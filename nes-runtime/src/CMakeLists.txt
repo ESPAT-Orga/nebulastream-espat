@@ -13,6 +13,7 @@
 add_subdirectory(Runtime)
 add_subdirectory(Pipelines)
 add_subdirectory(Listeners)
+add_subdirectory(StatisticCollection)
 
 add_source_files(nes-runtime
         ExecutionContext.cpp

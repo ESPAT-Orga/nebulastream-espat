@@ -15,6 +15,8 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
+#include <functional>
 #include <span>
 #include <string_view>
 #include <utility>
@@ -44,11 +46,13 @@ struct FieldOffsetTypePair
 /// Determines the in-tuple-buffer representation of the offsets for type-safety reasons
 template <NumRequiredOffsetsPerField N>
 struct FieldOffsetTypeSelector;
+
 template <>
 struct FieldOffsetTypeSelector<NumRequiredOffsetsPerField::ONE>
 {
     using type = FieldIndex;
 };
+
 template <>
 struct FieldOffsetTypeSelector<NumRequiredOffsetsPerField::TWO>
 {
@@ -62,8 +66,11 @@ class FieldOffsets final : public FieldIndexFunction<FieldOffsets<NumOffsetsPerF
 
     /// FieldIndexFunction (CRTP) interface functions
     [[nodiscard]] FieldIndex applyGetOffsetOfFirstTupleDelimiter() const { return this->offsetOfFirstTuple; }
+
     [[nodiscard]] FieldIndex applyGetOffsetOfLastTupleDelimiter() const { return this->offsetOfLastTuple; }
+
     [[nodiscard]] size_t applyGetTotalNumberOfTuples() const { return this->totalNumberOfTuples; }
+
     [[nodiscard]] std::string_view applyReadFieldAt(const std::string_view bufferView, const size_t tupleIdx, const size_t fieldIdx) const
     {
         PRECONDITION(tupleIdx < this->totalNumberOfTuples, "TupleIdx {} is out of range [0-{}].", tupleIdx, this->totalNumberOfTuples);
@@ -96,7 +103,6 @@ class FieldOffsets final : public FieldIndexFunction<FieldOffsets<NumOffsetsPerF
         Memory::TupleBuffer tupleBuffer;
         std::span<OffsetType> fieldOffsetSpan;
     };
-
 
     [[nodiscard]] std::string_view
     createFieldSV(const std::string_view bufferView, const size_t bufferNumber, const size_t fieldOffset, const size_t fieldIdx) const
@@ -174,6 +180,7 @@ public:
     {
         this->offsetBuffers.back()[currentIndex + idx] = offset;
     }
+
     void writeOffsetAt(const FieldOffsetTypePair& offset, const FieldIndex idx)
     requires(NumOffsetsPerField == NumRequiredOffsetsPerField::TWO)
     {
@@ -181,13 +188,13 @@ public:
         this->offsetBuffers.back()[currentIndex + idx] = offset;
     }
 
-
     /// Resets the indexes and pointers, calculates and sets the number of tuples in the current buffer, returns the total number of tuples.
     void markNoTupleDelimiters()
     {
         this->offsetOfFirstTuple = std::numeric_limits<FieldIndex>::max();
         this->offsetOfLastTuple = std::numeric_limits<FieldIndex>::max();
     }
+
     void markWithTupleDelimiters(const FieldIndex offsetToFirstTuple, const FieldIndex offsetToLastTuple)
     {
         this->offsetOfFirstTuple = offsetToFirstTuple;

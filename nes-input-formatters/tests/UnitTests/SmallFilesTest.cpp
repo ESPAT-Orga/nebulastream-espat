@@ -141,10 +141,10 @@ public:
         std::string currentTestFilePath;
     };
 
-    size_t
-    getNumberOfExpectedBuffers(const TestConfig& testConfig, const std::filesystem::path& testFilePath, size_t sizeOfSchemaInBytes) const
+    size_t getNumberOfExpectedBuffers(
+        const TestConfig& testConfig, const std::filesystem::path& testFilePath, const size_t sizeOfSchemaInBytes) const
     {
-        const auto sizeOfFormattedBuffers = Configurations::WorkerConfiguration().bufferSizeInBytes.getValue();
+        const auto sizeOfFormattedBuffers = WorkerConfiguration().bufferSizeInBytes.getValue();
         PRECONDITION(
             sizeOfFormattedBuffers >= sizeOfSchemaInBytes, "The formatted buffer must be large enough to hold at least one tuple.");
 
@@ -169,7 +169,7 @@ public:
                 "Could not find file test file: {}.<file_ending_of_{}>", testDirPath / currentTestFile.fileName, formatterType);
         }(currentTestFile, testDirPath, testConfig.formatterType);
 
-        const auto sizeOfFormattedBuffers = Configurations::WorkerConfiguration().bufferSizeInBytes.getValue();
+        const auto sizeOfFormattedBuffers = WorkerConfiguration().bufferSizeInBytes.getValue();
         const auto numberOfExpectedRawBuffers = getNumberOfExpectedBuffers(testConfig, testFilePath, schema.getSizeOfSchemaInBytes());
         rawBuffers.reserve(numberOfExpectedRawBuffers);
 

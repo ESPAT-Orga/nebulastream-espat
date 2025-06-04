@@ -18,7 +18,7 @@
 #include <memory>
 #include <Configuration/WorkerConfiguration.hpp>
 #include <Phases/LowerToCompiledQueryPlanPhase.hpp>
-#include <Phases/PipeliningPhase.hpp>
+#include <Phases/PipelineBuilder/PipelineBuilder.hpp>
 #include <Util/DumpMode.hpp>
 #include <CompiledQueryPlan.hpp>
 #include <ErrorHandling.hpp>
@@ -33,9 +33,10 @@ std::unique_ptr<CompiledQueryPlan> QueryCompiler::compileQuery(std::unique_ptr<Q
 {
     try
     {
+        auto pipelineBuilder = std::make_unique<PipelineBuilder>();
         auto lowerToCompiledQueryPlanPhase = LowerToCompiledQueryPlanPhase(request->dumpCompilationResult);
 
-        auto pipelinedQueryPlan = PipeliningPhase::apply(request->queryPlan);
+        auto pipelinedQueryPlan = pipelineBuilder->build(request->queryPlan);
         return lowerToCompiledQueryPlanPhase.apply(pipelinedQueryPlan);
     }
     catch (...)

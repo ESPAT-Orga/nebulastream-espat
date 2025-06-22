@@ -47,6 +47,7 @@ enum class TokenType : uint8_t
     QUERY,
     RESULT_DELIMITER,
     ERROR_EXPECTATION,
+    CONFIGURATION
 };
 
 /// Assures that the number of parsed queries matches the number of parsed results
@@ -147,6 +148,7 @@ public:
     using SystestAttachSourceCallback = std::function<void(SystestAttachSource attachSource)>;
     using SystestSinkCallback = std::function<void(SystestSink&&)>;
     using ErrorExpectationCallback = std::function<void(const ErrorExpectation&, SystestQueryId correspondingQueryId)>;
+    using ConfigurationCallback = std::function<void(const std::vector<ConfigurationOverride>&)>;
 
     /// Register callbacks to be called when the respective section is parsed
     void registerOnQueryCallback(QueryCallback callback);
@@ -155,6 +157,7 @@ public:
     void registerOnSystestAttachSourceCallback(SystestAttachSourceCallback callback);
     void registerOnSystestSinkCallback(SystestSinkCallback callback);
     void registerOnErrorExpectationCallback(ErrorExpectationCallback callback);
+    void registerOnConfigurationCallback(ConfigurationCallback callback);
 
     void parse();
     void parseResultLines();
@@ -180,6 +183,7 @@ private:
     [[nodiscard]] std::filesystem::path expectFilePath();
     [[nodiscard]] std::string expectQuery();
     [[nodiscard]] ErrorExpectation expectError() const;
+    [[nodiscard]] std::vector<ConfigurationOverride> expectConfiguration();
     [[nodiscard]] std::pair<SystestLogicalSource, std::optional<SystestAttachSource>>
     expectInlineGeneratorSource(SystestLogicalSource& source, const std::vector<std::string>& attachSourceTokens);
 
@@ -189,6 +193,7 @@ private:
     SystestAttachSourceCallback onAttachSourceCallback;
     SystestSinkCallback onSystestSinkCallback;
     ErrorExpectationCallback onErrorExpectationCallback;
+    ConfigurationCallback onConfigurationCallback;
 
     bool firstToken = true;
     size_t currentLine = 0;

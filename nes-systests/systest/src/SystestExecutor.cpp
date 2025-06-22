@@ -315,12 +315,11 @@ SystestConfiguration readConfiguration(int argc, const char** argv)
     return config;
 }
 
-void runEndlessMode(std::vector<Systest::SystestQuery> queries, SystestConfiguration& config)
+void runEndlessMode(const std::vector<Systest::SystestQuery>& queries, SystestConfiguration& config)
 {
-    std::cout << std::format("Running endlessly over a total of {} queries.", queries.size()) << '\n';
+    std::cout << std::format("Running endlessly over a total of {} queries (across all configuration overrides).", queries.size()) << '\n';
 
     const auto numberConcurrentQueries = config.numberConcurrentQueries.getValue();
-
     auto singleNodeWorkerConfiguration = config.singleNodeWorkerConfig.value_or(SingleNodeWorkerConfiguration{});
     if (not config.workerConfig.getValue().empty())
     {
@@ -330,33 +329,50 @@ void runEndlessMode(std::vector<Systest::SystestQuery> queries, SystestConfigura
     {
         singleNodeWorkerConfiguration = config.singleNodeWorkerConfig.value();
     }
-
-
     std::mt19937 rng(std::random_device{}());
-
     const auto grpcURI = config.grpcAddressUri.getValue();
     const auto runRemote = not grpcURI.empty();
 
-    auto submitter = [&]() -> std::unique_ptr<Systest::QuerySubmitter>
+    std::unordered_map<ConfigurationOverride, std::vector<Systest::SystestQuery>> queriesByOverride;
+    for (const auto& query : queries)
+    {
+        queriesByOverride[query.configurationOverride].push_back(query);
+    }
+
+    std::unordered_map<ConfigurationOverride, std::unique_ptr<Systest::QuerySubmitter>> submitters;
+    for (const auto& [overrideConfig, _] : queriesByOverride)
     {
         if (runRemote)
         {
-            return std::make_unique<Systest::RemoteWorkerQuerySubmitter>(grpcURI);
+            submitters[overrideConfig] = std::make_unique<Systest::RemoteWorkerQuerySubmitter>(grpcURI);
         }
-        return std::make_unique<Systest::LocalWorkerQuerySubmitter>(singleNodeWorkerConfiguration);
-    }();
+        else
+        {
+            auto configCopy = singleNodeWorkerConfiguration;
+            for (const auto& [key, value] : overrideConfig.overrideParameters)
+            {
+                configCopy.overwriteConfigWithCommandLineInput({{key, value}});
+            }
+            submitters[overrideConfig] = std::make_unique<NES::Systest::LocalWorkerQuerySubmitter>(configCopy);
+        }
+    }
 
     while (true)
     {
-        std::ranges::shuffle(queries, rng);
-        const auto failedQueries = runQueries(queries, numberConcurrentQueries, *submitter);
-        if (!failedQueries.empty())
+        for (const auto& [overrideConfig, queriesOrig] : queriesByOverride)
         {
-            std::stringstream outputMessage;
-            outputMessage << fmt::format("The following queries failed:\n[Name, Command]\n- {}", fmt::join(failedQueries, "\n- "));
-            NES_ERROR("{}", outputMessage.str());
-            std::cout << '\n' << outputMessage.str() << '\n';
-            std::exit(1); ///NOLINT(concurrency-mt-unsafe)
+            std::vector<Systest::SystestQuery> queries = queriesOrig;
+            std::ranges::shuffle(queries, rng);
+            auto& submitter = *submitters[overrideConfig];
+            const auto failedQueries = runQueries(queries, numberConcurrentQueries, submitter);
+            if (!failedQueries.empty())
+            {
+                std::stringstream outputMessage;
+                outputMessage << fmt::format("The following queries failed:\n[Name, Command]\n- {}", fmt::join(failedQueries, "\n- "));
+                NES_ERROR("{}", outputMessage.str());
+                std::cout << '\n' << outputMessage.str() << '\n';
+                std::exit(1); ///NOLINT(concurrency-mt-unsafe)
+            }
         }
     }
 }
@@ -476,7 +492,8 @@ SystestExecutorResult executeSystests(SystestConfiguration config)
         std::vector<Systest::RunningQuery> failedQueries;
         if (const auto grpcURI = config.grpcAddressUri.getValue(); not grpcURI.empty())
         {
-            failedQueries = runQueriesAtRemoteWorker(queries, numberConcurrentQueries, grpcURI);
+            auto failed = runQueriesAtRemoteWorker(queries, numberConcurrentQueries, grpcURI);
+            failedQueries.insert(failedQueries.end(), failed.begin(), failed.end());
         }
         else
         {
@@ -492,7 +509,8 @@ SystestExecutorResult executeSystests(SystestConfiguration config)
             if (config.benchmark)
             {
                 nlohmann::json benchmarkResults;
-                failedQueries = Systest::runQueriesAndBenchmark(queries, singleNodeWorkerConfiguration, benchmarkResults);
+                auto failed = Systest::runQueriesAndBenchmark(queries, singleNodeWorkerConfiguration, benchmarkResults);
+                failedQueries.insert(failedQueries.end(), failed.begin(), failed.end());
                 std::cout << benchmarkResults.dump(4);
                 const auto outputPath = std::filesystem::path(config.workingDir.getValue()) / "BenchmarkResults.json";
                 std::ofstream outputFile(outputPath);
@@ -501,7 +519,32 @@ SystestExecutorResult executeSystests(SystestConfiguration config)
             }
             else
             {
-                failedQueries = runQueriesAtLocalWorker(queries, numberConcurrentQueries, singleNodeWorkerConfiguration);
+                std::unordered_map<ConfigurationOverride, std::vector<Systest::SystestQuery>> queriesByOverride;
+                for (const auto& query : queries)
+                {
+                    queriesByOverride[query.configurationOverride].push_back(query);
+                }
+
+                for (const auto& [overrideConfig, queriesForConfig] : queriesByOverride)
+                {
+                    if (!config.workerConfig.getValue().empty())
+                    {
+                        singleNodeWorkerConfiguration.workerConfiguration.overwriteConfigWithYAMLFileInput(config.workerConfig);
+                    }
+                    else if (config.singleNodeWorkerConfig.has_value())
+                    {
+                        singleNodeWorkerConfiguration = config.singleNodeWorkerConfig.value();
+                    }
+
+                    auto configCopy = singleNodeWorkerConfiguration;
+                    for (const auto& [key, value] : overrideConfig.overrideParameters)
+                    {
+                        configCopy.overwriteConfigWithCommandLineInput({{key, value}});
+                    }
+
+                    auto failed = runQueriesAtLocalWorker(queries, numberConcurrentQueries, configCopy);
+                    failedQueries.insert(failedQueries.end(), failed.begin(), failed.end());
+                }
             }
         }
         if (not failedQueries.empty())

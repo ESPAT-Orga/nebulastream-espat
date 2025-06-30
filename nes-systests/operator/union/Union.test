@@ -16,7 +16,14 @@ Source stream2 UINT64 id UINT64 value UINT64 timestamp
 
 SINK sink UINT64 stream$id UINT64 stream$value UINT64 stream$timestamp
 
-# Todo: fails, misses the first tuple of 'stream'
+# Todo: BUG
+# - both sources get the same FormatScan pipeline as their successor
+# - two TupleBuffers, both with sequence number 1 end up in the input formatter pipeline
+# - Two major problems:
+# - 1: violates assumption that sequence numbers are unique in a pipeline
+# - 2: raw buffers should not share the same format pipeline, since formatting the individual raw buffers is unrelated
+# Solution: two format pipelines
+
 # Simple Union
 SELECT * FROM stream UNION SELECT * FROM stream2 INTO sink
 ----

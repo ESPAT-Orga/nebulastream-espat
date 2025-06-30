@@ -38,7 +38,7 @@ RewriteRuleResultSubgraph LowerToPhysicalProjection::apply(LogicalOperator proje
     auto handlerId = getNextOperatorHandlerId();
     auto inputSchema = projectionLogicalOperator.getInputSchemas()[0];
     auto outputSchema = projectionLogicalOperator.getOutputSchema();
-    auto bufferSize = conf.pageSize.getValue();
+    auto bufferSize = conf.operatorBufferSize.getValue();
 
     // LogicalOperator
     const auto sourceOperators

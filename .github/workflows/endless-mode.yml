@@ -15,7 +15,7 @@ jobs:
   run-endless-mode:
     name: "Run tests in endless mode: ${{matrix.arch}}-${{matrix.stdlib}}-${{matrix.build_type}}-${{ matrix.sanitizer }}"
     container:
-      image: nebulastream/nes-development:${{ inputs.dev_image_tag }}-${{ matrix.stdlib }}-${{matrix.sanitizer}}
+      image: ghcr.io/nebulastream/nes-development:${{ inputs.dev_image_tag }}-${{ matrix.stdlib }}-${{matrix.sanitizer}}
       env:
         MOLD_JOBS: 1
       # TODO #401 Investigate rootless docker containers

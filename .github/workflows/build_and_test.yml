@@ -17,7 +17,7 @@ jobs:
     # Ensures that the build works from a clean build directory.
     name: "Clean build and tests"
     container:
-      image: nebulastream/nes-development:${{ inputs.dev_image_tag }}-${{ matrix.stdlib }}-${{matrix.sanitizer}}
+      image: ghcr.io/nebulastream/nes-development:${{ inputs.dev_image_tag }}-${{ matrix.stdlib }}-${{matrix.sanitizer}}
       env:
         MOLD_JOBS: 1
       options: --user root
@@ -68,7 +68,7 @@ jobs:
   build-and-test-linux:
     name: "Build and tests: ${{matrix.arch}}-${{matrix.stdlib}}-${{matrix.build_type}}-${{ matrix.sanitizer }}"
     container:
-      image: nebulastream/nes-development:${{ inputs.dev_image_tag }}-${{ matrix.stdlib }}-${{matrix.sanitizer}}
+      image: ghcr.io/nebulastream/nes-development:${{ inputs.dev_image_tag }}-${{ matrix.stdlib }}-${{matrix.sanitizer}}
       env:
         MOLD_JOBS: 1
       # TODO #401 Investigate rootless docker containers
@@ -149,7 +149,7 @@ jobs:
   build-and-test-log-level:
     name: "Build and test log level: ${{matrix.arch}}-${{matrix.stdlib}}-${{matrix.build_type}}-log-level"
     container:
-      image: nebulastream/nes-development:${{ inputs.dev_image_tag }}-${{ matrix.stdlib }}-none
+      image: ghcr.io/nebulastream/nes-development:${{ inputs.dev_image_tag }}-${{ matrix.stdlib }}-none
       volumes:
         - ccache:/ccache
       env:
@@ -195,7 +195,7 @@ jobs:
   build-without-tests:
     name: "Build with disabled tests: ${{matrix.arch}}-${{matrix.stdlib}}"
     container:
-      image: nebulastream/nes-development:${{ inputs.dev_image_tag }}-${{ matrix.stdlib }}-none
+      image: ghcr.io/nebulastream/nes-development:${{ inputs.dev_image_tag }}-${{ matrix.stdlib }}-none
       env:
         MOLD_JOBS: 1
       # TODO #401 Investigate rootless docker containers

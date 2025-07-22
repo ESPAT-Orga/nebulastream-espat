@@ -15,10 +15,7 @@
 #include <SystestState.hpp>
 
 #include <algorithm>
-#include <array>
-#include <chrono>
 #include <cstdint>
-#include <expected> /// NOLINT(misc-include-cleaner)
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -27,48 +24,26 @@
 #include <optional>
 #include <ostream>
 #include <ranges>
-#include <regex>
 #include <string>
 #include <string_view>
-#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
 
-#include <DataTypes/DataTypeProvider.hpp>
-
-#include <DataTypes/Schema.hpp>
-#include <Identifiers/Identifiers.hpp>
-#include <Operators/Sinks/SinkLogicalOperator.hpp>
-#include <Operators/Sources/SourceDescriptorLogicalOperator.hpp>
-#include <Plans/LogicalPlan.hpp>
-#include <SQLQueryParser/AntlrSQLQueryParser.hpp>
-#include <Sinks/SinkCatalog.hpp>
-#include <Sinks/SinkDescriptor.hpp>
-#include <Sources/SourceCatalog.hpp>
-#include <Sources/SourceDataProvider.hpp>
-#include <Sources/SourceValidationProvider.hpp>
-#include <SystestSources/SystestSourceYAMLBinder.hpp>
-#include <Util/Strings.hpp>
 #include <fmt/format.h>
 #include <fmt/ranges.h> ///NOLINT: required by fmt
 
-#include <DataTypes/DataType.hpp>
-#include <Identifiers/NESStrongType.hpp>
-#include <Sources/SourceDescriptor.hpp>
-#include <SystestSources/SourceTypes.hpp>
-#include <Util/Logger/Logger.hpp>
-#include <ErrorHandling.hpp>
-#include <SystestParser.hpp>
-#include <SystestRunner.hpp>
+#include <Sinks/SinkCatalog.hpp>
+#include <Sources/SourceCatalog.hpp>
+#include <Util/Strings.hpp>
 
 namespace NES::Systest
 {
 
 std::filesystem::path
-SystestQuery::resultFile(const std::filesystem::path& workingDir, std::string_view testName, const SystestQueryId queryIdInTestFile)
+SystestQueryContext::resultFile(const std::filesystem::path& workingDir, std::string_view testName, const SystestQueryId queryIdInTestFile)
 {
-    auto resultDir = workingDir / "results";
+    const auto resultDir = workingDir / "results";
     if (not is_directory(resultDir))
     {
         create_directory(resultDir);
@@ -78,9 +53,10 @@ SystestQuery::resultFile(const std::filesystem::path& workingDir, std::string_vi
     return resultDir / std::filesystem::path(fmt::format("{}_{}.csv", testName, queryIdInTestFile));
 }
 
-std::filesystem::path SystestQuery::sourceFile(const std::filesystem::path& workingDir, std::string_view testName, const uint64_t sourceId)
+std::filesystem::path
+SystestQueryContext::sourceFile(const std::filesystem::path& workingDir, std::string_view testName, const uint64_t sourceId)
 {
-    auto sourceDir = workingDir / "sources";
+    const auto sourceDir = workingDir / "sources";
     if (not is_directory(sourceDir))
     {
         create_directory(sourceDir);
@@ -90,7 +66,7 @@ std::filesystem::path SystestQuery::sourceFile(const std::filesystem::path& work
     return sourceDir / std::filesystem::path(fmt::format("{}_{}.csv", testName, sourceId));
 }
 
-std::filesystem::path SystestQuery::resultFile() const
+std::filesystem::path SystestQueryContext::resultFile() const
 {
     return resultFile(workingDir, testName, queryIdInFile);
 }
@@ -109,7 +85,7 @@ TestFileMap discoverTestsRecursively(const std::filesystem::path& path, const st
     const auto desiredExtension = fileExtension.has_value() ? toLowerCopy(*fileExtension) : "";
 
     for (const auto& entry : std::filesystem::recursive_directory_iterator(path, std::filesystem::directory_options::skip_permission_denied)
-             | std::views::filter([](auto entry) { return entry.is_regular_file(); }))
+             | std::views::filter([](const auto& entry) { return entry.is_regular_file(); }))
     {
         const std::string entryExt = toLowerCopy(entry.path().extension().string());
         if (!fileExtension || entryExt == desiredExtension)
@@ -151,10 +127,9 @@ std::vector<TestGroup> readGroups(const TestFile& testfile)
 
 TestFile::TestFile(
     const std::filesystem::path& file, std::shared_ptr<SourceCatalog> sourceCatalog, std::shared_ptr<SinkCatalog> sinkCatalog)
-    : file(weakly_canonical(file))
-    , groups(readGroups(*this))
-    , sourceCatalog(std::move(sourceCatalog))
-    , sinkCatalog(std::move(sinkCatalog)) { };
+    : file(weakly_canonical(file)), groups(readGroups(*this)), sourceCatalog(std::move(sourceCatalog)), sinkCatalog(std::move(sinkCatalog))
+{
+}
 
 TestFile::TestFile(
     const std::filesystem::path& file,
@@ -165,8 +140,9 @@ TestFile::TestFile(
     , onlyEnableQueriesWithTestQueryNumber(std::move(onlyEnableQueriesWithTestQueryNumber))
     , groups(readGroups(*this))
     , sourceCatalog(std::move(sourceCatalog))
-    , sinkCatalog(std::move(sinkCatalog)) { };
-
+    , sinkCatalog(std::move(sinkCatalog))
+{
+}
 struct TestGroupFiles
 {
     std::string name;
@@ -177,7 +153,7 @@ std::vector<TestGroupFiles> collectTestGroups(const TestFileMap& testMap)
 {
     std::unordered_map<std::string, std::vector<std::filesystem::path>> groupFilesMap;
 
-    for (const auto& [testName, testFile] : testMap)
+    for (const auto& testFile : testMap | std::views::values)
     {
         for (const auto& groupName : testFile.groups)
         {
@@ -285,54 +261,6 @@ std::ostream& operator<<(std::ostream& os, const TestFileMap& testMap)
         }
     }
     return os;
-}
-
-std::chrono::duration<double> RunningQuery::getElapsedTime() const
-{
-    INVARIANT(not querySummary.runs.empty(), "Query summaries should not be empty!");
-    INVARIANT(queryId != INVALID_QUERY_ID, "QueryId should not be invalid");
-
-    const auto lastRun = querySummary.runs.back();
-    INVARIANT(lastRun.stop.has_value() && lastRun.running.has_value(), "Query {} has no querySummary timestamps!", queryId);
-    return std::chrono::duration_cast<std::chrono::duration<double>>(lastRun.stop.value() - lastRun.running.value());
-}
-
-std::string RunningQuery::getThroughput() const
-{
-    INVARIANT(not querySummary.runs.empty(), "Query summaries should not be empty!");
-    INVARIANT(queryId != INVALID_QUERY_ID, "QueryId should not be invalid");
-
-    const auto lastRun = querySummary.runs.back();
-    INVARIANT(lastRun.stop.has_value() && lastRun.running.has_value(), "Query {} has no querySummary timestamps!", queryId);
-    if (not bytesProcessed.has_value() or not tuplesProcessed.has_value())
-    {
-        return "";
-    }
-
-    double bytesPerSecond = NAN;
-    double tuplesPerSecond = NAN;
-    if (bytesProcessed.value() > 0 and tuplesProcessed.value() > 0)
-    {
-        /// Calculating the throughput in bytes per second and tuples per second
-        const std::chrono::duration<double> duration = lastRun.stop.value() - lastRun.running.value();
-        bytesPerSecond = static_cast<double>(bytesProcessed.value()) / duration.count();
-        tuplesPerSecond = static_cast<double>(tuplesProcessed.value()) / duration.count();
-    }
-
-    auto formatUnits = [](double throughput)
-    {
-        /// Format throughput in SI units, e.g. 1.234 MB/s instead of 1234000 B/s
-        const std::array<std::string, 5> units = {"", "k", "M", "G", "T"};
-        uint64_t unitIndex = 0;
-        constexpr auto nextUnit = 1000;
-        while (throughput >= nextUnit && unitIndex < units.size() - 1)
-        {
-            throughput /= nextUnit;
-            unitIndex++;
-        }
-        return fmt::format("{:.3f} {}", throughput, units[unitIndex]);
-    };
-    return fmt::format("{}B/s / {}Tup/s", formatUnits(bytesPerSecond), formatUnits(tuplesPerSecond));
 }
 
 std::string TestFile::getLogFilePath() const

@@ -80,14 +80,14 @@ namespace
 template <typename ErrorCallable>
 void reportResult(
     std::shared_ptr<RunningQuery>& runningQuery,
-    std::size_t& finishedCount,
-    std::size_t total,
+    SystestProgressTracker& progressTracker,
     std::vector<std::shared_ptr<RunningQuery>>& failed,
     ErrorCallable&& errorBuilder)
 {
     std::string msg = errorBuilder();
     runningQuery->passed = msg.empty();
-    printQueryResultToStdOut(*runningQuery, msg, finishedCount++, total, "");
+    printQueryResultToStdOut(*runningQuery, msg, progressTracker, "");
+    progressTracker.incrementQueryCounter();
     if (!msg.empty())
     {
         failed.push_back(runningQuery);
@@ -101,16 +101,14 @@ bool passes(const std::shared_ptr<RunningQuery>& runningQuery)
 
 void processQueryWithError(
     std::shared_ptr<RunningQuery> runningQuery,
-    std::size_t& finished,
-    const size_t numQueries,
+    SystestProgressTracker& progressTracker,
     std::vector<std::shared_ptr<RunningQuery>>& failed,
     const std::optional<Exception>& exception)
 {
     runningQuery->exception = exception;
     reportResult(
         runningQuery,
-        finished,
-        numQueries,
+        progressTracker,
         failed,
         [&]
         {
@@ -138,7 +136,7 @@ runQueries(const std::vector<SystestQuery>& queries, const uint64_t numConcurren
 
     std::unordered_map<QueryId, std::shared_ptr<RunningQuery>> active;
     std::vector<std::shared_ptr<RunningQuery>> failed;
-    std::size_t finished = 0;
+    SystestProgressTracker progressTracker{queries.size()};
 
     const auto startMoreQueries = [&] -> bool
     {
@@ -159,14 +157,14 @@ runQueries(const std::vector<SystestQuery>& queries, const uint64_t numConcurren
                 }
                 else
                 {
-                    processQueryWithError(std::make_shared<RunningQuery>(nextQuery), finished, queries.size(), failed, {reg.error()});
+                    processQueryWithError(std::make_shared<RunningQuery>(nextQuery), progressTracker, failed, {reg.error()});
                 }
             }
             else
             {
                 /// There was an error during query parsing, report the result and don't register the query
                 processQueryWithError(
-                    std::make_shared<RunningQuery>(nextQuery), finished, queries.size(), failed, {nextQuery.planInfoOrException.error()});
+                    std::make_shared<RunningQuery>(nextQuery), progressTracker, failed, {nextQuery.planInfoOrException.error()});
             }
         }
         return hasOneMoreQueryToStart;
@@ -187,14 +185,13 @@ runQueries(const std::vector<SystestQuery>& queries, const uint64_t numConcurren
             if (summary.currentStatus == QueryStatus::Failed)
             {
                 INVARIANT(summary.runs.back().error, "A query that failed must have a corresponding error.");
-                processQueryWithError(it->second, finished, queries.size(), failed, summary.runs.back().error);
+                processQueryWithError(it->second, progressTracker, failed, summary.runs.back().error);
             }
             else
             {
                 reportResult(
                     runningQuery,
-                    finished,
-                    queries.size(),
+                    progressTracker,
                     failed,
                     [&]
                     {
@@ -248,8 +245,7 @@ std::vector<RunningQuery> runQueriesAndBenchmark(
 {
     LocalWorkerQuerySubmitter submitter(configuration);
     std::vector<std::shared_ptr<RunningQuery>> ranQueries;
-    std::size_t queryFinishedCounter = 0;
-    const auto totalQueries = queries.size();
+    SystestProgressTracker progressTracker{queries.size()};
     for (const auto& queryToRun : queries)
     {
         if (not queryToRun.planInfoOrException.has_value())
@@ -308,9 +304,9 @@ std::vector<RunningQuery> runQueriesAndBenchmark(
         const auto queryPerformanceMessage
             = fmt::format(" in {} ({})", ranQueries.back()->getElapsedTime(), ranQueries.back()->getThroughput());
         printQueryResultToStdOut(
-            *ranQueries.back(), errorMessage.value_or(""), queryFinishedCounter, totalQueries, queryPerformanceMessage);
+            *ranQueries.back(), errorMessage.value_or(""), progressTracker, queryPerformanceMessage);
 
-        queryFinishedCounter += 1;
+        progressTracker.incrementQueryCounter();
     }
 
     return serializeExecutionResults(
@@ -320,14 +316,13 @@ std::vector<RunningQuery> runQueriesAndBenchmark(
 void printQueryResultToStdOut(
     const RunningQuery& runningQuery,
     const std::string& errorMessage,
-    const size_t queryCounter,
-    const size_t totalQueries,
+    SystestProgressTracker& progressTracker,
     const std::string_view queryPerformanceMessage)
 {
     const auto queryNameLength = runningQuery.systestQuery.testName.size();
     const auto queryNumberAsString = runningQuery.systestQuery.queryIdInFile.toString();
     const auto queryNumberLength = queryNumberAsString.size();
-    const auto queryCounterAsString = std::to_string(queryCounter + 1);
+    const auto queryCounterAsString = std::to_string(progressTracker.getQueryCounter() + 1);
     std::string overrideStr;
     if (not runningQuery.systestQuery.configurationOverride.overrideParameters.empty())
     {
@@ -339,7 +334,7 @@ void printQueryResultToStdOut(
         overrideStr = fmt::format(" [{}]", fmt::join(kvs, ", "));
     }
     std::cout << std::string(padSizeQueryCounter - queryCounterAsString.size(), ' ');
-    std::cout << queryCounterAsString << "/" << totalQueries << " ";
+    std::cout << queryCounterAsString << "/" << progressTracker.getTotalQueries() << " ";
     std::cout << runningQuery.systestQuery.testName << ":" << std::string(padSizeQueryNumber - queryNumberLength, '0') << queryNumberAsString;
     std::cout << overrideStr;
     std::cout << std::string(padSizeSuccess - (queryNameLength + padSizeQueryNumber + overrideStr.size()), '.');

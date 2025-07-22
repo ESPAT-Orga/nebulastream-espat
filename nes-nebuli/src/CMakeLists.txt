@@ -12,6 +12,7 @@
 
 add_subdirectory(LegacyOptimizer)
 add_subdirectory(YAML)
+add_subdirectory(Distributed)
 add_subdirectory(QueryManager)
 
-add_source_files(nes-coordinator StatementHandler.cpp JsonOutputFormatter.cpp)
+add_source_files(nes-coordinator StatementHandler.cpp JsonOutputFormatter.cpp QueryPlanning.cpp)

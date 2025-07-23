@@ -312,6 +312,39 @@ struct SystestBinder::Impl
     {
     }
 
+    std::vector<ConfigurationOverride> mergeConfigurations(const std::vector<ConfigurationOverride>& regularOverrides, const std::vector<ConfigurationOverride>& globalConfigOverrides)
+    {
+        if (globalConfigOverrides.empty())
+        {
+            return regularOverrides;
+        }
+
+        std::vector<ConfigurationOverride> mergedOverrides;
+        if (regularOverrides.empty())
+        {
+            /// If no regular overrides, use global overrides
+            mergedOverrides = globalConfigOverrides;
+        }
+        else
+        {
+            /// Merge global overrides with each regular override
+            for (const auto& regularOverride : regularOverrides)
+            {
+                for (const auto& globalOverride : globalConfigOverrides)
+                {
+                    ConfigurationOverride mergedOverride = globalOverride;
+                    /// Merge regular override parameters into the merged override
+                    for (const auto& [key, value] : regularOverride.overrideParameters)
+                    {
+                        mergedOverride.overrideParameters[key] = value;
+                    }
+                    mergedOverrides.emplace_back(std::move(mergedOverride));
+                }
+            }
+        }
+        return mergedOverrides;
+    };
+
     std::pair<std::vector<SystestQuery>, size_t> loadOptimizeQueries(const TestFileMap& discoveredTestFiles)
     {
         /// This method could also be removed with the checks and loop put in the SystestExecutor, but it's an aesthetic choice.
@@ -401,6 +434,7 @@ struct SystestBinder::Impl
         std::shared_ptr<std::vector<std::jthread>> sourceThreads = std::make_shared<std::vector<std::jthread>>();
         const std::unordered_map<SourceDescriptor, std::filesystem::path> generatedDataPaths{};
         std::vector configOverrides{ConfigurationOverride{}};
+        std::vector globalConfigOverrides{ConfigurationOverride{}};
         SystestParser parser{};
 
         parser.registerSubstitutionRule(
@@ -632,7 +666,10 @@ struct SystestBinder::Impl
 
                 auto& currentTest = plans.emplace(currentQueryNumberInTest, currentQueryNumberInTest).first->second;
                 currentTest.setQueryDefinition(query);
-                currentTest.setConfigurationOverrides(configOverrides);
+
+                auto mergedConfigOverrides = mergeConfigurations(configOverrides, globalConfigOverrides);
+                currentTest.setConfigurationOverrides(mergedConfigOverrides);
+
                 if (auto sinkExpected = sltSinkProvider.createActualSink(sinkName, sinkForQuery, resultFile); not sinkExpected.has_value())
                 {
                     currentTest.setException(sinkExpected.error());
@@ -665,6 +702,9 @@ struct SystestBinder::Impl
                     {
                         currentTest.setException(e);
                     }
+                    /// Reset currentConfigOverrides after applying it to this query
+                    /// This ensures that Configuration tokens only apply to the next query
+                    configOverrides = {ConfigurationOverride{}};
                 }
             });
 
@@ -677,6 +717,8 @@ struct SystestBinder::Impl
             });
 
         parser.registerOnConfigurationCallback([&](const std::vector<ConfigurationOverride>& overrides) { configOverrides = overrides; });
+
+        parser.registerOnGlobalConfigurationCallback([&](const std::vector<ConfigurationOverride>& overrides) { globalConfigOverrides = overrides; });
 
         parser.registerOnResultTuplesCallback(
             [&](std::vector<std::string>&& resultTuples, const SystestQueryId correspondingQueryId)

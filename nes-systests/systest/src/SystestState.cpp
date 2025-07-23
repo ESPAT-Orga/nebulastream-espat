@@ -97,26 +97,44 @@ std::filesystem::path SystestQuery::resultFile() const
     return resultFile(workingDir, testName, queryIdInFile);
 }
 
-// SystestProgressTracker implementation
 SystestProgressTracker::SystestProgressTracker() = default;
 
-SystestProgressTracker::SystestProgressTracker(size_t totalQueries) : totalQueries(totalQueries) {}
+SystestProgressTracker::SystestProgressTracker(size_t totalQueries) : totalQueries(totalQueries)
+{
+}
 
-void SystestProgressTracker::incrementQueryCounter() { ++queryCounter; }
+void SystestProgressTracker::incrementQueryCounter()
+{
+    ++queryCounter;
+}
 
-size_t SystestProgressTracker::getQueryCounter() const { return queryCounter.load(); }
+size_t SystestProgressTracker::getQueryCounter() const
+{
+    return queryCounter.load();
+}
 
-void SystestProgressTracker::setTotalQueries(size_t total) { totalQueries = total; }
+void SystestProgressTracker::setTotalQueries(size_t total)
+{
+    totalQueries = total;
+}
 
-size_t SystestProgressTracker::getTotalQueries() const { return totalQueries; }
+size_t SystestProgressTracker::getTotalQueries() const
+{
+    return totalQueries;
+}
 
-double SystestProgressTracker::getProgress() const {
+double SystestProgressTracker::getProgress() const
+{
     return totalQueries > 0 ? static_cast<double>(queryCounter.load()) / totalQueries : 0.0;
 }
 
-void SystestProgressTracker::reset() { queryCounter = 0; }
+void SystestProgressTracker::reset()
+{
+    queryCounter = 0;
+}
 
-void SystestProgressTracker::reset(size_t newTotalQueries) {
+void SystestProgressTracker::reset(size_t newTotalQueries)
+{
     queryCounter = 0;
     totalQueries = newTotalQueries;
 }

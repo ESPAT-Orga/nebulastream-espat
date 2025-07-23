@@ -303,8 +303,7 @@ std::vector<RunningQuery> runQueriesAndBenchmark(
         ranQueries.back()->passed = not errorMessage.has_value();
         const auto queryPerformanceMessage
             = fmt::format(" in {} ({})", ranQueries.back()->getElapsedTime(), ranQueries.back()->getThroughput());
-        printQueryResultToStdOut(
-            *ranQueries.back(), errorMessage.value_or(""), progressTracker, queryPerformanceMessage);
+        printQueryResultToStdOut(*ranQueries.back(), errorMessage.value_or(""), progressTracker, queryPerformanceMessage);
 
         progressTracker.incrementQueryCounter();
     }
@@ -335,7 +334,8 @@ void printQueryResultToStdOut(
     }
     std::cout << std::string(padSizeQueryCounter - queryCounterAsString.size(), ' ');
     std::cout << queryCounterAsString << "/" << progressTracker.getTotalQueries() << " ";
-    std::cout << runningQuery.systestQuery.testName << ":" << std::string(padSizeQueryNumber - queryNumberLength, '0') << queryNumberAsString;
+    std::cout << runningQuery.systestQuery.testName << ":" << std::string(padSizeQueryNumber - queryNumberLength, '0')
+              << queryNumberAsString;
     std::cout << overrideStr;
     std::cout << std::string(padSizeSuccess - (queryNameLength + padSizeQueryNumber + overrideStr.size()), '.');
     if (runningQuery.passed)

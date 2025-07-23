@@ -261,8 +261,8 @@ public:
                         && sinkOutputSchema.has_value() && additionalSourceThreads.has_value(),
                     "Neither optimized plan nor an exception has been set");
                 return SystestQuery::PlanInfo{
-                    .queryPlan = std::move(optimizedPlan.value()),
-                    .sourcesToFilePathsAndCounts = std::move(sourcesToFilePathsAndCounts.value()),
+                    .queryPlan = optimizedPlan.value(),
+                    .sourcesToFilePathsAndCounts = sourcesToFilePathsAndCounts.value(),
                     .sinkOutputSchema = sinkOutputSchema.value(),
                 };
             }
@@ -273,15 +273,15 @@ public:
         for (auto configurationOverride : configurationOverrides)
         {
             queries.push_back(
-                {.testName = std::move(testName.value()),
+                {.testName = testName.value(),
                  .queryIdInFile = queryIdInFile,
-                 .testFilePath = std::move(testFilePath.value()),
-                 .workingDir = std::move(workingDir.value()),
-                 .queryDefinition = std::move(queryDefinition.value()),
+                 .testFilePath = testFilePath.value(),
+                 .workingDir = workingDir.value(),
+                 .queryDefinition = queryDefinition.value(),
                  .planInfoOrException = createPlanInfoOrException(),
-                 .expectedResultsOrExpectedError = std::move(expectedResultsOrError.value()),
-                 .additionalSourceThreads = std::move(additionalSourceThreads.value()),
-                 .configurationOverride = std::move(configurationOverride)});
+                 .expectedResultsOrExpectedError = expectedResultsOrError.value(),
+                 .additionalSourceThreads = additionalSourceThreads.value(),
+                 .configurationOverride = configurationOverride});
         }
         return queries;
     }
@@ -312,25 +312,26 @@ struct SystestBinder::Impl
     {
     }
 
-    std::vector<ConfigurationOverride> mergeConfigurations(const std::vector<ConfigurationOverride>& regularOverrides, const std::vector<ConfigurationOverride>& globalConfigOverrides)
+    std::vector<ConfigurationOverride>
+    mergeConfigurations(const std::vector<ConfigurationOverride>& overrides, const std::vector<ConfigurationOverride>& otherOverrides)
     {
-        if (globalConfigOverrides.empty())
+        if (overrides.empty())
         {
-            return regularOverrides;
+            return overrides;
         }
 
         std::vector<ConfigurationOverride> mergedOverrides;
-        if (regularOverrides.empty())
+        if (overrides.empty())
         {
             /// If no regular overrides, use global overrides
-            mergedOverrides = globalConfigOverrides;
+            mergedOverrides = otherOverrides;
         }
         else
         {
             /// Merge global overrides with each regular override
-            for (const auto& regularOverride : regularOverrides)
+            for (const auto& regularOverride : overrides)
             {
-                for (const auto& globalOverride : globalConfigOverrides)
+                for (const auto& globalOverride : otherOverrides)
                 {
                     ConfigurationOverride mergedOverride = globalOverride;
                     /// Merge regular override parameters into the merged override
@@ -718,7 +719,18 @@ struct SystestBinder::Impl
 
         parser.registerOnConfigurationCallback([&](const std::vector<ConfigurationOverride>& overrides) { configOverrides = overrides; });
 
-        parser.registerOnGlobalConfigurationCallback([&](const std::vector<ConfigurationOverride>& overrides) { globalConfigOverrides = overrides; });
+        parser.registerOnGlobalConfigurationCallback(
+            [&](const std::vector<ConfigurationOverride>& overrides)
+            {
+                if (globalConfigOverrides.empty())
+                {
+                    globalConfigOverrides = overrides;
+                }
+                else
+                {
+                    globalConfigOverrides = mergeConfigurations(overrides, globalConfigOverrides);
+                }
+            });
 
         parser.registerOnResultTuplesCallback(
             [&](std::vector<std::string>&& resultTuples, const SystestQueryId correspondingQueryId)

@@ -319,32 +319,51 @@ struct SystestBinder::Impl
         {
             return overrides;
         }
+        std::unordered_map<std::string, std::vector<std::string>> valuesByKey;
 
-        std::vector<ConfigurationOverride> mergedOverrides;
-        if (overrides.empty())
+        auto collect = [&](const std::vector<ConfigurationOverride>& vec)
         {
-            /// If no regular overrides, use global overrides
-            mergedOverrides = otherOverrides;
-        }
-        else
-        {
-            /// Merge global overrides with each regular override
-            for (const auto& regularOverride : overrides)
+            for (const auto& override : vec)
             {
-                for (const auto& globalOverride : otherOverrides)
+                for (const auto& [key, value] : override)
                 {
-                    ConfigurationOverride mergedOverride = globalOverride;
-                    /// Merge regular override parameters into the merged override
-                    for (const auto& [key, value] : regularOverride.overrideParameters)
+                    auto& bucket = valuesByKey[key];
+                    if (std::find(bucket.begin(), bucket.end(), value) == bucket.end())
                     {
-                        mergedOverride.overrideParameters[key] = value;
+                        bucket.push_back(value);
                     }
-                    mergedOverrides.emplace_back(std::move(mergedOverride));
                 }
             }
+        };
+        collect(overrides);
+        collect(otherOverrides);
+
+        std::vector<ConfigurationOverride> results{{}};
+        if (valuesByKey.empty())
+        {
+            return results;
         }
-        return mergedOverrides;
+
+        for (const auto& [key, vals] : valuesByKey)
+        {
+            std::vector<ConfigurationOverride> next;
+            next.reserve(results.size() * vals.size());
+
+            for (const auto& partial : results)
+            {
+                for (const auto& val : vals)
+                {
+                    auto cfg = partial;
+                    cfg.emplace(key, val);
+                    next.emplace_back(std::move(cfg));
+                }
+            }
+            results.swap(next);
+        }
+
+        return results;
     };
+
 
     std::pair<std::vector<SystestQuery>, size_t> loadOptimizeQueries(const TestFileMap& discoveredTestFiles)
     {
@@ -392,7 +411,7 @@ struct SystestBinder::Impl
 
                                      if (systest.getBoundPlan().has_value())
                                      {
-                                         const NES::CLI::LegacyOptimizer optimizer{testfile.sourceCatalog};
+                                         const CLI::LegacyOptimizer optimizer{testfile.sourceCatalog};
                                          try
                                          {
                                              systest.setOptimizedPlan(optimizer.optimize(systest.getBoundPlan().value()), sinkProvider);
@@ -717,7 +736,18 @@ struct SystestBinder::Impl
                     .first->second.setExpectedResult(ExpectedError{.code = errorExpectation.code, .message = errorExpectation.message});
             });
 
-        parser.registerOnConfigurationCallback([&](const std::vector<ConfigurationOverride>& overrides) { configOverrides = overrides; });
+        parser.registerOnConfigurationCallback(
+            [&](const std::vector<ConfigurationOverride>& overrides)
+            {
+                if (configOverrides.empty())
+                {
+                    configOverrides = overrides;
+                }
+                else
+                {
+                    configOverrides = mergeConfigurations(overrides, configOverrides);
+                }
+            });
 
         parser.registerOnGlobalConfigurationCallback(
             [&](const std::vector<ConfigurationOverride>& overrides)

@@ -312,6 +312,13 @@ struct SystestBinder::Impl
     {
     }
 
+    /// Merges the local configurations and global configurations
+    /// Example:
+    ///   overrides       = [{ "a" = "1" }, { "b" = "2" }]
+    ///   otherOverrides  = [{ "a" = "3" }]
+    ///
+    ///   result          = [{ "a" = "1", "b" = "2" },
+    ///                      { "a" = "3", "b" = "2" }]
     std::vector<ConfigurationOverride>
     mergeConfigurations(const std::vector<ConfigurationOverride>& overrides, const std::vector<ConfigurationOverride>& otherOverrides)
     {

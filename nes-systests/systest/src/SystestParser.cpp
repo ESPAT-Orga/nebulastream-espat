@@ -179,14 +179,14 @@ NES::SystestAttachSource parseAttachSource(const std::string& line)
 namespace NES::Systest
 {
 
-static constexpr auto SystestLogicalSourceToken = "Source"s;
-static constexpr auto AttachSourceToken = "Attach"s;
-static constexpr auto QueryToken = "SELECT"s;
-static constexpr auto SinkToken = "SINK"s;
-static constexpr auto ResultDelimiter = "----"s;
-static constexpr auto ErrorToken = "ERROR"s;
-static constexpr auto ConfigurationToken = "CONFIGURATION"s;
-static constexpr auto GlobalConfigurationToken = "GLOBALCONFIGURATION"s;
+static constexpr auto SystestLogicalSourceToken = "Source"sv;
+static constexpr auto AttachSourceToken = "Attach"sv;
+static constexpr auto QueryToken = "SELECT"sv;
+static constexpr auto SinkToken = "SINK"sv;
+static constexpr auto ResultDelimiter = "----"sv;
+static constexpr auto ErrorToken = "ERROR"sv;
+static constexpr auto ConfigurationToken = "CONFIGURATION"sv;
+static constexpr auto GlobalConfigurationToken = "GLOBALCONFIGURATION"sv;
 
 static const std::array stringToToken = std::to_array<std::pair<std::string_view, TokenType>>(
     {{SystestLogicalSourceToken, TokenType::LOGICAL_SOURCE},
@@ -761,172 +761,80 @@ std::string SystestParser::expectQuery()
     return queryString;
 }
 
-std::vector<ConfigurationOverride> SystestParser::expectConfiguration()
+namespace
 {
-    INVARIANT(currentLine < lines.size(), "current line to parse should exist");
-    const auto& line = lines[currentLine];
+std::vector<ConfigurationOverride> parseConfigurationLine(const std::string& line, std::string_view kindLabel)
+{
     std::istringstream stream(line);
-    std::string key, valueList;
 
-    /// Skip the Configuration token
-    std::string token;
-    stream >> token;
-    stream >> key;
+    std::string token, key;
+    stream >> token >> key;
 
-    if (!key.ends_with(":"))
+    if (!key.ends_with(':'))
     {
         throw SLTUnexpectedToken("Expected colon at end of key: '{}'", key);
     }
-    key.pop_back();
+    key.pop_back(); /// remove trailing ':'
 
-    std::getline(stream >> std::ws, valueList);
-
-    /// Validate that we have a value
-    if (valueList.empty())
-    {
-        throw SLTUnexpectedToken("Expected configuration value after key '{}', but got empty value", key);
-    }
-
-    /// Check if the key is empty after removing the colon
     if (key.empty())
     {
-        throw SLTUnexpectedToken("Expected configuration key before colon, but got empty key");
+        throw SLTUnexpectedToken("Expected {} key before colon, but got empty key", kindLabel);
+    }
+
+    std::string valueList;
+    std::getline(stream >> std::ws, valueList);
+
+    if (valueList.empty())
+    {
+        throw SLTUnexpectedToken("Expected {} value after key '{}', but got empty value", kindLabel, key);
     }
 
     std::vector<std::string> values;
+    auto invalidFormat = [&](std::string_view details)
+    { throw SLTUnexpectedToken("Invalid {} format for key '{}': '{}'. {}", kindLabel, key, valueList, details); };
 
-    /// Check if the value is wrapped in square brackets (multiple values)
     if (valueList.front() == '[' && valueList.back() == ']')
     {
-        /// Parse multiple values in square brackets
         valueList = valueList.substr(1, valueList.size() - 2);
         if (valueList.empty())
-        {
-            throw SLTUnexpectedToken("Expected at least one value in square brackets for key '{}', but got empty brackets", key);
-        }
+            invalidFormat("Expected at least one value inside the brackets");
         values = NES::Util::splitWithStringDelimiter<std::string>(valueList, ",");
     }
     else
     {
-        /// Single value without brackets - validate no brackets are present
-        if (valueList.find('[') != std::string::npos or valueList.find(']') != std::string::npos)
-        {
-            throw SLTUnexpectedToken(
-                "Invalid configuration format for key '{}': '{}'. Use either single value or properly formatted list in square brackets",
-                key,
-                valueList);
-        }
-
-        /// Check if there are commas in the value, which indicates multiple values without brackets
+        if (valueList.find_first_of("[]") != std::string::npos)
+            invalidFormat("Use either single value or properly formatted list in square brackets");
         if (valueList.find(',') != std::string::npos)
-        {
-            throw SLTUnexpectedToken(
-                "Invalid configuration format for key '{}': '{}'. Multiple values must be enclosed in square brackets", key, valueList);
-        }
+            invalidFormat("Multiple values must be enclosed in square brackets");
         values = {valueList};
     }
 
-    INVARIANT(!values.empty(), "when expecting a configuration keyword the configuration should not be empty");
     std::vector<ConfigurationOverride> result;
-    for (auto& value : values)
+    for (auto& v : values)
     {
-        value = NES::Util::trimWhiteSpaces(value);
-        if (value.empty())
-        {
-            throw SLTUnexpectedToken("Empty configuration value found for key '{}'", key);
-        }
-        ConfigurationOverride override;
-        override[key] = value;
-        result.emplace_back(std::move(override));
+        v = NES::Util::trimWhiteSpaces(v);
+        if (v.empty())
+            throw SLTUnexpectedToken("Empty {} value found for key '{}'", kindLabel, key);
+
+        ConfigurationOverride ov;
+        ov[key] = v;
+        result.emplace_back(std::move(ov));
     }
     return result;
+}
+}
+
+std::vector<ConfigurationOverride> SystestParser::expectConfiguration()
+{
+    INVARIANT(currentLine < lines.size(), "current line to parse should exist");
+    return parseConfigurationLine(lines[currentLine], "configuration");
 }
 
 std::vector<ConfigurationOverride> SystestParser::expectGlobalConfiguration()
 {
     INVARIANT(currentLine < lines.size(), "current line to parse should exist");
-    const auto& line = lines[currentLine];
-    std::istringstream stream(line);
-    std::string key, valueList;
-
-    /// Skip the GlobalConfiguration token
-    std::string token;
-    stream >> token;
-    stream >> key;
-
-    if (!key.ends_with(":"))
-    {
-        throw SLTUnexpectedToken("Expected colon at end of key: '{}'", key);
-    }
-    key.pop_back();
-
-    /// Check if the key is empty after removing the colon
-    if (key.empty())
-    {
-        throw SLTUnexpectedToken("Expected global configuration key before colon, but got empty key");
-    }
-
-    std::getline(stream >> std::ws, valueList);
-
-    /// Validate that we have a value
-    if (valueList.empty())
-    {
-        throw SLTUnexpectedToken("Expected global configuration value after key '{}', but got empty value", key);
-    }
-
-    std::vector<std::string> values;
-
-    /// Check if the value is wrapped in square brackets (multiple values)
-    if (valueList.front() == '[' && valueList.back() == ']')
-    {
-        /// Parse multiple values in square brackets
-        valueList = valueList.substr(1, valueList.size() - 2);
-        if (valueList.empty())
-        {
-            throw SLTUnexpectedToken("Expected at least one value in square brackets for key '{}', but got empty brackets", key);
-        }
-        values = NES::Util::splitWithStringDelimiter<std::string>(valueList, ",");
-    }
-    else
-    {
-        /// Single value without brackets - validate no brackets are present
-        if (valueList.find('[') != std::string::npos or valueList.find(']') != std::string::npos)
-        {
-            throw SLTUnexpectedToken(
-                "Invalid global configuration format for key '{}': '{}'. Use either single value or properly formatted list in square "
-                "brackets",
-                key,
-                valueList);
-        }
-
-        /// Check if there are commas in the value, which indicates multiple values without brackets
-        if (valueList.find(',') != std::string::npos)
-        {
-            throw SLTUnexpectedToken(
-                "Invalid global configuration format for key '{}': '{}'. Multiple values must be enclosed in square brackets",
-                key,
-                valueList);
-        }
-
-        values = {valueList};
-    }
-
-    INVARIANT(!values.empty(), "when expecting a global configuration keyword the configuration should not be empty");
-    std::vector<ConfigurationOverride> result;
-    for (auto& value : values)
-    {
-        value = NES::Util::trimWhiteSpaces(value);
-        if (value.empty())
-        {
-            throw SLTUnexpectedToken("Empty global configuration value found for key '{}'", key);
-        }
-        ConfigurationOverride override;
-        override[key] = value;
-        result.emplace_back(std::move(override));
-    }
-    return result;
+    return parseConfigurationLine(lines[currentLine], "global configuration");
 }
-
 SystestParser::ErrorExpectation SystestParser::expectError() const
 {
     /// Expects the form:

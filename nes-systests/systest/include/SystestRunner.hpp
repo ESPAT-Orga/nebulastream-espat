@@ -86,7 +86,7 @@ static constexpr auto padSizeQueryCounter = 3;
 void printQueryResultToStdOut(
     const RunningQuery& runningQuery,
     const std::string& errorMessage,
-    SystestProgressTracker& context,
+    SystestProgressTracker& progressTracker,
     const std::string_view queryPerformanceMessage);
 
 }

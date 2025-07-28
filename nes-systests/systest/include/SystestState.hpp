@@ -195,10 +195,8 @@ struct fmt::formatter<NES::Systest::RunningQuery> : formatter<std::string>
     }
 };
 
-namespace std
-{
 template <>
-struct hash<NES::Systest::ConfigurationOverride>
+struct std::hash<NES::Systest::ConfigurationOverride>
 {
     std::size_t operator()(const NES::Systest::ConfigurationOverride& cfg) const noexcept
     {
@@ -213,4 +211,3 @@ struct hash<NES::Systest::ConfigurationOverride>
         return seed;
     }
 };
-}

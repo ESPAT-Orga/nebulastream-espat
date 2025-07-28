@@ -111,7 +111,7 @@ SystestConfiguration readConfiguration(int argc, const char** argv)
     program.add_argument("--log-path").help("set the logging path");
 
     /// debug mode
-    program.add_argument("-d", "--debug").flag().help("dump the query plan and enable debug logging");
+    program.add_argument("-d", "--debug").flag().help("enable debug logging");
 
     /// input data
     program.add_argument("--data").help("path to the directory where input CSV files are stored");
@@ -209,10 +209,10 @@ SystestConfiguration readConfiguration(int argc, const char** argv)
             testFilePath = testFileDefinition.substr(0, delimiterPos);
             const std::string testNumberStr = testFileDefinition.substr(delimiterPos + 1);
 
-            std::stringstream ss(testNumberStr);
+            std::stringstream stringstream(testNumberStr);
             std::string item;
             /// handle sequences (e.g., "1,2")
-            while (std::getline(ss, item, ','))
+            while (std::getline(stringstream, item, ','))
             {
                 const size_t dashPos = item.find('-');
                 if (dashPos != std::string::npos)

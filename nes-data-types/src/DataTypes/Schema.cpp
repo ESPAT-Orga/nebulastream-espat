@@ -12,93 +12,141 @@
     limitations under the License.
 */
 
-#include <DataTypes/Schema.hpp>
-
+#include <concepts>
 #include <cstddef>
+#include <initializer_list>
 #include <iostream>
+#include <memory>
+#include <numeric>
 #include <optional>
 #include <ranges>
+#include <span>
 #include <string>
-#include <string_view>
 #include <utility>
 #include <vector>
+
 #include <DataTypes/DataType.hpp>
+#include <DataTypes/Schema.hpp>
 #include <Util/Logger/Logger.hpp>
-#include <fmt/format.h>
+#include <Util/Strings.hpp>
 #include <fmt/ranges.h>
 #include <magic_enum/magic_enum.hpp>
 #include <ErrorHandling.hpp>
+#include <SerializableDataType.pb.h>
+
 
 namespace NES
 {
-
-Schema::Field::Field(std::string name, DataType dataType) : name(std::move(name)), dataType(std::move(dataType))
+Schema::Field::Field(IdentifierList name, DataType dataType) : name(std::move(name)), dataType(std::move(dataType))
 {
 }
 
 std::ostream& operator<<(std::ostream& os, const Schema::Field& field)
 {
-    return os << fmt::format("Field(name: {}, DataType: {})", field.name, field.dataType);
+    return os << fmt::format("Field(name: {}, DataType: {})", field.name.toString(), field.dataType);
 }
 
-Schema::Schema(const MemoryLayoutType memoryLayoutType) : memoryLayoutType(memoryLayoutType) { };
 
-Schema Schema::addField(std::string name, const DataType& dataType)
+Schema::Schema(const MemoryLayoutType memoryLayoutType)
+
+    : memoryLayoutType(memoryLayoutType) { };
+
+//
+// template <std::ranges::input_range Range>
+// requires(std::same_as<Schema::Field, std::ranges::range_value_t<Range>>)
+// Schema::Schema(Private _, const Range& input) noexcept
+// template <std::ranges::input_range Range>
+//     requires (std::same_as<Schema::Field, std::ranges::range_value_t<Range>> && !std::same_as<Range, std::initializer_list<Schema::Field>>)
+// Schema::Schema(const Range& input) noexcept : Schema(Private{}, input)
+// {
+// }
+//
+// template <std::ranges::input_range Range>
+//     requires (std::same_as<Schema, std::ranges::range_value_t<Range>> && !std::same_as<Range, std::initializer_list<Schema>>)
+//     Schema::Schema(const Range& input) noexcept : Schema(Private{}, input | std::views::transform(&Schema::getFields) | std::views::join)
+// {
+//     // fields =  | ranges::to<std::vector<Field>>();
+//     // auto enumerated = std::vector<std::pair<Field, size_t>>{};
+//     // enumerated.reserve(std::ranges::size(fields));
+//     // for (size_t i = 0; i < std::ranges::size(fields); ++i)
+//     // {
+//     //     enumerated.push_back({this->fields[i], i});
+//     // }
+//     // auto [fieldsByName, collisions] = initializeFields(enumerated);
+//     // nameToField = fieldsByName | std::views::transform([](auto pair) { return std::pair{IdentifierList{pair.first}, pair.second}; })
+//     //     | ranges::to<std::unordered_map<IdentifierList, size_t>>();
+//     // currentPrefix = findCommonPrefix(fields);
+// }
+
+
+Schema::Schema(std::initializer_list<Field> fields) noexcept : Schema(Private{}, fields)
+{
+    // auto enumerated = std::vector<std::pair<Field, size_t>>{};
+    // enumerated.reserve(std::ranges::size(fields));
+    // for (size_t i = 0; i < std::ranges::size(fields); ++i)
+    // {
+    //     enumerated.push_back({this->fields[i], i});
+    // }
+    // auto [fieldsByName, collisions] = initializeFields(enumerated);
+    // nameToField = fieldsByName | std::views::transform([](auto pair) { return std::pair{IdentifierList{pair.first}, pair.second}; })
+    //     | ranges::to<std::unordered_map<IdentifierList, size_t>>();
+    // currentPrefix = findCommonPrefix(fields);
+}
+
+Schema::Schema(std::initializer_list<Schema> schemata) noexcept : Schema(Private{}, schemata | std::views::transform(&Schema::getFields) | std::views::join )
+{
+    // fields = | ranges::to<std::vector<Field>>();
+    // auto enumerated = std::vector<std::pair<Field, size_t>>{};
+    // enumerated.reserve(std::ranges::size(fields));
+    // for (size_t i = 0; i < std::ranges::size(fields); ++i)
+    // {
+    //     enumerated.push_back({this->fields[i], i});
+    // }
+    // auto [fieldsByName, collisions] = initializeFields(enumerated);
+    // nameToField = fieldsByName | std::views::transform([](auto pair) { return std::pair{IdentifierList{pair.first}, pair.second}; })
+    //     | ranges::to<std::unordered_map<IdentifierList, size_t>>();
+    // currentPrefix = findCommonPrefix(fields);
+}
+Schema Schema::addField(const IdentifierList& name, const DataType& dataType)
 {
     return addField(std::move(name), dataType.type);
 }
-Schema Schema::addField(std::string name, const DataType::Type type)
+Schema Schema::addField(const IdentifierList& name, const DataType::Type type)
 {
     DataType dataType{type};
     sizeOfSchemaInBytes += dataType.getSizeInBytes();
-    fields.emplace_back(std::move(name), std::move(dataType));
-    nameToField.emplace(fields.back().name, fields.size() - 1);
+    fields.emplace_back(Field{std::move(name), std::move(dataType)});
+    auto enumerated = std::vector<std::pair<Field, size_t>>{};
+    enumerated.reserve(std::ranges::size(fields));
+    for (size_t i = 0; i < std::ranges::size(fields); ++i)
+    {
+        enumerated.push_back({this->fields[i], i});
+    }
+    auto [fieldsByName, collisions] = initializeFields(enumerated);
+    nameToField = fieldsByName | std::views::transform([](auto pair) { return std::pair{IdentifierList{pair.first}, pair.second}; })
+        | ranges::to<std::unordered_map<IdentifierList, size_t>>();
+    currentPrefix = findCommonPrefix(fields);
     return *this;
 }
 
 /// No need to repopulate nameToField, since the key does not change
-bool Schema::replaceTypeOfField(const std::string& name, DataType type)
+void Schema::replaceTypeOfField(const IdentifierList& name, DataType type)
 {
     if (const auto fieldIdx = nameToField.find(name); fieldIdx != nameToField.end())
     {
         sizeOfSchemaInBytes -= fields.at(fieldIdx->second).dataType.getSizeInBytes();
         sizeOfSchemaInBytes += type.getSizeInBytes();
         fields.at(fieldIdx->second).dataType = std::move(type);
-        return true;
     }
-    NES_WARNING("Could not find field with name '{}'", name);
-    return false;
+    NES_WARNING("Could not find field with name '{}'", name.toString());
 }
 
-std::optional<Schema::Field> Schema::getFieldByName(const std::string& fieldName) const
+std::optional<Schema::Field> Schema::getFieldByName(const IdentifierList& fieldName) const
 {
-    /// Check if nameToField contains fully qualified name
-    if (const auto field = nameToField.find(fieldName); field != nameToField.end())
+    if (const auto found = nameToField.find(fieldName); found != nameToField.end())
     {
-        return fields.at(field->second);
+        return fields[found->second];
     }
-
-    ///Iterate over all fields and look for field which fully qualified name
-    std::vector<Field> matchedFields;
-    for (const auto& field : fields)
-    {
-        if (auto fullyQualifiedFieldName = field.name; fieldName.length() <= fullyQualifiedFieldName.length())
-        {
-            ///Check if the field name ends with the input field name
-            const auto startingPos = fullyQualifiedFieldName.length() - fieldName.length();
-            const auto fieldWithoutQualifier = fullyQualifiedFieldName.substr(startingPos, fieldName.length());
-            if (fieldWithoutQualifier == fieldName)
-            {
-                matchedFields.emplace_back(field);
-            }
-        }
-    }
-    ///Check how many matching fields were found log an ERROR
-    if (not matchedFields.empty())
-    {
-        return matchedFields.front();
-    }
-    NES_WARNING("Schema: field with name {} does not exist", fieldName);
     return std::nullopt;
 }
 
@@ -121,113 +169,110 @@ std::ostream& operator<<(std::ostream& os, const Schema& schema)
     return os;
 }
 
-std::string Schema::getQualifierNameForSystemGeneratedFieldsWithSeparator() const
-{
-    if (const auto qualifierName = getSourceNameQualifier(); qualifierName.has_value())
-    {
-        return qualifierName.value() + ATTRIBUTE_NAME_SEPARATOR;
-    }
-    /// TODO #764: make sure that there is always a qualifier
-    throw CannotInferStamp("Could not find qualifier for schema: {}", *this);
-}
+// IdentifierList Schema::getSourceNameQualifier() const
+// {
+//     return currentPrefix;
+// }
 
+// std::string Schema::getQualifierNameForSystemGeneratedFieldsWithSeparator() const
+// {
+//     if (const auto qualifierName = getQualifierNameForSystemGeneratedFields(); qualifierName.has_value())
+//     {
+//         return qualifierName.value() + ATTRIBUTE_NAME_SEPARATOR;
+//     }
+//     return ATTRIBUTE_NAME_SEPARATOR;
+// }
 const std::vector<Schema::Field>& Schema::getFields() const
 {
     return fields;
 }
-
 size_t Schema::getNumberOfFields() const
 {
     return fields.size();
 }
 
-std::optional<std::string> Schema::getSourceNameQualifier() const
-{
-    if (fields.empty())
-    {
-        NES_ERROR("A schema is not allowed to be empty when a qualifier is requested");
-        return std::nullopt;
-    }
-    return fields.front().name.substr(0, fields.front().name.find(ATTRIBUTE_NAME_SEPARATOR));
-}
-
-bool Schema::contains(const std::string& qualifiedFieldName) const
+// std::optional<IdentifierList> Schema::getQualifierNameForSystemGeneratedFields() const
+// {
+//     if (std::ranges::empty(currentPrefix))
+//     {
+//         return std::nullopt;
+//     }
+//     return currentPrefix;
+// }
+//
+bool Schema::contains(const IdentifierList& qualifiedFieldName) const
 {
     return nameToField.contains(qualifiedFieldName);
 }
+IdentifierList Schema::getCommonPrefix() const
+{
+    return currentPrefix;
+}
 
-std::vector<std::string> Schema::getFieldNames() const
+std::vector<IdentifierList> Schema::getUniqueFieldNames() const&
 {
     auto namesView = this->fields | std::views::transform([](const Field& field) { return field.name; });
     return {namesView.begin(), namesView.end()};
 }
-
+void Schema::assignToFields(const Schema& otherSchema)
+{
+    this->fields = otherSchema.fields;
+    this->nameToField = otherSchema.nameToField;
+    this->sizeOfSchemaInBytes = otherSchema.sizeOfSchemaInBytes;
+    this->currentPrefix = otherSchema.currentPrefix;
+}
 void Schema::appendFieldsFromOtherSchema(const Schema& otherSchema)
 {
     this->fields.reserve(this->fields.size() + otherSchema.fields.size());
-    this->nameToField.reserve(this->fields.size() + otherSchema.fields.size());
     for (const auto& otherField : otherSchema.fields)
     {
         this->fields.emplace_back(otherField);
-        this->nameToField.emplace(otherField.name, this->fields.size() - 1);
     }
     this->sizeOfSchemaInBytes += otherSchema.sizeOfSchemaInBytes;
+
+    auto enumerated = std::vector<std::pair<Field, size_t>>{};
+    enumerated.reserve(std::ranges::size(fields));
+    for (size_t i = 0; i < std::ranges::size(fields); ++i)
+    {
+        enumerated.push_back({this->fields[i], i});
+    }
+    auto [fieldsByName, collisions] = initializeFields(enumerated);
+    nameToField = fieldsByName | std::views::transform([](auto pair) { return std::pair{IdentifierList{pair.first}, pair.second}; })
+        | ranges::to<std::unordered_map<IdentifierList, size_t>>();
+    currentPrefix = findCommonPrefix(fields);
 }
 
-bool Schema::renameField(const std::string& oldFieldName, const std::string_view newFieldName)
+void Schema::renameField(const IdentifierList& oldFieldName, const IdentifierList newFieldName)
 {
-    if (auto fieldToRename = nameToField.extract(oldFieldName))
+    if (auto fieldToRename = nameToField.extract(oldFieldName); not fieldToRename.empty())
     {
         fields.at(fieldToRename.mapped()).name = newFieldName;
         fieldToRename.key() = newFieldName;
-        nameToField.insert(std::move(fieldToRename));
-        return true;
     }
-    return false;
+
+    auto enumerated = std::vector<std::pair<Field, size_t>>{};
+    enumerated.reserve(std::ranges::size(fields));
+    for (size_t i = 0; i < std::ranges::size(fields); ++i)
+    {
+        enumerated.push_back({this->fields[i], i});
+    }
+    auto [fieldsByName, collisions] = initializeFields(enumerated);
+    nameToField = fieldsByName | std::views::transform([](auto pair) { return std::pair{IdentifierList{pair.first}, pair.second}; })
+        | ranges::to<std::unordered_map<IdentifierList, size_t>>();
+    currentPrefix = findCommonPrefix(fields);
 }
 size_t Schema::getSizeOfSchemaInBytes() const
 {
     return sizeOfSchemaInBytes;
 }
 
-Schema withoutSourceQualifier(const Schema& input)
-{
-    Schema withoutPrefix{};
-    withoutPrefix.memoryLayoutType = input.memoryLayoutType;
-    auto stripPrefix = [](const std::string& name)
-    {
-        if (const auto pos = name.find_last_of(Schema::ATTRIBUTE_NAME_SEPARATOR); pos != std::string::npos)
-        {
-            return name.substr(pos + 1);
-        }
-        return name;
-    };
-
-    for (const auto& field : input.getFields())
-    {
-        auto nameWithoutPrefix = stripPrefix(field.name);
-        if (withoutPrefix.contains(nameWithoutPrefix))
-        {
-            throw FieldAlreadyExists("Removing source prefixes would cause duplicated fields. Field `{}` is not unique.", field.name);
-        }
-        withoutPrefix.addField(std::move(nameWithoutPrefix), field.dataType);
-    }
-
-
-    return withoutPrefix;
-}
-
 bool Schema::hasFields() const
 {
     return not fields.empty();
 }
-auto Schema::begin() const -> decltype(std::declval<std::vector<Field>>().cbegin())
-{
-    return fields.cbegin();
-}
-auto Schema::end() const -> decltype(std::declval<std::vector<Field>>().cend())
-{
-    return fields.cend();
-}
+
+
+template Schema::Schema(const std::vector<Schema::Field>& input) noexcept;
+template Schema::Schema(const std::vector<Schema>& input) noexcept;
 
 }

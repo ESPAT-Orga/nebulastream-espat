@@ -124,7 +124,7 @@ Schema Schema::addField(const IdentifierList& name, const DataType::Type type)
     }
     auto [fieldsByName, collisions] = initializeFields(enumerated);
     nameToField = fieldsByName | std::views::transform([](auto pair) { return std::pair{IdentifierList{pair.first}, pair.second}; })
-        | ranges::to<std::unordered_map<IdentifierList, size_t>>();
+        | std::ranges::to<std::unordered_map<IdentifierList, size_t>>();
     currentPrefix = findCommonPrefix(fields);
     return *this;
 }
@@ -238,7 +238,7 @@ void Schema::appendFieldsFromOtherSchema(const Schema& otherSchema)
     }
     auto [fieldsByName, collisions] = initializeFields(enumerated);
     nameToField = fieldsByName | std::views::transform([](auto pair) { return std::pair{IdentifierList{pair.first}, pair.second}; })
-        | ranges::to<std::unordered_map<IdentifierList, size_t>>();
+        | std::ranges::to<std::unordered_map<IdentifierList, size_t>>();
     currentPrefix = findCommonPrefix(fields);
 }
 
@@ -258,7 +258,7 @@ void Schema::renameField(const IdentifierList& oldFieldName, const IdentifierLis
     }
     auto [fieldsByName, collisions] = initializeFields(enumerated);
     nameToField = fieldsByName | std::views::transform([](auto pair) { return std::pair{IdentifierList{pair.first}, pair.second}; })
-        | ranges::to<std::unordered_map<IdentifierList, size_t>>();
+        | std::ranges::to<std::unordered_map<IdentifierList, size_t>>();
     currentPrefix = findCommonPrefix(fields);
 }
 size_t Schema::getSizeOfSchemaInBytes() const

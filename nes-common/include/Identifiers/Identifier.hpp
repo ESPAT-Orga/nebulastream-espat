@@ -130,7 +130,7 @@ class IdentifierList
 public:
     constexpr explicit IdentifierList() = default;
     constexpr explicit IdentifierList(std::ranges::input_range auto&& identifiers)
-        : identifiers(ranges::to<std::vector<Identifier>>(identifiers))
+        : identifiers(std::ranges::to<std::vector<Identifier>>(identifiers))
     {
     }
     constexpr IdentifierList(const std::initializer_list<Identifier> identifiers) : identifiers(identifiers) { }
@@ -194,13 +194,9 @@ public:
 
     [[nodiscard]] std::string toString() const
     {
-        return identifiers | std::views::transform(&Identifier::toString) | std::views::join_with('.') | NES::ranges::to<std::string>();
+        return identifiers | std::views::transform(&Identifier::toString) | std::views::join_with('.') | std::ranges::to<std::string>();
     }
 
-    // constexpr size_t size() const
-    // {
-    //     return identifiers.size();
-    // }
     friend bool operator==(const IdentifierList& lhs, const IdentifierList& rhs) { return lhs.identifiers == rhs.identifiers; }
     friend bool operator!=(const IdentifierList& lhs, const IdentifierList& rhs) { return !(lhs == rhs); }
 
@@ -228,7 +224,7 @@ public:
             {
                 return false;
             }
-            //For some reason I didn't manage to get the type signatures right for ranges::all_of
+            /// For some reason I didn't manage to get the type signatures right for ranges::all_of
             for (auto zipped = std::views::zip(first, second); auto [first, second] : zipped)
             {
                 if (first != second)
@@ -362,6 +358,7 @@ struct fmt::formatter<NES::IdentifierBase<Owning>>
         return fmt::format_to(ctx.out(), "{}", identifier.toString());
     }
 };
+
 template <>
 struct fmt::formatter<NES::IdentifierList>
 {

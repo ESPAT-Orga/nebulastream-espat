@@ -32,10 +32,10 @@
 
 namespace NES
 {
-FieldAccessLogicalFunction::FieldAccessLogicalFunction(std::string fieldName)
+FieldAccessLogicalFunction::FieldAccessLogicalFunction(IdentifierList fieldName)
     : fieldName(std::move(fieldName)), dataType(DataTypeProvider::provideDataType(DataType::Type::UNDEFINED)) { };
 
-FieldAccessLogicalFunction::FieldAccessLogicalFunction(DataType dataType, std::string fieldName)
+FieldAccessLogicalFunction::FieldAccessLogicalFunction(DataType dataType, IdentifierList fieldName)
     : fieldName(std::move(fieldName)), dataType(std::move(std::move(dataType))) { };
 
 bool FieldAccessLogicalFunction::operator==(const LogicalFunctionConcept& rhs) const

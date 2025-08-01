@@ -38,11 +38,11 @@ class FieldAccessLogicalFunction : public LogicalFunctionConcept
 public:
     static constexpr std::string_view NAME = "FieldAccess";
 
-    explicit FieldAccessLogicalFunction(std::string fieldName);
-    FieldAccessLogicalFunction(DataType dataType, std::string fieldName);
+    explicit FieldAccessLogicalFunction(IdentifierList fieldName);
+    FieldAccessLogicalFunction(DataType dataType, IdentifierList fieldName);
 
-    [[nodiscard]] std::string getFieldName() const;
-    [[nodiscard]] LogicalFunction withFieldName(std::string fieldName) const;
+    [[nodiscard]] IdentifierList getFieldName() const;
+    [[nodiscard]] LogicalFunction withFieldName(IdentifierList fieldName) const;
 
     [[nodiscard]] SerializableFunction serialize() const override;
 
@@ -63,7 +63,7 @@ public:
 
     struct ConfigParameters
     {
-        static inline const DescriptorConfig::ConfigParameter<std::string> FIELD_NAME{
+        static inline const DescriptorConfig::ConfigParameter<IdentifierList> FIELD_NAME{
             "fieldName",
             std::nullopt,
             [](const std::unordered_map<std::string, std::string>& config) { return DescriptorConfig::tryGet(FIELD_NAME, config); }};
@@ -73,7 +73,7 @@ public:
     };
 
 private:
-    std::string fieldName;
+    IdentifierList fieldName;
     DataType dataType;
 };
 

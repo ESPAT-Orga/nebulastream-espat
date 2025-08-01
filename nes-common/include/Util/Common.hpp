@@ -35,7 +35,7 @@ std::string escapeJson(const std::string& str);
 template <typename T>
 std::shared_ptr<T> checkNonNull(std::shared_ptr<T> ptr, USED_IN_DEBUG const std::string& errorMessage)
 {
-    INVARIANT(ptr, errorMessage);
+    INVARIANT(ptr, "{}", errorMessage);
     return ptr;
 }
 

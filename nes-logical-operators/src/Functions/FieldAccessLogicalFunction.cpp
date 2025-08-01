@@ -59,12 +59,12 @@ bool operator!=(const FieldAccessLogicalFunction& lhs, const FieldAccessLogicalF
     return !(lhs == rhs);
 }
 
-std::string FieldAccessLogicalFunction::getFieldName() const
+IdentifierList FieldAccessLogicalFunction::getFieldName() const
 {
     return fieldName;
 }
 
-LogicalFunction FieldAccessLogicalFunction::withFieldName(std::string fieldName) const
+LogicalFunction FieldAccessLogicalFunction::withFieldName(IdentifierList fieldName) const
 {
     auto copy = *this;
     copy.fieldName = std::move(fieldName);

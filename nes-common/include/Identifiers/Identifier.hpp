@@ -20,6 +20,7 @@
 #include <functional>
 #include <initializer_list>
 #include <optional>
+#include <ostream>
 #include <ranges>
 #include <span>
 #include <sstream>
@@ -85,23 +86,23 @@ public:
     [[nodiscard]] constexpr std::string getRawValue() const { return std::string{value}; }
     [[nodiscard]] constexpr bool isCaseSensitive() const { return caseSensitive; }
 
-    [[nodiscard]] constexpr std::string toString() const
+    friend std::ostream& operator<<(std::ostream& os, const IdentifierBase& obj)
     {
         auto copy = std::string{value};
-        if (!caseSensitive)
+        if (!obj.caseSensitive)
         {
             std::ranges::transform(
                 copy.begin(),
                 copy.end(),
                 copy.begin(),
                 [](const unsigned char character) -> unsigned char { return std::toupper(character); });
-            return copy;
+            return os << copy;
         }
-        return "\"" + copy + "\"";
+        return os << "\"" + copy + "\"";
     }
 
-    friend constexpr bool operator==(const IdentifierBase& lhs, const IdentifierBase& rhs) { return lhs.toString() == rhs.toString(); }
-    friend constexpr bool operator!=(const IdentifierBase& lhs, const IdentifierBase& rhs) { return !(lhs == rhs); }
+    friend bool operator==(const IdentifierBase& lhs, const IdentifierBase& rhs) { return lhs.toString() == rhs.toString(); }
+    friend bool operator!=(const IdentifierBase& lhs, const IdentifierBase& rhs) { return !(lhs == rhs); }
 
     static constexpr IdentifierBase parse(std::string_view stringView)
     {
@@ -192,10 +193,11 @@ public:
         return IdentifierList{std::move(newIdentifiers)};
     }
 
-    [[nodiscard]] std::string toString() const
+    friend std::ostream& operator<<(std::ostream& os, const IdentifierList& obj)
     {
-        return identifiers | std::views::transform(&Identifier::toString) | std::views::join_with('.') | std::ranges::to<std::string>();
+        return os << (obj.identifiers | std::views::transform(&Identifier::toString) | std::views::join_with('.') | std::ranges::to<std::string>());
     }
+
 
     friend bool operator==(const IdentifierList& lhs, const IdentifierList& rhs) { return lhs.identifiers == rhs.identifiers; }
     friend bool operator!=(const IdentifierList& lhs, const IdentifierList& rhs) { return !(lhs == rhs); }

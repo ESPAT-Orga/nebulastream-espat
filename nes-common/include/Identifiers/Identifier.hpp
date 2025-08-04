@@ -37,7 +37,6 @@
 
 namespace NES
 {
-
 //The template allows this class to be used with constexpr string, where we can only store a string_view.
 //For most parts, we should just use the "owning" version because it can't contain a dangling reference.
 template <bool Owning = true>
@@ -88,7 +87,7 @@ public:
 
     friend std::ostream& operator<<(std::ostream& os, const IdentifierBase& obj)
     {
-        auto copy = std::string{value};
+        auto copy = std::string{obj.value};
         if (!obj.caseSensitive)
         {
             std::ranges::transform(
@@ -101,7 +100,14 @@ public:
         return os << "\"" + copy + "\"";
     }
 
-    friend bool operator==(const IdentifierBase& lhs, const IdentifierBase& rhs) { return lhs.toString() == rhs.toString(); }
+    friend bool operator==(const IdentifierBase& lhs, const IdentifierBase& rhs)
+    {
+        std::stringstream lhsss;
+        std::stringstream rhsss;
+        lhsss << lhs;
+        rhsss << rhs;
+        return lhsss.str() == rhsss.str();
+    }
     friend bool operator!=(const IdentifierBase& lhs, const IdentifierBase& rhs) { return !(lhs == rhs); }
 
     static constexpr IdentifierBase parse(std::string_view stringView)
@@ -124,6 +130,69 @@ public:
 };
 
 using Identifier = IdentifierBase<true>;
+}
+
+template <bool Owning>
+struct std::formatter<NES::IdentifierBase<Owning>>
+{
+    constexpr auto parse(std::format_parse_context& ctx) { return ctx.begin(); }
+
+    auto format(const NES::IdentifierBase<Owning>& identifier, std::format_context& ctx) const
+    {
+        return std::format_to(ctx.out(), "{}", identifier.toString());
+    }
+};
+
+template <bool owning>
+struct std::hash<NES::IdentifierBase<owning>>
+{
+    std::size_t operator()(const NES::IdentifierBase<owning>& arg) const noexcept { return std::hash<std::string>{}(fmt::format("{}", arg)); }
+};
+
+template <bool Owning>
+struct std::hash<std::span<NES::IdentifierBase<Owning>>>
+{
+    //taken from https://stackoverflow.com/a/72073933 from SO user see,
+    //based on https://stackoverflow.com/a/12996028 from SO user Thomas Mueller
+    std::size_t operator()(const std::span<NES::IdentifierBase<Owning>>& arg) const noexcept
+    {
+        std::size_t seed = std::ranges::size(arg);
+        constexpr auto hasher = std::hash<NES::Identifier>{};
+        for (const auto& identifier : arg)
+        {
+            auto hash = hasher(identifier);
+            hash = ((hash >> 16) ^ hash) * 0x45d9f3b;
+            hash = ((hash >> 16) ^ hash) * 0x45d9f3b;
+            hash = (hash >> 16) ^ hash;
+            seed ^= hash + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+        }
+        return seed;
+    }
+};
+
+template <bool Owning>
+struct std::hash<std::span<const NES::IdentifierBase<Owning>>>
+{
+    //taken from https://stackoverflow.com/a/72073933 from SO user see,
+    //based on https://stackoverflow.com/a/12996028 from SO user Thomas Mueller
+    std::size_t operator()(const std::span<const NES::IdentifierBase<Owning>>& arg) const noexcept
+    {
+        std::size_t seed = std::ranges::size(arg);
+        constexpr auto hasher = std::hash<NES::Identifier>{};
+        for (const auto& identifier : arg)
+        {
+            auto hash = hasher(identifier);
+            hash = ((hash >> 16) ^ hash) * 0x45d9f3b;
+            hash = ((hash >> 16) ^ hash) * 0x45d9f3b;
+            hash = (hash >> 16) ^ hash;
+            seed ^= hash + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+        }
+        return seed;
+    }
+};
+
+namespace NES {
+
 class IdentifierList
 {
     std::vector<Identifier> identifiers;
@@ -249,11 +318,6 @@ static_assert(std::ranges::sized_range<IdentifierList>);
 IdentifierList zipIdentifierLists(const IdentifierList& firstIdList, const IdentifierList& secondIdList);
 }
 
-template <>
-struct std::hash<NES::Identifier>
-{
-    std::size_t operator()(const NES::Identifier& arg) const noexcept { return std::hash<std::string>{}(arg.toString()); }
-};
 
 template <>
 struct std::hash<NES::IdentifierList>
@@ -276,59 +340,6 @@ struct std::hash<NES::IdentifierList>
     }
 };
 
-template <bool Owning>
-struct std::hash<std::span<NES::IdentifierBase<Owning>>>
-{
-    //taken from https://stackoverflow.com/a/72073933 from SO user see,
-    //based on https://stackoverflow.com/a/12996028 from SO user Thomas Mueller
-    std::size_t operator()(const std::span<NES::IdentifierBase<Owning>>& arg) const noexcept
-    {
-        std::size_t seed = std::ranges::size(arg);
-        constexpr auto hasher = std::hash<NES::Identifier>{};
-        for (const auto& identifier : arg)
-        {
-            auto hash = hasher(identifier);
-            hash = ((hash >> 16) ^ hash) * 0x45d9f3b;
-            hash = ((hash >> 16) ^ hash) * 0x45d9f3b;
-            hash = (hash >> 16) ^ hash;
-            seed ^= hash + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-        }
-        return seed;
-    }
-};
-
-
-template <bool Owning>
-struct std::hash<std::span<const NES::IdentifierBase<Owning>>>
-{
-    //taken from https://stackoverflow.com/a/72073933 from SO user see,
-    //based on https://stackoverflow.com/a/12996028 from SO user Thomas Mueller
-    std::size_t operator()(const std::span<const NES::IdentifierBase<Owning>>& arg) const noexcept
-    {
-        std::size_t seed = std::ranges::size(arg);
-        constexpr auto hasher = std::hash<NES::Identifier>{};
-        for (const auto& identifier : arg)
-        {
-            auto hash = hasher(identifier);
-            hash = ((hash >> 16) ^ hash) * 0x45d9f3b;
-            hash = ((hash >> 16) ^ hash) * 0x45d9f3b;
-            hash = (hash >> 16) ^ hash;
-            seed ^= hash + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-        }
-        return seed;
-    }
-};
-
-template <bool Owning>
-struct std::formatter<NES::IdentifierBase<Owning>>
-{
-    constexpr auto parse(std::format_parse_context& ctx) { return ctx.begin(); }
-
-    auto format(const NES::IdentifierBase<Owning>& identifier, std::format_context& ctx) const
-    {
-        return std::format_to(ctx.out(), "{}", identifier.toString());
-    }
-};
 
 template <>
 struct std::formatter<NES::IdentifierList>

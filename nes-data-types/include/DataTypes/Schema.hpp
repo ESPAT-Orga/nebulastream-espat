@@ -48,6 +48,10 @@ public:
         friend std::ostream& operator<<(std::ostream& os, const Field& field);
         bool operator==(const Field&) const = default;
 
+        [[nodiscard]] const IdentifierList& getFullyQualifiedName() const { return name; }
+        [[nodiscard]] const Identifier& getLastName() const { return *(std::ranges::end(name) - 1); }
+        [[nodiscard]] const DataType& getDataType() const { return dataType; }
+    private:
         IdentifierList name;
         DataType dataType{};
     };
@@ -69,7 +73,7 @@ private:
 
         for (std::pair<Schema::Field, size_t>& field : fields)
         {
-            IdentifierList& fullName = field.first.name;
+            const IdentifierList& fullName = field.first.getFullyQualifiedName();
             for (size_t i = 0; i < std::ranges::size(fullName); i++)
             {
                 IdSpan idSubSpan = std::span{std::ranges::begin(fullName) + i, std::ranges::size(fullName) - i};
@@ -100,7 +104,7 @@ private:
         if (std::ranges::size(fields) > 0)
         {
             const Schema::Field& current = *std::ranges::begin(fields);
-            candidate = std::span{std::ranges::begin(current.name), std::ranges::end(current.name)};
+            candidate = std::span{std::ranges::begin(current.getFullyQualifiedName()), std::ranges::end(current.getFullyQualifiedName())};
         }
         //A fold over the fields, trying to find the common subspan starting from 0 in the names of all fields
         //Using Spans again to avoid unnecessary copies.
@@ -108,13 +112,13 @@ private:
         {
             for (const Schema::Field& field : std::span{std::ranges::begin(fields) + 1, std::ranges::size(fields) - 1})
             {
-                const auto compareUpTo = std::min(std::ranges::size(candidate), std::ranges::size(field.name));
+                const auto compareUpTo = std::min(std::ranges::size(candidate), std::ranges::size(field.getFullyQualifiedName()));
                 IdSpan previousCandidate = candidate;
                 candidate = {};
                 for (size_t i = 0; i < compareUpTo; ++i)
                 {
                     const IdSpan candidateSubspan = std::span{std::ranges::begin(previousCandidate), compareUpTo - i};
-                    const IdSpan currentSubspan = std::span{std::ranges::begin(field.name), compareUpTo - i};
+                    const IdSpan currentSubspan = std::span{std::ranges::begin(field.getFullyQualifiedName()), compareUpTo - i};
                     if (IdentifierList::SpanEquals{}(candidateSubspan, currentSubspan))
                     {
                         candidate = candidateSubspan;

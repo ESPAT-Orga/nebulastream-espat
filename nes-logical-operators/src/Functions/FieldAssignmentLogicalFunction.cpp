@@ -115,8 +115,8 @@ LogicalFunction FieldAssignmentLogicalFunction::withInferredDataType(const Schem
     copy.logicalFunction = logicalFunction.withInferredDataType(schema);
 
     ///Update the field name with fully qualified field name
-    auto fieldName = getField().getFieldName();
-    auto existingField = schema.getFieldByName(fieldName);
+    auto fieldName = getField().getFieldName().end() - 1;
+    auto existingField = schema.getFieldByName(*fieldName);
     if (existingField)
     {
         if (const auto dataType = copy.logicalFunction.getDataType().join(copy.fieldAccess.getDataType()))

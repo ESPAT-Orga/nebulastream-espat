@@ -28,6 +28,7 @@
 #include <ErrorHandling.hpp>
 #include <ProtobufHelper.hpp> /// NOLINT
 #include <SerializableVariantDescriptor.pb.h>
+#include "Identifiers/Identifier.hpp"
 
 namespace NES
 {
@@ -99,6 +100,11 @@ SerializableVariantDescriptor descriptorConfigTypeToProto(const DescriptorConfig
             else if constexpr (std::is_same_v<U, NES::WindowInfos>)
             {
                 protoVar.mutable_window_infos()->CopyFrom(arg);
+            } else if constexpr (std::is_same_v<U, NES::IdentifierList>)
+            {
+                SerializableIdentifierList protoIdentifiers;
+                protoIdentifiers.set_value(fmt::format("{}", arg));
+                protoVar.mutable_identifiers()->CopyFrom(protoIdentifiers);
             }
             else
             {

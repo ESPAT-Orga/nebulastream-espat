@@ -75,11 +75,11 @@ public:
 
 
     //Should we keep the conversion operator or the conversion constructor?
-    operator IdentifierBase<true>() const requires (!Owning)
+    operator IdentifierBase<true>() const
+    requires(!Owning)
     {
         return IdentifierBase<true>{std::string{value}, caseSensitive};
     }
-
 
 
     [[nodiscard]] constexpr std::string getRawValue() const { return std::string{value}; }
@@ -126,27 +126,23 @@ public:
         }
         return IdentifierBase{stringView, false};
     }
-
 };
 
 using Identifier = IdentifierBase<true>;
 }
 
 template <bool Owning>
-struct std::formatter<NES::IdentifierBase<Owning>>
+struct fmt::formatter<NES::IdentifierBase<Owning>> : ostream_formatter
 {
-    constexpr auto parse(std::format_parse_context& ctx) { return ctx.begin(); }
-
-    auto format(const NES::IdentifierBase<Owning>& identifier, std::format_context& ctx) const
-    {
-        return std::format_to(ctx.out(), "{}", identifier.toString());
-    }
 };
 
 template <bool owning>
 struct std::hash<NES::IdentifierBase<owning>>
 {
-    std::size_t operator()(const NES::IdentifierBase<owning>& arg) const noexcept { return std::hash<std::string>{}(fmt::format("{}", arg)); }
+    std::size_t operator()(const NES::IdentifierBase<owning>& arg) const noexcept
+    {
+        return std::hash<std::string>{}(fmt::format("{}", arg));
+    }
 };
 
 template <bool Owning>
@@ -191,7 +187,8 @@ struct std::hash<std::span<const NES::IdentifierBase<Owning>>>
     }
 };
 
-namespace NES {
+namespace NES
+{
 
 class IdentifierList
 {
@@ -203,6 +200,7 @@ public:
         : identifiers(std::ranges::to<std::vector<Identifier>>(identifiers))
     {
     }
+
     constexpr IdentifierList(const std::initializer_list<Identifier> identifiers) : identifiers(identifiers) { }
 
     //The constructors from optionals can be removed in c++ 26 when optional implements the range concept
@@ -264,7 +262,9 @@ public:
 
     friend std::ostream& operator<<(std::ostream& os, const IdentifierList& obj)
     {
-        return os << (obj.identifiers | std::views::transform(&Identifier::toString) | std::views::join_with('.') | std::ranges::to<std::string>());
+        return os
+            << (obj.identifiers | std::views::transform([](const Identifier& identifier) { return fmt::format("{}", identifier); })
+                | std::views::join_with('.') | std::ranges::to<std::string>());
     }
 
 
@@ -342,52 +342,22 @@ struct std::hash<NES::IdentifierList>
 
 
 template <>
-struct std::formatter<NES::IdentifierList>
-{
-    constexpr auto parse(std::format_parse_context& ctx) { return ctx.begin(); }
-
-    auto format(const NES::IdentifierList& identifiers, std::format_context& ctx) const
-    {
-        auto out = ctx.out();
-        if (std::ranges::size(identifiers) >= 1)
-        {
-            out = std::format_to(out, "{}", std::ranges::begin(identifiers)->toString());
-        }
-        for (const auto& identifier : std::span{std::ranges::begin(identifiers) + 1, std::ranges::end(identifiers)})
-        {
-            out = std::format_to(out, ".{}", identifier.toString());
-        }
-        return out;
-    }
-};
-
-template <bool Owning>
-struct fmt::formatter<NES::IdentifierBase<Owning>>
-{
-    constexpr auto parse(format_parse_context& ctx) { return ctx.begin(); }
-
-    auto format(const NES::IdentifierBase<Owning>& identifier, format_context& ctx) const
-    {
-        return fmt::format_to(ctx.out(), "{}", identifier.toString());
-    }
-};
-
-template <>
 struct fmt::formatter<NES::IdentifierList>
 {
-    constexpr auto parse(format_parse_context& ctx) { return ctx.begin(); }
+    constexpr auto parse(fmt::format_parse_context& ctx) { return ctx.begin(); }
 
     auto format(const NES::IdentifierList& identifiers, format_context& ctx) const
     {
         auto out = ctx.out();
         if (std::ranges::size(identifiers) >= 1)
         {
-            out = fmt::format_to(out, "{}", std::ranges::begin(identifiers)->toString());
+            out = fmt::format_to(out, "{}", *std::ranges::begin(identifiers));
         }
         for (const auto& identifier : std::span{std::ranges::begin(identifiers) + 1, std::ranges::end(identifiers)})
         {
-            out = fmt::format_to(out, ".{}", identifier.toString());
+            out = fmt::format_to(out, ".{}", identifier);
         }
         return out;
     }
 };
+

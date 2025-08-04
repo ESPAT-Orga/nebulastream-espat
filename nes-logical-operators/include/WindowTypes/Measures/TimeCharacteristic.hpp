@@ -30,8 +30,6 @@ namespace NES::Windowing
 class TimeCharacteristic final
 {
 public:
-    constexpr static auto RECORD_CREATION_TS_FIELD_NAME = "$record.creationTs";
-
     enum class Type : uint8_t
     {
         IngestionTime,

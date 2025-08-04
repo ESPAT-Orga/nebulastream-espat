@@ -43,7 +43,7 @@ Schema::Field::Field(IdentifierList name, DataType dataType) : name(std::move(na
 
 std::ostream& operator<<(std::ostream& os, const Schema::Field& field)
 {
-    return os << fmt::format("Field(name: {}, DataType: {})", field.name.toString(), field.dataType);
+    return os << fmt::format("Field(name: {}, DataType: {})", field.name, field.dataType);
 }
 
 
@@ -134,11 +134,11 @@ void Schema::replaceTypeOfField(const IdentifierList& name, DataType type)
 {
     if (const auto fieldIdx = nameToField.find(name); fieldIdx != nameToField.end())
     {
-        sizeOfSchemaInBytes -= fields.at(fieldIdx->second).dataType.getSizeInBytes();
+        sizeOfSchemaInBytes -= fields.at(fieldIdx->second).getDataType().getSizeInBytes();
         sizeOfSchemaInBytes += type.getSizeInBytes();
-        fields.at(fieldIdx->second).dataType = std::move(type);
+        fields.at(fieldIdx->second) = Field{name, std::move(type)};
     }
-    NES_WARNING("Could not find field with name '{}'", name.toString());
+    NES_WARNING("Could not find field with name '{}'", name);
 }
 
 std::optional<Schema::Field> Schema::getFieldByName(const IdentifierList& fieldName) const
@@ -211,7 +211,7 @@ IdentifierList Schema::getCommonPrefix() const
 
 std::vector<IdentifierList> Schema::getUniqueFieldNames() const&
 {
-    auto namesView = this->fields | std::views::transform([](const Field& field) { return field.name; });
+    auto namesView = this->fields | std::views::transform([](const Field& field) { return field.getFullyQualifiedName(); });
     return {namesView.begin(), namesView.end()};
 }
 void Schema::assignToFields(const Schema& otherSchema)
@@ -246,7 +246,7 @@ void Schema::renameField(const IdentifierList& oldFieldName, const IdentifierLis
 {
     if (auto fieldToRename = nameToField.extract(oldFieldName); not fieldToRename.empty())
     {
-        fields.at(fieldToRename.mapped()).name = newFieldName;
+        fields.at(fieldToRename.mapped()) = Field{newFieldName, fields.at(fieldToRename.mapped()).getDataType()};
         fieldToRename.key() = newFieldName;
     }
 

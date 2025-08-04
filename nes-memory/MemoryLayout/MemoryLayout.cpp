@@ -78,7 +78,7 @@ MemoryLayout::MemoryLayout(const uint64_t bufferSize, Schema schema) : bufferSiz
     capacity = recordSize > 0 ? bufferSize / recordSize : 0;
 }
 
-std::optional<uint64_t> MemoryLayout::getFieldIndexFromName(const std::string& fieldName) const
+std::optional<uint64_t> MemoryLayout::getFieldIndexFromName(const IdentifierList& fieldName) const
 {
     const auto nameFieldIt = nameFieldIndexMap.find(fieldName);
     if (!nameFieldIndexMap.contains(fieldName))

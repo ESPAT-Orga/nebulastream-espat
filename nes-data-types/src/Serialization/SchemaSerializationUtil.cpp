@@ -15,7 +15,9 @@
 #include <Serialization/DataTypeSerializationUtil.hpp>
 #include <Serialization/SchemaSerializationUtil.hpp>
 #include <Util/Logger/Logger.hpp>
+#include <fmt/format.h>
 #include <SerializableSchema.pb.h>
+#include "SerializableVariantDescriptor.pb.h"
 
 namespace NES
 {
@@ -27,9 +29,11 @@ SerializableSchema SchemaSerializationUtil::serializeSchema(const Schema& schema
     for (const auto& field : schema.getFields())
     {
         auto* serializedField = serializedSchema->add_fields();
-        serializedField->set_name(field.name);
+        SerializableIdentifierList identifierList;
+        identifierList.set_value(fmt::format("{}", field.getFullyQualifiedName()));
+        serializedField->set_allocated_name(&identifierList);
         /// serialize data type
-        DataTypeSerializationUtil::serializeDataType(field.dataType, serializedField->mutable_type());
+        DataTypeSerializationUtil::serializeDataType(field.getDataType(), serializedField->mutable_type());
     }
 
     /// Serialize layoutType
@@ -54,7 +58,7 @@ Schema SchemaSerializationUtil::deserializeSchema(const SerializableSchema& seri
     auto deserializedSchema = Schema{Schema::MemoryLayoutType::ROW_LAYOUT};
     for (const auto& serializedField : serializedSchema.fields())
     {
-        const auto& fieldName = serializedField.name();
+        const auto fieldName = IdentifierList::parse(serializedField.name().value());
         /// de-serialize data type
         auto type = DataTypeSerializationUtil::deserializeDataType(serializedField.type());
         deserializedSchema.addField(fieldName, type);

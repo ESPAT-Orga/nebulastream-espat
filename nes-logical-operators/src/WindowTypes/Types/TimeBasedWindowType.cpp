@@ -30,22 +30,18 @@ bool TimeBasedWindowType::inferStamp(const Schema& schema)
 {
     if (timeCharacteristic.getType() == TimeCharacteristic::Type::EventTime)
     {
-        auto fieldName = timeCharacteristic.field.name;
+        auto fieldName = timeCharacteristic.field.getFullyQualifiedName();
         auto existingField = schema.getFieldByName(fieldName);
         if (existingField)
         {
-            if (not existingField.value().dataType.isInteger())
+            if (not existingField.value().getDataType().isInteger())
             {
-                throw DifferentFieldTypeExpected("TimeBasedWindow should use a uint for time field " + fieldName);
+                throw DifferentFieldTypeExpected("TimeBasedWindow should use a uint for time field {}", fieldName);
             }
-            timeCharacteristic.field.name = existingField.value().name;
+            timeCharacteristic.field.name = existingField.value().getFullyQualifiedName();
             return true;
         }
-        if (fieldName == Windowing::TimeCharacteristic::RECORD_CREATION_TS_FIELD_NAME)
-        {
-            return true;
-        }
-        throw DifferentFieldTypeExpected("TimeBasedWindow using a non existing time field " + fieldName);
+        throw DifferentFieldTypeExpected("TimeBasedWindow using a non existing time field {}", fieldName);
     }
     return true;
 }

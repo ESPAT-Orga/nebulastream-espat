@@ -77,7 +77,7 @@ std::string FieldAccessLogicalFunction::explain(ExplainVerbosity verbosity) cons
     {
         return fmt::format("FieldAccessLogicalFunction({}{})", fieldName, dataType);
     }
-    return fieldName;
+    return fmt::format("{}", fieldName);
 }
 
 LogicalFunction FieldAccessLogicalFunction::withInferredDataType(const Schema& schema) const
@@ -89,8 +89,8 @@ LogicalFunction FieldAccessLogicalFunction::withInferredDataType(const Schema& s
     }
 
     auto copy = *this;
-    copy.dataType = existingField.value().dataType;
-    copy.fieldName = existingField.value().name;
+    copy.dataType = existingField.value().getDataType();
+    copy.fieldName = existingField.value().getFullyQualifiedName();
     return copy;
 }
 
@@ -139,8 +139,8 @@ LogicalFunctionRegistryReturnType
 LogicalFunctionGeneratedRegistrar::RegisterFieldAccessLogicalFunction(LogicalFunctionRegistryArguments arguments)
 {
     PRECONDITION(arguments.config.contains("FieldName"), "FieldAccessLogicalFunction requires a FieldName in its config");
-    auto fieldName = get<std::string>(arguments.config["FieldName"]);
-    PRECONDITION(!fieldName.empty(), "FieldName cannot be empty");
+    auto fieldName = get<IdentifierList>(arguments.config["FieldName"]);
+    PRECONDITION(!std::ranges::empty(fieldName), "FieldName cannot be empty");
     return FieldAccessLogicalFunction(arguments.dataType, fieldName);
 }
 

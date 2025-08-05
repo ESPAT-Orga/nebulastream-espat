@@ -25,6 +25,7 @@
 #include <Util/Logger/Formatter.hpp>
 #include <Util/PlanRenderer.hpp>
 #include <SerializableVariantDescriptor.pb.h>
+#include <Identifiers/Identifier.hpp>
 
 namespace NES
 {
@@ -35,9 +36,9 @@ class FieldAssignmentLogicalFunction final : public LogicalFunctionConcept
 public:
     static constexpr std::string_view NAME = "FieldAssignment";
 
-    FieldAssignmentLogicalFunction(FieldAccessLogicalFunction fieldAccess, const LogicalFunction& logicalFunction);
+    FieldAssignmentLogicalFunction(Identifier projectAs, const LogicalFunction& logicalFunction);
 
-    [[nodiscard]] FieldAccessLogicalFunction getField() const;
+    [[nodiscard]] Identifier getProjectAs() const;
     [[nodiscard]] LogicalFunction getAssignment() const;
 
     [[nodiscard]] bool operator==(const LogicalFunctionConcept& rhs) const override;
@@ -58,9 +59,9 @@ public:
     friend bool operator!=(const FieldAssignmentLogicalFunction& lhs, const FieldAssignmentLogicalFunction& rhs);
 
 private:
-    DataType dataType;
-    FieldAccessLogicalFunction fieldAccess;
     LogicalFunction logicalFunction;
+    Identifier projectAs;
+    DataType dataType;
 };
 }
 FMT_OSTREAM(NES::FieldAssignmentLogicalFunction);

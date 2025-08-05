@@ -63,7 +63,7 @@ public:
 
     struct ConfigParameters
     {
-        static inline const DescriptorConfig::ConfigParameter<Identifier> FIELD_NAME{
+        static inline const DescriptorConfig::ConfigParameter<IdentifierList> FIELD_NAME{
             "fieldName",
             std::nullopt,
             [](const std::unordered_map<std::string, std::string>& config) { return DescriptorConfig::tryGet(FIELD_NAME, config); }};
@@ -73,7 +73,7 @@ public:
     };
 
 private:
-    Identifier fieldName;
+    IdentifierList fieldName;
     DataType dataType;
 };
 

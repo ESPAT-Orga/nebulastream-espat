@@ -34,8 +34,8 @@ namespace NES
 
 
 FieldAssignmentLogicalFunction::FieldAssignmentLogicalFunction(
-    FieldAccessLogicalFunction fieldAccess, const LogicalFunction& logicalFunction)
-    : dataType(logicalFunction.getDataType()), fieldAccess(std::move(fieldAccess)), logicalFunction(logicalFunction)
+    Identifier projectAs, const LogicalFunction& logicalFunction)
+    : dataType(logicalFunction.getDataType()), projectAs(std::move(projectAs)), logicalFunction(logicalFunction)
 {
 }
 
@@ -51,9 +51,9 @@ bool FieldAssignmentLogicalFunction::operator==(const LogicalFunctionConcept& rh
 bool operator==(const FieldAssignmentLogicalFunction& lhs, const FieldAssignmentLogicalFunction& rhs)
 {
     /// a field assignment function has always two children.
-    const bool fieldsMatch = lhs.fieldAccess == rhs.fieldAccess;
+    const bool namesMatch = lhs.projectAs == rhs.projectAs;
     const bool assignmentsMatch = lhs.logicalFunction == rhs.logicalFunction;
-    return fieldsMatch and assignmentsMatch;
+    return namesMatch and assignmentsMatch;
 }
 
 bool operator!=(const FieldAssignmentLogicalFunction& lhs, const FieldAssignmentLogicalFunction& rhs)
@@ -65,14 +65,14 @@ std::string FieldAssignmentLogicalFunction::explain(ExplainVerbosity verbosity) 
 {
     if (verbosity == ExplainVerbosity::Debug)
     {
-        return fmt::format("FieldAssignmentLogicalFunction({} = {})", fieldAccess.explain(verbosity), logicalFunction.explain(verbosity));
+        return fmt::format("FieldAssignmentLogicalFunction({} = {})", projectAs, logicalFunction.explain(verbosity));
     }
-    return fmt::format("{} = {}", fieldAccess.explain(verbosity), logicalFunction.explain(verbosity));
+    return fmt::format("{} = {}", projectAs, logicalFunction.explain(verbosity));
 }
 
-FieldAccessLogicalFunction FieldAssignmentLogicalFunction::getField() const
+Identifier FieldAssignmentLogicalFunction::getProjectAs() const
 {
-    return fieldAccess;
+    return projectAs;
 }
 
 LogicalFunction FieldAssignmentLogicalFunction::getAssignment() const

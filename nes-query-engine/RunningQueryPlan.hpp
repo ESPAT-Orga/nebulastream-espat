@@ -22,9 +22,13 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+
 #include <Identifiers/Identifiers.hpp>
 #include <absl/functional/any_invocable.h>
 #include <folly/Synchronized.h>
+#include <rust/cxx.h>
+#include "Util/AtomicState.hpp"
+
 #include <ErrorHandling.hpp>
 #include <ExecutablePipelineStage.hpp>
 #include <ExecutableQueryPlan.hpp>
@@ -114,7 +118,6 @@ struct RunningQueryPlanNode
         WorkEmitter& emitter,
         std::vector<std::shared_ptr<RunningQueryPlanNode>> successors,
         std::unique_ptr<ExecutablePipelineStage> stage,
-        std::function<void(Exception)> unregisterWithError,
         CallbackRef planRef,
         CallbackRef setupCallback);
 
@@ -124,7 +127,6 @@ struct RunningQueryPlanNode
         PipelineId id,
         std::vector<std::shared_ptr<RunningQueryPlanNode>> successors,
         std::unique_ptr<ExecutablePipelineStage> stage,
-        std::function<void(Exception)> unregisterWithError,
         CallbackRef planRef)
         : id(id)
         , successors(std::move(successors))
@@ -134,16 +136,40 @@ struct RunningQueryPlanNode
     {
     }
 
-    void fail(Exception exception) const;
+    void fail(Exception exception);
 
     PipelineId id;
 
-    std::atomic_bool requiresTermination = false;
-    std::atomic<ssize_t> pendingTasks = 0;
+    struct Uninitialized
+    {
+    };
+    struct Running
+    {
+        size_t pendingTasks = 0;
+    };
+    struct Terminated
+    {
+        std::optional<Exception> reason;
+    };
+    struct StopPending
+    {
+    };
+
+
+    struct Failed
+    {
+        Exception reason;
+    };
+    struct FailurePending
+    {
+        Exception reason;
+    };
+
+    AtomicState<Uninitialized, Running, StopPending, FailurePending, Failed, Terminated> state{Uninitialized{}};
+
     std::vector<std::shared_ptr<RunningQueryPlanNode>> successors;
     std::unique_ptr<ExecutablePipelineStage> stage;
 
-    std::function<void(Exception)> unregisterWithError;
     CallbackRef planRef;
 };
 

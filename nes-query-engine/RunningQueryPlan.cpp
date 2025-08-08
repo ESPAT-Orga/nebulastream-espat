@@ -38,9 +38,11 @@
 #include <ExecutableQueryPlan.hpp>
 #include <Interfaces.hpp>
 #include <RunningSource.hpp>
+#include <SingleNodeWorkerRPCService.pb.h>
 
 namespace NES
 {
+struct Terminated;
 std::pair<CallbackOwner, CallbackRef> Callback::create(std::string context)
 {
     auto ref = std::shared_ptr<Callback>{
@@ -141,30 +143,47 @@ void RunningQueryPlanNode::RunningQueryPlanNodeDeleter::operator()(RunningQueryP
 {
     std::unique_ptr<RunningQueryPlanNode> node(ptr);
     ENGINE_LOG_DEBUG("Node {} will be deleted", node->id);
-    if (ptr->requiresTermination)
-    {
-        emitter.emitPipelineStop(
-            queryId,
-            std::move(node),
-            [ptr, &emitter = this->emitter, queryId = this->queryId]() mutable
-            {
-                ENGINE_LOG_DEBUG("Pipeline {}-{} was stopped", queryId, ptr->id);
-                ptr->requiresTermination = false;
-                for (auto& successor : ptr->successors)
+    auto didTransition = ptr->state.transition(
+        [](Terminated&& t) { return t; },
+        [](Uninitialized&&) { return Terminated{}; },
+        [&](Running&& r)
+        {
+            INVARIANT(r.pendingTasks == 0, "I assume this");
+            emitter.emitPipelineStop(
+                queryId,
+                std::move(node),
+                [ptr, &emitter = this->emitter, queryId = this->queryId] mutable
                 {
-                    emitter.emitPendingPipelineStop(queryId, std::move(successor), {}, {});
-                }
-            },
-            [ENGINE_IF_LOG_DEBUG(queryId = queryId, ) ptr](Exception)
-            {
-                ENGINE_LOG_DEBUG("Failed to stop {}-{}", queryId, ptr->id);
-                ptr->requiresTermination = false;
-            });
-    }
-    else
-    {
-        ENGINE_LOG_TRACE("Skipping {}-{} stop", queryId, ptr->id);
-    }
+                    auto transitionResult = ptr->state.transition([](StopPending&&) { return Terminated{std::nullopt}; });
+                    INVARIANT(transitionResult, "Should move from stop pending to stopped");
+                    for (auto& successor : ptr->successors)
+                    {
+                        emitter.emitPendingPipelineStop(queryId, std::move(successor), {}, {});
+                    }
+                },
+                {});
+            return StopPending{};
+        },
+        [&](Failed&& f)
+        {
+            emitter.emitPipelineFailure(
+                queryId,
+                node,
+                [ptr, &emitter = this->emitter, queryId = this->queryId, exception = f.reason] mutable
+                {
+                    auto transitionResult = ptr->state.transition([&](FailurePending&&) { return Terminated{exception}; });
+                    INVARIANT(transitionResult, "Should move from failure pending to failed");
+                    for (auto& successor : ptr->successors)
+                    {
+                        successor->fail(exception);
+                    }
+                },
+                {});
+            return FailurePending{std::move(f.reason)};
+        }
+
+    );
+    INVARIANT(didTransition, "Unexpected transition");
 }
 
 std::shared_ptr<RunningQueryPlanNode> RunningQueryPlanNode::create(
@@ -173,12 +192,11 @@ std::shared_ptr<RunningQueryPlanNode> RunningQueryPlanNode::create(
     WorkEmitter& emitter,
     std::vector<std::shared_ptr<RunningQueryPlanNode>> successors,
     std::unique_ptr<ExecutablePipelineStage> stage,
-    std::function<void(Exception)> unregisterWithError,
     CallbackRef planRef,
     CallbackRef setupCallback)
 {
     auto node = std::shared_ptr<RunningQueryPlanNode>(
-        new RunningQueryPlanNode(pipelineId, std::move(successors), std::move(stage), std::move(unregisterWithError), std::move(planRef)),
+        new RunningQueryPlanNode(pipelineId, std::move(successors), std::move(stage), std::move(planRef)),
         RunningQueryPlanNodeDeleter{.emitter = emitter, .queryId = queryId});
     emitter.emitPipelineStart(
         queryId,
@@ -188,7 +206,8 @@ std::shared_ptr<RunningQueryPlanNode> RunningQueryPlanNode::create(
             if (const auto nodeLocked = weakRef.lock())
             {
                 ENGINE_LOG_TRACE("Pipeline {}-{} was initialized", queryId, pipelineId);
-                nodeLocked->requiresTermination = true;
+                auto didTransition = nodeLocked->state.transition([&](Uninitialized&&) { return Running{}; });
+                INVARIANT(didTransition, "Node should have been in the Uninitialized state");
             }
         },
         {});
@@ -198,18 +217,19 @@ std::shared_ptr<RunningQueryPlanNode> RunningQueryPlanNode::create(
 
 RunningQueryPlanNode::~RunningQueryPlanNode()
 {
-    assert(!requiresTermination && "Node was destroyed without termination. This should not happen");
+    INVARIANT(state.is<Terminated>(), "Node should have been stopped");
 }
-void RunningQueryPlanNode::fail(Exception exception) const
+void RunningQueryPlanNode::fail(Exception exception)
 {
-    unregisterWithError(std::move(exception));
+    auto didTransition
+        = this->state.transition([](Uninitialized&&) { return Uninitialized{}; }, [&](Running&&) { return Failed{std::move(exception)}; });
+    INVARIANT(didTransition, "Failures should only happen while in the uninitialized or running state");
 }
 
 std::
     pair<std::vector<std::pair<std::unique_ptr<Sources::SourceHandle>, std::vector<std::shared_ptr<RunningQueryPlanNode>>>>, std::vector<std::weak_ptr<RunningQueryPlanNode>>> static createRunningNodes(
         QueryId queryId,
         ExecutableQueryPlan& queryPlan,
-        std::function<void(Exception)> unregisterWithError,
         const CallbackRef& terminationCallbackRef,
         const CallbackRef& pipelineSetupCallbackRef,
         WorkEmitter& emitter)
@@ -235,7 +255,6 @@ std::
             emitter,
             std::move(successors),
             std::move(pipeline->stage),
-            unregisterWithError,
             terminationCallbackRef,
             pipelineSetupCallbackRef);
         pipelines.emplace_back(node);
@@ -281,17 +300,7 @@ std::pair<std::unique_ptr<RunningQueryPlan>, CallbackRef> RunningQueryPlan::star
         std::move(terminationCallbackRef), [listener] { listener->onDestruction(); });
 
 
-    auto [sources, pipelines] = createRunningNodes(
-        queryId,
-        *internal.qep,
-        [ENGINE_IF_LOG_DEBUG(queryId, ) listener](Exception exception)
-        {
-            ENGINE_LOG_DEBUG("Fail PipelineNode called for QueryId: {}", queryId)
-            listener->onFailure(exception);
-        },
-        terminationCallbackRef,
-        pipelineSetupCallbackRef,
-        emitter);
+    auto [sources, pipelines] = createRunningNodes(queryId, *internal.qep, terminationCallbackRef, pipelineSetupCallbackRef, emitter);
     internal.pipelines = std::move(pipelines);
 
 
@@ -417,7 +426,25 @@ RunningQueryPlan::~RunningQueryPlan()
     {
         if (auto strongRef = weakRef.lock())
         {
-            strongRef->requiresTermination = false;
+            strongRef->state.transition(
+                [](RunningQueryPlanNode::Terminated&& t)
+                {
+                    INVARIANT(
+                        false,
+                        "This cannot happen. This state is only accessible if either the shared ptr has been dropped or the entire query "
+                        "plan.");
+                    return t;
+                },
+                [](RunningQueryPlanNode::StopPending&& stop)
+                {
+                    INVARIANT(false, "This cannot happen. This state is only accessible if the shared ptr has been dropped");
+                    return stop;
+                },
+                [](RunningQueryPlanNode::Failed&& failed)
+                {
+
+                }
+            );
         }
     }
     internal.sources.clear();

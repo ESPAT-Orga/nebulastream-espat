@@ -62,7 +62,7 @@ public:
     }
 
     explicit NetworkSink(Valve valve, const SinkDescriptor& sinkDescriptor);
-    ~NetworkSink() override = default;
+    ~NetworkSink() override;
 
     NetworkSink(const NetworkSink&) = delete;
     NetworkSink& operator=(const NetworkSink&) = delete;

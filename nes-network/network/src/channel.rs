@@ -148,7 +148,7 @@ impl Communication for MemCom {
         &self,
         identifier: &ConnectionIdentifier,
     ) -> Result<Channel<ReadHalf<SimplexStream>, WriteHalf<SimplexStream>>> {
-        let channel = memcom_connect(identifier).await;
+        let channel = memcom_connect(identifier).await.map_err(|e| e)?;
         Ok(Channel {
             reader: channel.read,
             writer: channel.write,

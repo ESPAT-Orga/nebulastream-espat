@@ -84,9 +84,14 @@ pub enum ControlChannelResponse {
     DenyChannelResponse,
 }
 #[derive(Debug, Serialize, Deserialize)]
+pub enum CloseReason {
+    Closed,
+    Error(String),
+}
+#[derive(Debug, Serialize, Deserialize)]
 pub enum DataChannelRequest {
     Data(TupleBuffer),
-    Close,
+    Close(CloseReason),
 }
 pub type Sequence = (u64, u64);
 
@@ -94,7 +99,7 @@ pub type Sequence = (u64, u64);
 pub enum DataChannelResponse {
     AckData(Sequence),
     NAckData(Sequence),
-    Close,
+    Close(CloseReason),
 }
 
 #[derive(Eq, PartialEq, Clone, Serialize, Deserialize)]

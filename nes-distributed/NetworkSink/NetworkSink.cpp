@@ -115,6 +115,17 @@ NetworkSink::NetworkSink(Valve valve, const SinkDescriptor& sinkDescriptor)
 {
 }
 
+NetworkSink::~NetworkSink()
+{
+    if (closed)
+        return;
+
+    if (const auto& channel = this->channel)
+    {
+        try_send_channel_failure(**channel, "Something");
+    }
+}
+
 void NetworkSink::start(PipelineExecutionContext&)
 {
     this->server = sender_instance(thisConnection);

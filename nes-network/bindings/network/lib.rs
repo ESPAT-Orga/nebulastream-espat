@@ -1,5 +1,7 @@
 use async_channel::TrySendError;
+use log::error;
 use nes_network::protocol::{ConnectionIdentifier, ThisConnectionIdentifier, TupleBuffer};
+use nes_network::receiver::DataQueueItem;
 use nes_network::sender::{ChannelControlMessage, ChannelControlQueue};
 use nes_network::*;
 use once_cell::sync;
@@ -54,7 +56,7 @@ pub mod ffi {
         fn receive_buffer(
             receiver_channel: &ReceiverDataChannel,
             builder: Pin<&mut TupleBufferBuilder>,
-        ) -> bool;
+        ) -> Result<bool>;
 
         fn close_receiver_channel(channel: Box<ReceiverDataChannel>);
 
@@ -68,6 +70,7 @@ pub mod ffi {
         fn sender_writes_pending(channel: &SenderDataChannel) -> bool;
 
         fn flush_channel(channel: &SenderDataChannel);
+        fn try_send_channel_failure(channel: &SenderDataChannel, error: String) -> SendResult;
         fn try_send_on_channel(
             channel: &SenderDataChannel,
             metadata: SerializedTupleBuffer,
@@ -101,7 +104,7 @@ struct SenderDataChannel {
 }
 
 struct ReceiverDataChannel {
-    chan: Box<async_channel::Receiver<TupleBuffer>>,
+    chan: Box<async_channel::Receiver<DataQueueItem>>,
 }
 
 fn init_sender_service(connection_addr: String) -> Result<(), String> {
@@ -119,11 +122,7 @@ fn init_sender_service(connection_addr: String) -> Result<(), String> {
                     .enable_time()
                     .build()
                     .unwrap();
-                sender::NetworkService::start(
-                    runtime,
-                    this_connection,
-                    channel::MemCom::new(),
-                )
+                sender::NetworkService::start(runtime, this_connection, channel::MemCom::new())
             });
             Ok(())
         }
@@ -145,11 +144,7 @@ fn init_receiver_service(connection_addr: String) -> Result<(), String> {
                     .enable_time()
                     .build()
                     .unwrap();
-                receiver::NetworkService::start(
-                    runtime,
-                    this_connection,
-                    channel::MemCom::new(),
-                )
+                receiver::NetworkService::start(runtime, this_connection, channel::MemCom::new())
             });
             Ok(())
         }
@@ -207,28 +202,33 @@ fn interrupt_receiver(receiver_channel: &ReceiverDataChannel) -> bool {
 fn receive_buffer(
     receiver_channel: &ReceiverDataChannel,
     mut builder: Pin<&mut ffi::TupleBufferBuilder>,
-) -> bool {
+) -> Result<bool, String> {
     let Ok(buffer) = receiver_channel.chan.recv_blocking() else {
-        return false;
+        return Ok(false);
     };
 
-    builder.as_mut().set_metadata(&ffi::SerializedTupleBuffer {
-        sequence_number: buffer.sequence_number as usize,
-        origin_id: buffer.origin_id as usize,
-        watermark: buffer.watermark as usize,
-        chunk_number: buffer.chunk_number as usize,
-        number_of_tuples: buffer.number_of_tuples as usize,
-        last_chunk: buffer.last_chunk,
-    });
+    match buffer {
+        DataQueueItem::Data(buffer) => {
+            builder.as_mut().set_metadata(&ffi::SerializedTupleBuffer {
+                sequence_number: buffer.sequence_number as usize,
+                origin_id: buffer.origin_id as usize,
+                watermark: buffer.watermark as usize,
+                chunk_number: buffer.chunk_number as usize,
+                number_of_tuples: buffer.number_of_tuples as usize,
+                last_chunk: buffer.last_chunk,
+            });
 
-    builder.as_mut().set_data(&buffer.data);
+            builder.as_mut().set_data(&buffer.data);
 
-    for child_buffer in buffer.child_buffers.iter() {
-        assert!(!child_buffer.is_empty());
-        builder.as_mut().add_child_buffer(child_buffer);
+            for child_buffer in buffer.child_buffers.iter() {
+                assert!(!child_buffer.is_empty());
+                builder.as_mut().add_child_buffer(child_buffer);
+            }
+
+            Ok(true)
+        }
+        DataQueueItem::Failure(e) => Err(e),
     }
-
-    true
 }
 
 // CXX requires the usage of Boxed types
@@ -268,6 +268,14 @@ fn try_send_on_channel(
         child_buffers: children.iter().map(|bytes| Vec::from(*bytes)).collect(),
     };
     match channel.chan.try_send(ChannelControlMessage::Data(buffer)) {
+        Ok(()) => ffi::SendResult::Ok,
+        Err(TrySendError::Full(_)) => ffi::SendResult::Full,
+        Err(TrySendError::Closed(_)) => ffi::SendResult::Closed,
+    }
+}
+
+fn try_send_channel_failure(channel: &SenderDataChannel, error: String) -> ffi::SendResult {
+    match channel.chan.try_send(ChannelControlMessage::Fail(error)) {
         Ok(()) => ffi::SendResult::Ok,
         Err(TrySendError::Full(_)) => ffi::SendResult::Full,
         Err(TrySendError::Closed(_)) => ffi::SendResult::Closed,

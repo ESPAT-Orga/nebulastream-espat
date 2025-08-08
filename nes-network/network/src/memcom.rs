@@ -3,6 +3,9 @@ use once_cell::sync;
 use std::collections::HashMap;
 use tokio::io::{ReadHalf, SimplexStream, WriteHalf};
 
+pub type Error = Box<dyn std::error::Error + Send + Sync>;
+pub type Result<T> = std::result::Result<T, Error>;
+
 #[derive(Debug)]
 pub struct Channel {
     pub read: ReadHalf<SimplexStream>,
@@ -21,7 +24,7 @@ pub async fn memcom_listen(connection_identifier: ConnectionIdentifier) -> Chann
     INSTANCE.listen(connection_identifier).await
 }
 
-pub async fn memcom_connect(connection_identifier: &ConnectionIdentifier) -> Channel {
+pub async fn memcom_connect(connection_identifier: &ConnectionIdentifier) -> Result<Channel> {
     INSTANCE.connect(connection_identifier).await
 }
 
@@ -32,7 +35,7 @@ impl MemCom {
         rx.await.unwrap()
     }
 
-    async fn connect(&self, connection: &ConnectionIdentifier) -> Channel {
+    async fn connect(&self, connection: &ConnectionIdentifier) -> Result<Channel> {
         let (client_read, server_write) = tokio::io::simplex(1024 * 1024);
         let (server_read, client_write) = tokio::io::simplex(1024 * 1024);
 
@@ -48,9 +51,9 @@ impl MemCom {
 
         let mut locked = self.listening.lock().await;
         let Some(channel) = locked.remove(connection) else {
-            unimplemented!();
+            return Err("Connection refused".into());
         };
         let _ = channel.send(server_channel);
-        client_channel
+        Ok(client_channel)
     }
 }

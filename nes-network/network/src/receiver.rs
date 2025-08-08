@@ -24,7 +24,11 @@ enum NetworkingServiceControl {
     RetryChannel(ChannelIdentifier, DataQueue, CancellationToken),
     RegisterChannel(ChannelIdentifier, DataQueue, oneshot::Sender<()>),
 }
-type DataQueue = async_channel::Sender<TupleBuffer>;
+pub enum DataQueueItem {
+    Data(TupleBuffer),
+    Failure(String),
+}
+type DataQueue = async_channel::Sender<DataQueueItem>;
 type NetworkingServiceController = async_channel::Sender<NetworkingServiceControl>;
 type NetworkingServiceControlListener = async_channel::Receiver<NetworkingServiceControl>;
 pub type Result<T> = std::result::Result<T, Error>;
@@ -32,6 +36,7 @@ pub type Error = Box<dyn std::error::Error + Send + Sync>;
 
 enum ChannelHandlerError {
     ClosedByOtherSide,
+    Failure(String),
     Cancelled,
     Network(Error),
 }
@@ -108,7 +113,7 @@ async fn channel_handler<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
             let sequence = pending_buffer.sequence();
             select! {
                 _ = cancellation_token.cancelled() => return Err(ChannelHandlerError::Cancelled),
-                write_queue_result = queue.send(pending_buffer) => {
+                write_queue_result = queue.send(DataQueueItem::Data(pending_buffer)) => {
                     match write_queue_result {
                         Ok(_) => {
                             let Some(result) = cancellation_token.run_until_cancelled(writer.send(DataChannelResponse::AckData(sequence))).await else {
@@ -117,7 +122,7 @@ async fn channel_handler<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
                             result.map_err(|e| ChannelHandlerError::Network(e.into()))?
                         },
                         Err(_) => {
-                            let Some(result) = cancellation_token.run_until_cancelled(writer.send(DataChannelResponse::Close)).await else {
+                            let Some(result) = cancellation_token.run_until_cancelled(writer.send(DataChannelResponse::Close(CloseReason::Closed))).await else {
                                 return Err(ChannelHandlerError::Cancelled);
                             };
                             return result.map_err(|e| ChannelHandlerError::Network(e.into()));
@@ -132,9 +137,16 @@ async fn channel_handler<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
             request = reader.next() => pending_buffer = {
                 match request.ok_or(ChannelHandlerError::Network("Connection Lost".into()))?.map_err(|e| ChannelHandlerError::Network(e.into()))? {
                     DataChannelRequest::Data(buffer) => Some(buffer),
-                    DataChannelRequest::Close => {
+                    DataChannelRequest::Close(CloseReason::Closed) => {
                         queue.close();
                         return Err(ChannelHandlerError::ClosedByOtherSide)
+                    },
+                    DataChannelRequest::Close(CloseReason::Error(error)) => {
+                        if queue.send(DataQueueItem::Failure(error.clone())).await.is_err() {
+                            info!("Failure message was lost as the channel has already been closed");
+                        }
+                        queue.close();
+                        return Err(ChannelHandlerError::Failure(error))
                     },
                 }
             }
@@ -189,6 +201,11 @@ async fn create_channel_handler<
                 }
                 ChannelHandlerError::ClosedByOtherSide => {
                     info!("Data Channel stopped");
+                    queue.close();
+                    return;
+                }
+                ChannelHandlerError::Failure(error) => {
+                    error!("Data Channel Received a Failure: {error}");
                     queue.close();
                     return;
                 }
@@ -428,7 +445,7 @@ impl<L: Communication + 'static> NetworkService<L> {
     pub fn register_channel(
         self: &Arc<NetworkService<L>>,
         channel: ChannelIdentifier,
-    ) -> Result<async_channel::Receiver<TupleBuffer>> {
+    ) -> Result<async_channel::Receiver<DataQueueItem>> {
         let (data_queue_sender, data_queue_receiver) = async_channel::bounded(10);
         let (tx, rx) = oneshot::channel();
         let Ok(_) = self

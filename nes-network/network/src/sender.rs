@@ -47,6 +47,7 @@ type NetworkingConnectionControlListener =
 enum ChannelHandlerResult {
     Cancelled,
     ConnectionLost(Box<dyn std::error::Error + Send + Sync>),
+    Failure(String),
     Closed,
 }
 
@@ -128,12 +129,10 @@ async fn create_channel<L: Communication>(
 }
 
 mod channel_handler {
-    use crate::protocol::{
-        DataChannelRequest, DataChannelResponse, DataChannelSenderReader, DataChannelSenderWriter,
-        Sequence, TupleBuffer,
-    };
+    use crate::protocol::{CloseReason, DataChannelRequest, DataChannelResponse, DataChannelSenderReader, DataChannelSenderWriter, Sequence, TupleBuffer};
     use futures::SinkExt;
     use std::collections::{HashMap, VecDeque};
+    use futures::future::err;
     use tokio::io::{AsyncRead, AsyncWrite};
     use tokio::select;
     use tokio::sync::oneshot;
@@ -147,11 +146,13 @@ mod channel_handler {
         Data(TupleBuffer),
         Flush(oneshot::Sender<()>),
         Terminate,
+        Fail(String)
     }
     pub type ChannelControlQueue = async_channel::Sender<ChannelControlMessage>;
     pub(super) type ChannelControlQueueListener = async_channel::Receiver<ChannelControlMessage>;
     pub(super) enum ChannelHandlerError {
         ClosedByOtherSide,
+        OtherSideFailure(String),
         ConnectionLost(Box<dyn std::error::Error + Send + Sync>),
         Protocol(Box<dyn std::error::Error + Send + Sync>),
         Cancelled,
@@ -196,7 +197,11 @@ mod channel_handler {
                     let _ = done.send(());
                 }
                 ChannelControlMessage::Terminate => {
-                    let _ = self.writer.send(DataChannelRequest::Close).await;
+                    let _ = self.writer.send(DataChannelRequest::Close(CloseReason::Closed)).await;
+                    return Err(ChannelHandlerError::Terminated);
+                }
+                ChannelControlMessage::Fail(error) => {
+                    let _ = self.writer.send(DataChannelRequest::Close(CloseReason::Error(error))).await;
                     return Err(ChannelHandlerError::Terminated);
                 }
             }
@@ -204,9 +209,13 @@ mod channel_handler {
         }
         fn handle_response(&mut self, response: DataChannelResponse) -> Result<()> {
             match response {
-                DataChannelResponse::Close => {
+                DataChannelResponse::Close(CloseReason::Closed) => {
                     info!("Channel Closed by other receiver");
                     return Err(ChannelHandlerError::ClosedByOtherSide);
+                }
+                DataChannelResponse::Close(CloseReason::Error(error)) => {
+                    info!("Channel Closed by other receiver");
+                    return Err(ChannelHandlerError::OtherSideFailure(error));
                 }
                 DataChannelResponse::NAckData(seq) => {
                     if let Some(write) = self.wait_for_ack.remove(&seq) {
@@ -354,6 +363,9 @@ async fn channel_handler(
         Err(channel_handler::ChannelHandlerError::ClosedByOtherSide) => {
             ChannelHandlerResult::Closed
         }
+        Err(channel_handler::ChannelHandlerError::OtherSideFailure(error)) => {
+            ChannelHandlerResult::Failure(error)
+        }
         Err(channel_handler::ChannelHandlerError::Cancelled) => ChannelHandlerResult::Cancelled,
         Err(channel_handler::ChannelHandlerError::ConnectionLost(e)) => {
             ChannelHandlerResult::ConnectionLost(e)
@@ -464,6 +476,9 @@ async fn establish_channel<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
                     }
                     ChannelHandlerResult::Closed => {
                         info!("Channel closed");
+                    }
+                    ChannelHandlerResult::Failure(error) => {
+                        info!("Channel failed: {error:?}");
                     }
                 }
             }

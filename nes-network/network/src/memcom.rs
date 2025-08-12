@@ -2,10 +2,10 @@ use crate::protocol::ConnectionIdentifier;
 use once_cell::sync;
 use std::collections::HashMap;
 use tokio::io::{ReadHalf, SimplexStream, WriteHalf};
+use tracing::{error, info};
 
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
 pub type Result<T> = std::result::Result<T, Error>;
-
 #[derive(Debug)]
 pub struct Channel {
     pub read: ReadHalf<SimplexStream>,
@@ -20,7 +20,7 @@ static INSTANCE: sync::Lazy<MemCom> = sync::Lazy::new(|| MemCom {
     listening: tokio::sync::Mutex::new(HashMap::new()),
 });
 
-pub async fn memcom_listen(connection_identifier: ConnectionIdentifier) -> Channel {
+pub async fn memcom_listen(connection_identifier: ConnectionIdentifier) -> Result<Channel> {
     INSTANCE.listen(connection_identifier).await
 }
 
@@ -29,10 +29,16 @@ pub async fn memcom_connect(connection_identifier: &ConnectionIdentifier) -> Res
 }
 
 impl MemCom {
-    async fn listen(&self, connection: ConnectionIdentifier) -> Channel {
+    async fn listen(&self, connection: ConnectionIdentifier) -> Result<Channel> {
         let (tx, rx) = tokio::sync::oneshot::channel();
-        self.listening.lock().await.insert(connection, tx);
-        rx.await.unwrap()
+        {
+            let mut locked = self.listening.lock().await;
+            match locked.entry(connection.clone()) {
+                std::collections::hash_map::Entry::Occupied(_) => return Err("cannot bind".into()),
+                std::collections::hash_map::Entry::Vacant(v) => v.insert(tx),
+            };
+        }
+        Ok(rx.await.unwrap())
     }
 
     async fn connect(&self, connection: &ConnectionIdentifier) -> Result<Channel> {

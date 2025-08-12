@@ -117,7 +117,7 @@ fn init_sender_service(connection_addr: String) -> Result<(), String> {
             e.insert({
                 let runtime = tokio::runtime::Builder::new_multi_thread()
                     .thread_name("net-sender")
-                    .worker_threads(2)
+                    .worker_threads(1)
                     .enable_io()
                     .enable_time()
                     .build()
@@ -139,7 +139,7 @@ fn init_receiver_service(connection_addr: String) -> Result<(), String> {
             e.insert({
                 let runtime = tokio::runtime::Builder::new_multi_thread()
                     .thread_name("net-receiver")
-                    .worker_threads(2)
+                    .worker_threads(1)
                     .enable_io()
                     .enable_time()
                     .build()
@@ -267,7 +267,7 @@ fn try_send_on_channel(
         data: Vec::from(data),
         child_buffers: children.iter().map(|bytes| Vec::from(*bytes)).collect(),
     };
-    match channel.chan.try_send(ChannelControlMessage::Data(buffer)) {
+    match dbg!(channel.chan.try_send(ChannelControlMessage::Data(buffer))) {
         Ok(()) => ffi::SendResult::Ok,
         Err(TrySendError::Full(_)) => ffi::SendResult::Full,
         Err(TrySendError::Closed(_)) => ffi::SendResult::Closed,

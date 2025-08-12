@@ -136,7 +136,7 @@ async fn channel_handler<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
             _ = cancellation_token.cancelled() => return Err(ChannelHandlerError::Cancelled),
             request = reader.next() => pending_buffer = {
                 match request.ok_or(ChannelHandlerError::Network("Connection Lost".into()))?.map_err(|e| ChannelHandlerError::Network(e.into()))? {
-                    DataChannelRequest::Data(buffer) => Some(buffer),
+                    DataChannelRequest::Data(buffer) => Some(dbg!(buffer)),
                     DataChannelRequest::Close(CloseReason::Closed) => {
                         queue.close();
                         return Err(ChannelHandlerError::ClosedByOtherSide)
@@ -178,7 +178,6 @@ async fn create_channel_handler<
                 warn!("Channel was closed");
                 return;
             };
-            info!("Open");
 
             let Err(channel_handler_error) = channel_handler(
                 channel_cancellation_token.clone(),

@@ -57,6 +57,7 @@ bool SinkLogicalOperator::operator==(const LogicalOperatorConcept& rhs) const
     return false;
 }
 
+
 std::string SinkLogicalOperator::explain(ExplainVerbosity verbosity) const
 {
     if (verbosity == ExplainVerbosity::Debug)
@@ -161,7 +162,7 @@ std::vector<Schema> SinkLogicalOperator::getInputSchemas() const
 
 Schema SinkLogicalOperator::getOutputSchema() const
 {
-    INVARIANT(this->sinkDescriptor.has_value(), "Logical Sink must have a valid descriptor (with a schema).");
+    INVARIANT(this->sinkDescriptor.has_value(), "Sink must have a valid descriptor (with a schema).");
     return *this->sinkDescriptor.value().getSchema();
 }
 
@@ -178,7 +179,7 @@ std::vector<OriginId> SinkLogicalOperator::getOutputOriginIds() const
 LogicalOperator SinkLogicalOperator::withInputOriginIds(std::vector<std::vector<OriginId>> ids) const
 {
     auto copy = *this;
-    copy.inputOriginIds = ids.at(0);
+    copy.inputOriginIds = ids[0];
     return copy;
 }
 

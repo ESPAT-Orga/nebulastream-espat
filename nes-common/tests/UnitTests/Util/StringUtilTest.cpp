@@ -353,13 +353,10 @@ TEST(StringCaseConversionTest, ToLowerCaseSpecialCharacters)
     EXPECT_EQ(toLowerCase("HELLO!@#"), "hello!@#");
 }
 
-TEST(StringCaseConversionTest, NoSupportForNonAsciiCharacters)
+TEST(StringCaseConversionTest, testWithNonAsciiCharacters)
 {
-    SKIP_IF_TSAN();
-
-    GTEST_FLAG_SET(death_test_style, "threadsafe");
-    EXPECT_DEATH_DEBUG([]() { [[maybe_unused]] auto testString = toLowerCase("ÉÇÀÔ"); }(), "");
-    EXPECT_DEATH_DEBUG([]() { [[maybe_unused]] auto testString = toLowerCase("éçàô"); }(), "");
+    EXPECT_EQ(toLowerCase("ÉÇÀÔ"), "ÉÇÀÔ");
+    EXPECT_EQ(toUpperCase("éçàô"), "éçàô");
 }
 
 TEST(ReplaceAllTest, ReplaceAllOccurrencesBasic)

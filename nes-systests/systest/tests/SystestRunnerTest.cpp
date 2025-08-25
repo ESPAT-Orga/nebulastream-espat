@@ -117,7 +117,11 @@ TEST_F(SystestRunnerTest, ExpectedErrorDuringParsing)
     constexpr ErrorCode expectedCode = ErrorCode::InvalidQuerySyntax;
     const auto parseError = std::unexpected(Exception{"parse error", static_cast<uint64_t>(expectedCode)});
 
-    const auto result = runQueries({makeQuery(parseError, ExpectedError{.code = expectedCode, .message = std::nullopt})}, 1, submitter);
+    const auto result = runQueries(
+        {makeQuery(parseError, ExpectedError{.code = expectedCode, .message = std::nullopt})},
+        1,
+        submitter,
+        [](const auto&) { return ""; });
     EXPECT_TRUE(result.empty()) << "query should pass because error was expected";
 }
 
@@ -146,7 +150,8 @@ TEST_F(SystestRunnerTest, RuntimeFailureWithUnexpectedCode)
     const auto result = runQueries(
         {makeQuery(SystestQuery::PlanInfo{.queryPlan = plan, .sourcesToFilePathsAndCounts = {}, .sinkOutputSchema = Schema{}}, {})},
         1,
-        submitter);
+        submitter,
+        [](const auto&) { return ""; });
 
     ASSERT_EQ(result.size(), 1);
     EXPECT_FALSE(result.front().passed);
@@ -178,7 +183,8 @@ TEST_F(SystestRunnerTest, MissingExpectedRuntimeError)
             SystestQuery::PlanInfo{.queryPlan = plan, .sourcesToFilePathsAndCounts = {}, .sinkOutputSchema = Schema{}},
             ExpectedError{.code = ErrorCode::InvalidQuerySyntax, .message = std::nullopt})},
         1,
-        submitter);
+        submitter,
+        [](const auto&) { return ""; });
 
     ASSERT_EQ(result.size(), 1);
     EXPECT_FALSE(result.front().passed);

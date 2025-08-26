@@ -90,8 +90,8 @@ TestFileMap discoverTestsRecursively(const std::filesystem::path& path, const st
         const std::string entryExt = toLowerCopy(entry.path().extension().string());
         if (!fileExtension || entryExt == desiredExtension)
         {
-            const TestFile testfile(entry.path(), std::make_shared<SourceCatalog>(), std::make_shared<SinkCatalog>());
-            testFiles.insert({testfile.file, testfile});
+            TestFile testfile(entry.path(), std::make_shared<SourceCatalog>(), std::make_shared<SinkCatalog>());
+            testFiles.insert({testfile.file, std::move(testfile)});
         }
     }
     return testFiles;
@@ -126,7 +126,7 @@ std::vector<TestGroup> readGroups(const TestFile& testfile)
 }
 
 TestFile::TestFile(
-    const std::filesystem::path& file, std::shared_ptr<SourceCatalog> sourceCatalog, std::shared_ptr<SinkCatalog> sinkCatalog)
+    const std::filesystem::path& file, SharedPtr<SourceCatalog> sourceCatalog, SharedPtr<SinkCatalog> sinkCatalog)
     : file(weakly_canonical(file)), groups(readGroups(*this)), sourceCatalog(std::move(sourceCatalog)), sinkCatalog(std::move(sinkCatalog))
 {
 }
@@ -134,8 +134,8 @@ TestFile::TestFile(
 TestFile::TestFile(
     const std::filesystem::path& file,
     std::unordered_set<SystestQueryId> onlyEnableQueriesWithTestQueryNumber,
-    std::shared_ptr<SourceCatalog> sourceCatalog,
-    std::shared_ptr<SinkCatalog> sinkCatalog)
+    SharedPtr<SourceCatalog> sourceCatalog,
+    SharedPtr<SinkCatalog> sinkCatalog)
     : file(weakly_canonical(file))
     , onlyEnableQueriesWithTestQueryNumber(std::move(onlyEnableQueriesWithTestQueryNumber))
     , groups(readGroups(*this))
@@ -178,17 +178,17 @@ TestFileMap loadTestFileMap(const SystestConfiguration& config)
 
         if (config.testQueryNumbers.empty()) /// case: load all tests
         {
-            const auto testfile = TestFile(directlySpecifiedTestFiles, std::make_shared<SourceCatalog>(), std::make_shared<SinkCatalog>());
-            return TestFileMap{{testfile.file, testfile}};
+            auto testfile = TestFile(directlySpecifiedTestFiles, std::make_shared<SourceCatalog>(), std::make_shared<SinkCatalog>());
+            return TestFileMap{{testfile.file, std::move(testfile)}};
         }
         /// case: load a concrete set of tests
         auto scalarTestNumbers = config.testQueryNumbers.getValues();
         const auto testNumbers = std::ranges::to<std::unordered_set<SystestQueryId>>(
             scalarTestNumbers | std::views::transform([](const auto& option) { return SystestQueryId(option.getValue()); }));
 
-        const auto testfile
+        auto testfile
             = TestFile(directlySpecifiedTestFiles, testNumbers, std::make_shared<SourceCatalog>(), std::make_shared<SinkCatalog>());
-        return TestFileMap{{testfile.file, testfile}};
+        return TestFileMap{{testfile.file, std::move(testfile)}};
     }
 
     auto testsDiscoverDir = config.testsDiscoverDir.getValue();

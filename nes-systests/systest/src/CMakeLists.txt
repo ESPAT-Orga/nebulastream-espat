@@ -12,13 +12,11 @@
 
 add_source_files(nes-systest-lib
         BenchmarkUtils.cpp
-        ExecutionBackend.cpp
         QueryResultReporter.cpp
         QueryTracker.cpp
         SystestExecutor.cpp
         SystestParser.cpp
         SystestRunner.cpp
-        SystestRunnerUtil.cpp
         SystestState.cpp
         SystestResultCheck.cpp
         SystestConfiguration.cpp

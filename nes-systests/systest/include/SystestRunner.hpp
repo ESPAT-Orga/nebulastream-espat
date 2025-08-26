@@ -16,20 +16,16 @@
 
 #include <cstdint>
 #include <filesystem>
-#include <memory>
 #include <string>
 #include <variant>
-#include <vector>
 #include <utility>
 
-#include <nlohmann/json_fwd.hpp>
-
-#include <ExecutionBackend.hpp>
+#include <QueryManager/QueryManager.hpp>
+#include <ErrorHandling.hpp>
 #include <QueryResultReporter.hpp>
 #include <QueryTracker.hpp>
 #include <SingleNodeWorkerConfiguration.hpp>
 #include <SystestState.hpp>
-#include <ErrorHandling.hpp>
 
 namespace NES::Systest
 {
@@ -58,7 +54,7 @@ public:
 private:
     QueryTracker queryTracker;
     ExecutionMode executionMode;
-    std::unique_ptr<ExecutionBackend> executionBackend;
+    std::unique_ptr<QueryManager> executionBackend;
     std::unique_ptr<QueryResultReporter> reporter;
     std::vector<FailedQuery> reportedFailures;
     std::vector<FinishedQuery> finishedQueries;
@@ -80,7 +76,7 @@ public:
 private:
     void submit();
     void handle();
-    void onStopped(SubmittedQuery&& submitted);
+    void onStopped(SubmittedQuery&& submitted, const DistributedQueryStatus& queryStatus);
     
     template<typename QueryT>
     requires requires(QueryT q) { q.ctx; }

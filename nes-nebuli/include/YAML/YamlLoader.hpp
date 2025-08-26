@@ -19,6 +19,7 @@
 #include <fstream>
 #include <iostream>
 
+#include <yaml-cpp/exceptions.h>
 #include <yaml-cpp/yaml.h>
 
 #include <ErrorHandling.hpp>

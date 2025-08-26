@@ -52,12 +52,12 @@ namespace
 
 /// NOLINTBEGIN(bugprone-unchecked-optional-access)
 
-NES::QuerySummary makeSummary(const NES::QueryId id, const NES::QueryStatus status, const std::shared_ptr<NES::Exception>& err)
+NES::QuerySummary makeSummary(const NES::LocalQueryId id, const NES::DistributedQueryStatus status, const std::shared_ptr<NES::Exception>& err)
 {
     NES::QuerySummary querySummary;
     querySummary.queryId = id;
     querySummary.currentStatus = status;
-    if (status == NES::QueryStatus::Failed && err)
+    if (status == NES::DistributedQueryStatus::Failed && err)
     {
         NES::QueryRunSummary run;
         run.error = *err;
@@ -103,11 +103,11 @@ public:
 class MockQueryManager final : public QueryManager
 {
 public:
-    MOCK_METHOD((std::expected<QueryId, Exception>), registerQuery, (const LogicalPlan&), (override));
-    MOCK_METHOD((std::expected<void, Exception>), start, (QueryId), (noexcept, override));
-    MOCK_METHOD((std::expected<void, Exception>), stop, (QueryId), (noexcept, override));
-    MOCK_METHOD((std::expected<void, Exception>), unregister, (QueryId), (noexcept, override));
-    MOCK_METHOD((std::expected<QuerySummary, Exception>), status, (QueryId), (const, noexcept, override));
+    MOCK_METHOD((std::expected<LocalQueryId, Exception>), registerQuery, (const LogicalPlan&), (override));
+    MOCK_METHOD((std::expected<void, Exception>), start, (LocalQueryId), (noexcept, override));
+    MOCK_METHOD((std::expected<void, Exception>), stop, (LocalQueryId), (noexcept, override));
+    MOCK_METHOD((std::expected<void, Exception>), unregister, (LocalQueryId), (noexcept, override));
+    MOCK_METHOD((std::expected<QuerySummary, Exception>), status, (LocalQueryId), (const, noexcept, override));
 };
 
 TEST_F(SystestRunnerTest, ExpectedErrorDuringParsing)
@@ -125,15 +125,15 @@ TEST_F(SystestRunnerTest, ExpectedErrorDuringParsing)
 TEST_F(SystestRunnerTest, RuntimeFailureWithUnexpectedCode)
 {
     const testing::InSequence seq;
-    constexpr QueryId id{7};
+    constexpr LocalQueryId id{7};
     /// Runtime fails with unexpected error code 10000
     const auto runtimeErr = std::make_shared<Exception>(Exception{"runtime boom", 10000});
 
     auto mockManager = std::make_unique<MockQueryManager>();
-    EXPECT_CALL(*mockManager, registerQuery(::testing::_)).WillOnce(testing::Return(std::expected<QueryId, Exception>{id}));
+    EXPECT_CALL(*mockManager, registerQuery(::testing::_)).WillOnce(testing::Return(std::expected<LocalQueryId, Exception>{id}));
     EXPECT_CALL(*mockManager, start(id));
     EXPECT_CALL(*mockManager, status(id))
-        .WillOnce(testing::Return(makeSummary(id, QueryStatus::Failed, runtimeErr)))
+        .WillOnce(testing::Return(makeSummary(id, DistributedQueryStatus::Failed, runtimeErr)))
         .WillRepeatedly(testing::Return(QuerySummary{}));
 
     QuerySubmitter submitter{std::move(mockManager)};
@@ -157,13 +157,13 @@ TEST_F(SystestRunnerTest, RuntimeFailureWithUnexpectedCode)
 TEST_F(SystestRunnerTest, MissingExpectedRuntimeError)
 {
     const testing::InSequence seq;
-    constexpr QueryId id{11};
+    constexpr LocalQueryId id{11};
 
     auto mockManager = std::make_unique<MockQueryManager>();
-    EXPECT_CALL(*mockManager, registerQuery(::testing::_)).WillOnce(testing::Return(std::expected<QueryId, Exception>{id}));
+    EXPECT_CALL(*mockManager, registerQuery(::testing::_)).WillOnce(testing::Return(std::expected<LocalQueryId, Exception>{id}));
     EXPECT_CALL(*mockManager, start(id));
     EXPECT_CALL(*mockManager, status(id))
-        .WillOnce(testing::Return(makeSummary(id, QueryStatus::Stopped, nullptr)))
+        .WillOnce(testing::Return(makeSummary(id, DistributedQueryStatus::Stopped, nullptr)))
         .WillRepeatedly(testing::Return(QuerySummary{}));
 
     QuerySubmitter submitter{std::move(mockManager)};

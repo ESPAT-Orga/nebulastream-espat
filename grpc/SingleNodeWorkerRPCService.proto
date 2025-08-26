@@ -50,7 +50,7 @@ message StopQueryRequest {
     QueryTerminationType terminationType = 3;
 }
 
-enum QueryStatus {
+enum QueryState {
     Registered = 0;
     Started = 1;
     Running = 2;
@@ -78,7 +78,7 @@ message QueryMetrics {
 
 message QuerySummaryReply {
     uint64 queryId = 1;
-    QueryStatus status = 2;
+    QueryState state = 2;
     QueryMetrics metrics = 3;
 }
 
@@ -87,7 +87,7 @@ message QueryLogRequest {
 }
 
 message QueryLogEntry {
-    QueryStatus status = 1;
+    QueryState state = 1;
     uint64 unixTimeInMs = 2;
     optional Error error = 3;
 }

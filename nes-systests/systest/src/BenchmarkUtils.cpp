@@ -66,7 +66,7 @@ std::pair<size_t, size_t> calculateSourceMetrics(const PlanInfo& planInfo)
     return {totalBytesProcessed, totalTuplesProcessed};
 }
 
-std::optional<std::chrono::duration<double>> extractElapsedTime(const QueryStatus& status)
+std::optional<std::chrono::duration<double>> extractElapsedTime(const DistributedQueryStatus& status)
 {
     /// Find the first local status with timing information
     for (const auto& localStatus : status.localStatusSnapshots)
@@ -107,7 +107,7 @@ std::string calculateThroughput(const size_t bytesProcessed, const size_t tuples
     return fmt::format("{}B/s / {}Tup/s", formatUnits(bytesPerSecond), formatUnits(tuplesPerSecond));
 }
 
-BenchmarkMetrics createBenchmarkMetrics(const PlanInfo& planInfo, const QueryStatus& status)
+BenchmarkMetrics createBenchmarkMetrics(const PlanInfo& planInfo, const DistributedQueryStatus& status)
 {
     BenchmarkMetrics metrics;
 

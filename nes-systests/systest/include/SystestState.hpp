@@ -36,11 +36,10 @@
 
 #include <fmt/base.h>
 #include <fmt/format.h>
-#include <magic_enum/magic_enum.hpp>
 
 #include <DataTypes/DataType.hpp>
 #include <DataTypes/Schema.hpp>
-#include <Distributed/DistributedQueryId.hpp>
+#include <DistributedQueryId.hpp>
 #include <Identifiers/Identifiers.hpp>
 #include <Identifiers/NESStrongType.hpp>
 #include <Listeners/QueryLog.hpp>
@@ -106,7 +105,7 @@ struct SystestQueryContext
 
 struct PlanInfo
 {
-    QueryPlanner::FinalizedLogicalPlan plan;
+    PlanStage::DistributedLogicalPlan plan;
     std::unordered_map<SourceDescriptor, std::pair<SourceInputFile, uint64_t>> sourcesToFilePathsAndCounts;
     Schema sinkOutputSchema;
 };
@@ -125,12 +124,12 @@ struct PlannedQuery
 struct SubmittedQuery
 {
     SubmittedQuery() = delete;
-    SubmittedQuery(Distributed::QueryId&& id, PlannedQuery&& q)
-        : queryId{std::move(id)}, ctx{std::move(q.ctx)}, planInfo{std::move(*q.planInfoOrException)}
+    SubmittedQuery(Query&& id, PlannedQuery&& q)
+        : query{std::move(id)}, ctx{std::move(q.ctx)}, planInfo{std::move(*q.planInfoOrException)}
     {
     }
 
-    Distributed::QueryId queryId;
+    Query query;
     SystestQueryContext ctx;
     PlanInfo planInfo;
     /// Optional benchmarking metrics
@@ -170,12 +169,13 @@ struct FinishedQuery
 struct TestFile
 {
     explicit TestFile(
-        const std::filesystem::path& file, std::shared_ptr<SourceCatalog> sourceCatalog, std::shared_ptr<SinkCatalog> sinkCatalog);
+        const std::filesystem::path& file, SharedPtr<SourceCatalog> sourceCatalog, SharedPtr<SinkCatalog> sinkCatalog);
+
     explicit TestFile(
         const std::filesystem::path& file,
         std::unordered_set<SystestQueryId> onlyEnableQueriesWithTestQueryNumber,
-        std::shared_ptr<SourceCatalog> sourceCatalog,
-        std::shared_ptr<SinkCatalog> sinkCatalog);
+        SharedPtr<SourceCatalog> sourceCatalog,
+        SharedPtr<SinkCatalog> sinkCatalog);
     [[nodiscard]] std::string getLogFilePath() const;
 
     [[nodiscard]] TestName name() const { return file.stem().string(); }
@@ -184,8 +184,8 @@ struct TestFile
     std::unordered_set<SystestQueryId> onlyEnableQueriesWithTestQueryNumber;
     std::vector<TestGroup> groups;
     std::vector<PlannedQuery> queries;
-    std::shared_ptr<SourceCatalog> sourceCatalog;
-    std::shared_ptr<SinkCatalog> sinkCatalog;
+    SharedPtr<SourceCatalog> sourceCatalog;
+    SharedPtr<SinkCatalog> sinkCatalog;
 };
 
 /// intermediate representation storing all considered test files

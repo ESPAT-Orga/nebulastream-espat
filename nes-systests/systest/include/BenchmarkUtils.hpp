@@ -41,13 +41,13 @@ struct BenchmarkMetrics
 std::pair<size_t, size_t> calculateSourceMetrics(const PlanInfo& planInfo);
 
 /// Extract elapsed time from QueryStatus (using the last run's timing)
-std::optional<std::chrono::duration<double>> extractElapsedTime(const QueryStatus& status);
+std::optional<std::chrono::duration<double>> extractElapsedTime(const DistributedQueryStatus& status);
 
 /// Calculate and format throughput string from metrics
 std::string calculateThroughput(size_t bytesProcessed, size_t tuplesProcessed, std::chrono::duration<double> elapsedTime);
 
 /// Create BenchmarkMetrics from PlanInfo and QueryStatus
-BenchmarkMetrics createBenchmarkMetrics(const PlanInfo& planInfo, const QueryStatus& status);
+BenchmarkMetrics createBenchmarkMetrics(const PlanInfo& planInfo, const DistributedQueryStatus& status);
 
 /// Serialize finished queries with benchmark metrics to JSON
 void serializeBenchmarkResults(const std::vector<FinishedQuery>& finished, nlohmann::json& resultJson);

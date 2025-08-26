@@ -12,15 +12,14 @@
 
 add_subdirectory(src)
 
-get_source(nes-catalogs CATALOG_SOURCE_FILES)
-get_source(nes-legacy-optimizer LEGACY_OPTIMIZER_SOURCE_FILES)
 get_source(nes-coordinator COORDINATOR_SOURCE_FILES)
+get_source(nes-global-optimizer GLOBAL_OPTIMIZER_SOURCE_FILES)
 get_source(nes-yaml-binder YAML_BINDER_SOURCE_FILES)
 get_source(nes-query-manager-grpc QUERY_MANAGER_GRPC_SOURCE_FILES)
 get_source(nes-query-manager-embedded QUERY_MANAGER_EMBEDDED_SOURCE_FILES)
 
-add_library(nes-nebuli-lib STATIC ${QUERY_MANAGER_GRPC_SOURCE_FILES} ${CATALOG_SOURCE_FILES} ${LEGACYOPTIMIZER_SOURCE_FILES} ${OPERATORS_SOURCE_FILES} ${COORDINATOR_SOURCE_FILES} ${CLIENT_SOURCE_FILES} ${YAML_BINDER_SOURCE_FILES})
-add_library(nes-nebuli-embedded-lib STATIC ${QUERY_MANAGER_GRPC_SOURCE_FILES} ${CATALOG_SOURCE_FILES} ${LEGACYOPTIMIZER_SOURCE_FILES} ${OPERATORS_SOURCE_FILES} ${COORDINATOR_SOURCE_FILES} ${CLIENT_SOURCE_FILES} ${YAML_BINDER_SOURCE_FILES} ${QUERY_MANAGER_EMBEDDED_SOURCE_FILES} )
+add_library(nes-nebuli-lib STATIC ${COORDINATOR_SOURCE_FILES} ${QUERY_MANAGER_GRPC_SOURCE_FILES} ${GLOBAL_OPTIMIZER_SOURCE_FILES} ${YAML_BINDER_SOURCE_FILES})
+add_library(nes-nebuli-embedded-lib STATIC ${COORDINATOR_SOURCE_FILES} ${QUERY_MANAGER_GRPC_SOURCE_FILES} ${GLOBAL_OPTIMIZER_SOURCE_FILES} ${YAML_BINDER_SOURCE_FILES} ${QUERY_MANAGER_EMBEDDED_SOURCE_FILES} )
 
 find_package(PkgConfig)
 pkg_check_modules(uuid REQUIRED IMPORTED_TARGET GLOBAL uuid)
@@ -33,7 +32,7 @@ target_include_directories(nes-nebuli-lib
         PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/private>)
 
 target_link_libraries(nes-nebuli-lib
-        PUBLIC nes-logical-operators nes-sql-parser
+        PUBLIC nes-logical-operators nes-sql-parser nes-distributed
         PRIVATE yaml-cpp::yaml-cpp PkgConfig::uuid
 )
 
@@ -46,7 +45,7 @@ target_include_directories(nes-nebuli-embedded-lib
         PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/private>)
 
 target_link_libraries(nes-nebuli-embedded-lib
-        PUBLIC nes-logical-operators nes-single-node-worker-lib nes-sql-parser
+        PUBLIC nes-logical-operators nes-single-node-worker-lib nes-sql-parser nes-distributed
         PRIVATE nes-sql-parser yaml-cpp::yaml-cpp
 )
 
@@ -85,7 +84,6 @@ function(add_nes_test_nebuli)
 endfunction()
 
 add_tests_if_enabled(tests)
-add_nes_test_nebuli("network-topology-test" tests/NetworkTopologyTest.cpp)
 add_nes_test_nebuli("distributed-planning-test" tests/DistributedPlanningTest.cpp)
 
 add_test(

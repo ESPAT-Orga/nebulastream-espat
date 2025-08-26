@@ -17,39 +17,45 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
-#include <iostream>
 #include <istream>
 #include <memory>
 #include <ranges>
-#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include <DataTypes/Schema.hpp>
-#include <Distributed/NetworkTopology.hpp>
-#include <Distributed/WorkerCatalog.hpp>
-#include <SQLQueryParser/AntlrSQLQueryParser.hpp>
+#include <Plans/LogicalPlan.hpp>
 #include <Sinks/SinkDescriptor.hpp>
 #include <Sources/SourceCatalog.hpp>
 #include <Sources/SourceDescriptor.hpp>
 #include <Util/Logger/Logger.hpp>
 #include <ErrorHandling.hpp>
 #include <QueryConfig.hpp>
+#include <QueryPlanning.hpp>
+#include <WorkerCatalog.hpp>
 
 namespace NES::CLI
 {
 
 YamlBinder::YamlBinder(const QueryConfig& config)
-    : plan(AntlrSQLQueryParser::createLogicalQueryPlanFromSQLString(config.query))
-    , queryConfig{config}
-    , topology{TopologyGraph::from(
-          std::views::transform(config.workerNodes, [](const auto& conf) { return std::make_pair(conf.host, conf.downstreamNodes); })
-          | std::ranges::to<std::vector>())}
-    , workerCatalog{WorkerCatalog::from(config.workerNodes)}
-    , sourceCatalog{std::make_shared<SourceCatalog>()}
-    , sinkCatalog{std::make_shared<SinkCatalog>()}
+    : queryConfig{config}
+    , workerCatalog{std::make_unique<WorkerCatalog>()}
+    , sourceCatalog{std::make_unique<SourceCatalog>()}
+    , sinkCatalog{std::make_unique<SinkCatalog>()}
 {
+}
+
+void YamlBinder::bindRegisterWorkers(const std::vector<WorkerConfig>& unboundWorkers)
+{
+    for (const auto& [host, grpc, capacity, downstream] : unboundWorkers)
+    {
+        NES_INFO("Adding worker: {}", host);
+        if (not workerCatalog->addWorker(host, grpc, capacity, downstream))
+        {
+            NES_ERROR("Failed to add worker {}, because it already exists", host);
+        }
+    }
 }
 
 /// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
@@ -113,17 +119,22 @@ void YamlBinder::bindRegisterSinks(const std::vector<Sink>& unboundSinks)
     }
 }
 
-BoundLogicalPlan YamlBinder::bind() &&
+std::pair<PlanStage::BoundLogicalPlan, QueryPlanningContext> YamlBinder::bind(LogicalPlan&& plan) &&
 {
     /// Validate and set descriptors for sources and sinks, register into source catalog
+    bindRegisterWorkers(queryConfig.workerNodes);
     bindRegisterLogicalSources(queryConfig.logicalSources);
     bindRegisterPhysicalSources(queryConfig.physicalSources);
     bindRegisterSinks(queryConfig.sinks);
-    return BoundLogicalPlan{
-        .plan = std::move(plan),
-        .topology = std::move(topology),
-        .workerCatalog = std::move(workerCatalog),
+    auto boundPlan = PlanStage::BoundLogicalPlan{std::move(plan)};
+    auto ctx = QueryPlanningContext{
+        .id = boundPlan.plan.getQueryId(),
+        .sqlString = boundPlan.plan.getOriginalSql(),
         .sourceCatalog = std::move(sourceCatalog),
-        .sinkCatalog = std::move(sinkCatalog)};
+        .sinkCatalog = std::move(sinkCatalog),
+        .workerCatalog = std::move(workerCatalog)};
+
+    return {std::move(boundPlan), std::move(ctx)};
 }
+
 }

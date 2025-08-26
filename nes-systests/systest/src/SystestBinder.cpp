@@ -41,8 +41,8 @@
 #include <DataTypes/DataType.hpp>
 #include <DataTypes/DataTypeProvider.hpp>
 #include <DataTypes/Schema.hpp>
-#include <Distributed/NetworkTopology.hpp>
-#include <Distributed/WorkerCatalog.hpp>
+#include <NetworkTopology.hpp>
+#include <WorkerCatalog.hpp>
 #include <InputFormatters/InputFormatterProvider.hpp>
 #include <Operators/Sinks/SinkLogicalOperator.hpp>
 #include <Operators/Sources/SourceDescriptorLogicalOperator.hpp>
@@ -71,34 +71,33 @@ namespace NES::Systest
 class SystestTopology
 {
     std::random_device rd;
-    WorkerCatalog workerCatalog;
-    const TopologyGraph topology;
+    SharedPtr<WorkerCatalog> workerCatalog;
 
 public:
     explicit SystestTopology(const std::vector<CLI::WorkerConfig>& cluster)
-        : workerCatalog{WorkerCatalog::from(cluster)}
-        , topology{TopologyGraph::from(
-              std::views::transform(cluster, [](const auto& conf) { return std::make_pair(conf.host, conf.downstreamNodes); })
-              | std::ranges::to<std::vector>())}
     {
+        for (const auto& [host, grpc, capacity, downstreamNodes] : cluster)
+        {
+            workerCatalog->addWorker(grpc, host, capacity, downstreamNodes);
+        }
     }
 
-    const TopologyGraph& getTopologyGraph() const { return topology; }
+    Topology getTopologyGraph() const { return workerCatalog->getTopologySnapshot(); }
 
-    WorkerCatalog& getWorkerCatalog() { return workerCatalog; }
+    SharedPtr<const WorkerCatalog> getWorkerCatalog() { return copyPtr(workerCatalog); }
 
-    TopologyGraph::NodeId getRandomSource()
+    Topology::NodeId getRandomSource()
     {
         std::mt19937 gen(rd());
-        const auto& sourceNodes = topology.getSourceNodes();
+        const auto& sourceNodes = getTopologyGraph().getSourceNodes();
         std::uniform_int_distribution<> dis(0, sourceNodes.size() - 1);
         return sourceNodes[dis(gen)];
     }
 
-    TopologyGraph::NodeId getRandomSink()
+    Topology::NodeId getRandomSink()
     {
         std::mt19937 gen(rd());
-        const auto& sinkNodes = topology.getSinkNodes();
+        const auto& sinkNodes = getTopologyGraph().getSinkNodes();
         std::uniform_int_distribution<> dis(0, sinkNodes.size() - 1);
         return sinkNodes[dis(gen)];
     }
@@ -202,7 +201,7 @@ public:
         return std::unexpected{TestException("No bound plan set")};
     }
 
-    void setFinalizedPlan(QueryPlanner::FinalizedLogicalPlan finalizedPlan)
+    void setFinalizedPlan(PlanStage::DistributedLogicalPlan finalizedPlan)
     {
         this->decomposedPlan = std::move(finalizedPlan);
 
@@ -264,7 +263,7 @@ public:
 
                 return PlanInfo{
                     .plan = {std::move(*decomposedPlan)},
-                    .sourcesToFilePathsAndCounts = std::move(sourcesToFilePathsAndCounts.value()),
+                    .sourcesToFilePathsAndCounts = std::move(sourcesToFilePathsAndCounts).value(),
                     .sinkOutputSchema = sinkOutputSchema.value(),
                 };
             }
@@ -294,7 +293,7 @@ private:
     std::optional<std::string> queryDefinition;
     std::optional<LogicalPlan> boundPlan;
     std::optional<Exception> exception;
-    std::optional<QueryPlanner::FinalizedLogicalPlan> decomposedPlan;
+    std::optional<PlanStage::DistributedLogicalPlan> decomposedPlan;
     std::optional<std::unordered_map<SourceDescriptor, std::pair<SourceInputFile, uint64_t>>> sourcesToFilePathsAndCounts;
     std::optional<Schema> sinkOutputSchema;
     std::optional<std::variant<std::vector<std::string>, ExpectedError>> expectedResultsOrError;
@@ -342,9 +341,9 @@ struct SystestBinder::Impl
     std::vector<PlannedQuery> loadOptimizeQueriesFromTestFile(const TestFile& testFile)
     {
         SLTSinkFactory sinkProvider{testFile.sinkCatalog};
-        auto topology = SystestTopology{CLI::YamlLoader<CLI::ClusterConfig>::load(topologyFile).nodes};
+        auto catalog = SystestTopology{CLI::YamlLoader<CLI::ClusterConfig>::load(topologyFile).nodes};
 
-        auto loadedSystests = loadFromSLTFile(testFile, sinkProvider, topology);
+        auto loadedSystests = loadFromSLTFile(testFile, sinkProvider, catalog);
         std::unordered_set<SystestQueryId> foundQueries;
 
         auto buildSystests = loadedSystests
@@ -355,22 +354,20 @@ struct SystestBinder::Impl
                                          or testFile.onlyEnableQueriesWithTestQueryNumber.contains(loadedQueryPlan.getSystemTestQueryId());
                                  })
             | std::ranges::views::transform(
-                                 [&testFile, &foundQueries, &topology](auto& systest)
+                                 [&testFile, &foundQueries, &catalog](auto& systest)
                                  {
                                      foundQueries.insert(systest.getSystemTestQueryId());
 
                                      if (systest.getBoundPlan().has_value())
                                      {
+                                         auto logicalPlan = systest.getBoundPlan().value();
+                                         auto ctx = QueryPlanningContext{.id = logicalPlan.getQueryId(), .sqlString = logicalPlan.getOriginalSql(), .sourceCatalog = copyPtr(testFile.sourceCatalog), .sinkCatalog = copyPtr(testFile.sinkCatalog), .workerCatalog = copyPtr(catalog.getWorkerCatalog())};
                                          try
                                          {
                                              systest.setFinalizedPlan(
-                                                 QueryPlanner::plan(
-                                                     BoundLogicalPlan{
-                                                         .plan = *systest.getBoundPlan(),
-                                                         .topology = topology.getTopologyGraph(),
-                                                         .workerCatalog = topology.getWorkerCatalog(),
-                                                         .sourceCatalog = testFile.sourceCatalog,
-                                                         .sinkCatalog = testFile.sinkCatalog}));
+                                                 QueryPlanner::with().plan(
+                                                     PlanStage::BoundLogicalPlan{
+                                                         .plan = *systest.getBoundPlan()});
                                          }
                                          catch (const Exception& exception)
                                          {

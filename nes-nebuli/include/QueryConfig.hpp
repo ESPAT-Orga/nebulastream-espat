@@ -17,6 +17,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <WorkerCatalog.hpp>
 
 #include <yaml-cpp/yaml.h>
 
@@ -25,10 +26,6 @@
 
 namespace NES::CLI
 {
-
-using GrpcAddr = std::string;
-using HostAddr = std::string;
-using ChannelId = std::string;
 
 inline DataType stringToFieldType(const std::string& fieldNodeType)
 {
@@ -104,10 +101,10 @@ struct convert<NES::CLI::WorkerConfig>
 {
     static bool decode(const YAML::Node& node, NES::CLI::WorkerConfig& workerConfig)
     {
-        workerConfig.host = node["host"].as<NES::CLI::HostAddr>();
-        workerConfig.grpc = node["grpc"].as<NES::CLI::GrpcAddr>();
+        workerConfig.host = node["host"].as<NES::HostAddr>();
+        workerConfig.grpc = node["grpc"].as<NES::GrpcAddr>();
         workerConfig.capacity = node["capacity"].as<size_t>();
-        workerConfig.downstreamNodes = node["downstreamNodes"].as<std::vector<NES::CLI::HostAddr>>(std::vector<NES::CLI::HostAddr>{});
+        workerConfig.downstreamNodes = node["downstreamNodes"].as<std::vector<NES::HostAddr>>(std::vector<NES::HostAddr>{});
         return true;
     }
 };
@@ -131,7 +128,7 @@ struct convert<NES::CLI::Sink>
         sink.name = node["name"].as<std::string>();
         sink.type = node["type"].as<std::string>();
         sink.schema = node["schema"].as<std::vector<NES::CLI::SchemaField>>();
-        sink.host = node["host"].as<NES::CLI::HostAddr>();
+        sink.host = node["host"].as<NES::HostAddr>();
         sink.config = node["config"].as<std::unordered_map<std::string, std::string>>();
         return true;
     }
@@ -155,7 +152,7 @@ struct convert<NES::CLI::PhysicalSource>
     {
         physicalSource.logicalSource = node["logicalSource"].as<std::string>();
         physicalSource.type = node["type"].as<std::string>();
-        physicalSource.host = node["host"].as<NES::CLI::HostAddr>();
+        physicalSource.host = node["host"].as<NES::HostAddr>();
         physicalSource.parserConfig = node["parserConfig"].as<std::unordered_map<std::string, std::string>>();
         physicalSource.sourceConfig = node["sourceConfig"].as<std::unordered_map<std::string, std::string>>();
         return true;

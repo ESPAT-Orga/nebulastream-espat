@@ -27,13 +27,16 @@
 #include <fmt/format.h>
 
 #include <Listeners/QueryLog.hpp>
+#include <QueryManager/EmbeddedWorkerQueryManager.hpp>
+#include <QueryManager/GRPCQueryManager.hpp>
 #include <Runtime/Execution/QueryStatus.hpp>
 #include <Util/Overloaded.hpp>
+#include <YAML/YamlLoader.hpp>
+
 #include <BenchmarkUtils.hpp>
 #include <ErrorHandling.hpp>
-#include <ExecutionBackend.hpp>
+#include <QueryConfig.hpp>
 #include <SystestResultCheck.hpp>
-#include <SystestRunnerUtil.hpp>
 #include <SystestState.hpp>
 
 namespace NES::Systest
@@ -42,18 +45,25 @@ namespace NES::Systest
 using namespace std::chrono_literals;
 
 SystestRunner::SystestRunner(std::vector<PlannedQuery> inputQueries, ExecutionMode executionMode, const uint64_t queryConcurrency)
-    : queryTracker{inputQueries, queryConcurrency}
+    : queryTracker{std::move(inputQueries), queryConcurrency}
     , executionMode{executionMode}
     , reporter{std::make_unique<QueryResultReporter>(queryTracker.getTotalQueries())}
 {
     std::visit(
         Overloaded{
             [this](const LocalExecution& local)
-            { this->executionBackend = std::make_unique<EmbeddedWorkerBackend>(local.singleNodeWorkerConfig); },
+            { this->executionBackend = std::make_unique<EmbeddedWorkerQueryManager>(local.singleNodeWorkerConfig); },
             [this](const DistributedExecution& distributed)
-            { this->executionBackend = std::make_unique<ClusterBackend>(distributed.topologyPath); },
+            {
+                auto [nodes] = CLI::YamlLoader<CLI::ClusterConfig>::load(distributed.topologyPath);
+                this->executionBackend = std::make_unique<GrpcQueryManager>(
+                    nodes
+                    | std::views::transform([](CLI::WorkerConfig&& worker)
+                                            { return WorkerConfig{worker.host, worker.grpc, worker.capacity, worker.downstreamNodes}; })
+                    | std::ranges::to<std::vector>());
+            },
             [this](const BenchmarkExecution& benchmark)
-            { this->executionBackend = std::make_unique<EmbeddedWorkerBackend>(benchmark.singleNodeWorkerConfig); }},
+            { this->executionBackend = std::make_unique<EmbeddedWorkerQueryManager>(benchmark.singleNodeWorkerConfig); }},
         executionMode);
 }
 
@@ -94,7 +104,7 @@ void SystestRunner::submit()
 
             if (auto registerResult = executionBackend->registerQuery(planInfo.plan); registerResult.has_value())
             {
-                auto submitted = SubmittedQuery{std::move(registerResult.value()), std::move(*planned)};
+                auto submitted = SubmittedQuery{std::move(registerResult).value(), std::move(*planned)};
 
                 /// Calculate source metrics for benchmark mode
                 if (std::holds_alternative<BenchmarkExecution>(executionMode))
@@ -104,13 +114,13 @@ void SystestRunner::submit()
                     submitted.tuplesProcessed = tuplesProcessed;
                 }
 
-                executionBackend->startQuery(submitted.queryId);
+                executionBackend->start(submitted.query);
                 queryTracker.moveToSubmitted(std::move(submitted));
             }
             else
             {
                 /// Error happened during query registration on at least one of the workers
-                onFailure<PlannedQuery>(std::move(*planned), std::move(registerResult.error()));
+                onFailure<PlannedQuery>(std::move(*planned), {std::move(registerResult.error())});
             }
         }
         else
@@ -128,31 +138,40 @@ void SystestRunner::handle()
 {
     while (auto submittedQuery = queryTracker.nextSubmitted())
     {
-        switch (const auto queryStatus = executionBackend->status(submittedQuery->queryId); getGlobalQueryState(queryStatus))
-        {
-            case QueryState::Failed:
-                /// Error happened during query execution, fetch exceptions from workers and handle
-                onFailure<SubmittedQuery>(std::move(*submittedQuery), getExceptions(queryStatus));
-                break;
-            case QueryState::Stopped:
-                onStopped(std::move(*submittedQuery));
-                break;
-            default: {
-                /// onRunning, put it back
-                queryTracker.moveToSubmitted(std::move(*submittedQuery));
-                std::this_thread::sleep_for(25ms); /// Give other submitted queries a chance to make progress
-                break;
-            }
-        }
+        executionBackend->status(submittedQuery->query)
+            .and_then(
+                [this, &submittedQuery](auto&& status) -> std::expected<void, Exception>
+                {
+                    switch (getGlobalQueryState(status))
+                    {
+                        case QueryState::Failed:
+                            onFailure<SubmittedQuery>(std::move(*submittedQuery), getExceptions(status));
+                            break;
+                        case QueryState::Stopped:
+                            onStopped(std::move(*submittedQuery), status);
+                            break;
+                        default:
+                            queryTracker.moveToSubmitted(std::move(*submittedQuery));
+                            std::this_thread::sleep_for(25ms);
+                            break;
+                    }
+                    return {};
+                })
+            .or_else(
+                [this, &submittedQuery](auto&& error)
+                {
+                    onFailure<SubmittedQuery>(std::move(*submittedQuery), {error});
+                    return std::expected<void, Exception>{};
+                });
     }
 }
 
-void SystestRunner::onStopped(SubmittedQuery&& submitted)
+void SystestRunner::onStopped(SubmittedQuery&& submitted, const DistributedQueryStatus& queryStatus)
 {
     /// Check if we expected an error but got success
     if (std::holds_alternative<ExpectedError>(submitted.ctx.expectedResultsOrError))
     {
-        const auto expectedError = std::get<ExpectedError>(submitted.ctx.expectedResultsOrError);
+        const auto& expectedError = std::get<ExpectedError>(submitted.ctx.expectedResultsOrError);
         reporter->reportUnexpectedSuccess(submitted.ctx, expectedError);
         auto failedQuery = FailedQuery{std::move(submitted.ctx), {}};
         reportedFailures.push_back(failedQuery);
@@ -170,10 +189,9 @@ void SystestRunner::onStopped(SubmittedQuery&& submitted)
         return;
     }
 
-    /// Handle benchmark mode logic
+    /// benchmark mode
     if (std::holds_alternative<BenchmarkExecution>(executionMode))
     {
-        const auto queryStatus = executionBackend->status(submitted.queryId);
         const auto elapsedTime = extractElapsedTime(queryStatus);
         std::optional<std::string> throughput;
 

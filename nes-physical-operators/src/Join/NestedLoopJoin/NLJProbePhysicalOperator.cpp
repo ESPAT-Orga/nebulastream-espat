@@ -40,6 +40,8 @@
 #include <val.hpp>
 #include <val_ptr.hpp>
 
+#include "inline.hpp"
+
 namespace NES
 {
 
@@ -56,19 +58,19 @@ NLJSlice* getNLJSliceRefFromEndProxy(OperatorHandler* ptrOpHandler, const SliceE
     return dynamic_cast<NLJSlice*>(slice.value().get());
 }
 
-Timestamp getNLJWindowStartProxy(const EmittedNLJWindowTrigger* nljWindowTriggerTask)
+NAUT_INLINE Timestamp getNLJWindowStartProxy(const EmittedNLJWindowTrigger* nljWindowTriggerTask)
 {
     PRECONDITION(nljWindowTriggerTask, "nljWindowTriggerTask should not be null");
     return nljWindowTriggerTask->windowInfo.windowStart;
 }
 
-Timestamp getNLJWindowEndProxy(const EmittedNLJWindowTrigger* nljWindowTriggerTask)
+NAUT_INLINE Timestamp getNLJWindowEndProxy(const EmittedNLJWindowTrigger* nljWindowTriggerTask)
 {
     PRECONDITION(nljWindowTriggerTask, "nljWindowTriggerTask should not be null");
     return nljWindowTriggerTask->windowInfo.windowEnd;
 }
 
-SliceEnd getNLJSliceEndProxy(const EmittedNLJWindowTrigger* nljWindowTriggerTask, const JoinBuildSideType joinBuildSide)
+NAUT_INLINE SliceEnd getNLJSliceEndProxy(const EmittedNLJWindowTrigger* nljWindowTriggerTask, const JoinBuildSideType joinBuildSide)
 {
     PRECONDITION(nljWindowTriggerTask != nullptr, "nljWindowTriggerTask should not be null");
 
@@ -81,6 +83,13 @@ SliceEnd getNLJSliceEndProxy(const EmittedNLJWindowTrigger* nljWindowTriggerTask
     }
     std::unreachable();
 }
+}
+
+NAUT_INLINE auto getPagedVectorRefHelperProxy(const NLJSlice* nljSlice,
+                                    WorkerThreadId workerThreadId,
+                                    JoinBuildSideType joinBuildSide) {
+    PRECONDITION(nljSlice != nullptr, "nlj slice pointer should not be null!");
+    return nljSlice->getPagedVectorRef(workerThreadId, joinBuildSide);
 }
 
 NLJProbePhysicalOperator::NLJProbePhysicalOperator(
@@ -159,20 +168,12 @@ void NLJProbePhysicalOperator::open(ExecutionContext& executionCtx, RecordBuffer
     const auto sliceRefRight = invoke(getNLJSliceRefFromEndProxy, operatorHandlerMemRef, sliceIdRight);
 
     const auto leftPagedVectorRef = invoke(
-        +[](const NLJSlice* nljSlice, const WorkerThreadId workerThreadId, const JoinBuildSideType joinBuildSide)
-        {
-            PRECONDITION(nljSlice != nullptr, "nlj slice pointer should not be null!");
-            return nljSlice->getPagedVectorRef(workerThreadId, joinBuildSide);
-        },
+        getPagedVectorRefHelperProxy,
         sliceRefLeft,
         workerThreadIdForPages,
         nautilus::val<JoinBuildSideType>(JoinBuildSideType::Left));
     const auto rightPagedVectorRef = invoke(
-        +[](const NLJSlice* nljSlice, const WorkerThreadId workerThreadId, const JoinBuildSideType joinBuildSide)
-        {
-            PRECONDITION(nljSlice != nullptr, "nlj slice pointer should not be null!");
-            return nljSlice->getPagedVectorRef(workerThreadId, joinBuildSide);
-        },
+        getPagedVectorRefHelperProxy,
         sliceRefRight,
         workerThreadIdForPages,
         nautilus::val<JoinBuildSideType>(JoinBuildSideType::Right));

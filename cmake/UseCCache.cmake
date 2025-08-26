@@ -10,7 +10,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-option(USE_CCACHE_IF_AVAILABLE "Use ccache to speed up rebuilds" ON)
+option(USE_CCACHE_IF_AVAILABLE "Use ccache to speed up rebuilds" OFF)
 find_program(CCACHE_EXECUTABLE ccache)
 if (CCACHE_EXECUTABLE AND ${USE_CCACHE_IF_AVAILABLE})
     message(STATUS "Using ccache: ${CCACHE_EXECUTABLE}")

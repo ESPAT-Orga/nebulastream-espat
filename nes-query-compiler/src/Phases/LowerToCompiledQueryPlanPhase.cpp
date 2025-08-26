@@ -22,6 +22,7 @@
 #include <utility>
 #include <variant>
 #include <vector>
+
 #include <Configuration/WorkerConfiguration.hpp>
 #include <Identifiers/Identifiers.hpp>
 #include <InputFormatters/InputFormatterProvider.hpp>
@@ -37,6 +38,9 @@
 #include <SinkPhysicalOperator.hpp>
 #include <SourcePhysicalOperator.hpp>
 #include <options.hpp>
+#include "Nautilus/Interface/PagedVector/PagedVectorRef.hpp"
+
+#include "InlineFunctionRegistry.hpp"
 
 namespace NES
 {
@@ -108,6 +112,7 @@ std::unique_ptr<ExecutablePipelineStage> LowerToCompiledQueryPlanPhase::getStage
     {
         case ExecutionMode::COMPILER: {
             options.setOption("engine.Compilation", true);
+            options.setOption("engine.Inline", true);
             break;
         }
         case ExecutionMode::INTERPRETER: {
@@ -142,6 +147,7 @@ std::unique_ptr<ExecutablePipelineStage> LowerToCompiledQueryPlanPhase::getStage
             options.setOption("dump.file", true);
             break;
     }
+
     return std::make_unique<CompiledExecutablePipelineStage>(pipeline, pipeline->getOperatorHandlers(), options);
 }
 

@@ -24,6 +24,8 @@
 #include <Nautilus/Interface/PagedVector/PagedVector.hpp>
 #include <SliceStore/Slice.hpp>
 
+#include "inline.hpp"
+
 namespace NES
 {
 
@@ -58,19 +60,19 @@ uint64_t NLJSlice::getNumberOfTuplesRight() const
         [](uint64_t sum, const auto& pagedVector) { return sum + pagedVector->getTotalNumberOfEntries(); });
 }
 
-Nautilus::Interface::PagedVector* NLJSlice::getPagedVectorRefLeft(const WorkerThreadId workerThreadId) const
+NAUT_INLINE Nautilus::Interface::PagedVector* NLJSlice::getPagedVectorRefLeft(const WorkerThreadId workerThreadId) const
 {
     const auto pos = workerThreadId % leftPagedVectors.size();
     return leftPagedVectors[pos].get();
 }
 
-Nautilus::Interface::PagedVector* NLJSlice::getPagedVectorRefRight(const WorkerThreadId workerThreadId) const
+NAUT_INLINE Nautilus::Interface::PagedVector* NLJSlice::getPagedVectorRefRight(const WorkerThreadId workerThreadId) const
 {
     const auto pos = workerThreadId % rightPagedVectors.size();
     return rightPagedVectors[pos].get();
 }
 
-Nautilus::Interface::PagedVector*
+NAUT_INLINE Nautilus::Interface::PagedVector*
 NLJSlice::getPagedVectorRef(const WorkerThreadId workerThreadId, const JoinBuildSideType joinBuildSide) const
 {
     switch (joinBuildSide)

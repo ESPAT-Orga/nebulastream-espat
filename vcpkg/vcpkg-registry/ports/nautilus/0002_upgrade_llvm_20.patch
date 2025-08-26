@@ -1,0 +1,33 @@
+Subject: [PATCH] inlining work in progress
+---
+Index: nautilus/src/nautilus/llvm-passes/FunctionInliningPass.cpp
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/nautilus/src/nautilus/llvm-passes/FunctionInliningPass.cpp b/nautilus/src/nautilus/llvm-passes/FunctionInliningPass.cpp
+--- a/nautilus/src/nautilus/llvm-passes/FunctionInliningPass.cpp	(revision 455d9bab9c993843d5c53d116d155f8bfd8050da)
++++ b/nautilus/src/nautilus/llvm-passes/FunctionInliningPass.cpp	(date 1755967231586)
+@@ -121,7 +121,7 @@
+         LLVM_PLUGIN_API_VERSION, "NautilusInlineRegistrationPass", "0.0.1",
+         [](PassBuilder &PB) {
+             PB.registerOptimizerLastEPCallback(
+-                [](ModulePassManager &MPM, auto) {
++                [](ModulePassManager &MPM, auto, auto) {
+                     MPM.addPass(NautilusInlineRegistrationPass{});
+                 });
+         }
+Index: nautilus/src/nautilus/llvm-passes/CMakeLists.txt
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/nautilus/src/nautilus/llvm-passes/CMakeLists.txt b/nautilus/src/nautilus/llvm-passes/CMakeLists.txt
+--- a/nautilus/src/nautilus/llvm-passes/CMakeLists.txt	(revision 455d9bab9c993843d5c53d116d155f8bfd8050da)
++++ b/nautilus/src/nautilus/llvm-passes/CMakeLists.txt	(date 1755966584113)
+@@ -1,4 +1,4 @@
+-find_package(LLVM 19.1.7 CONFIG)
++find_package(LLVM 20.1.7 CONFIG)
+
+ add_library(InliningPass SHARED FunctionInliningPass.cpp
+         InliningUtils.cpp InliningUtils.h)

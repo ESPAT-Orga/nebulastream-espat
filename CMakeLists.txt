@@ -14,7 +14,7 @@ cmake_minimum_required(VERSION 3.21.0)
 include(CMakeDependentOption)
 
 set(CMAKE_VERBOSE_MAKEFILE OFF)
-set(LLVM_TOOLCHAIN_VERSION 19)
+set(LLVM_TOOLCHAIN_VERSION 20)
 
 # Enable native mtune/march for optimizations
 option(NES_BUILD_NATIVE "Override mtune/march to load native support (might improve performance significantly)" OFF)
@@ -238,6 +238,18 @@ else ()
 endif ()
 
 add_custom_target(build_all_plugins)
+
+
+function(nautilus_inline target)
+    if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        add_dependencies(${target} nes-passes)
+        target_compile_options(${target} PRIVATE
+                "-fpass-plugin=$<TARGET_FILE:nes-passes>"
+        )
+    else ()
+        message(WARNING "Cannot apply inlining pass when not compiling with clang")
+    endif ()
+endfunction()
 
 # Add target for common lib, which contains a minimal set
 # of shared functionality used by all components of nes

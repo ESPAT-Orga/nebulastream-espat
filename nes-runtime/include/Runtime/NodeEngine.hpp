@@ -19,6 +19,8 @@
 #include <Listeners/SystemEventListener.hpp>
 #include <Runtime/BufferManager.hpp>
 #include <Runtime/QueryTerminationType.hpp>
+#include <StatisticStore/AbstractStatisticStore.hpp>
+#include <StatisticStore/DefaultStatisticStore.hpp>
 #include <CompiledQueryPlan.hpp>
 #include <QueryEngine.hpp>
 
@@ -59,6 +61,12 @@ public:
     [[nodiscard]] std::shared_ptr<QueryLog> getQueryLog() { return queryLog; }
 
     [[nodiscard]] std::shared_ptr<const QueryLog> getQueryLog() const { return queryLog; }
+
+    [[nodiscard]] static std::shared_ptr<AbstractStatisticStore> getStatisticStore()
+    {
+        static std::shared_ptr<AbstractStatisticStore> statisticStore = std::make_shared<DefaultStatisticStore>();
+        return statisticStore;
+    }
 
 private:
     std::shared_ptr<BufferManager> bufferManager;

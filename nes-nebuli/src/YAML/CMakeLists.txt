@@ -13,5 +13,3 @@
 add_source_files(nes-yaml-binder
         YAMLBinder.cpp
 )
-
-add_subdirectory(Synopsis)

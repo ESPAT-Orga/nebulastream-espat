@@ -53,6 +53,7 @@
 #include <Operators/Windows/Aggregations/MedianAggregationLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/MinAggregationLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/SumAggregationLogicalFunction.hpp>
+#include <Operators/Windows/Aggregations/Synopsis/Histogram/EquiWidthHistogramLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/Synopsis/Sample/ReservoirSampleLogicalFunction.hpp>
 #include <Operators/Windows/JoinLogicalOperator.hpp>
 #include <Plans/LogicalPlan.hpp>
@@ -913,6 +914,27 @@ void AntlrSQLQueryPlanCreator::exitFunctionCall(AntlrSQLParser::FunctionCallCont
                 const auto asFieldIfNotOverwritten = FieldAccessLogicalFunction("reservoir");
                 helpers.top().windowAggs.push_back(
                     ReservoirSampleLogicalFunction::create(uselessField, asFieldIfNotOverwritten, sampleFields, reservoirSize));
+                break;
+            }
+            else if (funcName == "EQUIWIDTHHISTOGRAM")
+            {
+                if (helpers.top().functionBuilder.size() != 1 && helpers.top().functionBuilder.back().tryGet<FieldAccessLogicalFunction>())
+                {
+                    throw InvalidQuerySyntax("EQUIWIDTHHISTOGRAM requires the first argument to be a fieldname");
+                }
+                const auto fieldName = helpers.top().functionBuilder.back().tryGet<FieldAccessLogicalFunction>().value();
+                helpers.top().functionBuilder.pop_back();
+                if (helpers.top().constantBuilder.size() != 3)
+                {
+                    throw InvalidQuerySyntax("EQUIWIDTHHISTOGRAM requires the arguments numBuckets, minValue, maxValue to be constants");
+                }
+                const auto numBuckets = parseConstant(helpers.top().constantBuilder.back(), "numBuckets");
+                helpers.top().constantBuilder.pop_back();
+                const auto minValue = parseConstant(helpers.top().constantBuilder.back(), "minValue");
+                helpers.top().constantBuilder.pop_back();
+                const auto maxValue = parseConstant(helpers.top().constantBuilder.back(), "maxValue");
+                helpers.top().constantBuilder.pop_back();
+                helpers.top().windowAggs.push_back(EquiWidthHistogramLogicalFunction::create(fieldName, numBuckets, minValue, maxValue));
                 break;
             }
             else

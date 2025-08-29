@@ -10,9 +10,4 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-add_subdirectory(Sample)
-add_subdirectory(Histogram)
-
-add_source_files(nes-physical-operators
-        SynopsisFunctionRef.cpp
-)
+add_plugin(EquiWidthHistogram AggregationLogicalFunction nes-logical-operators EquiWidthHistogramLogicalFunction.cpp)

@@ -15,6 +15,7 @@
 #pragma once
 #include <vector>
 #include <Util/Logger/Formatter.hpp>
+#include <WindowTypes/Measures/TimeMeasure.hpp>
 #include <fmt/base.h>
 #include <fmt/format.h>
 #include <magic_enum/magic_enum.hpp>
@@ -43,9 +44,9 @@ public:
     /// Defines what statistic type is for the underlying statistic memory area
     enum class StatisticType : uint8_t
     {
-        Histogram,
-        Sample,
-        Sketch
+        Equi_Width_Histogram,
+        Reservoir_Sample,
+        Count_Min_Sketch
     };
 
     Statistic(

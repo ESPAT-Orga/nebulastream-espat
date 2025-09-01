@@ -12,18 +12,18 @@
     limitations under the License.
 */
 
-#include <Execution/Operators/Statistic/StatisticStoreOperatorHandler.hpp>
+#include <Statistic/StatisticStore/StatisticStoreOperatorHandler.hpp>
 
-namespace NES::Runtime::Execution::Operators
+namespace NES
 {
-
-StatisticStoreOperatorHandler::StatisticStoreOperatorHandler() : statisticStoreManager(StatisticStoreManager::getInstance())
+StatisticStoreOperatorHandler::StatisticStoreOperatorHandler(std::shared_ptr<AbstractStatisticStore> statisticStore)
+    : statisticStore(std::move(statisticStore))
 {
 }
 
 std::shared_ptr<AbstractStatisticStore> StatisticStoreOperatorHandler::getStatisticStore() const
 {
-    return statisticStoreManager->getStatisticStore();
+    return statisticStore;
 }
 
 }

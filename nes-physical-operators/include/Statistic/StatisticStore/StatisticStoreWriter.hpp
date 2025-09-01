@@ -14,21 +14,30 @@
 
 #pragma once
 
-#include <Execution/Operators/ExecutableOperator.hpp>
+#include <PhysicalOperator.hpp>
 
-namespace NES::Runtime::Execution::Operators
+namespace NES
 {
 
-class StatisticStoreReader final : public ExecutableOperator
+class StatisticStoreWriter final : public PhysicalOperatorConcept
 {
 public:
-    explicit StatisticStoreReader(uint64_t operatorHandlerIndex);
+    explicit StatisticStoreWriter(uint64_t operatorHandlerId);
 
-    /// Gets the single statistic for given metadata from the StatisticStore and writes it to the record
+    /// Inserts the given statistic record into the StatisticStore
     void execute(ExecutionContext& executionCtx, Record& record) const override;
 
+    [[nodiscard]] std::optional<PhysicalOperator> getChild() const override;
+    void setChild(PhysicalOperator child) override;
+
 private:
-   const uint64_t operatorHandlerIndex;
+    std::optional<PhysicalOperator> child;
+    OperatorHandlerId operatorHandlerId;
+    std::string statisticHashFieldName;
+    std::string statisticTypeFieldName;
+    std::string statisticStartTsFieldName;
+    std::string statisticEndTsFieldName;
+    std::string statisticDataFieldName;
 };
 
 }

@@ -19,6 +19,7 @@
 #include <utility>
 #include <DataTypes/Schema.hpp>
 #include <MemoryLayout/MemoryLayout.hpp>
+#include <nautilus/val.hpp>
 #include <ErrorHandling.hpp>
 
 namespace NES
@@ -59,6 +60,25 @@ uint64_t ColumnLayout::getFieldOffset(const uint64_t tupleIndex, const uint64_t 
             "tuple index: {} is larger the maximal capacity in the memory layout {}",
             std::to_string(tupleIndex),
             std::to_string(getCapacity()));
+    }
+
+    const auto fieldOffset = (tupleIndex * physicalFieldSizes[fieldIndex]) + getColumnOffset(fieldIndex);
+    return fieldOffset;
+}
+
+nautilus::val<uint64_t>
+ColumnLayout::getFieldOffset(nautilus::val<uint64_t> tupleIndex, const nautilus::static_val<uint64_t> fieldIndex) const
+{
+    if (fieldIndex >= physicalFieldSizes.size())
+    {
+        throw CannotAccessBuffer(
+            "field index: {} is larger the number of field in the memory layout {}",
+            std::to_string(fieldIndex),
+            std::to_string(physicalFieldSizes.size()));
+    }
+    if (tupleIndex >= getCapacity())
+    {
+        throw CannotAccessBuffer("tuple index is larger the maximal capacity in the memory layout {}", std::to_string(getCapacity()));
     }
 
     const auto fieldOffset = (tupleIndex * physicalFieldSizes[fieldIndex]) + getColumnOffset(fieldIndex);

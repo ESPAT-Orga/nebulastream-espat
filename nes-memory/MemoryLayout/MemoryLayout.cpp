@@ -156,6 +156,11 @@ std::string MemoryLayout::readVarSizedDataAsString(const TupleBuffer& tupleBuffe
     return std::string{strPtrContent, stringSize};
 }
 
+uint64_t MemoryLayout::getNumberOfFields() const
+{
+    return physicalFieldSizes.size();
+}
+
 uint64_t MemoryLayout::getTupleSize() const
 {
     return recordSize;

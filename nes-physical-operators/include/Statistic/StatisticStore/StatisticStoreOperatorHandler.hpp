@@ -14,21 +14,25 @@
 
 #pragma once
 
-#include <Execution/Operators/ExecutableOperator.hpp>
+#include <Runtime/Execution/OperatorHandler.hpp>
+#include <StatisticStore/AbstractStatisticStore.hpp>
 
-namespace NES::Runtime::Execution::Operators
+namespace NES
 {
 
-class StatisticStoreWriter final : public ExecutableOperator
+class StatisticStoreOperatorHandler final : public OperatorHandler
 {
 public:
-    explicit StatisticStoreWriter(uint64_t operatorHandlerIndex);
+    explicit StatisticStoreOperatorHandler(std::shared_ptr<AbstractStatisticStore> statisticStore);
 
-    /// Inserts the given statistic record into the StatisticStore
-    void execute(ExecutionContext& executionCtx, Record& record) const override;
+    void start(PipelineExecutionContext&, uint32_t) override { }
+
+    void stop(QueryTerminationType, PipelineExecutionContext&) override { }
+
+    [[nodiscard]] std::shared_ptr<AbstractStatisticStore> getStatisticStore() const;
 
 private:
-    const uint64_t operatorHandlerIndex;
+    std::shared_ptr<AbstractStatisticStore> statisticStore;
 };
 
 }

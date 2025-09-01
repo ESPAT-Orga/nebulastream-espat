@@ -27,6 +27,7 @@
 #include <Runtime/AbstractBufferProvider.hpp>
 #include <Runtime/BufferManager.hpp>
 #include <Runtime/TupleBuffer.hpp>
+#include <nautilus/Engine.hpp>
 
 namespace NES
 {
@@ -73,11 +74,15 @@ public:
     /// Calculates the offset in the tuple buffer of a particular field for a specific tuple.
     /// Depending on the concrete MemoryLayout, e.g., Columnar or Row - Layout, this may result in different calculations.
     [[nodiscard]] virtual uint64_t getFieldOffset(uint64_t tupleIndex, uint64_t fieldIndex) const = 0;
+    [[nodiscard]] virtual nautilus::val<uint64_t>
+    getFieldOffset(nautilus::val<uint64_t> tupleIndex, nautilus::static_val<uint64_t> fieldIndex) const = 0;
 
     /// @brief Gets the number of tuples a tuple buffer with this memory layout could occupy.
     /// Depending on the concrete memory layout this value may change, e.g., some layouts may add some padding or alignment.
     /// @return number of tuples a tuple buffer can occupy.
     [[nodiscard]] uint64_t getCapacity() const;
+
+    [[nodiscard]] uint64_t getNumberOfFields() const;
     [[nodiscard]] uint64_t getTupleSize() const;
     [[nodiscard]] uint64_t getBufferSize() const;
     void setBufferSize(uint64_t bufferSize);

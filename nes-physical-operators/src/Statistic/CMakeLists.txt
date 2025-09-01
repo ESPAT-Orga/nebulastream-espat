@@ -10,10 +10,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-add_source_files(nes-query-manager-grpc
-        GRPCQuerySubmissionBackend.cpp
-        QueryManager.cpp
-)
+add_subdirectory(StatisticStore)
 
-add_source_files(nes-query-manager-embedded
-        EmbeddedWorkerQuerySubmissionBackend.cpp)
+add_source_files(nes-physical-operators
+        StatisticProvider.cpp)

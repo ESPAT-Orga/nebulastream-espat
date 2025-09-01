@@ -20,6 +20,8 @@
 #include <DataTypes/Schema.hpp>
 #include <MemoryLayout/MemoryLayout.hpp>
 #include <Util/Logger/Logger.hpp>
+#include <nautilus/std/cstdlib.h>
+#include <nautilus/std/cstring.h>
 #include <ErrorHandling.hpp>
 
 namespace NES
@@ -74,6 +76,18 @@ uint64_t RowLayout::getFieldOffset(const uint64_t tupleIndex, const uint64_t fie
     auto offSet = (tupleIndex * recordSize) + fieldOffSets[fieldIndex];
     NES_TRACE("DynamicRowLayoutBuffer.calcOffset: offSet = {}", offSet);
     return offSet;
+}
+
+nautilus::val<uint64_t> RowLayout::getFieldOffset(nautilus::val<uint64_t> tupleIndex, nautilus::static_val<uint64_t> fieldIndex) const
+{
+    if (fieldIndex >= fieldOffSets.size())
+    {
+        throw CannotAccessBuffer(
+            "field index: {} is larger the number of field in the memory layout {}",
+            std::to_string(fieldIndex),
+            std::to_string(physicalFieldSizes.size()));
+    }
+    return (tupleIndex * recordSize) + fieldOffSets[fieldIndex];
 }
 
 }

@@ -52,6 +52,11 @@ std::optional<uint32_t> writeVarSizedData(const TupleBuffer& buffer, const std::
     return {};
 }
 
+uint64_t MemoryLayout::getNumberOfFields() const
+{
+    return physicalFieldSizes.size();
+}
+
 uint64_t MemoryLayout::getTupleSize() const
 {
     return recordSize;

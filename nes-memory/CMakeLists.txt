@@ -30,6 +30,23 @@ target_include_directories(nes-memory
         PRIVATE
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
 )
+
+# Link with the nautilus library
+find_package(spdlog REQUIRED CONFIG)
+find_package(MLIR REQUIRED CONFIG)
+find_package(nautilus REQUIRED CONFIG)
+
+# We have to set the nes-memory to public to use the nautilus library in other modules
+target_link_libraries(nes-memory PUBLIC nautilus::nautilus
+        MLIRExecutionEngine
+        MLIRFuncAllExtensions
+
+        # Dialects
+        MLIRSCFDialect
+        MLIRFuncToLLVM
+        MLIRSCFToControlFlow
+)
+
 find_package(folly REQUIRED)
 target_link_libraries(nes-memory PUBLIC nes-common nes-data-types PRIVATE folly::folly)
 add_tests_if_enabled(tests)

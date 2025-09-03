@@ -131,7 +131,7 @@ getAggregationPhysicalFunctions(const WindowedAggregationLogicalOperator& logica
         {
             auto logicalReservoirSample
                 = std::static_pointer_cast<ReservoirSampleLogicalFunction>(logicalOperator.getWindowAggregation().front());
-            aggregationArguments.reservoirSize = logicalReservoirSample->getReservoirSize();
+            aggregationArguments.optionalSynopsisArgs.emplace_back(logicalReservoirSample->getReservoirSize());
         }
         if (auto aggregationPhysicalFunction
             = AggregationPhysicalFunctionRegistry::instance().create(std::string(name), std::move(aggregationArguments)))

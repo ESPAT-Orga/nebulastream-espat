@@ -184,7 +184,7 @@ AggregationPhysicalFunctionGeneratedRegistrar::RegisterReservoirSampleAggregatio
     AggregationPhysicalFunctionRegistryArguments arguments)
 {
     INVARIANT(arguments.memProviderPagedVector.has_value(), "Memory provider paged vector not set");
-    INVARIANT(arguments.reservoirSize.has_value(), "Reservoir size not set");
+    INVARIANT(not arguments.optionalSynopsisArgs.empty(), "Reservoir size not set");
 
     return std::make_shared<ReservoirSamplePhysicalFunction>(
         std::move(arguments.inputType),
@@ -192,7 +192,7 @@ AggregationPhysicalFunctionGeneratedRegistrar::RegisterReservoirSampleAggregatio
         arguments.inputFunction,
         arguments.resultFieldIdentifier,
         arguments.memProviderPagedVector.value(),
-        arguments.reservoirSize.value(),
+        arguments.optionalSynopsisArgs.front(),
         arguments.memProviderPagedVector.value()->getMemoryLayout()->getSchema());
 }
 

@@ -16,8 +16,8 @@
 
 #include <utility>
 #include <Operators/LogicalOperator.hpp>
-#include <QueryExecutionConfiguration.hpp>
 #include <RewriteRules/AbstractRewriteRule.hpp>
+#include <QueryExecutionConfiguration.hpp>
 
 namespace NES
 {
@@ -25,6 +25,7 @@ namespace NES
 struct LowerToPhysicalReservoirProbe : AbstractRewriteRule
 {
     explicit LowerToPhysicalReservoirProbe(QueryExecutionConfiguration conf) : conf(std::move(conf)) { }
+
     RewriteRuleResultSubgraph apply(LogicalOperator logicalOperator) override;
 
 private:

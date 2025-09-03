@@ -23,9 +23,7 @@ namespace NES
 
 SampleProbePhysicalOperator::SampleProbePhysicalOperator(
     const Schema& sampleSchema, const Record::RecordFieldIdentifier& fieldIdentifier, WindowMetaData windowMetaData)
-    : sampleSchema(sampleSchema)
-    , inputFieldIdentifier(fieldIdentifier)
-    , windowMetaData(windowMetaData)
+    : sampleSchema(sampleSchema), inputFieldIdentifier(fieldIdentifier), windowMetaData(windowMetaData)
 {
 }
 

@@ -42,8 +42,11 @@ struct Statistic
     }
 
     [[nodiscard]] StatisticType getType() const { return type; }
+
     [[nodiscard]] Windowing::TimeMeasure getStartTs() const { return startTs; }
+
     [[nodiscard]] Windowing::TimeMeasure getEndTs() const { return endTs; }
+
     [[nodiscard]] int8_t* getStatisticData() { return statistic.data(); }
 
 private:

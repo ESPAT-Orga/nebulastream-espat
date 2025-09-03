@@ -179,7 +179,8 @@ void Schema::updateFieldsFromOtherSchema(const Schema& otherSchema)
 {
     for (const auto& otherField : otherSchema.fields)
     {
-        for (auto& ourField : fields | std::views::filter([&otherField](Field ourField){ return ourField.name == otherField.name; })) {
+        for (auto& ourField : fields | std::views::filter([&otherField](Field ourField) { return ourField.name == otherField.name; }))
+        {
             ourField.dataType = otherField.dataType;
         }
         ///std::ranges::for_each(

@@ -73,7 +73,7 @@ LogicalOperator ReservoirProbeLogicalOperator::withInferredSchema(std::vector<Sc
     else
     {
         copy.asField = copy.asField.withFieldName(copy.inputSchema.getQualifierNameForSystemGeneratedFieldsWithSeparator() + asFieldName)
-                               .get<FieldAccessLogicalFunction>();
+                           .get<FieldAccessLogicalFunction>();
     }
 
     auto pos = asFieldName.find(Schema::ATTRIBUTE_NAME_SEPARATOR);
@@ -95,7 +95,9 @@ LogicalOperator ReservoirProbeLogicalOperator::withInferredSchema(std::vector<Sc
     for (auto field : sampleSchema.getFields())
     {
         auto pos = field.name.find(Schema::ATTRIBUTE_NAME_SEPARATOR);
-        std::string qualifiedName = (pos == std::string::npos)? copy.inputSchema.getQualifierNameForSystemGeneratedFieldsWithSeparator() + field.name : field.name;
+        std::string qualifiedName = (pos == std::string::npos)
+            ? copy.inputSchema.getQualifierNameForSystemGeneratedFieldsWithSeparator() + field.name
+            : field.name;
         if (not copy.outputSchema.contains(field.name))
         {
             copy.outputSchema.addField(qualifiedName, field.dataType);
@@ -111,7 +113,6 @@ LogicalOperator ReservoirProbeLogicalOperator::withTraitSet(TraitSet) const
     auto copy = *this;
     copy.traitSet = traitSet;
     return copy;
-
 }
 
 TraitSet ReservoirProbeLogicalOperator::getTraitSet() const
@@ -249,8 +250,8 @@ LogicalOperatorGeneratedRegistrar::RegisterReservoirProbeLogicalOperator(NES::Lo
         logicalOperator.id = *id;
     }
     return logicalOperator.withInferredSchema(arguments.inputSchemas)
-       .withInputOriginIds(arguments.inputOriginIds)
-       .withOutputOriginIds(arguments.outputOriginIds);
+        .withInputOriginIds(arguments.inputOriginIds)
+        .withOutputOriginIds(arguments.outputOriginIds);
 }
 
 }

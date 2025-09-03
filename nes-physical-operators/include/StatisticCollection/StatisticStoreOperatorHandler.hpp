@@ -27,6 +27,7 @@ public:
     StatisticStoreOperatorHandler();
 
     void start(PipelineExecutionContext&, uint32_t) override { }
+
     void stop(QueryTerminationType, PipelineExecutionContext&) override { }
 
     [[nodiscard]] std::shared_ptr<AbstractStatisticStore> getStatisticStore() const;

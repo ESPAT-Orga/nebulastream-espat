@@ -64,14 +64,12 @@ public:
         static inline const DescriptorConfig::ConfigParameter<std::string> AS_FIELD{
             "asField",
             std::nullopt,
-            [](const std::unordered_map<std::string, std::string>& config)
-            { return DescriptorConfig::tryGet(AS_FIELD, config); }};
+            [](const std::unordered_map<std::string, std::string>& config) { return DescriptorConfig::tryGet(AS_FIELD, config); }};
 
         static inline const DescriptorConfig::ConfigParameter<std::string> SAMPLE_SCHEMA{
             "sampleSchema",
             std::nullopt,
-            [](const std::unordered_map<std::string, std::string>& config)
-            { return DescriptorConfig::tryGet(SAMPLE_SCHEMA, config); }};
+            [](const std::unordered_map<std::string, std::string>& config) { return DescriptorConfig::tryGet(SAMPLE_SCHEMA, config); }};
 
         static inline std::unordered_map<std::string, DescriptorConfig::ConfigParameterContainer> parameterMap
             = DescriptorConfig::createConfigParameterContainerMap(AS_FIELD, SAMPLE_SCHEMA);

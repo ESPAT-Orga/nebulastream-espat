@@ -27,17 +27,25 @@ namespace NES
 class ReservoirSampleLogicalFunction final : public WindowAggregationLogicalFunction
 {
 public:
-    static std::shared_ptr<WindowAggregationLogicalFunction> create(const FieldAccessLogicalFunction& onField, std::vector<FieldAccessLogicalFunction> sampleFields, uint64_t reservoirSize);
+    static std::shared_ptr<WindowAggregationLogicalFunction>
+    create(const FieldAccessLogicalFunction& onField, std::vector<FieldAccessLogicalFunction> sampleFields, uint64_t reservoirSize);
     /// The argument `onField` needs to be a valid field, but is otherwise ignored
     /// `asField` used when the reservoir should be renamed in the query
     /// `reservoirSize` number of records the reservoir should hold
-    static std::shared_ptr<WindowAggregationLogicalFunction>
-    create(const FieldAccessLogicalFunction& onField, const FieldAccessLogicalFunction& asField, std::vector<FieldAccessLogicalFunction> sampleFields, uint64_t reservoirSize);
+    static std::shared_ptr<WindowAggregationLogicalFunction> create(
+        const FieldAccessLogicalFunction& onField,
+        const FieldAccessLogicalFunction& asField,
+        std::vector<FieldAccessLogicalFunction> sampleFields,
+        uint64_t reservoirSize);
 
     /// TODO The onField is unused and should be removed.
-    ReservoirSampleLogicalFunction(const FieldAccessLogicalFunction& onField, std::vector<FieldAccessLogicalFunction> sampleFields, uint64_t reservoirSize);
     ReservoirSampleLogicalFunction(
-        const FieldAccessLogicalFunction& onField, const FieldAccessLogicalFunction& asField, std::vector<FieldAccessLogicalFunction> sampleFields, uint64_t reservoirSize);
+        const FieldAccessLogicalFunction& onField, std::vector<FieldAccessLogicalFunction> sampleFields, uint64_t reservoirSize);
+    ReservoirSampleLogicalFunction(
+        const FieldAccessLogicalFunction& onField,
+        const FieldAccessLogicalFunction& asField,
+        std::vector<FieldAccessLogicalFunction> sampleFields,
+        uint64_t reservoirSize);
 
     void inferStamp(const Schema& schema) override;
     ~ReservoirSampleLogicalFunction() override = default;

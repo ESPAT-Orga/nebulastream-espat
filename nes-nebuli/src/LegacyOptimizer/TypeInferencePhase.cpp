@@ -45,12 +45,14 @@ static LogicalOperator propagateSchema(const LogicalOperator& op)
     }
 
     const LogicalOperator opWithChildren = op.withChildren(newChildren);
-    const LogicalOperator opWithTypes =  opWithChildren.withInferredSchema(childSchemas);
+    const LogicalOperator opWithTypes = opWithChildren.withInferredSchema(childSchemas);
 
     if (opWithTypes.tryGet<ReservoirProbeLogicalOperator>().has_value())
     {
         /// TODO: Add StatisticStore here as alternative to WindowAggregationLogicalOperator
-        PRECONDITION(newChildren.size() == 1 && newChildren.front().tryGet<WindowedAggregationLogicalOperator>().has_value(), "Child has to be a WindowAggregation!");
+        PRECONDITION(
+            newChildren.size() == 1 && newChildren.front().tryGet<WindowedAggregationLogicalOperator>().has_value(),
+            "Child has to be a WindowAggregation!");
         auto aggOp = newChildren.front().get<WindowedAggregationLogicalOperator>();
         auto inputSchema = aggOp.getInputSchemas().front();
         auto probeOp = opWithTypes.get<ReservoirProbeLogicalOperator>();

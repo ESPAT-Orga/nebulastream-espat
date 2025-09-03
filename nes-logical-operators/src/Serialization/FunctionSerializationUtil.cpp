@@ -15,9 +15,9 @@
 #include <Serialization/FunctionSerializationUtil.hpp>
 
 #include <memory>
-#include <vector>
-#include <ranges>
 #include <optional>
+#include <ranges>
+#include <vector>
 
 #include <Configurations/Descriptor.hpp>
 #include <Functions/FieldAccessLogicalFunction.hpp>
@@ -72,13 +72,14 @@ deserializeWindowAggregationFunction(const SerializableAggregationFunction& seri
         reservoirSize = std::make_optional(serializedFunction.reservoir_size());
         auto fieldsFns = serializedFunction.sample_fields().functions();
         sampleFields = std::vector<FieldAccessLogicalFunction>{
-            fieldsFns | std::views::transform([](auto const& fn) {
-                LogicalFunction logFn = deserializeFunction(fn);
-                return logFn.get<FieldAccessLogicalFunction>();
-            })
-            | std::ranges::to<std::vector>()
-        };
-
+            fieldsFns
+            | std::views::transform(
+                [](const auto& fn)
+                {
+                    LogicalFunction logFn = deserializeFunction(fn);
+                    return logFn.get<FieldAccessLogicalFunction>();
+                })
+            | std::ranges::to<std::vector>()};
     }
 
     if (auto fieldAccess = onField.tryGet<FieldAccessLogicalFunction>())

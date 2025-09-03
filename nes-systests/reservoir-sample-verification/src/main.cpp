@@ -44,10 +44,15 @@ public:
         reservoir.emplace_back(record);
         ++currRecordIdx;
     }
+
     void replace(uint64_t index, std::tuple<uint64_t, uint64_t, uint64_t> record) { reservoir.at(index) = record; }
+
     void increaseIndex() { ++currRecordIdx; }
+
     [[nodiscard]] uint64_t getIndex() const { return currRecordIdx; }
+
     [[nodiscard]] uint64_t size() const { return reservoir.size(); }
+
     [[nodiscard]] std::vector<std::tuple<uint64_t, uint64_t, uint64_t>> getReservoir() const { return reservoir; }
 };
 
@@ -59,6 +64,7 @@ private:
     uint64_t reservoirSize;
     /// Size of the window in milliseconds
     uint64_t windowSizeMSec;
+
     std::optional<uint64_t> findCorrespondingWindow(uint64_t ts)
     {
         auto it = std::ranges::find_if(
@@ -91,6 +97,7 @@ public:
         }
         return 0;
     }
+
     [[nodiscard]] uint64_t getWindowStart(uint64_t timestamp, uint64_t previousWindowStart) const
     {
         if (previousWindowStart % this->windowSizeMSec != 0)
@@ -120,17 +127,23 @@ public:
         /// else we are still in the same window: timestamp >= windowStart && timestamp < windowEnd
         return windowStart;
     }
+
     void addRecordToCorrespondingWindowReservoir(uint64_t windowStart, std::tuple<uint64_t, uint64_t, uint64_t> record)
     {
         this->windowReservoirs.try_emplace(windowStart).first->second.emplaceBack(record);
     }
+
     void replaceRecordInCorrespondingWindowReservoir(uint64_t windowStart, uint64_t index, std::tuple<uint64_t, uint64_t, uint64_t> record)
     {
         this->windowReservoirs.try_emplace(windowStart).first->second.replace(index, record);
     }
+
     WindowReservoir& getCorrespondingWindowReservoir(uint64_t windowStart) { return this->windowReservoirs.at(windowStart); }
+
     std::map<uint64_t, WindowReservoir>& getSampleStore() { return windowReservoirs; }
+
     [[nodiscard]] uint64_t getReservoirSize() const { return reservoirSize; }
+
     [[nodiscard]] uint64_t getWindowSizeMSec() const { return windowSizeMSec; }
 };
 

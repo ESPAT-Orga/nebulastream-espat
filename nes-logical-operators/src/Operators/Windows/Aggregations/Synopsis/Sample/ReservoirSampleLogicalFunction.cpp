@@ -32,7 +32,8 @@
 namespace NES
 {
 
-ReservoirSampleLogicalFunction::ReservoirSampleLogicalFunction(const FieldAccessLogicalFunction& onField, std::vector<FieldAccessLogicalFunction> sampleFields, uint64_t reservoirSize)
+ReservoirSampleLogicalFunction::ReservoirSampleLogicalFunction(
+    const FieldAccessLogicalFunction& onField, std::vector<FieldAccessLogicalFunction> sampleFields, uint64_t reservoirSize)
     : WindowAggregationLogicalFunction(
           onField.getDataType(),
           DataTypeProvider::provideDataType(partialAggregateStampType),
@@ -42,8 +43,12 @@ ReservoirSampleLogicalFunction::ReservoirSampleLogicalFunction(const FieldAccess
     , reservoirSize(reservoirSize)
 {
 }
+
 ReservoirSampleLogicalFunction::ReservoirSampleLogicalFunction(
-    const FieldAccessLogicalFunction& onField, const FieldAccessLogicalFunction& asField, std::vector<FieldAccessLogicalFunction> sampleFields, uint64_t reservoirSize)
+    const FieldAccessLogicalFunction& onField,
+    const FieldAccessLogicalFunction& asField,
+    std::vector<FieldAccessLogicalFunction> sampleFields,
+    uint64_t reservoirSize)
     : WindowAggregationLogicalFunction(
           onField.getDataType(),
           DataTypeProvider::provideDataType(partialAggregateStampType),
@@ -56,13 +61,16 @@ ReservoirSampleLogicalFunction::ReservoirSampleLogicalFunction(
 }
 
 std::shared_ptr<WindowAggregationLogicalFunction> ReservoirSampleLogicalFunction::create(
-    const FieldAccessLogicalFunction& onField, const FieldAccessLogicalFunction& asField, std::vector<FieldAccessLogicalFunction> sampleFields, uint64_t reservoirSize)
+    const FieldAccessLogicalFunction& onField,
+    const FieldAccessLogicalFunction& asField,
+    std::vector<FieldAccessLogicalFunction> sampleFields,
+    uint64_t reservoirSize)
 {
     return std::make_shared<ReservoirSampleLogicalFunction>(onField, asField, sampleFields, reservoirSize);
 }
 
-std::shared_ptr<WindowAggregationLogicalFunction>
-ReservoirSampleLogicalFunction::create(const FieldAccessLogicalFunction& onField, std::vector<FieldAccessLogicalFunction> sampleFields, uint64_t reservoirSize)
+std::shared_ptr<WindowAggregationLogicalFunction> ReservoirSampleLogicalFunction::create(
+    const FieldAccessLogicalFunction& onField, std::vector<FieldAccessLogicalFunction> sampleFields, uint64_t reservoirSize)
 {
     return std::make_shared<ReservoirSampleLogicalFunction>(onField, sampleFields, reservoirSize);
 }
@@ -113,7 +121,7 @@ NES::SerializableAggregationFunction ReservoirSampleLogicalFunction::serialize()
     serializedAggregationFunction.mutable_on_field()->CopyFrom(onFieldFuc);
 
     FunctionList fnList;
-    for (auto field: sampleFields)
+    for (auto field : sampleFields)
     {
         auto* addPtr = fnList.add_functions();
         addPtr->CopyFrom(field.serialize());
@@ -130,12 +138,12 @@ AggregationLogicalFunctionGeneratedRegistrar::RegisterReservoirSampleAggregation
     AggregationLogicalFunctionRegistryArguments arguments)
 {
     /// We assume the fields vector starts with onField (useless), asField, and then has the sampleFields
-    PRECONDITION(arguments.fields.size() >= 3, "ReservoirSampleLogicalFunction requires onField (even though unused), asField, and at least one field for the sample");
+    PRECONDITION(
+        arguments.fields.size() >= 3,
+        "ReservoirSampleLogicalFunction requires onField (even though unused), asField, and at least one field for the sample");
     PRECONDITION(arguments.reservoirSize.has_value(), "ReservoirSampleLogicalFunction requires reservoirSize to be set!");
     std::vector<FieldAccessLogicalFunction> sampleFields{
-        std::make_move_iterator(arguments.fields.begin() + 2),
-        std::make_move_iterator(arguments.fields.end())
-    };
+        std::make_move_iterator(arguments.fields.begin() + 2), std::make_move_iterator(arguments.fields.end())};
     uint64_t reservoirSize = arguments.reservoirSize.value();
     return ReservoirSampleLogicalFunction::create(arguments.fields[0], arguments.fields[1], sampleFields, reservoirSize);
 }

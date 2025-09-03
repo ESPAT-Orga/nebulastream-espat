@@ -893,15 +893,18 @@ void AntlrSQLQueryPlanCreator::exitFunctionCall(AntlrSQLParser::FunctionCallCont
                     throw InvalidQuerySyntax("Sample requires sample fields as arguments at {}", context->getText());
                 }
                 std::vector<FieldAccessLogicalFunction> sampleFields;
-                for (auto& field : helpers.top().functionBuilder) {
-                    PRECONDITION(field.tryGet<FieldAccessLogicalFunction>().has_value(), "sample field was not a FieldAccessLogicalFunction");
+                for (auto& field : helpers.top().functionBuilder)
+                {
+                    PRECONDITION(
+                        field.tryGet<FieldAccessLogicalFunction>().has_value(), "sample field was not a FieldAccessLogicalFunction");
                     sampleFields.emplace_back(field.get<FieldAccessLogicalFunction>());
                 }
                 helpers.top().functionBuilder.clear();
 
                 if (helpers.top().constantBuilder.empty())
                 {
-                    throw InvalidQuerySyntax("Expected constant at the end of ReservoirSample function call, got nothing at {}", context->getText());
+                    throw InvalidQuerySyntax(
+                        "Expected constant at the end of ReservoirSample function call, got nothing at {}", context->getText());
                 }
                 auto constantString = helpers.top().constantBuilder.back();
                 helpers.top().constantBuilder.pop_back();

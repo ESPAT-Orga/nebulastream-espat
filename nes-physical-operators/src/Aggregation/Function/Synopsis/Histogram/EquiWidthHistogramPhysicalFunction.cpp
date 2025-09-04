@@ -18,12 +18,13 @@
 
 #include <Aggregation/Function/Synopsis/SynopsisFunctionRef.hpp>
 #include <Nautilus/DataTypes/DataTypesUtil.hpp>
+#include <Nautilus/Interface/Hash/MurMur3HashFunction.hpp>
 #include <Nautilus/Interface/HashMap/ChainedHashMap/ChainedHashMapRef.hpp>
 #include <Nautilus/Interface/HashMap/HashMap.hpp>
 #include <Nautilus/Interface/PagedVector/PagedVectorRef.hpp>
 #include <Util/Common.hpp>
 #include <AggregationPhysicalFunctionRegistry.hpp>
-#include "Nautilus/Interface/Hash/MurMur3HashFunction.hpp"
+#include <QueryExecutionConfiguration.hpp>
 
 namespace NES
 {
@@ -208,17 +209,30 @@ AggregationPhysicalFunctionRegistryReturnType
 AggregationPhysicalFunctionGeneratedRegistrar::RegisterEquiWidthHistogramAggregationPhysicalFunction(
     AggregationPhysicalFunctionRegistryArguments arguments)
 {
-    /// TODO Get actual arguments
-    auto numBuckets = 5;
-    auto pageSize = 4096;
-    auto minValue = 0;
-    auto maxValue = 10;
+    auto numBuckets = arguments.optionalSynopsisArgs[0];
+    auto minValue = arguments.optionalSynopsisArgs[1];
+    auto maxValue = arguments.optionalSynopsisArgs[2];
     std::unique_ptr<Interface::HashFunction> hashFunction = std::make_unique<Interface::MurMur3HashFunction>();
     auto bucketSchema = Schema();
-    auto fieldKeys = std::vector<Nautilus::Interface::MemoryProvider::FieldOffsets>();
-    auto fieldValues = std::vector<Nautilus::Interface::MemoryProvider::FieldOffsets>();
-    auto entriesPerPage = 8;
-    auto entrySize = 8;
+    std::vector<Record::RecordFieldIdentifier> fieldValueKeys;
+    std::vector<Record::RecordFieldIdentifier> fieldValueNames;
+    for (size_t i = 0; i < numBuckets; ++i)
+    {
+        auto keyName = fmt::format("bucket_{}_lower", i);
+        bucketSchema.addField(keyName, DataType::Type::UINT64);
+        fieldValueKeys.emplace_back(keyName);
+        auto valueName = fmt::format("bucket_{}_count", i);
+        bucketSchema.addField(valueName, DataType::Type::UINT64);
+        fieldValueNames.emplace_back(valueName);
+    }
+    auto [fieldKeys, fieldValues]
+        = Interface::MemoryProvider::ChainedEntryMemoryProvider::createFieldOffsets(bucketSchema, fieldValueKeys, fieldValueNames);
+    /// TODO Are these values set correctly?
+    auto keySize = sizeof(uint64_t); /// Size of Record, but that is an unordered_map?
+    auto valueSize = sizeof(uint64_t); /// Same as above
+    auto entrySize = sizeof(Interface::ChainedHashMapEntry) + keySize + valueSize;
+    auto pageSize = DEFAULT_PAGED_VECTOR_SIZE;
+    auto entriesPerPage = pageSize / entrySize;
 
     return std::make_shared<EquiWidthHistogramPhysicalFunction>(
         std::move(arguments.inputType),

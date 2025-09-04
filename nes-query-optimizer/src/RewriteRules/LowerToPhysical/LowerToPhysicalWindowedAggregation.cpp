@@ -35,6 +35,7 @@
 #include <Nautilus/Interface/MemoryProvider/ColumnTupleBufferMemoryProvider.hpp>
 #include <Nautilus/Interface/Record.hpp>
 #include <Operators/LogicalOperator.hpp>
+#include <Operators/Windows/Aggregations/Synopsis/Histogram/EquiWidthHistogramLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/Synopsis/Sample/ReservoirSampleLogicalFunction.hpp>
 #include <Operators/Windows/WindowedAggregationLogicalOperator.hpp>
 #include <RewriteRules/AbstractRewriteRule.hpp>
@@ -132,6 +133,14 @@ getAggregationPhysicalFunctions(const WindowedAggregationLogicalOperator& logica
             auto logicalReservoirSample
                 = std::static_pointer_cast<ReservoirSampleLogicalFunction>(logicalOperator.getWindowAggregation().front());
             aggregationArguments.optionalSynopsisArgs.emplace_back(logicalReservoirSample->getReservoirSize());
+        }
+        else if (name.contains("EquiWidthHistogram"))
+        {
+            auto logicalEquiWidthHistogram
+                = std::static_pointer_cast<EquiWidthHistogramLogicalFunction>(logicalOperator.getWindowAggregation().front());
+            aggregationArguments.optionalSynopsisArgs.emplace_back(logicalEquiWidthHistogram->numBuckets);
+            aggregationArguments.optionalSynopsisArgs.emplace_back(logicalEquiWidthHistogram->minValue);
+            aggregationArguments.optionalSynopsisArgs.emplace_back(logicalEquiWidthHistogram->maxValue);
         }
         if (auto aggregationPhysicalFunction
             = AggregationPhysicalFunctionRegistry::instance().create(std::string(name), std::move(aggregationArguments)))

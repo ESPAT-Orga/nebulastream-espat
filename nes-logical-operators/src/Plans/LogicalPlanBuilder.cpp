@@ -35,6 +35,7 @@
 #include <Operators/Sinks/SinkLogicalOperator.hpp>
 #include <Operators/Sources/SourceNameLogicalOperator.hpp>
 #include <Operators/UnionLogicalOperator.hpp>
+#include <Operators/Windows/Aggregations/Synopsis/Histogram/HistogramProbeLogicalOperator.hpp>
 #include <Operators/Windows/Aggregations/Synopsis/Sample/ReservoirProbeLogicalOperator.hpp>
 #include <Operators/Windows/Aggregations/Synopsis/Sample/ReservoirSampleLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/WindowAggregationLogicalFunction.hpp>
@@ -203,6 +204,7 @@ LogicalPlanBuilder::checkAndAddWatermarkAssigner(LogicalPlan queryPlan, const st
 LogicalPlan LogicalPlanBuilder::addReservoirProbeOp(
     const LogicalPlan& queryPlan, FieldAccessLogicalFunction asField, std::vector<FieldAccessLogicalFunction> sampleFields)
 {
+    /// TODO Extend this precondition after adding more samples and a statstore.
     PRECONDITION(
         not queryPlan.getRootOperators().empty()
             && queryPlan.getRootOperators().front().tryGet<WindowedAggregationLogicalOperator>().and_then(
@@ -214,13 +216,31 @@ LogicalPlan LogicalPlanBuilder::addReservoirProbeOp(
                     }
                     return std::nullopt;
                 }),
-        "Can only add Reservoir probe after reservoir sample (TODO remove when we have statstore etc)");
+        "Can only add Reservoir probe after reservoir sample");
     auto sampleSchema = Schema();
     for (const auto& field : sampleFields)
     {
         sampleSchema.addField(field.getFieldName(), field.getDataType());
     }
     return promoteOperatorToRoot(queryPlan, ReservoirProbeLogicalOperator(std::move(asField), sampleSchema));
+}
+
+LogicalPlan LogicalPlanBuilder::addHistogramProbeOp(const LogicalPlan& queryPlan, FieldAccessLogicalFunction asField, uint64_t numBuckets, uint64_t minValue, uint64_t maxValue)
+{
+    /// TODO Extend this precondition after adding more histogram and a statstore.
+    PRECONDITION(
+        not queryPlan.getRootOperators().empty()
+            && queryPlan.getRootOperators().front().tryGet<WindowedAggregationLogicalOperator>().and_then(
+                [](auto&& op) -> std::optional<bool>
+                {
+                    if (not op.getWindowAggregation().empty())
+                    {
+                        return std::make_optional(op.getWindowAggregation().front()->getName() == "EquiWidthHistogram");
+                    }
+                    return std::nullopt;
+                }),
+        "Can only add histogram probe after a histogram");
+    return promoteOperatorToRoot(queryPlan, HistogramProbeLogicalOperator(std::move(asField), numBuckets, minValue, maxValue));
 }
 
 LogicalPlan LogicalPlanBuilder::addBinaryOperatorAndUpdateSource(

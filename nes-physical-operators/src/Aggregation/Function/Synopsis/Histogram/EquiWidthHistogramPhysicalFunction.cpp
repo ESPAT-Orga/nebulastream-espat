@@ -70,7 +70,7 @@ void EquiWidthHistogramPhysicalFunction::lift(
     Interface::ChainedHashMapRef hashMap(aggregationState, fieldKeys, fieldValues, entriesPerPage, entrySize);
 
     Record indexRecord;
-    indexRecord.write(resultFieldIdentifier, bucketIndex);
+    indexRecord.write(resultFieldIdentifier, bucketIndex * bucketWidth);
 
     const auto hashMapEntry = hashMap.findOrCreateEntry(
         indexRecord,

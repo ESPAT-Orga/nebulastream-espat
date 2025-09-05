@@ -84,11 +84,10 @@ std::string_view EquiWidthHistogramLogicalFunction::getName() const noexcept
     return NAME;
 }
 
+// TODO Remove when not necessary anymore in upstream NES.
 void EquiWidthHistogramLogicalFunction::inferStamp(const Schema& schema)
 {
-    // TODO use schema!
     (void)schema;
-    /// TODO We probably don't need to do most of this, especially if we remove the onField, which we should!
     /// We first infer the dataType of the input field and set the output dataType as the same.
     ///Set fully qualified name for the as Field
     const auto onFieldName = onField.getFieldName();

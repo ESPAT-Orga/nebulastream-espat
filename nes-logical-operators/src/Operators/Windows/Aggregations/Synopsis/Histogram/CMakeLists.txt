@@ -11,3 +11,4 @@
 # limitations under the License.
 
 add_plugin(EquiWidthHistogram AggregationLogicalFunction nes-logical-operators EquiWidthHistogramLogicalFunction.cpp)
+add_plugin(HistogramProbe LogicalOperator nes-logical-operators HistogramProbeLogicalOperator.cpp)

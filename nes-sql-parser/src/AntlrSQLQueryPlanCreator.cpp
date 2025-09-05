@@ -453,6 +453,11 @@ void AntlrSQLQueryPlanCreator::exitPrimaryQuery(AntlrSQLParser::PrimaryQueryCont
             /// TODO This is a hack to get the new projection operator to work.
             /// The projection operator wants to know which fields its going to project here, in its member projections. But as we do not yet know the source's schema, we cannot give it the schema of the sample. So instead we just project all input fields:
             helpers.top().asterisk = true;
+        } else if (helpers.top().windowAggs.front().get()->getName() == "EquiWidthHistogram")
+        {
+            auto asField = helpers.top().windowAggs.front().get()->asField;
+            auto histogramFn = dynamic_cast<EquiWidthHistogramLogicalFunction*>(helpers.top().windowAggs.front().get());
+            queryPlan = LogicalPlanBuilder::addHistogramProbeOp(queryPlan, asField, histogramFn->numBuckets, histogramFn->minValue, histogramFn->maxValue);
         }
     }
 

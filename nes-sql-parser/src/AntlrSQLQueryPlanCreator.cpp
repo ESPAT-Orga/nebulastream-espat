@@ -803,7 +803,7 @@ static uint64_t parseConstant(std::string constant, const char* fieldName)
 {
     uint64_t result;
     auto parseResult = std::from_chars(constant.data(), constant.data() + constant.size(), result);
-    if (parseResult.ec == std::errc())
+    if (parseResult.ec != std::errc())
     {
         throw InvalidQuerySyntax("Failed to parse field `{}` content: {}", fieldName, constant);
     }
@@ -928,11 +928,11 @@ void AntlrSQLQueryPlanCreator::exitFunctionCall(AntlrSQLParser::FunctionCallCont
                 {
                     throw InvalidQuerySyntax("EQUIWIDTHHISTOGRAM requires the arguments numBuckets, minValue, maxValue to be constants");
                 }
-                const auto numBuckets = parseConstant(helpers.top().constantBuilder.back(), "numBuckets");
+                const auto maxValue = parseConstant(helpers.top().constantBuilder.back(), "maxValue");
                 helpers.top().constantBuilder.pop_back();
                 const auto minValue = parseConstant(helpers.top().constantBuilder.back(), "minValue");
                 helpers.top().constantBuilder.pop_back();
-                const auto maxValue = parseConstant(helpers.top().constantBuilder.back(), "maxValue");
+                const auto numBuckets = parseConstant(helpers.top().constantBuilder.back(), "numBuckets");
                 helpers.top().constantBuilder.pop_back();
                 helpers.top().windowAggs.push_back(EquiWidthHistogramLogicalFunction::create(fieldName, numBuckets, minValue, maxValue));
                 break;

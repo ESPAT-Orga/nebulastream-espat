@@ -11,8 +11,8 @@
 # limitations under the License.
 
 add_plugin(EquiWidthHistogram AggregationPhysicalFunction nes-physical-operators EquiWidthHistogramPhysicalFunction.cpp)
+add_plugin(HistogramProbe WindowProbePhysicalOperator nes-physical-operators HistogramProbePhysicalOperator.cpp)
 
 add_source_files(nes-physical-operators
-        EquiWidthHistogramPhysicalFunction.cpp
         HistogramPhysicalFunction.cpp
 )

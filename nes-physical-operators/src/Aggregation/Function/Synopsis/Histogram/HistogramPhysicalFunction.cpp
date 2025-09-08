@@ -23,4 +23,25 @@ HistogramPhysicalFunction::HistogramPhysicalFunction(
 {
 }
 
+std::string HistogramPhysicalFunction::createBucketSchemaKeyName(size_t index)
+{
+    return fmt::format("bucket_{}_lower", index);
+}
+
+std::string HistogramPhysicalFunction::createBucketSchemaValueName(size_t index)
+{
+    return fmt::format("bucket_{}_count", index);
+}
+
+Schema HistogramPhysicalFunction::createBucketSchema(uint64_t numBuckets)
+{
+    Schema bucketSchema;
+    for (uint64_t i = 0; i < numBuckets; i++)
+    {
+        bucketSchema.addField(createBucketSchemaKeyName(i), DataType::Type::UINT64);
+        bucketSchema.addField(createBucketSchemaValueName(i), DataType::Type::UINT64);
+    }
+    return bucketSchema;
+}
+
 }

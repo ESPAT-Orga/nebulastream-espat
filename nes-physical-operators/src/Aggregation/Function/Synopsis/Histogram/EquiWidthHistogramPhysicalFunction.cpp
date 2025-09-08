@@ -70,7 +70,9 @@ void EquiWidthHistogramPhysicalFunction::lift(
     Interface::ChainedHashMapRef hashMap(aggregationState, fieldKeys, fieldValues, entriesPerPage, entrySize);
 
     Record indexRecord;
-    indexRecord.write(resultFieldIdentifier, bucketIndex * bucketWidth);
+    /// bucketLowerBound is a double_t again.
+    auto bucketLowerBound = bucketIndex * bucketWidth;
+    indexRecord.write(resultFieldIdentifier, bucketLowerBound);
 
     const auto hashMapEntry = hashMap.findOrCreateEntry(
         indexRecord,
@@ -133,11 +135,11 @@ Record EquiWidthHistogramPhysicalFunction::lower(
 
     /// Create a Ref object to store the bucketWidth as metaData and a record with the lower bound and count for each bucket
     const auto dataSize = nautilus::val<uint32_t>(numFilledBuckets * (sizeof(double_t) + sizeof(uint64_t)));
-    auto histogramFunctionRef = SynopsisFunctionRef(bucketSchema);
-    histogramFunctionRef.initializeForWriting(
+    auto synRef = SynopsisFunctionRef(bucketSchema);
+    synRef.initializeForWriting(
         pipelineMemoryProvider.arena, dataSize, nautilus::val<uint32_t>(sizeof(double_t)), VarVal(numFilledBuckets));
 
-    /// Iterate hashmap to fill histogramFunctionRef with all buckets that have a count > 0
+    /// Iterate hashmap to fill synRef with all buckets that have a count > 0
     for (auto entryIt = hashMap.begin(); entryIt != hashMap.end(); ++entryIt)
     {
         const auto entryRef = *entryIt;
@@ -148,12 +150,12 @@ Record EquiWidthHistogramPhysicalFunction::lower(
         Record bucketRecord;
         bucketRecord.reassignFields(keyRecord);
         bucketRecord.reassignFields(valueRecord);
-        histogramFunctionRef.writeRecord(bucketRecord);
+        synRef.writeRecord(bucketRecord);
     }
 
     /// Add the reservoir to the result record
     Record resultRecord;
-    resultRecord.write(resultFieldIdentifier, histogramFunctionRef.getSynopsis());
+    resultRecord.write(resultFieldIdentifier, synRef.getSynopsis());
     return resultRecord;
 }
 
@@ -213,16 +215,14 @@ AggregationPhysicalFunctionGeneratedRegistrar::RegisterEquiWidthHistogramAggrega
     auto minValue = arguments.optionalSynopsisArgs[1];
     auto maxValue = arguments.optionalSynopsisArgs[2];
     std::unique_ptr<Interface::HashFunction> hashFunction = std::make_unique<Interface::MurMur3HashFunction>();
-    auto bucketSchema = Schema();
+    auto bucketSchema = HistogramPhysicalFunction::createBucketSchema(numBuckets);
     std::vector<Record::RecordFieldIdentifier> fieldValueKeys;
     std::vector<Record::RecordFieldIdentifier> fieldValueNames;
-    for (size_t i = 0; i < numBuckets; ++i)
-    {
-        auto keyName = fmt::format("bucket_{}_lower", i);
-        bucketSchema.addField(keyName, DataType::Type::UINT64);
+    /// This for loop relies on the layout of the bucketSchema being key, value, key, val...
+    for (size_t i = 0; i < bucketSchema.getNumberOfFields() - 1; i += 2) {
+        auto keyName = bucketSchema.getFieldAt(i).name;
+        auto valueName = bucketSchema.getFieldAt(i + 1).name;
         fieldValueKeys.emplace_back(keyName);
-        auto valueName = fmt::format("bucket_{}_count", i);
-        bucketSchema.addField(valueName, DataType::Type::UINT64);
         fieldValueNames.emplace_back(valueName);
     }
     auto [fieldKeys, fieldValues]

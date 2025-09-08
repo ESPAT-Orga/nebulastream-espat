@@ -458,6 +458,8 @@ void AntlrSQLQueryPlanCreator::exitPrimaryQuery(AntlrSQLParser::PrimaryQueryCont
             auto asField = helpers.top().windowAggs.front().get()->asField;
             auto histogramFn = dynamic_cast<EquiWidthHistogramLogicalFunction*>(helpers.top().windowAggs.front().get());
             queryPlan = LogicalPlanBuilder::addHistogramProbeOp(queryPlan, asField, histogramFn->numBuckets, histogramFn->minValue, histogramFn->maxValue);
+            /// TODO See comment in ReservoirSample branch.
+            helpers.top().asterisk = true;
         }
     }
 

@@ -95,7 +95,7 @@ LogicalOperator HistogramProbeLogicalOperator::withInferredSchema(std::vector<Sc
     for (size_t i = 0; i < numBuckets; i++)
     {
         /// TODO Account for empty buckets - the physical operator EquiWidthHistogram does not put them into its result if empty.
-        auto name = fmt::format("bucket[{},{})", lower, lower + bucketWidth);
+        auto name = fmt::format("{}bucket[{},{})", copy.outputSchema.getQualifierNameForSystemGeneratedFieldsWithSeparator(), lower, lower + bucketWidth);
         copy.outputSchema.addField(name, DataType::Type::UINT64);
         lower += bucketWidth;
     }
@@ -228,6 +228,7 @@ LogicalOperatorGeneratedRegistrar::RegisterHistogramProbeLogicalOperator(NES::Lo
     auto asFieldFunction = FunctionSerializationUtil::deserializeFunction(std::get<NES::SerializableFunction>(asFieldSerialized));
     auto asField = asFieldFunction.get<FieldAccessLogicalFunction>();
 
+    /// TODO Get arguments instead of hardcoding!
     auto logicalOperator = HistogramProbeLogicalOperator(asField, 5, 0, 25);
     if (auto& id = arguments.id)
     {

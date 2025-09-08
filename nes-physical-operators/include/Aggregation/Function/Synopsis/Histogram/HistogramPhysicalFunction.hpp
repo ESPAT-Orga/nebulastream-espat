@@ -30,6 +30,9 @@ class HistogramPhysicalFunction : public AggregationPhysicalFunction
 public:
     HistogramPhysicalFunction(
         DataType inputType, DataType resultType, PhysicalFunction inputFunction, Record::RecordFieldIdentifier resultFieldIdentifier);
+    static std::string createBucketSchemaKeyName(size_t index);
+    static std::string createBucketSchemaValueName(size_t index);
+    static Schema createBucketSchema(uint64_t numBuckets);
 };
 
 }

@@ -10,6 +10,4 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-add_subdirectory(Histogram)
-add_subdirectory(Sample)
-add_subdirectory(Sketch)
+add_plugin(CountMinSketch AggregationLogicalFunction nes-logical-operators CountMinSketchLogicalFunction.cpp)

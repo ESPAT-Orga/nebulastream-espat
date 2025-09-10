@@ -55,6 +55,7 @@
 #include <Operators/Windows/Aggregations/SumAggregationLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/Synopsis/Histogram/EquiWidthHistogramLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/Synopsis/Sample/ReservoirSampleLogicalFunction.hpp>
+#include <Operators/Windows/Aggregations/Synopsis/Sketch/CountMinSketchLogicalFunction.hpp>
 #include <Operators/Windows/JoinLogicalOperator.hpp>
 #include <Plans/LogicalPlan.hpp>
 #include <Plans/LogicalPlanBuilder.hpp>
@@ -942,6 +943,21 @@ void AntlrSQLQueryPlanCreator::exitFunctionCall(AntlrSQLParser::FunctionCallCont
                 const auto numBuckets = parseConstant(helpers.top().constantBuilder.back(), "numBuckets");
                 helpers.top().constantBuilder.pop_back();
                 helpers.top().windowAggs.push_back(EquiWidthHistogramLogicalFunction::create(fieldName, numBuckets, minValue, maxValue));
+                break;
+            }
+            else if (funcName == "COUNTMINSKETCH")
+            {
+                if (helpers.top().functionBuilder.size() != 1 && helpers.top().functionBuilder.back().tryGet<FieldAccessLogicalFunction>())
+                {
+                    throw InvalidQuerySyntax("COUNTMINSKETCH requires the first argument to be a fieldname");
+                }
+                const auto fieldName = helpers.top().functionBuilder.back().tryGet<FieldAccessLogicalFunction>().value();
+                helpers.top().functionBuilder.pop_back();
+                const auto rows = parseConstant(helpers.top().constantBuilder.back(), "rows");
+                helpers.top().constantBuilder.pop_back();
+                const auto columns = parseConstant(helpers.top().constantBuilder.back(), "columns");
+                helpers.top().constantBuilder.pop_back();
+                helpers.top().windowAggs.push_back(CountMinSketchLogicalFunction::create(fieldName, columns, rows));
                 break;
             }
             else

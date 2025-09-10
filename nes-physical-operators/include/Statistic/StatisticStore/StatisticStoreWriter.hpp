@@ -22,7 +22,13 @@ namespace NES
 class StatisticStoreWriter final : public PhysicalOperatorConcept
 {
 public:
-    explicit StatisticStoreWriter(uint64_t operatorHandlerId);
+    explicit StatisticStoreWriter(
+        uint64_t operatorHandlerId,
+        std::string_view statisticHashFieldName,
+        std::string_view statisticTypeFieldName,
+        std::string_view statisticStartTsFieldName,
+        std::string_view statisticEndTsFieldName,
+        std::string_view statisticDataFieldName);
 
     /// Inserts the given statistic record into the StatisticStore
     void execute(ExecutionContext& executionCtx, Record& record) const override;

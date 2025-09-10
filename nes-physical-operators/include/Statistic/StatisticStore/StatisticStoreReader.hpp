@@ -26,7 +26,12 @@ namespace NES
 class StatisticStoreReader final : public PhysicalOperatorConcept
 {
 public:
-    explicit StatisticStoreReader(uint64_t operatorHandlerId, StatisticProvider statisticProvider);
+    explicit StatisticStoreReader(
+        uint64_t operatorHandlerId,
+        std::string_view statisticHashFieldName,
+        std::string_view statisticStartTsFieldName,
+        std::string_view statisticEndTsFieldName,
+        StatisticProvider statisticProvider);
 
     /// Gets the single statistic for given metadata from the StatisticStore and creates records out of it
     void execute(ExecutionContext& executionCtx, Record& record) const override;

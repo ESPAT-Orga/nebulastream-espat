@@ -94,7 +94,15 @@ void EquiWidthHistogramLogicalFunction::inferStamp(const Schema& schema)
     const auto asFieldName = asField.getFieldName();
 
     const auto attributeNameResolver = "stream$";
-    ///If on and as field name are different then append the attribute name resolver from on field to the as field
+    if (onFieldName.find(Schema::ATTRIBUTE_NAME_SEPARATOR) == std::string::npos)
+    {
+        onField = onField.withFieldName(attributeNameResolver + onFieldName).get<FieldAccessLogicalFunction>();
+    }
+    else
+    {
+        const auto fieldName = onFieldName.substr(onFieldName.find_last_of(Schema::ATTRIBUTE_NAME_SEPARATOR) + 1);
+        onField = onField.withFieldName(attributeNameResolver + fieldName).get<FieldAccessLogicalFunction>();
+    }
     if (asFieldName.find(Schema::ATTRIBUTE_NAME_SEPARATOR) == std::string::npos)
     {
         asField = asField.withFieldName(attributeNameResolver + asFieldName).get<FieldAccessLogicalFunction>();

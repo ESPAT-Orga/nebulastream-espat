@@ -46,7 +46,7 @@ public:
         std::unique_ptr<StatisticProviderIteratorImpl> iteratorImpl;
 
     public:
-        virtual ~StatisticProviderIterator() = default;
+        ~StatisticProviderIterator() = default;
         StatisticProviderIterator(StatisticProviderIterator&& statisticProviderIterator) noexcept;
         explicit StatisticProviderIterator(std::unique_ptr<StatisticProviderIteratorImpl> iteratorImpl);
         Record operator*() const;
@@ -57,8 +57,8 @@ public:
     protected:
         friend class StatisticProvider;
         /// Gets called after creation but before the first use
-        virtual void advanceToBegin() const;
-        virtual void advanceToEnd() const;
+        void advanceToBegin() const;
+        void advanceToEnd() const;
     };
 
     StatisticProvider(const Statistic::StatisticType statisticType, std::unique_ptr<StatisticProviderArguments> statisticProviderArguments);
@@ -69,8 +69,8 @@ public:
 
     ~StatisticProvider() = default;
 
-    [[nodiscard]] StatisticProviderIterator begin() const;
-    [[nodiscard]] StatisticProviderIterator end() const;
+    [[nodiscard]] StatisticProviderIterator begin(const nautilus::val<int8_t*>& statisticMemArea) const;
+    [[nodiscard]] StatisticProviderIterator end(const nautilus::val<int8_t*>& statisticMemArea) const;
 
 private:
     Statistic::StatisticType statisticType;
@@ -86,7 +86,7 @@ private:
 class StatisticProviderIteratorImpl
 {
 public:
-    explicit StatisticProviderIteratorImpl(nautilus::val<int8_t*> statisticData);
+    explicit StatisticProviderIteratorImpl(nautilus::val<int8_t*> statisticMemArea);
     virtual ~StatisticProviderIteratorImpl() = default;
 
     /// Methods for operating in a reading manner across one statistic

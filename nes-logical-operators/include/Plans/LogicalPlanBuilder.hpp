@@ -85,6 +85,8 @@ public:
     static LogicalPlan addReservoirProbeOp(
         const LogicalPlan& queryPlan, FieldAccessLogicalFunction asField, std::vector<FieldAccessLogicalFunction> sampleFields);
 
+    static LogicalPlan addHistogramProbeOp(const LogicalPlan& queryPlan, FieldAccessLogicalFunction asField, uint64_t numBuckets, uint64_t minValue, uint64_t maxValue);
+
 private:
     /// @brief: This method adds a binary operator to the query plan and updates the consumed sources
     /// @param operatorNode the binary operator to add

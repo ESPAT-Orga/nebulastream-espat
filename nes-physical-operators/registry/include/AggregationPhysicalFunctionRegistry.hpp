@@ -36,7 +36,8 @@ struct AggregationPhysicalFunctionRegistryArguments
     PhysicalFunction inputFunction;
     Record::RecordFieldIdentifier resultFieldIdentifier;
     std::optional<std::shared_ptr<Interface::MemoryProvider::TupleBufferMemoryProvider>> memProviderPagedVector;
-    std::optional<uint64_t> reservoirSize;
+    /// TODO Use std::variant or add a config like in logical operator arguments?
+    std::vector<uint64_t> optionalSynopsisArgs;
 };
 
 class AggregationPhysicalFunctionRegistry : public BaseRegistry<

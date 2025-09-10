@@ -31,8 +31,8 @@ void SampleProbePhysicalOperator::execute(ExecutionContext& executionCtx, Record
 {
     auto sampleRef = SynopsisFunctionRef(sampleSchema);
     sampleRef.initializeForReading(record.read(inputFieldIdentifier).cast<VariableSizedData>().getReference());
-    const auto sampleSize = Nautilus::Util::readValueFromMemRef<uint64_t>(sampleRef.getMetaData().getContent());
-    for (auto i = nautilus::val<uint64_t>(0); i < sampleSize; ++i)
+    const auto sampleActualSize = Nautilus::Util::readValueFromMemRef<uint64_t>(sampleRef.getMetaData().getContent());
+    for (auto i = nautilus::val<uint64_t>(0); i < sampleActualSize; ++i)
     {
         auto sampleRecord = sampleRef.readNextRecord();
         // TODO Also add ID if group by? Maybe save that info?

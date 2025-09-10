@@ -53,6 +53,7 @@
 #include <Operators/Windows/Aggregations/MedianAggregationLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/MinAggregationLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/SumAggregationLogicalFunction.hpp>
+#include <Operators/Windows/Aggregations/Synopsis/Histogram/EquiWidthHistogramLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/Synopsis/Sample/ReservoirSampleLogicalFunction.hpp>
 #include <Operators/Windows/JoinLogicalOperator.hpp>
 #include <Plans/LogicalPlan.hpp>
@@ -452,6 +453,13 @@ void AntlrSQLQueryPlanCreator::exitPrimaryQuery(AntlrSQLParser::PrimaryQueryCont
             /// TODO This is a hack to get the new projection operator to work.
             /// The projection operator wants to know which fields its going to project here, in its member projections. But as we do not yet know the source's schema, we cannot give it the schema of the sample. So instead we just project all input fields:
             helpers.top().asterisk = true;
+        } else if (helpers.top().windowAggs.front().get()->getName() == "EquiWidthHistogram")
+        {
+            auto asField = helpers.top().windowAggs.front().get()->asField;
+            auto histogramFn = dynamic_cast<EquiWidthHistogramLogicalFunction*>(helpers.top().windowAggs.front().get());
+            queryPlan = LogicalPlanBuilder::addHistogramProbeOp(queryPlan, asField, histogramFn->numBuckets, histogramFn->minValue, histogramFn->maxValue);
+            /// TODO See comment in ReservoirSample branch.
+            helpers.top().asterisk = true;
         }
     }
 
@@ -802,7 +810,7 @@ static uint64_t parseConstant(std::string constant, const char* fieldName)
 {
     uint64_t result;
     auto parseResult = std::from_chars(constant.data(), constant.data() + constant.size(), result);
-    if (parseResult.ec == std::errc())
+    if (parseResult.ec != std::errc())
     {
         throw InvalidQuerySyntax("Failed to parse field `{}` content: {}", fieldName, constant);
     }
@@ -913,6 +921,27 @@ void AntlrSQLQueryPlanCreator::exitFunctionCall(AntlrSQLParser::FunctionCallCont
                 const auto asFieldIfNotOverwritten = FieldAccessLogicalFunction("reservoir");
                 helpers.top().windowAggs.push_back(
                     ReservoirSampleLogicalFunction::create(uselessField, asFieldIfNotOverwritten, sampleFields, reservoirSize));
+                break;
+            }
+            else if (funcName == "EQUIWIDTHHISTOGRAM")
+            {
+                if (helpers.top().functionBuilder.size() != 1 && helpers.top().functionBuilder.back().tryGet<FieldAccessLogicalFunction>())
+                {
+                    throw InvalidQuerySyntax("EQUIWIDTHHISTOGRAM requires the first argument to be a fieldname");
+                }
+                const auto fieldName = helpers.top().functionBuilder.back().tryGet<FieldAccessLogicalFunction>().value();
+                helpers.top().functionBuilder.pop_back();
+                if (helpers.top().constantBuilder.size() != 3)
+                {
+                    throw InvalidQuerySyntax("EQUIWIDTHHISTOGRAM requires the arguments numBuckets, minValue, maxValue to be constants");
+                }
+                const auto maxValue = parseConstant(helpers.top().constantBuilder.back(), "maxValue");
+                helpers.top().constantBuilder.pop_back();
+                const auto minValue = parseConstant(helpers.top().constantBuilder.back(), "minValue");
+                helpers.top().constantBuilder.pop_back();
+                const auto numBuckets = parseConstant(helpers.top().constantBuilder.back(), "numBuckets");
+                helpers.top().constantBuilder.pop_back();
+                helpers.top().windowAggs.push_back(EquiWidthHistogramLogicalFunction::create(fieldName, numBuckets, minValue, maxValue));
                 break;
             }
             else

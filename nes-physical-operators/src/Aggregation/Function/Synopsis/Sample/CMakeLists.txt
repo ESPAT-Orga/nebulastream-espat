@@ -11,10 +11,9 @@
 # limitations under the License.
 
 add_plugin(ReservoirSample AggregationPhysicalFunction nes-physical-operators ReservoirSamplePhysicalFunction.cpp)
+# TODO Is it correct to put `WindowProbePhysicalOperator` here even though we do not inherit from it (same for histogram)?
 add_plugin(ReservoirProbe WindowProbePhysicalOperator nes-physical-operators SampleProbePhysicalOperator.cpp)
 
 add_source_files(nes-physical-operators
-        ReservoirSamplePhysicalFunction.cpp
         SamplePhysicalFunction.cpp
-        SampleProbePhysicalOperator.cpp
 )

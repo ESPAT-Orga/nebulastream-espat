@@ -35,10 +35,13 @@
 #include <Operators/Sinks/SinkLogicalOperator.hpp>
 #include <Operators/Sources/SourceNameLogicalOperator.hpp>
 #include <Operators/UnionLogicalOperator.hpp>
+#include <Operators/Windows/Aggregations/Synopsis/Sample/ReservoirProbeLogicalOperator.hpp>
+#include <Operators/Windows/Aggregations/Synopsis/Sample/ReservoirSampleLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/WindowAggregationLogicalFunction.hpp>
 #include <Operators/Windows/JoinLogicalOperator.hpp>
 #include <Operators/Windows/WindowedAggregationLogicalOperator.hpp>
 #include <Plans/LogicalPlan.hpp>
+#include <Plans/LogicalPlanBuilder.hpp>
 #include <Util/Common.hpp>
 #include <Util/Logger/Logger.hpp>
 #include <WindowTypes/Measures/TimeCharacteristic.hpp>
@@ -195,6 +198,29 @@ LogicalPlanBuilder::checkAndAddWatermarkAssigner(LogicalPlan queryPlan, const st
         }
     }
     return queryPlan;
+}
+
+LogicalPlan LogicalPlanBuilder::addReservoirProbeOp(
+    const LogicalPlan& queryPlan, FieldAccessLogicalFunction asField, std::vector<FieldAccessLogicalFunction> sampleFields)
+{
+    PRECONDITION(
+        not queryPlan.getRootOperators().empty()
+            && queryPlan.getRootOperators().front().tryGet<WindowedAggregationLogicalOperator>().and_then(
+                [](auto&& op) -> std::optional<bool>
+                {
+                    if (not op.getWindowAggregation().empty())
+                    {
+                        return std::make_optional(op.getWindowAggregation().front()->getName() == "ReservoirSample");
+                    }
+                    return std::nullopt;
+                }),
+        "Can only add Reservoir probe after reservoir sample (TODO remove when we have statstore etc)");
+    auto sampleSchema = Schema();
+    for (const auto& field : sampleFields)
+    {
+        sampleSchema.addField(field.getFieldName(), field.getDataType());
+    }
+    return promoteOperatorToRoot(queryPlan, ReservoirProbeLogicalOperator(std::move(asField), sampleSchema));
 }
 
 LogicalPlan LogicalPlanBuilder::addBinaryOperatorAndUpdateSource(

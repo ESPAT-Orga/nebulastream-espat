@@ -53,6 +53,7 @@
 #include <Operators/Windows/Aggregations/MedianAggregationLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/MinAggregationLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/SumAggregationLogicalFunction.hpp>
+#include <Operators/Windows/Aggregations/Synopsis/Sample/ReservoirSampleLogicalFunction.hpp>
 #include <Operators/Windows/JoinLogicalOperator.hpp>
 #include <Plans/LogicalPlan.hpp>
 #include <Plans/LogicalPlanBuilder.hpp>
@@ -80,7 +81,6 @@ LogicalPlan AntlrSQLQueryPlanCreator::getQueryPlan() const
         throw InvalidQuerySyntax("Query could not be parsed");
     }
     /// Todo #421: support multiple sinks
-    INVARIANT(!sinkNames.empty(), "Need at least one sink!");
     return LogicalPlanBuilder::addSink(sinkNames.front(), queryPlans.top());
 }
 
@@ -444,6 +444,15 @@ void AntlrSQLQueryPlanCreator::exitPrimaryQuery(AntlrSQLParser::PrimaryQueryCont
     {
         queryPlan = LogicalPlanBuilder::addWindowAggregation(
             queryPlan, helpers.top().windowType, helpers.top().windowAggs, helpers.top().groupByFields);
+        if (helpers.top().windowAggs.front().get()->getName() == "ReservoirSample")
+        {
+            auto reservoirFn = dynamic_cast<ReservoirSampleLogicalFunction*>(helpers.top().windowAggs.front().get());
+            auto asField = helpers.top().windowAggs.front().get()->asField;
+            queryPlan = LogicalPlanBuilder::addReservoirProbeOp(queryPlan, asField, reservoirFn->getSampleFields());
+            /// TODO This is a hack to get the new projection operator to work.
+            /// The projection operator wants to know which fields its going to project here, in its member projections. But as we do not yet know the source's schema, we cannot give it the schema of the sample. So instead we just project all input fields:
+            helpers.top().asterisk = true;
+        }
     }
 
     queryPlan = LogicalPlanBuilder::addProjection(helpers.top().getProjections(), helpers.top().asterisk, queryPlan);
@@ -580,11 +589,11 @@ void AntlrSQLQueryPlanCreator::exitNamedExpression(AntlrSQLParser::NamedExpressi
     /// The user did not specify a new name (... AS THE_NAME) for the aggregation function and we need to generate one.
     else if (context->name == nullptr and not helpers.top().functionBuilder.empty() and helpers.top().hasUnnamedAggregation)
     {
-        const auto accessFunction = helpers.top().functionBuilder.back();
+        const auto fieldAccess = helpers.top().functionBuilder.back();
         helpers.top().functionBuilder.pop_back();
-        const auto fieldAccessNode = accessFunction.get<FieldAccessLogicalFunction>();
+        const auto fieldAccessLogicalFn = fieldAccess.get<FieldAccessLogicalFunction>();
         const auto lastAggregation = helpers.top().windowAggs.back();
-        const auto newName = fmt::format("{}_{}", fieldAccessNode.getFieldName(), lastAggregation->getName());
+        const auto newName = fmt::format("{}_{}", fieldAccessLogicalFn.getFieldName(), lastAggregation->getName());
         const auto asField = FieldAccessLogicalFunction(newName);
         lastAggregation->asField = asField;
         helpers.top().windowAggs.pop_back();
@@ -789,6 +798,17 @@ void AntlrSQLQueryPlanCreator::exitConstantDefault(AntlrSQLParser::ConstantDefau
     }
 }
 
+static uint64_t parseConstant(std::string constant, const char* fieldName)
+{
+    uint64_t result;
+    auto parseResult = std::from_chars(constant.data(), constant.data() + constant.size(), result);
+    if (parseResult.ec == std::errc())
+    {
+        throw InvalidQuerySyntax("Failed to parse field `{}` content: {}", fieldName, constant);
+    }
+    return result;
+}
+
 void AntlrSQLQueryPlanCreator::exitFunctionCall(AntlrSQLParser::FunctionCallContext* context)
 {
     const auto funcName = Util::toUpperCase(context->children[0]->getText());
@@ -859,9 +879,41 @@ void AntlrSQLQueryPlanCreator::exitFunctionCall(AntlrSQLParser::FunctionCallCont
                 auto constFunctionItem = ConstantValueLogicalFunction(*dataType, std::move(value));
                 helpers.top().functionBuilder.emplace_back(constFunctionItem);
             }
-            else if (auto logicalFunction = LogicalFunctionProvider::tryProvide(funcName, std::move(helpers.top().functionBuilder)))
+            else if (auto logicalFunction = LogicalFunctionProvider::tryProvide(funcName, helpers.top().functionBuilder))
             {
+                helpers.top().functionBuilder.pop_back();
                 helpers.top().functionBuilder.push_back(*logicalFunction);
+            }
+            /// TODO Would be better to use the LogicalFunctionProvider for reservoir, but then it would also need to take constantBuilder
+            /// as argument and not just the functionBuilder (see above).
+            else if (funcName == "RESERVOIR")
+            {
+                if (helpers.top().functionBuilder.empty())
+                {
+                    throw InvalidQuerySyntax("Sample requires sample fields as arguments at {}", context->getText());
+                }
+                std::vector<FieldAccessLogicalFunction> sampleFields;
+                for (auto& field : helpers.top().functionBuilder)
+                {
+                    PRECONDITION(
+                        field.tryGet<FieldAccessLogicalFunction>().has_value(), "sample field was not a FieldAccessLogicalFunction");
+                    sampleFields.emplace_back(field.get<FieldAccessLogicalFunction>());
+                }
+                helpers.top().functionBuilder.clear();
+
+                if (helpers.top().constantBuilder.empty())
+                {
+                    throw InvalidQuerySyntax(
+                        "Expected constant at the end of ReservoirSample function call, got nothing at {}", context->getText());
+                }
+                auto constantString = helpers.top().constantBuilder.back();
+                helpers.top().constantBuilder.pop_back();
+                uint64_t reservoirSize = parseConstant(helpers.top().constantBuilder.back(), "reservoirSize");
+                const auto uselessField = FieldAccessLogicalFunction("timestamp");
+                const auto asFieldIfNotOverwritten = FieldAccessLogicalFunction("reservoir");
+                helpers.top().windowAggs.push_back(
+                    ReservoirSampleLogicalFunction::create(uselessField, asFieldIfNotOverwritten, sampleFields, reservoirSize));
+                break;
             }
             else
             {

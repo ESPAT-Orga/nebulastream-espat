@@ -38,6 +38,7 @@ struct AggregationPhysicalFunctionRegistryArguments
     std::optional<std::shared_ptr<Interface::MemoryProvider::TupleBufferMemoryProvider>> memProviderPagedVector;
     std::optional<uint64_t> seed;
     std::optional<uint64_t> sampleSize;
+    std::optional<uint64_t> binWidth;
 };
 
 class AggregationPhysicalFunctionRegistry : public BaseRegistry<

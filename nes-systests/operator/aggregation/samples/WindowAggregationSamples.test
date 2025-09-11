@@ -37,9 +37,9 @@ SINK sinkStream UINT64 stream$start UINT64 stream$end UINT64 stream$id UINT64 st
 
 # Simple reservoir sample, grouped by id
 SELECT * FROM (
-    SELECT RESERVOIR_PROBE(STAT_HASH, f1 UINT64, f2 U64, ts U64)
+    SELECT RESERVOIR_PROBE(STAT_HASH=43, f1 UINT64, f2 U64, ts U64)
     FROM (
-        SELECT RESERVOIR(id, value, timestamp, 5) FROM stream GROUP BY id WINDOW TUMBLING(timestamp, size 5 sec)
+        SELECT RESERVOIR(STAT_HASH=43, id, value, timestamp, 5) FROM stream GROUP BY id WINDOW TUMBLING(timestamp, size 5 sec)
     )
 ) INTO sinkStream;
 ----
@@ -73,9 +73,9 @@ SELECT * FROM (
 
 # Simple reservoir sample without grouping
 SELECT * FROM (
-    SELECT RESERVOIR_PROBE(STAT_HASH, f1 UINT64, f2 U64, ts U64)
+    SELECT RESERVOIR_PROBE(STAT_HASH=42, f1 UINT64, f2 U64, ts U64)
     FROM (
-        SELECT RESERVOIR(id, value, timestamp, 5) FROM stream WINDOW TUMBLING(timestamp, size 5 sec)
+        SELECT RESERVOIR(STAT_HASH=42, id, value, timestamp, 5) FROM stream WINDOW TUMBLING(timestamp, size 5 sec)
     )
 ) INTO sinkStream;
 ----

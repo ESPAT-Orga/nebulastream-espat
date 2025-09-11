@@ -76,7 +76,9 @@ public:
         AggregationFunctionList,
         WindowInfos,
         ProjectionList,
-        UInt64List>;
+        UInt64List,
+        SerializableFunction,
+        SerializableSchema>;
     using Config = std::unordered_map<std::string, ConfigType>;
 
     /// Tag struct that tags a config key with a type.

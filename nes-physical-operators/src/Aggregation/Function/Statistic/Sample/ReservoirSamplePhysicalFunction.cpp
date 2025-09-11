@@ -190,16 +190,17 @@ ReservoirSamplePhysicalFunction::lower(nautilus::val<AggregationState*> aggregat
 void ReservoirSamplePhysicalFunction::reset(nautilus::val<AggregationState*> aggregationState, PipelineMemoryProvider&)
 {
     invoke(
-        +[](AggregationState* pagedVectorMemArea) -> void
+        +[](AggregationState* pagedVectorMemArea, const uint64_t stateSize) -> void
         {
             /// Allocates a new PagedVector in the memory area provided by the pointer to the pagedvector
             auto* pagedVector = reinterpret_cast<Interface::PagedVector*>(pagedVectorMemArea);
             new (pagedVector) Interface::PagedVector();
 
             /// MemSet the three uint64_t values to 0
-            std::memset(reinterpret_cast<int8_t*>(pagedVector) + sizeof(Interface::PagedVector), 0, sizeof(uint64_t) * 3);
+            std::memset(reinterpret_cast<int8_t*>(pagedVector) + sizeof(Interface::PagedVector), 0, stateSize);
         },
-        aggregationState);
+        aggregationState,
+        nautilus::val<uint64_t>{getSizeOfStateInBytes()});
 }
 
 void ReservoirSamplePhysicalFunction::cleanup(nautilus::val<AggregationState*> aggregationState)

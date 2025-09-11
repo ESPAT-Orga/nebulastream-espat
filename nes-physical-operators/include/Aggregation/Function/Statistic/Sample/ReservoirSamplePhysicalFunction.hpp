@@ -18,7 +18,7 @@
 
 namespace NES
 {
-class ReservoirSamplePhysicalFunction : public AggregationPhysicalFunction
+class ReservoirSamplePhysicalFunction final : public AggregationPhysicalFunction
 {
 public:
     ReservoirSamplePhysicalFunction(

@@ -56,17 +56,15 @@ uint64_t getRandomNumberProxy(const uint64_t upperBound, const uint64_t seed)
 }
 
 void ReservoirSamplePhysicalFunction::lift(
-    const nautilus::val<AggregationState*>& aggregationState,
-    PipelineMemoryProvider& pipelineMemoryProvider,
-    const Nautilus::Record& record)
+    const nautilus::val<AggregationState*>& aggregationState, PipelineMemoryProvider& pipelineMemoryProvider, const Record& record)
 {
     const auto pagedVectorPtr = static_cast<nautilus::val<int8_t*>>(aggregationState);
-    const Interface::PagedVectorRef pagedVectorRef(pagedVectorPtr, bufferRef);
+    const PagedVectorRef pagedVectorRef(pagedVectorPtr, bufferRef);
 
-    const auto numberOfSeenTuplesRef = pagedVectorPtr + nautilus::val<uint64_t>{sizeof(Interface::PagedVector)};
+    const auto numberOfSeenTuplesRef = pagedVectorPtr + nautilus::val<uint64_t>{sizeof(PagedVector)};
     const auto sampleDataSizeRef = numberOfSeenTuplesRef + nautilus::val<uint64_t>{sizeof(uint64_t)};
-    auto numberOfSeenTuples = Nautilus::Util::readValueFromMemRef<uint64_t>(numberOfSeenTuplesRef);
-    auto sampleDataSize = Nautilus::Util::readValueFromMemRef<uint64_t>(sampleDataSizeRef);
+    auto numberOfSeenTuples = readValueFromMemRef<uint64_t>(numberOfSeenTuplesRef);
+    auto sampleDataSize = readValueFromMemRef<uint64_t>(sampleDataSizeRef);
 
     if (numberOfSeenTuples < sampleSize)
     {
@@ -99,15 +97,15 @@ void ReservoirSamplePhysicalFunction::combine(
     const auto pagedVectorPtr1 = static_cast<nautilus::val<int8_t*>>(aggregationState1);
     const auto pagedVectorPtr2 = static_cast<nautilus::val<int8_t*>>(aggregationState2);
 
-    const auto numberOfSeenTuplesRef1 = pagedVectorPtr1 + nautilus::val<uint64_t>{sizeof(Interface::PagedVector)};
+    const auto numberOfSeenTuplesRef1 = pagedVectorPtr1 + nautilus::val<uint64_t>{sizeof(PagedVector)};
     const auto sampleDataSizeRef1 = numberOfSeenTuplesRef1 + nautilus::val<uint64_t>{sizeof(uint64_t)};
-    auto numberOfSeenTuples1 = Nautilus::Util::readValueFromMemRef<uint64_t>(numberOfSeenTuplesRef1);
-    auto sampleDataSize1 = Nautilus::Util::readValueFromMemRef<uint64_t>(sampleDataSizeRef1);
+    auto numberOfSeenTuples1 = readValueFromMemRef<uint64_t>(numberOfSeenTuplesRef1);
+    auto sampleDataSize1 = readValueFromMemRef<uint64_t>(sampleDataSizeRef1);
 
-    const auto numberOfSeenTuplesRef2 = pagedVectorPtr2 + nautilus::val<uint64_t>{sizeof(Interface::PagedVector)};
+    const auto numberOfSeenTuplesRef2 = pagedVectorPtr2 + nautilus::val<uint64_t>{sizeof(PagedVector)};
     const auto sampleDataSizeRef2 = numberOfSeenTuplesRef2 + nautilus::val<uint64_t>{sizeof(uint64_t)};
-    auto numberOfSeenTuples2 = Nautilus::Util::readValueFromMemRef<uint64_t>(numberOfSeenTuplesRef2);
-    auto sampleDataSize2 = Nautilus::Util::readValueFromMemRef<uint64_t>(sampleDataSizeRef2);
+    auto numberOfSeenTuples2 = readValueFromMemRef<uint64_t>(numberOfSeenTuplesRef2);
+    auto sampleDataSize2 = readValueFromMemRef<uint64_t>(sampleDataSizeRef2);
 
     const auto numberOfSeenTuples = numberOfSeenTuples1 + numberOfSeenTuples2;
     const auto sampleDataSize = sampleDataSize1 + sampleDataSize2;
@@ -115,22 +113,20 @@ void ReservoirSamplePhysicalFunction::combine(
     VarVal{sampleDataSize}.writeToMemory(sampleDataSizeRef1);
 
     invoke(
-        +[](Interface::PagedVector* vector1, const Interface::PagedVector* vector2) -> void { vector1->copyFrom(*vector2); },
-        pagedVectorPtr1,
-        pagedVectorPtr2);
+        +[](PagedVector* vector1, const PagedVector* vector2) -> void { vector1->copyFrom(*vector2); }, pagedVectorPtr1, pagedVectorPtr2);
 }
 
-Nautilus::Record
+Record
 ReservoirSamplePhysicalFunction::lower(nautilus::val<AggregationState*> aggregationState, PipelineMemoryProvider& pipelineMemoryProvider)
 {
     const auto pagedVectorPtr = static_cast<nautilus::val<int8_t*>>(aggregationState);
-    const Interface::PagedVectorRef pagedVectorRef(pagedVectorPtr, bufferRef);
+    const PagedVectorRef pagedVectorRef(pagedVectorPtr, bufferRef);
     const auto& schema = bufferRef->getMemoryLayout()->getSchema();
 
-    const auto numberOfSeenTuplesRef = pagedVectorPtr + nautilus::val<uint64_t>{sizeof(Interface::PagedVector)};
+    const auto numberOfSeenTuplesRef = pagedVectorPtr + nautilus::val<uint64_t>{sizeof(PagedVector)};
     const auto sampleDataSizeRef = numberOfSeenTuplesRef + nautilus::val<uint64_t>{sizeof(uint64_t)};
-    auto numberOfSeenTuples = Nautilus::Util::readValueFromMemRef<uint64_t>(numberOfSeenTuplesRef);
-    auto sampleDataSize = Nautilus::Util::readValueFromMemRef<uint64_t>(sampleDataSizeRef);
+    auto numberOfSeenTuples = readValueFromMemRef<uint64_t>(numberOfSeenTuplesRef);
+    auto sampleDataSize = readValueFromMemRef<uint64_t>(sampleDataSizeRef);
 
     /// Acquiring memory for the sample. We need enough for the sample with its meta data + 4B for storing the size of the
     /// variable sized data that doubles as the total size of the synopses
@@ -161,8 +157,8 @@ ReservoirSamplePhysicalFunction::lower(nautilus::val<AggregationState*> aggregat
             else
             {
                 /// For all other data types, we can reuse the existing store value function map
-                if (const auto storeFunction = Nautilus::Util::storeValueFunctionMap.find(field.dataType.type);
-                    storeFunction != Nautilus::Util::storeValueFunctionMap.end())
+                if (const auto storeFunction = storeValueFunctionMap.find(field.dataType.type);
+                    storeFunction != storeValueFunctionMap.end())
                 {
                     auto _ = storeFunction->second(value, sampleTuplesMemArea);
                     sampleTuplesMemArea += field.dataType.getSizeInBytes();
@@ -190,16 +186,17 @@ ReservoirSamplePhysicalFunction::lower(nautilus::val<AggregationState*> aggregat
 void ReservoirSamplePhysicalFunction::reset(nautilus::val<AggregationState*> aggregationState, PipelineMemoryProvider&)
 {
     invoke(
-        +[](AggregationState* pagedVectorMemArea) -> void
+        +[](AggregationState* pagedVectorMemArea, const uint64_t stateSize) -> void
         {
             /// Allocates a new PagedVector in the memory area provided by the pointer to the pagedvector
-            auto* pagedVector = reinterpret_cast<Interface::PagedVector*>(pagedVectorMemArea);
-            new (pagedVector) Interface::PagedVector();
+            auto* pagedVector = reinterpret_cast<PagedVector*>(pagedVectorMemArea);
+            new (pagedVector) PagedVector();
 
             /// MemSet the three uint64_t values to 0
-            std::memset(reinterpret_cast<int8_t*>(pagedVector) + sizeof(Interface::PagedVector), 0, sizeof(uint64_t) * 3);
+            std::memset(reinterpret_cast<int8_t*>(pagedVector) + sizeof(PagedVector), 0, stateSize);
         },
-        aggregationState);
+        aggregationState,
+        nautilus::val<uint64_t>{getSizeOfStateInBytes()});
 }
 
 void ReservoirSamplePhysicalFunction::cleanup(nautilus::val<AggregationState*> aggregationState)
@@ -208,8 +205,7 @@ void ReservoirSamplePhysicalFunction::cleanup(nautilus::val<AggregationState*> a
         +[](AggregationState* pagedVectorMemArea) -> void
         {
             /// Calls the destructor of the PagedVector
-            auto* pagedVector
-                = reinterpret_cast<Interface::PagedVector*>(pagedVectorMemArea); /// NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+            auto* pagedVector = reinterpret_cast<PagedVector*>(pagedVectorMemArea); /// NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
             pagedVector->~PagedVector();
         },
         aggregationState);
@@ -218,15 +214,15 @@ void ReservoirSamplePhysicalFunction::cleanup(nautilus::val<AggregationState*> a
 size_t ReservoirSamplePhysicalFunction::getSizeOfStateInBytes() const
 {
     /// PagedVector + numberOfSeenTuples + sampleDataSize (in Bytes)
-    return sizeof(Interface::PagedVector) + sizeof(uint64_t) + sizeof(uint64_t);
+    return sizeof(PagedVector) + sizeof(uint64_t) + sizeof(uint64_t);
 }
 
 ReservoirSamplePhysicalFunction::ReservoirSamplePhysicalFunction(
     DataType inputType,
     DataType resultType,
     PhysicalFunction inputFunction,
-    Nautilus::Record::RecordFieldIdentifier resultFieldIdentifier,
-    std::shared_ptr<Nautilus::Interface::BufferRef::TupleBufferRef> bufferRef,
+    Record::RecordFieldIdentifier resultFieldIdentifier,
+    std::shared_ptr<TupleBufferRef> bufferRef,
     const std::string_view numberOfSeenTuplesFieldName,
     const uint64_t seed,
     const uint64_t sampleSize)

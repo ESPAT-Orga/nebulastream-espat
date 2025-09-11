@@ -18,34 +18,34 @@
 
 namespace NES
 {
-class ReservoirSamplePhysicalFunction : public AggregationPhysicalFunction
+class ReservoirSamplePhysicalFunction final : public AggregationPhysicalFunction
 {
 public:
     ReservoirSamplePhysicalFunction(
         DataType inputType,
         DataType resultType,
         PhysicalFunction inputFunction,
-        Nautilus::Record::RecordFieldIdentifier resultFieldIdentifier,
-        std::shared_ptr<Nautilus::Interface::BufferRef::TupleBufferRef> bufferRef,
+        Record::RecordFieldIdentifier resultFieldIdentifier,
+        std::shared_ptr<TupleBufferRef> bufferRef,
         const std::string_view numberOfSeenTuplesFieldName,
         const uint64_t seed,
         const uint64_t sampleSize);
     void lift(
         const nautilus::val<AggregationState*>& aggregationState,
         PipelineMemoryProvider& pipelineMemoryProvider,
-        const Nautilus::Record& record) override;
+        const Record& record) override;
     void combine(
         nautilus::val<AggregationState*> aggregationState1,
         nautilus::val<AggregationState*> aggregationState2,
         PipelineMemoryProvider& pipelineMemoryProvider) override;
-    Nautilus::Record lower(nautilus::val<AggregationState*> aggregationState, PipelineMemoryProvider& pipelineMemoryProvider) override;
+    Record lower(nautilus::val<AggregationState*> aggregationState, PipelineMemoryProvider& pipelineMemoryProvider) override;
     void reset(nautilus::val<AggregationState*> aggregationState, PipelineMemoryProvider& pipelineMemoryProvider) override;
     void cleanup(nautilus::val<AggregationState*> aggregationState) override;
     [[nodiscard]] size_t getSizeOfStateInBytes() const override;
     ~ReservoirSamplePhysicalFunction() override;
 
 private:
-    std::shared_ptr<Nautilus::Interface::BufferRef::TupleBufferRef> bufferRef;
+    std::shared_ptr<TupleBufferRef> bufferRef;
     std::string numberOfSeenTuplesFieldName;
     uint64_t seed;
     uint64_t sampleSize;

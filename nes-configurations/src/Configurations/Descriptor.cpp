@@ -123,6 +123,7 @@ DescriptorConfig::ConfigType protoToDescriptorConfigType(const SerializableVaria
         case NES::SerializableVariantDescriptor::VALUE_NOT_SET:
         default:
             throw CannotSerialize("Protobuf oneOf has no value");
+            std::unreachable();
     }
 }
 

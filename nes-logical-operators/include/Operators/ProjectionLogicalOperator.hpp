@@ -33,6 +33,8 @@
 namespace NES
 {
 
+class SerializableOperator;
+
 /// Combines both selecting the fields to project and renaming/mapping of fields
 class ProjectionLogicalOperator
 {

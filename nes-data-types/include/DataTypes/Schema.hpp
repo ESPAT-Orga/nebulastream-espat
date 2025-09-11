@@ -51,6 +51,19 @@ public:
         friend std::ostream& operator<<(std::ostream& os, const Field& field);
         bool operator==(const Field&) const = default;
 
+        Field& addQualifierIfNotExists(std::string_view qualifier)
+        {
+            if (qualifier.empty())
+            {
+                return *this;
+            }
+            if (name.find(qualifier) == std::string::npos)
+            {
+                name = std::string(qualifier) + name;
+            }
+            return *this;
+        }
+
         std::string name;
         DataType dataType{};
     };
@@ -79,6 +92,7 @@ public:
     [[nodiscard]] bool operator==(const Schema& other) const = default;
     friend std::ostream& operator<<(std::ostream& os, const Schema& schema);
 
+    Schema addField(const Field& field);
     Schema addField(std::string name, const DataType& dataType);
     Schema addField(std::string name, DataType::Type type);
 

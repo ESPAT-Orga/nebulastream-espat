@@ -136,14 +136,14 @@ getAggregationPhysicalFunctions(const WindowedAggregationLogicalOperator& logica
         if (name.contains("ReservoirSample"))
         {
             const auto logicalReservoirSample = std::dynamic_pointer_cast<ReservoirSampleLogicalFunction>(descriptor);
-            aggregationArguments.numberOfSeenTuplesFieldName = logicalReservoirSample->numberOfSeenTuplesFieldName;
+            aggregationArguments.numberOfSeenTuplesFieldName = logicalOperator.getNumberOfSeenTuplesFieldName();
             aggregationArguments.sampleSize = logicalReservoirSample->reservoirSize;
             aggregationArguments.seed = logicalReservoirSample->seed;
         }
         if (name.contains("EquiWidthHistogram"))
         {
             const auto logicalEquiWidthHistogram = std::dynamic_pointer_cast<EquiWidthHistogramLogicalFunction>(descriptor);
-            aggregationArguments.numberOfSeenTuplesFieldName = logicalEquiWidthHistogram->numberOfSeenTuplesFieldName;
+            aggregationArguments.numberOfSeenTuplesFieldName = logicalOperator.getNumberOfSeenTuplesFieldName();
             aggregationArguments.minValue = logicalEquiWidthHistogram->minValue;
             aggregationArguments.maxValue = logicalEquiWidthHistogram->maxValue;
             aggregationArguments.numberOfBins = logicalEquiWidthHistogram->numBuckets;
@@ -151,7 +151,7 @@ getAggregationPhysicalFunctions(const WindowedAggregationLogicalOperator& logica
         if (name.contains("CountMinSketch"))
         {
             const auto logicalCountMinSketch = std::dynamic_pointer_cast<CountMinSketchLogicalFunction>(descriptor);
-            aggregationArguments.numberOfSeenTuplesFieldName = logicalCountMinSketch->numberOfSeenTuplesFieldName;
+            aggregationArguments.numberOfSeenTuplesFieldName = logicalOperator.getNumberOfSeenTuplesFieldName();
             aggregationArguments.columns = logicalCountMinSketch->columns;
             aggregationArguments.rows = logicalCountMinSketch->rows;
         }

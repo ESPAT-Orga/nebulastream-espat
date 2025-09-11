@@ -34,6 +34,7 @@
 #include <Operators/SelectionLogicalOperator.hpp>
 #include <Operators/Sinks/SinkLogicalOperator.hpp>
 #include <Operators/Sources/SourceNameLogicalOperator.hpp>
+#include <Operators/Statistic/StatisticStoreWriterLogicalOperator.hpp>
 #include <Operators/UnionLogicalOperator.hpp>
 #include <Operators/Windows/Aggregations/WindowAggregationLogicalFunction.hpp>
 #include <Operators/Windows/JoinLogicalOperator.hpp>
@@ -77,7 +78,8 @@ LogicalPlan LogicalPlanBuilder::addWindowAggregation(
     LogicalPlan queryPlan,
     const std::shared_ptr<Windowing::WindowType>& windowType,
     std::vector<std::shared_ptr<WindowAggregationLogicalFunction>> windowAggs,
-    std::vector<FieldAccessLogicalFunction> onKeys)
+    std::vector<FieldAccessLogicalFunction> onKeys,
+    std::shared_ptr<LogicalStatisticFields> logicalStatisticFields)
 {
     PRECONDITION(not queryPlan.getRootOperators().empty(), "invalid query plan, as the root operator is empty");
 
@@ -102,8 +104,22 @@ LogicalPlan LogicalPlanBuilder::addWindowAggregation(
         throw NotImplemented("Only TimeBasedWindowType is supported for now");
     }
 
-    auto inputSchema = queryPlan.getRootOperators().front().getOutputSchema();
+    if (logicalStatisticFields)
+    {
+        return promoteOperatorToRoot(
+            queryPlan,
+            WindowedAggregationLogicalOperator(std::move(onKeys), std::move(windowAggs), windowType, std::move(logicalStatisticFields)));
+    }
     return promoteOperatorToRoot(queryPlan, WindowedAggregationLogicalOperator(std::move(onKeys), std::move(windowAggs), windowType));
+}
+
+LogicalPlan LogicalPlanBuilder::addStatisticStoreWriter(
+    const LogicalPlan& queryPlan,
+    const std::shared_ptr<LogicalStatisticFields>& inputLogicalStatisticFields,
+    const Statistic::StatisticHash statisticHash,
+    const Statistic::StatisticType statisticType)
+{
+    return promoteOperatorToRoot(queryPlan, StatisticStoreWriterLogicalOperator{inputLogicalStatisticFields, statisticHash, statisticType});
 }
 
 LogicalPlan LogicalPlanBuilder::addUnion(LogicalPlan leftLogicalPlan, LogicalPlan rightLogicalPlan)
@@ -195,6 +211,11 @@ LogicalPlanBuilder::checkAndAddWatermarkAssigner(LogicalPlan queryPlan, const st
         }
     }
     return queryPlan;
+}
+
+LogicalPlan LogicalPlanBuilder::addStatProbeOp(const LogicalOperator probe, const LogicalPlan& queryPlan)
+{
+    return promoteOperatorToRoot(queryPlan, probe);
 }
 
 LogicalPlan LogicalPlanBuilder::addBinaryOperatorAndUpdateSource(

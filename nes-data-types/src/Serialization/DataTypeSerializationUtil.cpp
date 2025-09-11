@@ -34,7 +34,7 @@ SerializableDataType* DataTypeSerializationUtil::serializeDataType(const DataTyp
 
 DataType DataTypeSerializationUtil::deserializeDataType(const SerializableDataType& serializedDataType)
 {
-    const DataType deserializedDataType = DataType{.type = magic_enum::enum_value<DataType::Type>(serializedDataType.type())};
+    const DataType deserializedDataType = DataType{.type = magic_enum::enum_cast<DataType::Type>(serializedDataType.type()).value()};
     return deserializedDataType;
 }
 

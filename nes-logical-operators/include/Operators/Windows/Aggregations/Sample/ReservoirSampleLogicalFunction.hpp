@@ -19,6 +19,7 @@
 #include <DataTypes/DataType.hpp>
 #include <DataTypes/Schema.hpp>
 #include <Functions/FieldAccessLogicalFunction.hpp>
+#include <Operators/Statistic/LogicalStatisticFields.hpp>
 #include <Operators/Windows/Aggregations/WindowAggregationLogicalFunction.hpp>
 
 namespace NES
@@ -34,13 +35,13 @@ public:
         const FieldAccessLogicalFunction& onField,
         std::vector<FieldAccessLogicalFunction> sampleFields,
         uint64_t reservoirSize,
-        const std::string_view numberOfSeenTuplesFieldName);
+        uint64_t sampleHash);
     ReservoirSampleLogicalFunction(
         const FieldAccessLogicalFunction& onField,
         const FieldAccessLogicalFunction& asField,
         std::vector<FieldAccessLogicalFunction> sampleFields,
         uint64_t reservoirSize,
-        const std::string_view numberOfSeenTuplesFieldName);
+        uint64_t sampleHash);
 
     void inferStamp(const Schema& schema) override;
     ~ReservoirSampleLogicalFunction() override = default;
@@ -54,7 +55,8 @@ public:
     /// We hardcode the seed to have determinism for testing purposes
     uint64_t seed = 42;
 
-    std::string numberOfSeenTuplesFieldName;
+    /// Identifies the sample in the StatStore
+    uint64_t sampleHash;
 
 private:
     static constexpr std::string_view NAME = "ReservoirSample";

@@ -19,6 +19,7 @@
 #include <DataTypes/DataType.hpp>
 #include <DataTypes/Schema.hpp>
 #include <Functions/FieldAccessLogicalFunction.hpp>
+#include <Operators/Statistic/LogicalStatisticFields.hpp>
 #include <Operators/Windows/Aggregations/WindowAggregationLogicalFunction.hpp>
 
 namespace NES
@@ -33,19 +34,13 @@ public:
     /// `numBuckets` number of buckets the histogram should have.
     /// `minValue` start value of the histogram
     /// `maxValue` end value of the histogram
-    EquiWidthHistogramLogicalFunction(
-        const FieldAccessLogicalFunction& onField,
-        uint64_t numBuckets,
-        uint64_t minValue,
-        uint64_t maxValue,
-        const std::string_view numberOfSeenTuplesFieldName);
+    EquiWidthHistogramLogicalFunction(const FieldAccessLogicalFunction& onField, uint64_t numBuckets, uint64_t minValue, uint64_t maxValue);
     EquiWidthHistogramLogicalFunction(
         const FieldAccessLogicalFunction& onField,
         const FieldAccessLogicalFunction& asField,
         uint64_t numBuckets,
         uint64_t minValue,
-        uint64_t maxValue,
-        const std::string_view numberOfSeenTuplesFieldName);
+        uint64_t maxValue);
 
     void inferStamp(const Schema& schema) override;
     ~EquiWidthHistogramLogicalFunction() override = default;
@@ -55,7 +50,6 @@ public:
     uint64_t numBuckets;
     uint64_t minValue;
     uint64_t maxValue;
-    std::string numberOfSeenTuplesFieldName;
 
 private:
     static constexpr std::string_view NAME = "EquiWidthHistogram";

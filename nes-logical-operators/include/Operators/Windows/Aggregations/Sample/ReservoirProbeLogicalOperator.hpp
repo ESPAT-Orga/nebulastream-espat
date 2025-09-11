@@ -18,45 +18,32 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
-#include <utility>
 #include <vector>
 #include <Configurations/Descriptor.hpp>
 #include <DataTypes/Schema.hpp>
-#include <Functions/LogicalFunction.hpp>
+#include <Functions/FieldAssignmentLogicalFunction.hpp>
 #include <Identifiers/Identifiers.hpp>
 #include <Operators/LogicalOperator.hpp>
+#include <Operators/Statistic/LogicalStatisticFields.hpp>
 #include <Traits/Trait.hpp>
 #include <Util/PlanRenderer.hpp>
 #include <SerializableOperator.pb.h>
 
 namespace NES
 {
-
 class SerializableOperator;
 
-/// The projection operator only narrows down the fields of an input schema to a smaller subset. The map operator handles renaming and adding new fields.
-class ProjectionLogicalOperator : public LogicalOperatorConcept
+/// Reads out a reservoir sample from the memory layout created by the ReservoirSampleLogicalFunction to be understandable by a sink.
+class ReservoirProbeLogicalOperator : public LogicalOperatorConcept, public LogicalStatisticFields
 {
 public:
-    class Asterisk
-    {
-        bool value;
-
-    public:
-        explicit Asterisk(bool value) : value(value) { }
-
-        friend ProjectionLogicalOperator;
-    };
-
-    using Projection = std::pair<std::optional<FieldIdentifier>, LogicalFunction>;
-    ProjectionLogicalOperator(std::vector<Projection> projections, Asterisk asterisk);
-
-    [[nodiscard]] const std::vector<Projection>& getProjections() const;
+    explicit ReservoirProbeLogicalOperator(uint64_t stashHash, Schema sampleSchema);
+    explicit ReservoirProbeLogicalOperator(uint64_t stashHash, Schema sampleSchema, LogicalStatisticFields logicalStatisticFields);
 
     [[nodiscard]] bool operator==(const LogicalOperatorConcept& rhs) const override;
     void serialize(SerializableOperator&) const override;
 
-    [[nodiscard]] LogicalOperator withTraitSet(TraitSet traitSet) const override;
+    [[nodiscard]] LogicalOperator withTraitSet(TraitSet) const override;
     [[nodiscard]] TraitSet getTraitSet() const override;
 
     [[nodiscard]] LogicalOperator withChildren(std::vector<LogicalOperator> children) const override;
@@ -73,37 +60,35 @@ public:
     [[nodiscard]] std::string explain(ExplainVerbosity verbosity) const override;
     [[nodiscard]] std::string_view getName() const noexcept override;
 
-    [[nodiscard]] std::vector<std::string> getAccessedFields() const;
-
     [[nodiscard]] LogicalOperator withInferredSchema(std::vector<Schema> inputSchemas) const override;
 
     struct ConfigParameters
     {
-        static inline const DescriptorConfig::ConfigParameter<std::string> PROJECTION_FUNCTION_NAME{
-            "projectionFunctionName",
+        static inline const DescriptorConfig::ConfigParameter<std::string> STATISTIC_HASH{
+            "statisticHash",
             std::nullopt,
-            [](const std::unordered_map<std::string, std::string>& config)
-            { return DescriptorConfig::tryGet(PROJECTION_FUNCTION_NAME, config); }};
+            [](const std::unordered_map<std::string, std::string>& config) { return DescriptorConfig::tryGet(STATISTIC_HASH, config); }};
 
-        static inline const DescriptorConfig::ConfigParameter<std::string> ASTERISK{
-            "asterisk",
+        static inline const DescriptorConfig::ConfigParameter<std::string> SAMPLE_SCHEMA{
+            "sampleSchema",
             std::nullopt,
-            [](const std::unordered_map<std::string, std::string>& config) { return DescriptorConfig::tryGet(ASTERISK, config); }};
+            [](const std::unordered_map<std::string, std::string>& config) { return DescriptorConfig::tryGet(SAMPLE_SCHEMA, config); }};
 
         static inline std::unordered_map<std::string, DescriptorConfig::ConfigParameterContainer> parameterMap
-            = DescriptorConfig::createConfigParameterContainerMap(PROJECTION_FUNCTION_NAME, ASTERISK);
+            = DescriptorConfig::createConfigParameterContainerMap(STATISTIC_HASH, SAMPLE_SCHEMA);
     };
 
-private:
-    static constexpr std::string_view NAME = "Projection";
-    std::vector<Projection> projections;
+    /// Name of the field the sample is in.
+    uint64_t statisticHash;
+    Schema sampleSchema;
 
-    bool asterisk = false;
+private:
+    static constexpr std::string_view NAME = "ReservoirProbe";
+
     std::vector<LogicalOperator> children;
     TraitSet traitSet;
     Schema inputSchema, outputSchema;
     std::vector<OriginId> inputOriginIds;
     std::vector<OriginId> outputOriginIds;
 };
-
 }

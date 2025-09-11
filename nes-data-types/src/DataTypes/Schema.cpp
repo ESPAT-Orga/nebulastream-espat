@@ -41,6 +41,11 @@ std::ostream& operator<<(std::ostream& os, const Schema::Field& field)
     return os << fmt::format("Field(name: {}, DataType: {})", field.name, field.dataType);
 }
 
+Schema Schema::addField(const Field& field)
+{
+    return addField(field.name, field.dataType);
+}
+
 Schema::Schema(const MemoryLayoutType memoryLayoutType) : memoryLayoutType(memoryLayoutType) { };
 
 Schema Schema::addField(std::string name, const DataType& dataType)

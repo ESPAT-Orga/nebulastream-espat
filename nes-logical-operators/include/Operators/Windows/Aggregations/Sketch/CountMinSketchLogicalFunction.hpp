@@ -19,6 +19,7 @@
 #include <DataTypes/DataType.hpp>
 #include <DataTypes/Schema.hpp>
 #include <Functions/FieldAccessLogicalFunction.hpp>
+#include <Operators/Statistic/LogicalStatisticFields.hpp>
 #include <Operators/Windows/Aggregations/WindowAggregationLogicalFunction.hpp>
 
 namespace NES
@@ -32,14 +33,9 @@ public:
     /// `asField` used when the sketch should be renamed in the query
     /// `columns` how many possible "buckets" per hashfunction
     /// `rows` equal to number of hash functions used
+    CountMinSketchLogicalFunction(const FieldAccessLogicalFunction& onField, uint64_t columns, uint64_t rows);
     CountMinSketchLogicalFunction(
-        const FieldAccessLogicalFunction& onField, uint64_t columns, uint64_t rows, const std::string_view numberOfSeenTuplesFieldName);
-    CountMinSketchLogicalFunction(
-        const FieldAccessLogicalFunction& onField,
-        const FieldAccessLogicalFunction& asField,
-        uint64_t columns,
-        uint64_t rows,
-        const std::string_view numberOfSeenTuplesFieldName);
+        const FieldAccessLogicalFunction& onField, const FieldAccessLogicalFunction& asField, uint64_t columns, uint64_t rows);
 
     void inferStamp(const Schema& schema) override;
     ~CountMinSketchLogicalFunction() override = default;
@@ -48,7 +44,6 @@ public:
 
     uint64_t columns;
     uint64_t rows;
-    std::string numberOfSeenTuplesFieldName;
 
 private:
     static constexpr std::string_view NAME = "CountMinSketch";

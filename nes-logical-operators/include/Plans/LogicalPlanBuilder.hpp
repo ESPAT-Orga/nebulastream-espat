@@ -72,7 +72,14 @@ public:
         LogicalPlan queryPlan,
         const std::shared_ptr<Windowing::WindowType>& windowType,
         std::vector<std::shared_ptr<WindowAggregationLogicalFunction>> windowAggs,
-        std::vector<FieldAccessLogicalFunction> onKeys);
+        std::vector<FieldAccessLogicalFunction> onKeys,
+        std::shared_ptr<LogicalStatisticFields> logicalStatisticFields = nullptr);
+
+    static LogicalPlan addStatisticStoreWriter(
+        const LogicalPlan& queryPlan,
+        const std::shared_ptr<LogicalStatisticFields>& inputLogicalStatisticFields,
+        Statistic::StatisticHash statisticHash,
+        Statistic::StatisticType statisticType);
 
     static LogicalPlan addStatisticStoreWriter(
         const LogicalPlan& queryPlan,

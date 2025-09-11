@@ -197,6 +197,11 @@ LogicalPlanBuilder::checkAndAddWatermarkAssigner(LogicalPlan queryPlan, const st
     return queryPlan;
 }
 
+LogicalPlan LogicalPlanBuilder::addStatProbeOp(const LogicalOperator probe, const LogicalPlan& queryPlan)
+{
+    return promoteOperatorToRoot(queryPlan, probe);
+}
+
 LogicalPlan LogicalPlanBuilder::addBinaryOperatorAndUpdateSource(
     const LogicalOperator& operatorNode, const LogicalPlan& leftLogicalPlan, const LogicalPlan& rightLogicalPlan)
 {

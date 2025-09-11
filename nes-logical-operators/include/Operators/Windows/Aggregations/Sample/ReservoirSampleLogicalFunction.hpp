@@ -31,12 +31,16 @@ public:
     /// `asField` used when the reservoir should be renamed in the query
     /// `reservoirSize` number of records the reservoir should hold
     ReservoirSampleLogicalFunction(
-        const FieldAccessLogicalFunction& onField, std::vector<FieldAccessLogicalFunction> sampleFields, uint64_t reservoirSize);
+        const FieldAccessLogicalFunction& onField,
+        std::vector<FieldAccessLogicalFunction> sampleFields,
+        uint64_t reservoirSize,
+        uint64_t sampleHash);
     ReservoirSampleLogicalFunction(
         const FieldAccessLogicalFunction& onField,
         const FieldAccessLogicalFunction& asField,
         std::vector<FieldAccessLogicalFunction> sampleFields,
-        uint64_t reservoirSize);
+        uint64_t reservoirSize,
+        uint64_t sampleHash);
 
     void inferStamp(const Schema& schema) override;
     ~ReservoirSampleLogicalFunction() override = default;
@@ -50,6 +54,8 @@ private:
     /// Selects which fields get projected into the sample.
     std::vector<FieldAccessLogicalFunction> sampleFields;
     uint64_t reservoirSize;
+    /// Identifies the sample in the StatStore
+    uint64_t sampleHash;
 
     static constexpr std::string_view NAME = "ReservoirSample";
     static constexpr DataType::Type partialAggregateStampType = DataType::Type::UNDEFINED;

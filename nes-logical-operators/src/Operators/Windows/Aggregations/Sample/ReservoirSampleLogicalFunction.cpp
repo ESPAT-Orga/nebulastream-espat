@@ -33,7 +33,10 @@ namespace NES
 {
 
 ReservoirSampleLogicalFunction::ReservoirSampleLogicalFunction(
-    const FieldAccessLogicalFunction& onField, std::vector<FieldAccessLogicalFunction> sampleFields, const uint64_t reservoirSize)
+    const FieldAccessLogicalFunction& onField,
+    std::vector<FieldAccessLogicalFunction> sampleFields,
+    const uint64_t reservoirSize,
+    const uint64_t sampleHash)
     : WindowAggregationLogicalFunction(
           onField.getDataType(),
           DataTypeProvider::provideDataType(partialAggregateStampType),
@@ -41,6 +44,7 @@ ReservoirSampleLogicalFunction::ReservoirSampleLogicalFunction(
           onField)
     , sampleFields(std::move(sampleFields))
     , reservoirSize(reservoirSize)
+    , sampleHash(sampleHash)
 {
 }
 
@@ -48,7 +52,8 @@ ReservoirSampleLogicalFunction::ReservoirSampleLogicalFunction(
     const FieldAccessLogicalFunction& onField,
     const FieldAccessLogicalFunction& asField,
     std::vector<FieldAccessLogicalFunction> sampleFields,
-    const uint64_t reservoirSize)
+    const uint64_t reservoirSize,
+    const uint64_t sampleHash)
     : WindowAggregationLogicalFunction(
           onField.getDataType(),
           DataTypeProvider::provideDataType(partialAggregateStampType),
@@ -57,6 +62,7 @@ ReservoirSampleLogicalFunction::ReservoirSampleLogicalFunction(
           asField)
     , sampleFields(std::move(sampleFields))
     , reservoirSize(reservoirSize)
+    , sampleHash(sampleHash)
 {
 }
 
@@ -114,6 +120,7 @@ NES::SerializableAggregationFunction ReservoirSampleLogicalFunction::serialize()
     serializedAggregationFunction.mutable_sample_fields()->CopyFrom(fnList);
 
     serializedAggregationFunction.set_reservoir_size(reservoirSize);
+    serializedAggregationFunction.set_sample_hash(sampleHash);
 
     return serializedAggregationFunction;
 }
@@ -130,7 +137,7 @@ AggregationLogicalFunctionGeneratedRegistrar::RegisterReservoirSampleAggregation
     const std::vector<FieldAccessLogicalFunction> sampleFields{
         std::make_move_iterator(arguments.fields.begin() + 2), std::make_move_iterator(arguments.fields.end())};
     return std::make_shared<ReservoirSampleLogicalFunction>(
-        arguments.fields[0], arguments.fields[1], sampleFields, arguments.reservoirSize.value());
+        arguments.fields[0], arguments.fields[1], sampleFields, arguments.reservoirSize.value(), arguments.sampleHash.value());
 }
 
 uint64_t ReservoirSampleLogicalFunction::getReservoirSize() const

@@ -66,6 +66,7 @@ public:
     [[nodiscard]] bool isInAggFunction() const { return not windowAggs.empty(); }
 
     /// Containers that hold state of specific objects that we create during parsing.
+    std::optional<LogicalOperator> statProbe;
     std::shared_ptr<Windowing::WindowType> windowType;
     std::vector<std::shared_ptr<WindowAggregationLogicalFunction>> windowAggs;
     std::vector<SinkDescriptor> sinkDescriptor;

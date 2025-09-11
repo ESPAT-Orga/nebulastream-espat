@@ -68,6 +68,7 @@ deserializeWindowAggregationFunction(const SerializableAggregationFunction& seri
     if (type == "ReservoirSample")
     {
         args.reservoirSize = serializedFunction.reservoir_size();
+        args.sampleHash = serializedFunction.sample_hash();
         auto fieldsFns = serializedFunction.sample_fields().functions();
         args.fields = std::vector{
             fieldsFns

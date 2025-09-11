@@ -30,6 +30,7 @@ struct AggregationLogicalFunctionRegistryArguments
 {
     std::vector<FieldAccessLogicalFunction> fields;
     std::optional<uint64_t> reservoirSize;
+    std::optional<uint64_t> sampleHash;
     std::optional<uint64_t> histogramNumBuckets;
     std::optional<uint64_t> histogramMinValue;
     std::optional<uint64_t> histogramMaxValue;

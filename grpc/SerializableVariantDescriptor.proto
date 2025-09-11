@@ -68,13 +68,13 @@ message SerializableAggregationFunction {
     SerializableFunction on_field = 2;
     SerializableFunction as_field = 3;
     optional uint64 reservoir_size = 4;
-    optional FunctionList sample_fields = 5;
-    optional uint64 histogram_num_buckets = 6;
-    optional uint64 histogram_min_value = 7;
-    optional uint64 histogram_max_value = 8;
-    optional uint64 count_min_num_columns = 9;
-    optional uint64 count_min_num_rows = 10;
-    optional SerializableSchema.SerializableField number_of_seen_tuples_field = 11;
+    optional uint64 sample_hash = 5;
+    optional FunctionList sample_fields = 6;
+    optional uint64 histogram_num_buckets = 7;
+    optional uint64 histogram_min_value = 8;
+    optional uint64 histogram_max_value = 9;
+    optional uint64 count_min_num_columns = 10;
+    optional uint64 count_min_num_rows = 11;
 }
 
 message AggregationFunctionList {

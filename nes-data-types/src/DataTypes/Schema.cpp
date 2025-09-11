@@ -51,6 +51,11 @@ std::string Schema::Field::getUnqualifiedName() const
     return name.substr(separatorPosition + 1);
 }
 
+Schema Schema::addField(const Field& field)
+{
+    return addField(field.name, field.dataType);
+}
+
 Schema::Schema(const MemoryLayoutType memoryLayoutType) : memoryLayoutType(memoryLayoutType) { };
 
 Schema Schema::addField(std::string name, const DataType& dataType)

@@ -50,6 +50,11 @@ inline std::ostream& operator<<(std::ostream& os, const SerializableFunction& fu
     return os;
 }
 
+inline std::ostream& operator<<(std::ostream& os, const SerializableSchema& descriptor)
+{
+    return os << descriptor.DebugString();
+}
+
 inline std::ostream& operator<<(std::ostream& os, const UInt64List& descriptor)
 {
     return os << descriptor.DebugString();
@@ -88,6 +93,11 @@ inline bool operator==(const SerializableFunction& lhs, const SerializableFuncti
 inline bool operator==(const ProjectionList& lhs, const ProjectionList& rhs)
 {
     /// Compare by serializing to string.
+    return lhs.SerializeAsString() == rhs.SerializeAsString();
+}
+
+inline bool operator==(const SerializableSchema& lhs, const SerializableSchema& rhs)
+{
     return lhs.SerializeAsString() == rhs.SerializeAsString();
 }
 

@@ -18,12 +18,15 @@
 #include <memory>
 #include <string>
 #include <utility>
+
 #include <DataTypes/DataType.hpp>
 #include <DataTypes/DataTypeProvider.hpp>
 #include <DataTypes/Schema.hpp>
 #include <Functions/FieldAccessLogicalFunction.hpp>
 #include <Functions/LogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/WindowAggregationLogicalFunction.hpp>
+#include <Serialization/DataTypeSerializationUtil.hpp>
+#include <Serialization/SchemaSerializationUtil.hpp>
 #include <Util/Common.hpp>
 #include <Util/Logger/Logger.hpp>
 #include <AggregationLogicalFunctionRegistry.hpp>
@@ -33,11 +36,7 @@ namespace NES
 {
 
 EquiWidthHistogramLogicalFunction::EquiWidthHistogramLogicalFunction(
-    const FieldAccessLogicalFunction& onField,
-    const uint64_t numBuckets,
-    const uint64_t minValue,
-    const uint64_t maxValue,
-    const std::string_view numberOfSeenTuplesFieldName)
+    const FieldAccessLogicalFunction& onField, const uint64_t numBuckets, const uint64_t minValue, const uint64_t maxValue)
     : WindowAggregationLogicalFunction(
           onField.getDataType(),
           DataTypeProvider::provideDataType(partialAggregateStampType),
@@ -46,7 +45,6 @@ EquiWidthHistogramLogicalFunction::EquiWidthHistogramLogicalFunction(
     , numBuckets(numBuckets)
     , minValue(minValue)
     , maxValue(maxValue)
-    , numberOfSeenTuplesFieldName(numberOfSeenTuplesFieldName)
 {
 }
 
@@ -55,8 +53,7 @@ EquiWidthHistogramLogicalFunction::EquiWidthHistogramLogicalFunction(
     const FieldAccessLogicalFunction& asField,
     const uint64_t numBuckets,
     const uint64_t minValue,
-    const uint64_t maxValue,
-    const std::string_view numberOfSeenTuplesFieldName)
+    const uint64_t maxValue)
     : WindowAggregationLogicalFunction(
           onField.getDataType(),
           DataTypeProvider::provideDataType(partialAggregateStampType),
@@ -66,7 +63,6 @@ EquiWidthHistogramLogicalFunction::EquiWidthHistogramLogicalFunction(
     , numBuckets(numBuckets)
     , minValue(minValue)
     , maxValue(maxValue)
-    , numberOfSeenTuplesFieldName(numberOfSeenTuplesFieldName)
 {
 }
 
@@ -124,8 +120,6 @@ NES::SerializableAggregationFunction EquiWidthHistogramLogicalFunction::serializ
     serializedAggregationFunction.set_histogram_num_buckets(numBuckets);
     serializedAggregationFunction.set_histogram_min_value(minValue);
     serializedAggregationFunction.set_histogram_max_value(maxValue);
-    serializedAggregationFunction.set_number_of_seen_tuples_field_name(numberOfSeenTuplesFieldName);
-
     return serializedAggregationFunction;
 }
 
@@ -138,15 +132,14 @@ AggregationLogicalFunctionGeneratedRegistrar::RegisterEquiWidthHistogramAggregat
     PRECONDITION(arguments.histogramMinValue.has_value(), "EquiWidthHistogramLogicalFunction requires min value to be set!");
     PRECONDITION(arguments.histogramMaxValue.has_value(), "EquiWidthHistogramLogicalFunction requires max value be set!");
     PRECONDITION(arguments.histogramNumBuckets.has_value(), "EquiWidthHistogramLogicalFunction requires number of buckets to be set!");
-    PRECONDITION(arguments.numberOfSeenTuplesFieldName.has_value(), "CountMinSketchLogicalFunction requires number of seen tuples be set!");
 
-    return std::make_shared<EquiWidthHistogramLogicalFunction>(
+    const auto equiWidthHist = std::make_shared<EquiWidthHistogramLogicalFunction>(
         arguments.fields[0],
         arguments.fields[1],
         arguments.histogramNumBuckets.value(),
         arguments.histogramMinValue.value(),
-        arguments.histogramMaxValue.value(),
-        arguments.numberOfSeenTuplesFieldName.value());
+        arguments.histogramMaxValue.value());
+    return equiWidthHist;
 }
 
 }

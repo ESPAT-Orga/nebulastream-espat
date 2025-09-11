@@ -21,12 +21,14 @@
 #include <string_view>
 #include <unordered_map>
 #include <vector>
+
 #include <Configurations/Descriptor.hpp>
 #include <DataTypes/Schema.hpp>
 #include <Functions/FieldAccessLogicalFunction.hpp>
 #include <Identifiers/Identifiers.hpp>
 #include <Operators/LogicalOperator.hpp>
 #include <Operators/OriginIdAssigner.hpp>
+#include <Operators/Statistic/LogicalStatisticFields.hpp>
 #include <Operators/Windows/Aggregations/WindowAggregationLogicalFunction.hpp>
 #include <Traits/Trait.hpp>
 #include <Traits/TraitSet.hpp>
@@ -47,8 +49,12 @@ public:
         std::vector<std::shared_ptr<WindowAggregationLogicalFunction>> aggregationFunctions,
         std::shared_ptr<Windowing::WindowType> windowType);
 
+    WindowedAggregationLogicalOperator(
+        std::vector<FieldAccessLogicalFunction> groupingKey,
+        std::vector<std::shared_ptr<WindowAggregationLogicalFunction>> aggregationFunctions,
+        std::shared_ptr<Windowing::WindowType> windowType,
+        std::shared_ptr<LogicalStatisticFields> logicalStatisticFields);
 
-    [[nodiscard]] std::vector<std::string> getGroupByKeyNames() const;
     [[nodiscard]] bool isKeyed() const;
 
     [[nodiscard]] std::vector<std::shared_ptr<WindowAggregationLogicalFunction>> getWindowAggregation() const;
@@ -80,6 +86,7 @@ public:
     [[nodiscard]] std::string_view getName() const noexcept;
 
     [[nodiscard]] WindowedAggregationLogicalOperator withInferredSchema(std::vector<Schema> inputSchemas) const;
+    [[nodiscard]] std::string getNumberOfSeenTuplesFieldName() const;
 
     struct ConfigParameters
     {
@@ -109,6 +116,7 @@ private:
     std::shared_ptr<Windowing::WindowType> windowType;
     std::vector<FieldAccessLogicalFunction> groupingKey;
     WindowMetaData windowMetaData;
+    std::shared_ptr<LogicalStatisticFields> logicalStatisticFields;
 
     std::vector<LogicalOperator> children;
     TraitSet traitSet;

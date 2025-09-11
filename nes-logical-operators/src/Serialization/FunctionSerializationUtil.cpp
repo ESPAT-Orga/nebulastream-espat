@@ -66,12 +66,39 @@ deserializeWindowAggregationFunction(const SerializableAggregationFunction& seri
     auto onField = deserializeFunction(serializedFunction.on_field());
     auto asField = deserializeFunction(serializedFunction.as_field());
 
+    AggregationLogicalFunctionRegistryArguments args;
+    if (type == "ReservoirSample")
+    {
+        args.reservoirSize = serializedFunction.reservoir_size();
+        args.sampleHash = serializedFunction.sample_hash();
+        auto fieldsFns = serializedFunction.sample_fields().functions();
+        args.fields = std::vector{
+            fieldsFns
+            | std::views::transform(
+                [](const auto& fn)
+                {
+                    const auto logFn = deserializeFunction(fn);
+                    return logFn.template get<FieldAccessLogicalFunction>();
+                })
+            | std::ranges::to<std::vector>()};
+    }
+    if (type == "EquiWidthHistogram")
+    {
+        args.histogramMinValue = serializedFunction.histogram_min_value();
+        args.histogramMaxValue = serializedFunction.histogram_max_value();
+        args.histogramNumBuckets = serializedFunction.histogram_num_buckets();
+    }
+    if (type == "CountMinSketch")
+    {
+        args.countMinNumColumns = serializedFunction.count_min_num_columns();
+        args.countMinNumRows = serializedFunction.count_min_num_rows();
+    }
+
     if (auto fieldAccess = onField.tryGet<FieldAccessLogicalFunction>())
     {
         if (auto asFieldAccess = asField.tryGet<FieldAccessLogicalFunction>())
         {
-            AggregationLogicalFunctionRegistryArguments args;
-            args.fields = {fieldAccess.value(), asFieldAccess.value()};
+            args.fields.insert(args.fields.begin(), {fieldAccess.value(), asFieldAccess.value()});
 
             if (auto function = AggregationLogicalFunctionRegistry::instance().create(type, args))
             {

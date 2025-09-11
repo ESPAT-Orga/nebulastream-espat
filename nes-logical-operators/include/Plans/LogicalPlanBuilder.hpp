@@ -23,10 +23,12 @@
 #include <Functions/LogicalFunction.hpp>
 #include <Operators/LogicalOperator.hpp>
 #include <Operators/ProjectionLogicalOperator.hpp>
+#include <Operators/Statistic/LogicalStatisticFields.hpp>
 #include <Operators/Windows/Aggregations/WindowAggregationLogicalFunction.hpp>
 #include <Operators/Windows/JoinLogicalOperator.hpp>
 #include <Plans/LogicalPlan.hpp>
 #include <WindowTypes/Types/WindowType.hpp>
+#include <Statistic.hpp>
 
 namespace NES
 {
@@ -63,7 +65,14 @@ public:
         LogicalPlan queryPlan,
         const std::shared_ptr<Windowing::WindowType>& windowType,
         std::vector<std::shared_ptr<WindowAggregationLogicalFunction>> windowAggs,
-        std::vector<FieldAccessLogicalFunction> onKeys);
+        std::vector<FieldAccessLogicalFunction> onKeys,
+        std::shared_ptr<LogicalStatisticFields> logicalStatisticFields = nullptr);
+
+    static LogicalPlan addStatisticStoreWriter(
+        const LogicalPlan& queryPlan,
+        const std::shared_ptr<LogicalStatisticFields>& inputLogicalStatisticFields,
+        Statistic::StatisticHash statisticHash,
+        Statistic::StatisticType statisticType);
 
     /// @brief UnionOperator to combine two query plans
     /// @param leftLogicalPlan the left query plan to combine by the union
@@ -91,6 +100,8 @@ public:
     /// Checks in case a window is contained in the query.
     /// If a watermark operator exists in the queryPlan and if not adds a watermark strategy to the queryPlan.
     static LogicalPlan checkAndAddWatermarkAssigner(LogicalPlan queryPlan, const std::shared_ptr<Windowing::WindowType>& windowType);
+
+    static LogicalPlan addStatProbeOp(const LogicalOperator& probe, const LogicalPlan& queryPlan);
 
 private:
     /// @brief: This method adds a binary operator to the query plan and updates the consumed sources

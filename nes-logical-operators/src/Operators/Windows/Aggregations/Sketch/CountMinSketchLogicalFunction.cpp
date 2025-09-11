@@ -24,6 +24,7 @@
 #include <Functions/FieldAccessLogicalFunction.hpp>
 #include <Functions/LogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/WindowAggregationLogicalFunction.hpp>
+#include <Serialization/DataTypeSerializationUtil.hpp>
 #include <Util/Common.hpp>
 #include <Util/Logger/Logger.hpp>
 #include <AggregationLogicalFunctionRegistry.hpp>
@@ -33,10 +34,7 @@ namespace NES
 {
 
 CountMinSketchLogicalFunction::CountMinSketchLogicalFunction(
-    const FieldAccessLogicalFunction& onField,
-    const uint64_t columns,
-    const uint64_t rows,
-    const std::string_view numberOfSeenTuplesFieldName)
+    const FieldAccessLogicalFunction& onField, const uint64_t columns, const uint64_t rows)
     : WindowAggregationLogicalFunction(
           onField.getDataType(),
           DataTypeProvider::provideDataType(partialAggregateStampType),
@@ -44,16 +42,11 @@ CountMinSketchLogicalFunction::CountMinSketchLogicalFunction(
           onField)
     , columns(columns)
     , rows(rows)
-    , numberOfSeenTuplesFieldName(numberOfSeenTuplesFieldName)
 {
 }
 
 CountMinSketchLogicalFunction::CountMinSketchLogicalFunction(
-    const FieldAccessLogicalFunction& onField,
-    const FieldAccessLogicalFunction& asField,
-    const uint64_t columns,
-    const uint64_t rows,
-    const std::string_view numberOfSeenTuplesFieldName)
+    const FieldAccessLogicalFunction& onField, const FieldAccessLogicalFunction& asField, const uint64_t columns, const uint64_t rows)
     : WindowAggregationLogicalFunction(
           onField.getDataType(),
           DataTypeProvider::provideDataType(partialAggregateStampType),
@@ -62,7 +55,6 @@ CountMinSketchLogicalFunction::CountMinSketchLogicalFunction(
           asField)
     , columns(columns)
     , rows(rows)
-    , numberOfSeenTuplesFieldName(numberOfSeenTuplesFieldName)
 {
 }
 
@@ -119,7 +111,6 @@ NES::SerializableAggregationFunction CountMinSketchLogicalFunction::serialize() 
     serializedAggregationFunction.mutable_on_field()->CopyFrom(onFieldFuc);
     serializedAggregationFunction.set_count_min_num_columns(columns);
     serializedAggregationFunction.set_count_min_num_rows(rows);
-    serializedAggregationFunction.set_number_of_seen_tuples_field_name(numberOfSeenTuplesFieldName);
     return serializedAggregationFunction;
 }
 
@@ -130,14 +121,11 @@ AggregationLogicalFunctionRegistryReturnType AggregationLogicalFunctionGenerated
     PRECONDITION(arguments.fields.size() >= 2, "CountMinSketchLogicalFunction requires onField and asField");
     PRECONDITION(arguments.countMinNumColumns.has_value(), "CountMinSketchLogicalFunction requires number of columns to be set!");
     PRECONDITION(arguments.countMinNumRows.has_value(), "CountMinSketchLogicalFunction requires number of rows to be set!");
-    PRECONDITION(arguments.numberOfSeenTuplesFieldName.has_value(), "CountMinSketchLogicalFunction requires number of seen tuples be set!");
+    PRECONDITION(arguments.numberOfSeenTuplesField.has_value(), "CountMinSketchLogicalFunction requires number of seen tuples be set!");
 
-    return std::make_shared<CountMinSketchLogicalFunction>(
-        arguments.fields[0],
-        arguments.fields[1],
-        arguments.countMinNumColumns.value(),
-        arguments.countMinNumRows.value(),
-        arguments.numberOfSeenTuplesFieldName.value());
+    const auto countMin = std::make_shared<CountMinSketchLogicalFunction>(
+        arguments.fields[0], arguments.fields[1], arguments.countMinNumColumns.value(), arguments.countMinNumRows.value());
+    return countMin;
 }
 
 }

@@ -19,12 +19,15 @@
 #include <DataTypes/DataType.hpp>
 #include <DataTypes/Schema.hpp>
 #include <Functions/FieldAccessLogicalFunction.hpp>
+#include <Operators/Statistic/LogicalStatisticFields.hpp>
 #include <Operators/Windows/Aggregations/WindowAggregationLogicalFunction.hpp>
 
 namespace NES
 {
 
 /// The CountMinSketch estimates counts of `asField` values, where accuracy depends on `columns` and `rows`.
+/// The actual errors can be taken from the paper: An Improved Data Stream Summary: The Count- Min Sketch and its Applications
+/// https://dimacs.rutgers.edu/~graham/pubs/papers/cm-full.pdf
 class CountMinSketchLogicalFunction final : public WindowAggregationLogicalFunction
 {
 public:
@@ -32,14 +35,9 @@ public:
     /// `asField` used when the sketch should be renamed in the query
     /// `columns` how many possible "buckets" per hashfunction
     /// `rows` equal to number of hash functions used
+    CountMinSketchLogicalFunction(const FieldAccessLogicalFunction& onField, uint64_t columns, uint64_t rows);
     CountMinSketchLogicalFunction(
-        const FieldAccessLogicalFunction& onField, uint64_t columns, uint64_t rows, const std::string_view numberOfSeenTuplesFieldName);
-    CountMinSketchLogicalFunction(
-        const FieldAccessLogicalFunction& onField,
-        const FieldAccessLogicalFunction& asField,
-        uint64_t columns,
-        uint64_t rows,
-        const std::string_view numberOfSeenTuplesFieldName);
+        const FieldAccessLogicalFunction& onField, const FieldAccessLogicalFunction& asField, uint64_t columns, uint64_t rows);
 
     void inferStamp(const Schema& schema) override;
     ~CountMinSketchLogicalFunction() override = default;
@@ -48,7 +46,6 @@ public:
 
     uint64_t columns;
     uint64_t rows;
-    std::string numberOfSeenTuplesFieldName;
 
 private:
     static constexpr std::string_view NAME = "CountMinSketch";

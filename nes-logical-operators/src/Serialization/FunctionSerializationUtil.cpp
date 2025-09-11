@@ -68,6 +68,7 @@ deserializeWindowAggregationFunction(const SerializableAggregationFunction& seri
     if (type == "ReservoirSample")
     {
         args.reservoirSize = serializedFunction.reservoir_size();
+        args.sampleHash = serializedFunction.sample_hash();
         auto fieldsFns = serializedFunction.sample_fields().functions();
         args.fields = std::vector{
             fieldsFns
@@ -78,20 +79,17 @@ deserializeWindowAggregationFunction(const SerializableAggregationFunction& seri
                     return logFn.template get<FieldAccessLogicalFunction>();
                 })
             | std::ranges::to<std::vector>()};
-        args.numberOfSeenTuplesFieldName = serializedFunction.number_of_seen_tuples_field_name();
     }
     if (type == "EquiWidthHistogram")
     {
         args.histogramMinValue = serializedFunction.histogram_min_value();
         args.histogramMaxValue = serializedFunction.histogram_max_value();
         args.histogramNumBuckets = serializedFunction.histogram_num_buckets();
-        args.numberOfSeenTuplesFieldName = serializedFunction.number_of_seen_tuples_field_name();
     }
     if (type == "CountMinSketch")
     {
         args.countMinNumColumns = serializedFunction.count_min_num_columns();
         args.countMinNumRows = serializedFunction.count_min_num_rows();
-        args.numberOfSeenTuplesFieldName = serializedFunction.number_of_seen_tuples_field_name();
     }
 
     if (auto fieldAccess = onField.tryGet<FieldAccessLogicalFunction>())

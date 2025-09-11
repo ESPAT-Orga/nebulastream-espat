@@ -40,7 +40,7 @@ public:
     /// @brief Serializes a field by updating the name and field of the serializableField protobuf object
     static void serializeField(const Schema::Field& field, SerializableSchema_SerializableField* serializableField);
 
-    /// @brief Serializes a field by updating the name and field of the serializableField protobuf object
+    /// @brief De-serializes a field by updating the name and field of the serializableField protobuf object
     static Schema::Field deserializeField(const SerializableSchema_SerializableField& serializableField);
 };
 }

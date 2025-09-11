@@ -77,7 +77,6 @@ public:
         WindowInfos,
         ProjectionList,
         UInt64List,
-        ProjectionList,
         SerializableFunction,
         SerializableSchema,
         SerializableSchema_SerializableField>;

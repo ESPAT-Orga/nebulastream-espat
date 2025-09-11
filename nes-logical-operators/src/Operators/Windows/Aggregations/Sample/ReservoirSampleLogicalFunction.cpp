@@ -24,6 +24,7 @@
 #include <Functions/FieldAccessLogicalFunction.hpp>
 #include <Functions/LogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/WindowAggregationLogicalFunction.hpp>
+#include <Serialization/DataTypeSerializationUtil.hpp>
 #include <Util/Common.hpp>
 #include <Util/Logger/Logger.hpp>
 #include <AggregationLogicalFunctionRegistry.hpp>
@@ -36,7 +37,7 @@ ReservoirSampleLogicalFunction::ReservoirSampleLogicalFunction(
     const FieldAccessLogicalFunction& onField,
     std::vector<FieldAccessLogicalFunction> sampleFields,
     const uint64_t reservoirSize,
-    const std::string_view numberOfSeenTuplesFieldName)
+    const uint64_t sampleHash)
     : WindowAggregationLogicalFunction(
           onField.getDataType(),
           DataTypeProvider::provideDataType(partialAggregateStampType),
@@ -44,7 +45,7 @@ ReservoirSampleLogicalFunction::ReservoirSampleLogicalFunction(
           onField)
     , sampleFields(std::move(sampleFields))
     , reservoirSize(reservoirSize)
-    , numberOfSeenTuplesFieldName(numberOfSeenTuplesFieldName)
+    , sampleHash(sampleHash)
 {
 }
 
@@ -53,7 +54,7 @@ ReservoirSampleLogicalFunction::ReservoirSampleLogicalFunction(
     const FieldAccessLogicalFunction& asField,
     std::vector<FieldAccessLogicalFunction> sampleFields,
     const uint64_t reservoirSize,
-    const std::string_view numberOfSeenTuplesFieldName)
+    const uint64_t sampleHash)
     : WindowAggregationLogicalFunction(
           onField.getDataType(),
           DataTypeProvider::provideDataType(partialAggregateStampType),
@@ -62,7 +63,7 @@ ReservoirSampleLogicalFunction::ReservoirSampleLogicalFunction(
           asField)
     , sampleFields(std::move(sampleFields))
     , reservoirSize(reservoirSize)
-    , numberOfSeenTuplesFieldName(numberOfSeenTuplesFieldName)
+    , sampleHash(sampleHash)
 {
 }
 
@@ -92,8 +93,8 @@ void ReservoirSampleLogicalFunction::inferStamp(const Schema& schema)
         const auto fieldName = asFieldName.substr(asFieldName.find_last_of(Schema::ATTRIBUTE_NAME_SEPARATOR) + 1);
         asField = asField.withFieldName(attributeNameResolver + fieldName).get<FieldAccessLogicalFunction>();
     }
-    inputStamp = DataType(DataType::Type::VARSIZED);
-    finalAggregateStamp = DataTypeProvider::provideDataType(DataType::Type::VARSIZED);
+    inputStamp = DataType{DataType::Type::VARSIZED};
+    finalAggregateStamp = DataType{DataType::Type::VARSIZED};
     asField = asField.withDataType(getFinalAggregateStamp()).get<FieldAccessLogicalFunction>();
 }
 
@@ -119,7 +120,7 @@ NES::SerializableAggregationFunction ReservoirSampleLogicalFunction::serialize()
     }
     serializedAggregationFunction.mutable_sample_fields()->CopyFrom(fnList);
     serializedAggregationFunction.set_reservoir_size(reservoirSize);
-    serializedAggregationFunction.set_number_of_seen_tuples_field_name(numberOfSeenTuplesFieldName);
+    serializedAggregationFunction.set_sample_hash(sampleHash);
 
     return serializedAggregationFunction;
 }
@@ -133,15 +134,11 @@ AggregationLogicalFunctionGeneratedRegistrar::RegisterReservoirSampleAggregation
         arguments.fields.size() >= 3,
         "ReservoirSampleLogicalFunction requires onField (even though unused), asField, and at least one field for the sample");
     PRECONDITION(arguments.reservoirSize.has_value(), "ReservoirSampleLogicalFunction requires reservoirSize to be set!");
-    PRECONDITION(arguments.numberOfSeenTuplesFieldName.has_value(), "CountMinSketchLogicalFunction requires number of seen tuples be set!");
 
     const std::vector<FieldAccessLogicalFunction> sampleFields{
         std::make_move_iterator(arguments.fields.begin() + 2), std::make_move_iterator(arguments.fields.end())};
-    return std::make_shared<ReservoirSampleLogicalFunction>(
-        arguments.fields[0],
-        arguments.fields[1],
-        sampleFields,
-        arguments.reservoirSize.value(),
-        arguments.numberOfSeenTuplesFieldName.value());
+    const auto reservoirSample = std::make_shared<ReservoirSampleLogicalFunction>(
+        arguments.fields[0], arguments.fields[1], sampleFields, arguments.reservoirSize.value(), arguments.sampleHash.value());
+    return reservoirSample;
 }
 }

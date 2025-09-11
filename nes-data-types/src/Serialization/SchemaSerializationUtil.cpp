@@ -11,9 +11,10 @@
     See the License for the specific language governing permissions and
     limitations under the License.
 */
+#include <Serialization/SchemaSerializationUtil.hpp>
+
 #include <DataTypes/Schema.hpp>
 #include <Serialization/DataTypeSerializationUtil.hpp>
-#include <Serialization/SchemaSerializationUtil.hpp>
 #include <Util/Logger/Logger.hpp>
 #include <SerializableSchema.pb.h>
 

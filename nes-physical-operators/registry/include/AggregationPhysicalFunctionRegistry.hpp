@@ -36,6 +36,8 @@ struct AggregationPhysicalFunctionRegistryArguments
     PhysicalFunction inputFunction;
     Record::RecordFieldIdentifier resultFieldIdentifier;
     std::optional<std::shared_ptr<Interface::MemoryProvider::TupleBufferMemoryProvider>> memProviderPagedVector;
+    std::optional<uint64_t> seed;
+    std::optional<uint64_t> sampleSize;
 };
 
 class AggregationPhysicalFunctionRegistry : public BaseRegistry<

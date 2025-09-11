@@ -41,6 +41,9 @@
 #include <Nautilus/Interface/HashMap/HashMap.hpp>
 #include <Nautilus/Interface/Record.hpp>
 #include <Operators/LogicalOperator.hpp>
+#include <Operators/Windows/Aggregations/Histogram/EquiWidthHistogramLogicalFunction.hpp>
+#include <Operators/Windows/Aggregations/Sample/ReservoirSampleLogicalFunction.hpp>
+#include <Operators/Windows/Aggregations/Sketch/CountMinSketchLogicalFunction.hpp>
 #include <Operators/Windows/WindowedAggregationLogicalOperator.hpp>
 #include <Runtime/Execution/OperatorHandler.hpp>
 #include <SliceStore/DefaultTimeBasedSliceStore.hpp>
@@ -52,6 +55,7 @@
 #include <WindowTypes/Measures/TimeCharacteristic.hpp>
 #include <WindowTypes/Types/TimeBasedWindowType.hpp>
 #include <magic_enum/magic_enum.hpp>
+
 #include <AggregationPhysicalFunctionRegistry.hpp>
 #include <ErrorHandling.hpp>
 #include <HashMapOptions.hpp>
@@ -133,14 +137,42 @@ getAggregationPhysicalFunctions(const WindowedAggregationLogicalOperator& logica
         auto bufferRef
             = LowerSchemaProvider::lowerSchema(configuration.pageSize.getValue(), logicalOperator.getInputSchemas()[0], memoryLayoutType);
 
-        auto name = descriptor->getName();
-        auto aggregationArguments = AggregationPhysicalFunctionRegistryArguments(
+        AggregationPhysicalFunctionRegistryArguments aggregationArguments{
             std::move(physicalInputType),
             std::move(physicalFinalType),
             std::move(aggregationInputFunction),
             resultFieldIdentifier,
             bufferRef,
             descriptor->shallIncludeNullValues());
+            bufferRef};
+
+        /// We should think about another way to store the additional arguments for each statistic physical function.
+        /// The current approach requries us to add here an if block for every new statistic build physical function.
+        /// One idea could be to use a similar approach as with the logical operators, storing all configs in a hashmap.
+        auto name = descriptor->getName();
+        if (name.contains("ReservoirSample"))
+        {
+            const auto logicalReservoirSample = std::dynamic_pointer_cast<ReservoirSampleLogicalFunction>(descriptor);
+            aggregationArguments.numberOfSeenTuplesFieldName = logicalOperator.getNumberOfSeenTuplesFieldName();
+            aggregationArguments.sampleSize = logicalReservoirSample->reservoirSize;
+            aggregationArguments.seed = logicalReservoirSample->seed;
+        }
+        if (name.contains("EquiWidthHistogram"))
+        {
+            const auto logicalEquiWidthHistogram = std::dynamic_pointer_cast<EquiWidthHistogramLogicalFunction>(descriptor);
+            aggregationArguments.numberOfSeenTuplesFieldName = logicalOperator.getNumberOfSeenTuplesFieldName();
+            aggregationArguments.minValue = logicalEquiWidthHistogram->minValue;
+            aggregationArguments.maxValue = logicalEquiWidthHistogram->maxValue;
+            aggregationArguments.numberOfBins = logicalEquiWidthHistogram->numBuckets;
+        }
+        if (name.contains("CountMinSketch"))
+        {
+            const auto logicalCountMinSketch = std::dynamic_pointer_cast<CountMinSketchLogicalFunction>(descriptor);
+            aggregationArguments.numberOfSeenTuplesFieldName = logicalOperator.getNumberOfSeenTuplesFieldName();
+            aggregationArguments.columns = logicalCountMinSketch->columns;
+            aggregationArguments.rows = logicalCountMinSketch->rows;
+        }
+
         if (auto aggregationPhysicalFunction
             = AggregationPhysicalFunctionRegistry::instance().create(std::string(name), std::move(aggregationArguments)))
         {

@@ -52,6 +52,11 @@ std::string Schema::Field::getUnqualifiedName() const
     return name.substr(separatorPosition + 1);
 }
 
+Schema Schema::addField(const Field& field)
+{
+    return addField(field.name, field.dataType);
+}
+
 Schema Schema::addField(std::string name, const DataType& dataType)
 {
     return addField(std::move(name), dataType.type, dataType.nullable ? DataType::NULLABLE::IS_NULLABLE : DataType::NULLABLE::NOT_NULLABLE);

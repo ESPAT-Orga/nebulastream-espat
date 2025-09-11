@@ -193,13 +193,12 @@ size_t MedianAggregationPhysicalFunction::getSizeOfStateInBytes() const
 AggregationPhysicalFunctionRegistryReturnType AggregationPhysicalFunctionGeneratedRegistrar::RegisterMedianAggregationPhysicalFunction(
     AggregationPhysicalFunctionRegistryArguments arguments)
 {
-    INVARIANT(arguments.memProviderPagedVector.has_value(), "Memory provider paged vector not set");
     return std::make_shared<MedianAggregationPhysicalFunction>(
         std::move(arguments.inputType),
         std::move(arguments.resultType),
         arguments.inputFunction,
         arguments.resultFieldIdentifier,
-        arguments.memProviderPagedVector.value());
+        arguments.memProviderPagedVector);
 }
 
 }

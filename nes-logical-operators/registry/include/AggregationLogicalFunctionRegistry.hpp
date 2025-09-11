@@ -29,6 +29,14 @@ using AggregationLogicalFunctionRegistryReturnType = std::shared_ptr<WindowAggre
 struct AggregationLogicalFunctionRegistryArguments
 {
     std::vector<FieldAccessLogicalFunction> fields;
+    std::optional<uint64_t> reservoirSize;
+    std::optional<uint64_t> sampleHash;
+    std::optional<uint64_t> histogramNumBuckets;
+    std::optional<uint64_t> histogramMinValue;
+    std::optional<uint64_t> histogramMaxValue;
+    std::optional<uint64_t> countMinNumColumns;
+    std::optional<uint64_t> countMinNumRows;
+    std::optional<Schema::Field> numberOfSeenTuplesField{};
 };
 
 class AggregationLogicalFunctionRegistry : public BaseRegistry<

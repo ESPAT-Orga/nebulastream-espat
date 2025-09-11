@@ -14,6 +14,7 @@
 
 #pragma once
 
+#include <SerializableSchema.pb.h>
 #include <DataTypes/Schema.hpp>
 
 namespace NES
@@ -35,5 +36,11 @@ public:
     /// @param serializedSchema the serialized schema.
     /// @return std::shared_ptr<Schema>
     static Schema deserializeSchema(const SerializableSchema& serializedSchema);
+
+    /// @brief Serializes a field by updating the name and field of the serializableField protobuf object
+    static void serializeField(const Schema::Field& field, SerializableSchema_SerializableField* serializableField);
+
+    /// @brief De-serializes a field by updating the name and field of the serializableField protobuf object
+    static Schema::Field deserializeField(const SerializableSchema_SerializableField& serializableField);
 };
 }

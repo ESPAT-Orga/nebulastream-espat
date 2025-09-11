@@ -36,6 +36,28 @@ struct AggregationPhysicalFunctionRegistryArguments
     PhysicalFunction inputFunction;
     Record::RecordFieldIdentifier resultFieldIdentifier;
     std::optional<std::shared_ptr<Interface::BufferRef::TupleBufferRef>> bufferRefPagedVector;
+    std::optional<std::string> numberOfSeenTuplesFieldName{};
+    std::optional<uint64_t> seed{};
+    std::optional<uint64_t> sampleSize{};
+    std::optional<uint64_t> numberOfBins{};
+    std::optional<uint64_t> minValue{};
+    std::optional<uint64_t> maxValue{};
+    std::optional<uint64_t> columns{};
+    std::optional<uint64_t> rows{};
+
+    AggregationPhysicalFunctionRegistryArguments(
+        const DataType inputType,
+        const DataType resultType,
+        PhysicalFunction inputFunction,
+        Record::RecordFieldIdentifier resultFieldIdentifier,
+        std::shared_ptr<Interface::BufferRef::TupleBufferRef> bufferRefPagedVector)
+        : inputType(inputType)
+        , resultType(resultType)
+        , inputFunction(std::move(inputFunction))
+        , resultFieldIdentifier(std::move(resultFieldIdentifier))
+        , bufferRefPagedVector(std::move(bufferRefPagedVector))
+    {
+    }
 };
 
 class AggregationPhysicalFunctionRegistry : public BaseRegistry<

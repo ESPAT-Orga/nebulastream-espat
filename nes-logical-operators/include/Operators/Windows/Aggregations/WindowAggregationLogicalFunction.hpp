@@ -28,6 +28,9 @@ namespace NES
 class WindowAggregationLogicalFunction
 {
 public:
+    /// Think about another way to store this
+    inline static const std::string NUMBER_OF_SEEN_TUPLES_FIELD_NAME = {"numberOfSeenTuples"};
+
     virtual ~WindowAggregationLogicalFunction() = default;
 
     [[nodiscard]] DataType getInputStamp() const;

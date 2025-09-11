@@ -14,6 +14,7 @@
 
 syntax = "proto3";
 import "SerializableDataType.proto";
+import "SerializableSchema.proto";
 package NES;
 
 message WindowInfos {
@@ -66,6 +67,14 @@ message SerializableAggregationFunction {
     string type = 1;
     SerializableFunction on_field = 2;
     SerializableFunction as_field = 3;
+    optional uint64 reservoir_size = 4;
+    optional FunctionList sample_fields = 5;
+    optional uint64 histogram_num_buckets = 6;
+    optional uint64 histogram_min_value = 7;
+    optional uint64 histogram_max_value = 8;
+    optional uint64 count_min_num_columns = 9;
+    optional uint64 count_min_num_rows = 10;
+    optional string number_of_seen_tuples_field_name = 11;
 }
 
 message AggregationFunctionList {
@@ -97,5 +106,7 @@ message SerializableVariantDescriptor {
     WindowInfos window_infos = 13;
     ProjectionList projections = 14;
     UInt64List ulongs = 15;
+    SerializableFunction function = 16;
+    SerializableSchema schema = 17;
   }
 }

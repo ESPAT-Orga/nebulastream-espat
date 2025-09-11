@@ -53,9 +53,12 @@
 #include <Functions/LogicalFunctionProvider.hpp>
 #include <Operators/Windows/Aggregations/AvgAggregationLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/CountAggregationLogicalFunction.hpp>
+#include <Operators/Windows/Aggregations/Histogram/EquiWidthHistogramLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/MaxAggregationLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/MedianAggregationLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/MinAggregationLogicalFunction.hpp>
+#include <Operators/Windows/Aggregations/Sample/ReservoirSampleLogicalFunction.hpp>
+#include <Operators/Windows/Aggregations/Sketch/CountMinSketchLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/SumAggregationLogicalFunction.hpp>
 #include <Operators/Windows/JoinLogicalOperator.hpp>
 #include <Plans/LogicalPlan.hpp>
@@ -486,6 +489,14 @@ void AntlrSQLQueryPlanCreator::exitPrimaryQuery(AntlrSQLParser::PrimaryQueryCont
     {
         queryPlan = LogicalPlanBuilder::addWindowAggregation(
             queryPlan, helpers.top().windowType, helpers.top().windowAggs, helpers.top().groupByFields);
+        const auto windowAggName = helpers.top().windowAggs.front().get()->getName();
+        if (windowAggName == "ReservoirSample" or windowAggName == "EquiWidthHistogram")
+        {
+            /// This is a hack to get the new projection operator to work.
+            /// The projection operator wants to know which fields its going to project here, in its member projections.
+            /// But as we do not yet know the source's schema, we cannot give it the schema of the sample. So instead we just project all input fields:
+            helpers.top().asterisk = true;
+        }
     }
 
     queryPlan = LogicalPlanBuilder::addProjection(helpers.top().getProjections(), helpers.top().asterisk, queryPlan);
@@ -622,11 +633,11 @@ void AntlrSQLQueryPlanCreator::exitNamedExpression(AntlrSQLParser::NamedExpressi
     /// The user did not specify a new name (... AS THE_NAME) for the aggregation function and we need to generate one.
     else if (context->name == nullptr and not helpers.top().functionBuilder.empty() and helpers.top().hasUnnamedAggregation)
     {
-        const auto accessFunction = helpers.top().functionBuilder.back();
+        const auto fieldAccess = helpers.top().functionBuilder.back();
         helpers.top().functionBuilder.pop_back();
-        const auto fieldAccessNode = accessFunction.get<FieldAccessLogicalFunction>();
+        const auto fieldAccessLogicalFn = fieldAccess.get<FieldAccessLogicalFunction>();
         const auto lastAggregation = helpers.top().windowAggs.back();
-        const auto newName = fmt::format("{}_{}", fieldAccessNode.getFieldName(), Util::toUpperCase(lastAggregation->getName()));
+        const auto newName = fmt::format("{}_{}", fieldAccessLogicalFn.getFieldName(), Util::toUpperCase(lastAggregation->getName()));
         const auto asField = FieldAccessLogicalFunction(newName);
         lastAggregation->asField = asField;
         helpers.top().windowAggs.pop_back();
@@ -825,6 +836,17 @@ void AntlrSQLQueryPlanCreator::exitConstantDefault(AntlrSQLParser::ConstantDefau
     }
 }
 
+static uint64_t parseConstant(std::string constant, const char* fieldName)
+{
+    uint64_t result;
+    auto parseResult = std::from_chars(constant.data(), constant.data() + constant.size(), result);
+    if (parseResult.ec != std::errc())
+    {
+        throw InvalidQuerySyntax("Failed to parse field `{}` content: {}", fieldName, constant);
+    }
+    return result;
+}
+
 void AntlrSQLQueryPlanCreator::exitFunctionCall(AntlrSQLParser::FunctionCallContext* context)
 {
     const auto funcName = Util::toUpperCase(context->children[0]->getText());
@@ -900,6 +922,74 @@ void AntlrSQLQueryPlanCreator::exitFunctionCall(AntlrSQLParser::FunctionCallCont
                 /// Remove exactly the functions used to create the 'logicalFunction' from the back of the function builder
                 helpers.top().functionBuilder.resize(helpers.top().functionBuilder.size() - logicalFunction.value().getChildren().size());
                 helpers.top().functionBuilder.push_back(*logicalFunction);
+            }
+            /// Would be better to use the LogicalFunctionProvider for reservoir, but then it would also need to take constantBuilder
+            /// as argument and not just the functionBuilder (see above).
+            else if (funcName == "RESERVOIR")
+            {
+                if (helpers.top().functionBuilder.empty())
+                {
+                    throw InvalidQuerySyntax("Sample requires sample fields as arguments at {}", context->getText());
+                }
+                std::vector<FieldAccessLogicalFunction> sampleFields;
+                for (auto& field : helpers.top().functionBuilder)
+                {
+                    PRECONDITION(
+                        field.tryGet<FieldAccessLogicalFunction>().has_value(), "sample field was not a FieldAccessLogicalFunction");
+                    sampleFields.emplace_back(field.get<FieldAccessLogicalFunction>());
+                }
+                helpers.top().functionBuilder.clear();
+
+                if (helpers.top().constantBuilder.empty())
+                {
+                    throw InvalidQuerySyntax(
+                        "Expected constant at the end of ReservoirSample function call, got nothing at {}", context->getText());
+                }
+                auto constantString = helpers.top().constantBuilder.back();
+                helpers.top().constantBuilder.pop_back();
+                uint64_t reservoirSize = parseConstant(helpers.top().constantBuilder.back(), "reservoirSize");
+                const auto uselessField = FieldAccessLogicalFunction("timestamp");
+                const auto asFieldIfNotOverwritten = FieldAccessLogicalFunction("reservoir");
+                helpers.top().windowAggs.push_back(
+                    std::make_shared<ReservoirSampleLogicalFunction>(uselessField, asFieldIfNotOverwritten, sampleFields, reservoirSize, WindowAggregationLogicalFunction::NUMBER_OF_SEEN_TUPLES_FIELD_NAME));
+                break;
+            }
+            else if (funcName == "EQUIWIDTHHISTOGRAM")
+            {
+                if (helpers.top().functionBuilder.size() != 1 && helpers.top().functionBuilder.back().tryGet<FieldAccessLogicalFunction>())
+                {
+                    throw InvalidQuerySyntax("EQUIWIDTHHISTOGRAM requires the first argument to be a fieldname");
+                }
+                const auto fieldName = helpers.top().functionBuilder.back().tryGet<FieldAccessLogicalFunction>().value();
+                helpers.top().functionBuilder.pop_back();
+                if (helpers.top().constantBuilder.size() != 3)
+                {
+                    throw InvalidQuerySyntax("EQUIWIDTHHISTOGRAM requires the arguments numBuckets, minValue, maxValue to be constants");
+                }
+                const auto maxValue = parseConstant(helpers.top().constantBuilder.back(), "maxValue");
+                helpers.top().constantBuilder.pop_back();
+                const auto minValue = parseConstant(helpers.top().constantBuilder.back(), "minValue");
+                helpers.top().constantBuilder.pop_back();
+                const auto numBuckets = parseConstant(helpers.top().constantBuilder.back(), "numBuckets");
+                helpers.top().constantBuilder.pop_back();
+                helpers.top().windowAggs.push_back(
+                    std::make_shared<EquiWidthHistogramLogicalFunction>(fieldName, numBuckets, minValue, maxValue, WindowAggregationLogicalFunction::NUMBER_OF_SEEN_TUPLES_FIELD_NAME));
+                break;
+            }
+            else if (funcName == "COUNTMINSKETCH")
+            {
+                if (helpers.top().functionBuilder.size() != 1 && helpers.top().functionBuilder.back().tryGet<FieldAccessLogicalFunction>())
+                {
+                    throw InvalidQuerySyntax("COUNTMINSKETCH requires the first argument to be a fieldname");
+                }
+                const auto fieldName = helpers.top().functionBuilder.back().tryGet<FieldAccessLogicalFunction>().value();
+                helpers.top().functionBuilder.pop_back();
+                const auto rows = parseConstant(helpers.top().constantBuilder.back(), "rows");
+                helpers.top().constantBuilder.pop_back();
+                const auto columns = parseConstant(helpers.top().constantBuilder.back(), "columns");
+                helpers.top().constantBuilder.pop_back();
+                helpers.top().windowAggs.push_back(std::make_shared<CountMinSketchLogicalFunction>(fieldName, columns, rows, WindowAggregationLogicalFunction::NUMBER_OF_SEEN_TUPLES_FIELD_NAME));
+                break;
             }
             else
             {

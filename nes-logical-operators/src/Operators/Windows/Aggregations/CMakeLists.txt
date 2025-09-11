@@ -20,3 +20,8 @@ add_plugin(Max AggregationLogicalFunction nes-logical-operators MaxAggregationLo
 add_plugin(Median AggregationLogicalFunction nes-logical-operators MedianAggregationLogicalFunction.cpp)
 add_plugin(Min AggregationLogicalFunction nes-logical-operators MinAggregationLogicalFunction.cpp)
 add_plugin(Sum AggregationLogicalFunction nes-logical-operators SumAggregationLogicalFunction.cpp)
+
+# Statistic Aggregation Functions
+add_plugin(ReservoirSample AggregationLogicalFunction nes-logical-operators Sample/ReservoirSampleLogicalFunction.cpp)
+add_plugin(EquiWidthHistogram AggregationLogicalFunction nes-logical-operators Histogram/EquiWidthHistogramLogicalFunction.cpp)
+add_plugin(CountMinSketch AggregationLogicalFunction nes-logical-operators Sketch/CountMinSketchLogicalFunction.cpp)

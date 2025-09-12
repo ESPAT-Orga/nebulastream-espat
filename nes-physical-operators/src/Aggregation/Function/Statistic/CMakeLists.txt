@@ -12,3 +12,4 @@
 
 add_plugin(ReservoirSample AggregationPhysicalFunction nes-physical-operators Sample/ReservoirSamplePhysicalFunction.cpp)
 add_plugin(EquiWidthHistogram AggregationPhysicalFunction nes-physical-operators Histogram/EquiWidthHistogramPhysicalFunction.cpp)
+add_plugin(CountMinSketch AggregationPhysicalFunction nes-physical-operators Sketch/CountMinPhysicalFunction.cpp)

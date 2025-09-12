@@ -12,27 +12,25 @@
     limitations under the License.
 */
 #pragma once
-#include <memory>
-#include <Nautilus/DataTypes/VarVal.hpp>
 #include <Nautilus/Interface/Hash/HashFunction.hpp>
 
 namespace NES
 {
-
-/// Implementation of the MurMur3 hash function for nautilus types.
-/// This implementation is based on the hash functions of https://github.com/martinus/robin-hood-hashing/ and duckdb.
-class MurMur3HashFunction final : public HashFunction
+/// H3 implementation taken from the paper Universal classes of hash functions by Carter, J., and Wegman, M. N. Journal of Computer and System Sciences 18, 2 (apr 1979)
+class H3HashFunction final : public HashFunction
 {
 public:
-    /// Seed as an initialisation.
-    const uint64_t SEED = 902850234;
-
+    H3HashFunction(uint64_t sizeSeedInBytes, uint64_t numberOfBitsInKey, nautilus::val<int8_t*> seeds);
+    ~H3HashFunction() override = default;
     [[nodiscard]] std::unique_ptr<HashFunction> clone() const override;
 
 protected:
     [[nodiscard]] HashValue init() const override;
+    HashValue calculate(HashValue& hash, const VarVal& value) const override;
 
-    /// Calculates the hash of value and xor-es it with hash
-    [[nodiscard]] HashValue calculate(HashValue& hash, const VarVal& value) const override;
+private:
+    uint64_t sizeSeedInBytes;
+    uint64_t numberOfBitsInKey;
+    nautilus::val<int8_t*> seeds;
 };
 }

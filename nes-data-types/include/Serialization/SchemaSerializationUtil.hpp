@@ -19,6 +19,7 @@
 namespace NES
 {
 class SerializableSchema;
+class SerializableSchema_SerializableField;
 
 /// @brief The SchemaSerializationUtil offers functionality to serialize and de-serialize schemas to the
 /// corresponding protobuffer object.
@@ -35,5 +36,11 @@ public:
     /// @param serializedSchema the serialized schema.
     /// @return std::shared_ptr<Schema>
     static Schema deserializeSchema(const SerializableSchema& serializedSchema);
+
+    /// @brief Serializes a field by updating the name and field of the serializableField protobuf object
+    static void serializeField(const Schema::Field& field, SerializableSchema_SerializableField* serializableField);
+
+    /// @brief Serializes a field by updating the name and field of the serializableField protobuf object
+    static Schema::Field deserializeField(const SerializableSchema_SerializableField& serializableField);
 };
 }

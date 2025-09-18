@@ -74,7 +74,7 @@ message SerializableAggregationFunction {
     optional uint64 histogram_max_value = 8;
     optional uint64 count_min_num_columns = 9;
     optional uint64 count_min_num_rows = 10;
-    optional string number_of_seen_tuples_field_name = 11;
+    optional SerializableSchema.SerializableField number_of_seen_tuples_field = 11;
 }
 
 message AggregationFunctionList {
@@ -108,5 +108,6 @@ message SerializableVariantDescriptor {
     UInt64List ulongs = 15;
     SerializableFunction function = 16;
     SerializableSchema schema = 17;
+    SerializableSchema.SerializableField field = 17;
   }
 }

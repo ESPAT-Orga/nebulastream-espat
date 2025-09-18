@@ -77,7 +77,8 @@ public:
         WindowInfos,
         ProjectionList,
         SerializableFunction,
-        SerializableSchema>;
+        SerializableSchema,
+        SerializableSchema_SerializableField>;
     using Config = std::unordered_map<std::string, ConfigType>;
 
     /// Tag struct that tags a config key with a type.

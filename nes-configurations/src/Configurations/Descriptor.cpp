@@ -111,6 +111,10 @@ SerializableVariantDescriptor descriptorConfigTypeToProto(const DescriptorConfig
             {
                 protoVar.mutable_schema()->CopyFrom(arg);
             }
+            else if constexpr (std::is_same_v<U, NES::SerializableSchema_SerializableField>)
+            {
+                protoVar.mutable_field()->CopyFrom(arg);
+            }
             else
             {
                 static_assert(!std::is_same_v<U, U>, "Unsupported type in SourceDescriptorConfigTypeToProto"); /// is_same_v for logging T
@@ -158,6 +162,8 @@ DescriptorConfig::ConfigType protoToDescriptorConfigType(const SerializableVaria
             return protoVar.function();
         case SerializableVariantDescriptor::kSchema:
             return protoVar.schema();
+        case SerializableVariantDescriptor::kField:
+            return protoVar.field();
         case NES::SerializableVariantDescriptor::VALUE_NOT_SET:
             throw CannotSerialize("Protobuf oneOf has no value");
     }

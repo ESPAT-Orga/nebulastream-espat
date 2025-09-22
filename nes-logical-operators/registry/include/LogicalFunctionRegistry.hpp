@@ -32,6 +32,7 @@ struct LogicalFunctionRegistryArguments
     DescriptorConfig::Config config;
     std::vector<LogicalFunction> children;
     DataType dataType;
+    uint8_t compressionLevel;
 };
 
 class LogicalFunctionRegistry

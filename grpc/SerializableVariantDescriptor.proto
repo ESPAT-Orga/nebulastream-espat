@@ -48,6 +48,7 @@ message SerializableFunction {
     string function_type = 2;
     SerializableDataType data_type = 3;
     map<string, SerializableVariantDescriptor> config = 4;
+    uint32 compression_level = 5;
 }
 
 message FunctionList {

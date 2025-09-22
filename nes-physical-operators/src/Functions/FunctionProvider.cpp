@@ -19,8 +19,6 @@
 #include <utility>
 #include <vector>
 #include <DataTypes/DataType.hpp>
-#include <Functions/CastFieldPhysicalFunction.hpp>
-#include <Functions/CastToTypeLogicalFunction.hpp>
 #include <Functions/ConstantValueLogicalFunction.hpp>
 #include <Functions/ConstantValuePhysicalFunction.hpp>
 #include <Functions/ConstantValueVariableSizePhysicalFunction.hpp>
@@ -28,6 +26,8 @@
 #include <Functions/FieldAccessPhysicalFunction.hpp>
 #include <Functions/LogicalFunction.hpp>
 #include <Functions/PhysicalFunction.hpp>
+#include <Functions/ZstdCompressLogicalFunction.hpp>
+#include <Functions/ZstdCompressPhysicalFunction.hpp>
 #include <Util/Strings.hpp>
 #include <ErrorHandling.hpp>
 #include <PhysicalFunctionRegistry.hpp>
@@ -54,6 +54,12 @@ PhysicalFunction FunctionProvider::lowerFunction(LogicalFunction logicalFunction
     if (const auto constantValueFunction = logicalFunction.tryGet<ConstantValueLogicalFunction>())
     {
         return lowerConstantFunction(*constantValueFunction);
+    }
+    if (const auto zstdCompressFunction = logicalFunction.tryGet<ZstdCompressLogicalFunction>())
+    {
+        INVARIANT(childFunctions.size() == 1, "ZstdCompressFunction expects exactly one child!");
+        return ZstdCompressPhysicalFunction(
+            childFunctions[0], logicalFunction.getDataType(), zstdCompressFunction->getZstdCompressionLevel());
     }
 
     /// 3. Calling the registry to create an executable function.

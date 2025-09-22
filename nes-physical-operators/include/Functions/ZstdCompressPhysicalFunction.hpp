@@ -12,10 +12,8 @@
     limitations under the License.
 */
 
-#include <Functions/CastFieldPhysicalFunction.hpp>
+#pragma once
 
-#include <utility>
-#include <DataTypes/DataType.hpp>
 #include <Functions/PhysicalFunction.hpp>
 #include <Nautilus/DataTypes/VarVal.hpp>
 #include <Nautilus/Interface/Record.hpp>
@@ -24,14 +22,15 @@
 namespace NES
 {
 
-CastFieldPhysicalFunction::CastFieldPhysicalFunction(PhysicalFunction childFunction, DataType castToType)
-    : castToType(std::move(castToType)), childFunction(std::move(childFunction))
+class ZstdCompressPhysicalFunction final : public PhysicalFunctionConcept
 {
-}
+public:
+    ZstdCompressPhysicalFunction(PhysicalFunction childPhysicalFunction, DataType type, uint32_t compressionLevel);
+    [[nodiscard]] VarVal execute(const Record& record, ArenaRef& arena) const override;
 
-VarVal CastFieldPhysicalFunction::execute(const Record& record, ArenaRef& arena) const
-{
-    const auto value = childFunction.execute(record, arena);
-    return value.castToType(castToType.type);
-}
+private:
+    PhysicalFunction childPhysicalFunction;
+    DataType type;
+    uint32_t compressionLevel;
+};
 }

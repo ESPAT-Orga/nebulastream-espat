@@ -13,7 +13,7 @@
 */
 
 #pragma once
-#include <DataTypes/DataType.hpp>
+
 #include <Functions/PhysicalFunction.hpp>
 #include <Nautilus/DataTypes/VarVal.hpp>
 #include <Nautilus/Interface/Record.hpp>
@@ -22,15 +22,14 @@
 namespace NES
 {
 
-class CastFieldPhysicalFunction : public PhysicalFunctionConcept
+class ZstdDecompressPhysicalFunction final : public PhysicalFunctionConcept
 {
 public:
-    explicit CastFieldPhysicalFunction(PhysicalFunction childFunction, DataType castToType);
+    ZstdDecompressPhysicalFunction(PhysicalFunction childPhysicalFunction, DataType type);
     [[nodiscard]] VarVal execute(const Record& record, ArenaRef& arena) const override;
 
 private:
-    DataType castToType;
-    PhysicalFunction childFunction;
+    PhysicalFunction childPhysicalFunction;
+    DataType type;
 };
-
 }

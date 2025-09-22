@@ -41,6 +41,7 @@
     "nautilus",
     "replxx",
     "spdlog",
+    "zstd",
     "yaml-cpp",
     "boost-url"
   ],

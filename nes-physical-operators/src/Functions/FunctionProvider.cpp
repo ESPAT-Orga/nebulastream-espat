@@ -18,7 +18,6 @@
 #include <string_view>
 #include <utility>
 #include <vector>
-#include <Functions/CastFieldPhysicalFunction.hpp>
 #include <Functions/CastToTypeLogicalFunction.hpp>
 #include <Functions/ConstantValueLogicalFunction.hpp>
 #include <Functions/ConstantValuePhysicalFunction.hpp>
@@ -27,6 +26,8 @@
 #include <Functions/FieldAccessPhysicalFunction.hpp>
 #include <Functions/LogicalFunction.hpp>
 #include <Functions/PhysicalFunction.hpp>
+#include <Functions/ZstdCompressLogicalFunction.hpp>
+#include <Functions/ZstdCompressPhysicalFunction.hpp>
 #include <Util/Strings.hpp>
 #include <ErrorHandling.hpp>
 #include <PhysicalFunctionRegistry.hpp>
@@ -52,14 +53,14 @@ PhysicalFunction FunctionProvider::lowerFunction(LogicalFunction logicalFunction
     {
         return lowerConstantFunction(*constantValueFunction);
     }
-    if (const auto castToTypeNode = logicalFunction.tryGet<CastToTypeLogicalFunction>())
+    if (const auto zstdCompressFunction = logicalFunction.tryGet<ZstdCompressLogicalFunction>())
     {
-        INVARIANT(childFunction.size() == 1, "CastFieldPhysicalFunction expects exact one child!");
-        return CastFieldPhysicalFunction(childFunction[0], castToTypeNode->getDataType());
+        INVARIANT(childFunction.size() == 1, "ZstdCompressFunction expects exactly one child!");
+        return ZstdCompressPhysicalFunction(childFunction[0], logicalFunction.getDataType(), zstdCompressFunction->getCompressionLevel());
     }
 
     /// 3. Calling the registry to create an executable function.
-    auto executableFunctionArguments = PhysicalFunctionRegistryArguments(childFunction);
+    auto executableFunctionArguments = PhysicalFunctionRegistryArguments(childFunction, logicalFunction.getDataType());
     if (const auto function
         = PhysicalFunctionRegistry::instance().create(std::string(logicalFunction.getType()), std::move(executableFunctionArguments)))
     {

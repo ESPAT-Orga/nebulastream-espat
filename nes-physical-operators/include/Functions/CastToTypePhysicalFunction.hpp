@@ -13,28 +13,24 @@
 */
 
 #pragma once
-#include <string>
-#include <vector>
+#include <DataTypes/DataType.hpp>
 #include <Functions/PhysicalFunction.hpp>
-#include <Util/Registry.hpp>
+#include <Nautilus/DataTypes/VarVal.hpp>
+#include <Nautilus/Interface/Record.hpp>
+#include <ExecutionContext.hpp>
 
 namespace NES
 {
 
-using PhysicalFunctionRegistryReturnType = PhysicalFunction;
-
-struct PhysicalFunctionRegistryArguments
+class CastToTypePhysicalFunction : public PhysicalFunctionConcept
 {
-    std::vector<PhysicalFunction> childFunctions;
-    DataType dataType;
+public:
+    explicit CastToTypePhysicalFunction(PhysicalFunction childFunction, DataType castToType);
+    [[nodiscard]] VarVal execute(const Record& record, ArenaRef& arena) const override;
+
+private:
+    DataType castToType;
+    PhysicalFunction childFunction;
 };
 
-class PhysicalFunctionRegistry
-    : public BaseRegistry<PhysicalFunctionRegistry, std::string, PhysicalFunctionRegistryReturnType, PhysicalFunctionRegistryArguments>
-{
-};
 }
-
-#define INCLUDED_FROM_REGISTRY_PHYSICAL_FUNCTION
-#include <PhysicalFunctionGeneratedRegistrar.inc>
-#undef INCLUDED_FROM_REGISTRY_PHYSICAL_FUNCTION

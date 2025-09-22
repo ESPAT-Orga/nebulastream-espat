@@ -48,7 +48,9 @@ LogicalFunction deserializeFunction(const SerializableFunction& serializedFuncti
         functionDescriptorConfig[key] = protoToDescriptorConfigType(value);
     }
 
-    auto argument = LogicalFunctionRegistryArguments(functionDescriptorConfig, deserializedChildren, dataType);
+    uint8_t compressionLevel = serializedFunction.compression_level();
+
+    auto argument = LogicalFunctionRegistryArguments(functionDescriptorConfig, deserializedChildren, dataType, compressionLevel);
 
     if (auto function = LogicalFunctionRegistry::instance().create(functionType, argument))
     {

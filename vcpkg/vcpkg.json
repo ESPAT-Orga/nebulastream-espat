@@ -41,6 +41,7 @@
     "reflectcpp",
     "replxx",
     "spdlog",
+    "zstd",
     "yaml-cpp",
     "boost-url",
     "nameof",

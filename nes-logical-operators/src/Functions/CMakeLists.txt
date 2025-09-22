@@ -22,3 +22,5 @@ add_plugin(ConstantValue LogicalFunction nes-logical-operators ConstantValueLogi
 add_plugin(FieldAccess LogicalFunction nes-logical-operators FieldAccessLogicalFunction.cpp)
 add_plugin(Concat LogicalFunction nes-logical-operators ConcatLogicalFunction.cpp)
 add_plugin(CastToType LogicalFunction nes-logical-operators CastToTypeLogicalFunction.cpp)
+add_plugin(ZstdCompress LogicalFunction nes-logical-operators ZstdCompressLogicalFunction.cpp)
+add_plugin(ZstdDecompress LogicalFunction nes-logical-operators ZstdDecompressLogicalFunction.cpp)

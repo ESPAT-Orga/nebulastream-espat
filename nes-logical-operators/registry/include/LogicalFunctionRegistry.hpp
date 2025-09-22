@@ -32,6 +32,7 @@ struct LogicalFunctionRegistryArguments
 {
     std::vector<LogicalFunction> children;
     Reflected reflected;
+    uint8_t compressionLevel;
 };
 
 class LogicalFunctionRegistry

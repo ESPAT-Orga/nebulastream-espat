@@ -12,7 +12,7 @@
     limitations under the License.
 */
 
-#include <RewriteRules/LowerToPhysical/LowerToPhysicalWindowedAggregation.hpp>
+#include <RewriteRules/LowerToPhysical/LowerToPhysicalStatisticBuild.hpp>
 
 #include <cstdint>
 #include <memory>
@@ -36,6 +36,10 @@
 #include <Nautilus/Interface/HashMap/ChainedHashMap/ChainedHashMap.hpp>
 #include <Nautilus/Interface/Record.hpp>
 #include <Operators/LogicalOperator.hpp>
+#include <Operators/Windows/Aggregations/Histogram/EquiWidthHistogramLogicalFunction.hpp>
+#include <Operators/Windows/Aggregations/Sample/ReservoirSampleLogicalFunction.hpp>
+#include <Operators/Windows/Aggregations/Sketch/CountMinSketchLogicalFunction.hpp>
+#include <Operators/Windows/StatisticBuildLogicalOperator.hpp>
 #include <Operators/Windows/WindowedAggregationLogicalOperator.hpp>
 #include <RewriteRules/AbstractRewriteRule.hpp>
 #include <Runtime/Execution/OperatorHandler.hpp>
@@ -57,7 +61,7 @@ namespace NES
 {
 
 static std::pair<std::vector<Record::RecordFieldIdentifier>, std::vector<Record::RecordFieldIdentifier>>
-getKeyAndValueFields(const WindowedAggregationLogicalOperator& logicalOperator)
+getKeyAndValueFields(const StatisticBuildLogicalOperator& logicalOperator)
 {
     std::vector<Record::RecordFieldIdentifier> fieldKeyNames;
     std::vector<Record::RecordFieldIdentifier> fieldValueNames;
@@ -75,7 +79,9 @@ getKeyAndValueFields(const WindowedAggregationLogicalOperator& logicalOperator)
     return {fieldKeyNames, fieldValueNames};
 }
 
-static std::unique_ptr<TimeFunction> getTimeFunction(const WindowedAggregationLogicalOperator& logicalOperator)
+/// This function (and all statics) should go to some util file so it's shared with LowerToPhysicalWindowedAggregation, can take WindowType
+/// instead of logicalOperator. Otherwise, we need to keep it up to date with LowerToPhysicalWindowedAggregation.
+static std::unique_ptr<TimeFunction> getTimeFunction(const StatisticBuildLogicalOperator& logicalOperator)
 {
     auto* const timeWindow = dynamic_cast<Windowing::TimeBasedWindowType*>(logicalOperator.getWindowType().get());
     if (timeWindow == nullptr)
@@ -108,7 +114,7 @@ static std::unique_ptr<TimeFunction> getTimeFunction(const WindowedAggregationLo
 namespace
 {
 std::vector<std::shared_ptr<AggregationPhysicalFunction>>
-getAggregationPhysicalFunctions(const WindowedAggregationLogicalOperator& logicalOperator, const QueryExecutionConfiguration& configuration)
+getAggregationPhysicalFunctions(const StatisticBuildLogicalOperator& logicalOperator, const QueryExecutionConfiguration& configuration)
 {
     std::vector<std::shared_ptr<AggregationPhysicalFunction>> aggregationPhysicalFunctions;
     const auto& aggregationDescriptors = logicalOperator.getWindowAggregation();
@@ -129,6 +135,32 @@ getAggregationPhysicalFunctions(const WindowedAggregationLogicalOperator& logica
             std::move(aggregationInputFunction),
             resultFieldIdentifier,
             bufferRef);
+        /// We should think about another way to store the additional arguments for each statistic physical function.
+        /// The current approach requries us to add here an if block for every new statistic build physical function.
+        /// One idea could be to use a similar approach as with the logical operators, storing all configs in a hashmap.
+        if (name.contains("ReservoirSample"))
+        {
+            const auto logicalReservoirSample = std::dynamic_pointer_cast<ReservoirSampleLogicalFunction>(descriptor);
+            aggregationArguments.numberOfSeenTuplesFieldName = logicalOperator.getNumberOfSeenTuplesFieldName();
+            aggregationArguments.sampleSize = logicalReservoirSample->reservoirSize;
+            aggregationArguments.seed = logicalReservoirSample->seed;
+        }
+        else if (name.contains("EquiWidthHistogram"))
+        {
+            const auto logicalEquiWidthHistogram = std::dynamic_pointer_cast<EquiWidthHistogramLogicalFunction>(descriptor);
+            aggregationArguments.numberOfSeenTuplesFieldName = logicalOperator.getNumberOfSeenTuplesFieldName();
+            aggregationArguments.minValue = logicalEquiWidthHistogram->minValue;
+            aggregationArguments.maxValue = logicalEquiWidthHistogram->maxValue;
+            aggregationArguments.numberOfBins = logicalEquiWidthHistogram->numBuckets;
+        }
+        else if (name.contains("CountMinSketch"))
+        {
+            const auto logicalCountMinSketch = std::dynamic_pointer_cast<CountMinSketchLogicalFunction>(descriptor);
+            aggregationArguments.numberOfSeenTuplesFieldName = logicalOperator.getNumberOfSeenTuplesFieldName();
+            aggregationArguments.columns = logicalCountMinSketch->columns;
+            aggregationArguments.rows = logicalCountMinSketch->rows;
+        }
+
         if (auto aggregationPhysicalFunction
             = AggregationPhysicalFunctionRegistry::instance().create(std::string(name), std::move(aggregationArguments)))
         {
@@ -136,16 +168,16 @@ getAggregationPhysicalFunctions(const WindowedAggregationLogicalOperator& logica
         }
         else
         {
-            throw UnknownAggregationType("unknown aggregation type: {}", name);
+            throw UnknownAggregationType("unknown statistic type: {}", name);
         }
     }
     return aggregationPhysicalFunctions;
 }
 }
 
-RewriteRuleResultSubgraph LowerToPhysicalWindowedAggregation::apply(LogicalOperator logicalOperator)
+RewriteRuleResultSubgraph LowerToPhysicalStatisticBuild::apply(LogicalOperator logicalOperator)
 {
-    PRECONDITION(logicalOperator.tryGetAs<WindowedAggregationLogicalOperator>(), "Expected a WindowedAggregationLogicalOperator");
+    PRECONDITION(logicalOperator.tryGetAs<StatisticBuildLogicalOperator>(), "Expected a StatisticBuildLogicalOperator");
     PRECONDITION(std::ranges::size(logicalOperator.getChildren()) == 1, "Expected one child");
     auto outputOriginIdsOpt = getTrait<OutputOriginIdsTrait>(logicalOperator.getTraitSet());
     auto inputOriginIdsOpt = getTrait<OutputOriginIdsTrait>(logicalOperator.getChildren().at(0).getTraitSet());
@@ -155,14 +187,14 @@ RewriteRuleResultSubgraph LowerToPhysicalWindowedAggregation::apply(LogicalOpera
     PRECONDITION(std::ranges::size(outputOriginIds) == 1, "Expected one output origin id");
     PRECONDITION(logicalOperator.getInputSchemas().size() == 1, "Expected one input schema");
 
-    auto aggregation = logicalOperator.getAs<WindowedAggregationLogicalOperator>();
+    auto aggregation = logicalOperator.getAs<StatisticBuildLogicalOperator>();
     auto handlerId = getNextOperatorHandlerId();
     auto outputSchema = aggregation.getOutputSchema();
     auto outputOriginId = outputOriginIds[0];
     auto inputOriginIds = inputOriginIdsOpt.value();
-    auto timeFunction = getTimeFunction(*aggregation);
     auto windowType = std::dynamic_pointer_cast<Windowing::TimeBasedWindowType>(aggregation->getWindowType());
-    INVARIANT(windowType != nullptr, "Window type must be a time-based window type");
+    auto timeFunction = getTimeFunction(*aggregation);
+
     auto aggregationPhysicalFunctions = getAggregationPhysicalFunctions(*aggregation, conf);
 
     const auto valueSize = std::accumulate(
@@ -228,13 +260,13 @@ RewriteRuleResultSubgraph LowerToPhysicalWindowedAggregation::apply(LogicalOpera
         std::vector{buildWrapper});
 
     /// Creates a physical leaf for each logical leaf. Required, as this operator can have any number of sources.
-    std::vector leafes(logicalOperator.getChildren().size(), buildWrapper);
-    return {.root = probeWrapper, .leafs = {leafes}};
+    std::vector leaves(logicalOperator.getChildren().size(), buildWrapper);
+    return {.root = probeWrapper, .leafs = {leaves}};
 }
 
 std::unique_ptr<AbstractRewriteRule>
-RewriteRuleGeneratedRegistrar::RegisterWindowedAggregationRewriteRule(RewriteRuleRegistryArguments argument) /// NOLINT
+RewriteRuleGeneratedRegistrar::RegisterStatisticBuildRewriteRule(RewriteRuleRegistryArguments argument) /// NOLINT
 {
-    return std::make_unique<LowerToPhysicalWindowedAggregation>(argument.conf);
+    return std::make_unique<LowerToPhysicalStatisticBuild>(argument.conf);
 }
 }

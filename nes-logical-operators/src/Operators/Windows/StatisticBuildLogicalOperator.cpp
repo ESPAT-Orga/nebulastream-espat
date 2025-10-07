@@ -12,7 +12,7 @@
     limitations under the License.
 */
 
-#include <Operators/Windows/WindowedAggregationLogicalOperator.hpp>
+#include <Operators/Windows/StatisticBuildLogicalOperator.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -23,17 +23,18 @@
 #include <utility>
 #include <variant>
 #include <vector>
-
-#include <fmt/format.h>
-#include <fmt/ranges.h>
-
 #include <Configurations/Descriptor.hpp>
 #include <DataTypes/DataType.hpp>
 #include <DataTypes/Schema.hpp>
 #include <Functions/FieldAccessLogicalFunction.hpp>
 #include <Identifiers/Identifiers.hpp>
 #include <Operators/LogicalOperator.hpp>
+#include <Operators/Statistic/LogicalStatisticFields.hpp>
+#include <Operators/Windows/Aggregations/Histogram/EquiWidthHistogramLogicalFunction.hpp>
+#include <Operators/Windows/Aggregations/Sample/ReservoirSampleLogicalFunction.hpp>
+#include <Operators/Windows/Aggregations/Sketch/CountMinSketchLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/WindowAggregationLogicalFunction.hpp>
+#include <Operators/Windows/WindowedAggregationLogicalOperator.hpp>
 #include <Serialization/FunctionSerializationUtil.hpp>
 #include <Serialization/SchemaSerializationUtil.hpp>
 #include <Traits/Trait.hpp>
@@ -42,6 +43,8 @@
 #include <WindowTypes/Types/TimeBasedWindowType.hpp>
 #include <WindowTypes/Types/TumblingWindow.hpp>
 #include <WindowTypes/Types/WindowType.hpp>
+#include <fmt/format.h>
+#include <fmt/ranges.h>
 #include <ErrorHandling.hpp>
 #include <LogicalOperatorRegistry.hpp>
 #include <SerializableOperator.pb.h>
@@ -50,57 +53,42 @@
 namespace NES
 {
 
-WindowedAggregationLogicalOperator::WindowedAggregationLogicalOperator(
-    std::vector<FieldAccessLogicalFunction> groupingKey,
+
+StatisticBuildLogicalOperator::StatisticBuildLogicalOperator(
     std::vector<std::shared_ptr<WindowAggregationLogicalFunction>> aggregationFunctions,
-    std::shared_ptr<Windowing::WindowType> windowType)
-    : aggregationFunctions(std::move(aggregationFunctions)), windowType(std::move(windowType)), groupingKey(std::move(groupingKey))
+    std::shared_ptr<Windowing::WindowType> windowType,
+    std::shared_ptr<LogicalStatisticFields> logicalStatisticFields)
+    : aggregationFunctions(std::move(aggregationFunctions))
+    , windowType(std::move(windowType))
+    , logicalStatisticFields(std::move(logicalStatisticFields))
 {
+    PRECONDITION(this->logicalStatisticFields != nullptr, "A StatisticBuild operator always needs logicalStatisticFields.");
 }
 
-std::string_view WindowedAggregationLogicalOperator::getName() const noexcept
+std::string_view StatisticBuildLogicalOperator::getName() const noexcept
 {
     return NAME;
 }
 
-std::string WindowedAggregationLogicalOperator::explain(ExplainVerbosity verbosity, OperatorId id) const
+std::string StatisticBuildLogicalOperator::explain(ExplainVerbosity verbosity, OperatorId id) const
 {
     if (verbosity == ExplainVerbosity::Debug)
     {
         auto windowType = getWindowType();
         auto windowAggregation = getWindowAggregation();
         return fmt::format(
-            "WINDOW AGGREGATION(opId: {}, {}, window type: {})",
+            "STATISTIC BUILD(opId: {}, {}, window type: {})",
             id,
             fmt::join(std::views::transform(windowAggregation, [](const auto& agg) { return agg->toString(); }), ", "),
             windowType->toString());
     }
     auto windowAggregation = getWindowAggregation();
     return fmt::format(
-        "WINDOW AGG({})", fmt::join(std::views::transform(windowAggregation, [](const auto& agg) { return agg->getName(); }), ", "));
+        "STAT BUILD({})", fmt::join(std::views::transform(windowAggregation, [](const auto& agg) { return agg->getName(); }), ", "));
 }
 
-bool WindowedAggregationLogicalOperator::operator==(const WindowedAggregationLogicalOperator& rhs) const
+bool StatisticBuildLogicalOperator::operator==(const StatisticBuildLogicalOperator& rhs) const
 {
-    if (this->isKeyed() != rhs.isKeyed())
-    {
-        return false;
-    }
-
-    const auto rhsGroupingKeys = rhs.getGroupingKeys();
-    if (groupingKey.size() != rhsGroupingKeys.size())
-    {
-        return false;
-    }
-
-    for (uint64_t i = 0; i < groupingKey.size(); i++)
-    {
-        if (groupingKey[i] != rhsGroupingKeys[i])
-        {
-            return false;
-        }
-    }
-
     const auto rhsWindowAggregation = rhs.getWindowAggregation();
     if (aggregationFunctions.size() != rhsWindowAggregation.size())
     {
@@ -114,22 +102,26 @@ bool WindowedAggregationLogicalOperator::operator==(const WindowedAggregationLog
             return false;
         }
     }
+    if (*logicalStatisticFields != *rhs.logicalStatisticFields)
+    {
+        return false;
+    }
 
     return *windowType == *rhs.getWindowType() && getOutputSchema() == rhs.getOutputSchema() && getInputSchemas() == rhs.getInputSchemas()
         && getTraitSet() == rhs.getTraitSet();
 }
 
-WindowedAggregationLogicalOperator WindowedAggregationLogicalOperator::withInferredSchema(std::vector<Schema> inputSchemas) const
+StatisticBuildLogicalOperator StatisticBuildLogicalOperator::withInferredSchema(std::vector<Schema> inputSchemas) const
 {
     auto copy = *this;
-    INVARIANT(!inputSchemas.empty(), "WindowAggregation should have at least one input");
+    INVARIANT(!inputSchemas.empty(), "StatisticBuild should have at least one input");
 
     const auto& firstSchema = inputSchemas[0];
     for (const auto& schema : inputSchemas)
     {
         if (schema != firstSchema)
         {
-            throw CannotInferSchema("All input schemas must be equal for WindowAggregation operator");
+            throw CannotInferSchema("All input schemas must be equal for StatisticBuild operator");
         }
     }
 
@@ -145,128 +137,126 @@ WindowedAggregationLogicalOperator WindowedAggregationLogicalOperator::withInfer
     copy.inputSchema = firstSchema;
     copy.outputSchema = Schema{copy.outputSchema.memoryLayoutType};
 
+    const auto& newQualifierForSystemField = firstSchema.getQualifierNameForSystemGeneratedFieldsWithSeparator();
+    copy.logicalStatisticFields->addQualifierName(newQualifierForSystemField);
+
     if (auto* timeWindow = dynamic_cast<Windowing::TimeBasedWindowType*>(getWindowType().get()))
     {
-        const auto& newQualifierForSystemField = firstSchema.getQualifierNameForSystemGeneratedFieldsWithSeparator();
-
-        copy.windowMetaData.windowStartFieldName = newQualifierForSystemField + "START";
-        copy.windowMetaData.windowEndFieldName = newQualifierForSystemField + "END";
-        copy.outputSchema.addField(copy.windowMetaData.windowStartFieldName, DataType::Type::UINT64);
-        copy.outputSchema.addField(copy.windowMetaData.windowEndFieldName, DataType::Type::UINT64);
+        copy.windowMetaData.windowStartFieldName = copy.logicalStatisticFields->statisticStartTsField.name;
+        copy.windowMetaData.windowEndFieldName = copy.logicalStatisticFields->statisticEndTsField.name;
+        copy.outputSchema.addField(copy.windowMetaData.windowStartFieldName, copy.logicalStatisticFields->statisticStartTsField.dataType);
+        copy.outputSchema.addField(copy.windowMetaData.windowEndFieldName, copy.logicalStatisticFields->statisticEndTsField.dataType);
     }
     else
     {
         throw CannotInferSchema("Unsupported window type {}", getWindowType()->toString());
     }
-
-    if (isKeyed())
-    {
-        auto keys = getGroupingKeys();
-        auto newKeys = std::vector<FieldAccessLogicalFunction>();
-        for (auto& key : keys)
-        {
-            auto newKey = key.withInferredDataType(firstSchema).get<FieldAccessLogicalFunction>();
-            newKeys.push_back(newKey);
-            copy.outputSchema.addField(newKey.getFieldName(), newKey.getDataType());
-        }
-        copy.groupingKey = newKeys;
-    }
     for (const auto& agg : copy.aggregationFunctions)
     {
         copy.outputSchema.addField(agg->getAsField().getFieldName(), agg->getAsField().getDataType());
     }
+
+    if (aggregationFunctions.size() != 1)
+    {
+        throw CannotInferSchema("Expect exactly one aggregation for a statistic aggregation but found {}", aggregationFunctions.size());
+    }
+    copy.logicalStatisticFields->statisticDataField
+        = {aggregationFunctions[0]->getAsField().getFieldName(), aggregationFunctions[0]->getAsField().getDataType()};
+    copy.outputSchema.addField(logicalStatisticFields->statisticNumberOfSeenTuplesField);
+
     return copy;
 }
 
-TraitSet WindowedAggregationLogicalOperator::getTraitSet() const
+TraitSet StatisticBuildLogicalOperator::getTraitSet() const
 {
     return traitSet;
 }
 
-WindowedAggregationLogicalOperator WindowedAggregationLogicalOperator::withTraitSet(TraitSet traitSet) const
+StatisticBuildLogicalOperator StatisticBuildLogicalOperator::withTraitSet(TraitSet traitSet) const
 {
     auto copy = *this;
     copy.traitSet = std::move(traitSet);
     return copy;
 }
 
-WindowedAggregationLogicalOperator WindowedAggregationLogicalOperator::withChildren(std::vector<LogicalOperator> children) const
+StatisticBuildLogicalOperator StatisticBuildLogicalOperator::withChildren(std::vector<LogicalOperator> children) const
 {
     auto copy = *this;
     copy.children = std::move(children);
     return copy;
 }
 
-std::vector<Schema> WindowedAggregationLogicalOperator::getInputSchemas() const
+std::vector<Schema> StatisticBuildLogicalOperator::getInputSchemas() const
 {
     return {inputSchema};
 };
 
-Schema WindowedAggregationLogicalOperator::getOutputSchema() const
+Schema StatisticBuildLogicalOperator::getOutputSchema() const
 {
     return outputSchema;
 }
 
-std::vector<LogicalOperator> WindowedAggregationLogicalOperator::getChildren() const
+std::vector<LogicalOperator> StatisticBuildLogicalOperator::getChildren() const
 {
     return children;
 }
 
-bool WindowedAggregationLogicalOperator::isKeyed() const
-{
-    return !groupingKey.empty();
-}
-
-std::vector<std::shared_ptr<WindowAggregationLogicalFunction>> WindowedAggregationLogicalOperator::getWindowAggregation() const
+std::vector<std::shared_ptr<WindowAggregationLogicalFunction>> StatisticBuildLogicalOperator::getWindowAggregation() const
 {
     return aggregationFunctions;
 }
 
-void WindowedAggregationLogicalOperator::setWindowAggregation(std::vector<std::shared_ptr<WindowAggregationLogicalFunction>> wa)
+void StatisticBuildLogicalOperator::setWindowAggregation(std::vector<std::shared_ptr<WindowAggregationLogicalFunction>> wa)
 {
     aggregationFunctions = std::move(wa);
 }
 
-std::shared_ptr<Windowing::WindowType> WindowedAggregationLogicalOperator::getWindowType() const
+std::shared_ptr<Windowing::WindowType> StatisticBuildLogicalOperator::getWindowType() const
 {
     return windowType;
 }
 
-void WindowedAggregationLogicalOperator::setWindowType(std::shared_ptr<Windowing::WindowType> wt)
+void StatisticBuildLogicalOperator::setWindowType(std::shared_ptr<Windowing::WindowType> wt)
 {
     windowType = std::move(wt);
 }
 
-std::vector<FieldAccessLogicalFunction> WindowedAggregationLogicalOperator::getGroupingKeys() const
+std::vector<FieldAccessLogicalFunction> StatisticBuildLogicalOperator::getGroupingKeys() const
 {
     return groupingKey;
 }
 
-std::string WindowedAggregationLogicalOperator::getWindowStartFieldName() const
+std::string StatisticBuildLogicalOperator::getWindowStartFieldName() const
 {
     return windowMetaData.windowStartFieldName;
 }
 
-std::string WindowedAggregationLogicalOperator::getWindowEndFieldName() const
+std::string StatisticBuildLogicalOperator::getWindowEndFieldName() const
 {
     return windowMetaData.windowEndFieldName;
 }
 
-const WindowMetaData& WindowedAggregationLogicalOperator::getWindowMetaData() const
+const WindowMetaData& StatisticBuildLogicalOperator::getWindowMetaData() const
 {
     return windowMetaData;
 }
 
-void WindowedAggregationLogicalOperator::serialize(SerializableOperator& serializableOperator) const
+std::string StatisticBuildLogicalOperator::getNumberOfSeenTuplesFieldName() const
+{
+    return logicalStatisticFields->statisticNumberOfSeenTuplesField.name;
+}
+
+void StatisticBuildLogicalOperator::serialize(SerializableOperator& serializableOperator) const
 {
     SerializableLogicalOperator proto;
 
     proto.set_operator_type(NAME);
 
-    for (auto& input : getInputSchemas())
+    const auto inputs = getInputSchemas();
+    for (size_t i = 0; i < inputs.size(); ++i)
     {
         auto* inSch = proto.add_input_schemas();
-        SchemaSerializationUtil::serializeSchema(input, inSch);
+        SchemaSerializationUtil::serializeSchema(inputs[i], inSch);
     }
 
     auto* outSch = proto.mutable_output_schema();
@@ -284,17 +274,6 @@ void WindowedAggregationLogicalOperator::serialize(SerializableOperator& seriali
         *aggList.add_functions() = agg->serialize();
     }
     (*serializableOperator.mutable_config())[ConfigParameters::WINDOW_AGGREGATIONS] = descriptorConfigTypeToProto(aggList);
-
-    /// Serialize keys if present
-    if (isKeyed())
-    {
-        FunctionList keyList;
-        for (const auto& key : getGroupingKeys())
-        {
-            *keyList.add_functions() = key.serialize();
-        }
-        (*serializableOperator.mutable_config())[ConfigParameters::WINDOW_KEYS] = descriptorConfigTypeToProto(keyList);
-    }
 
     /// Serialize window info
     WindowInfos windowInfo;
@@ -320,15 +299,31 @@ void WindowedAggregationLogicalOperator::serialize(SerializableOperator& seriali
     }
     (*serializableOperator.mutable_config())[ConfigParameters::WINDOW_INFOS] = descriptorConfigTypeToProto(windowInfo);
 
+    /// Serialize logicalStatisticFields. Also use a function from LogicalStatisticFields here!
+    SerializableSchema_SerializableField serField;
+    SchemaSerializationUtil::serializeField(logicalStatisticFields->statisticStartTsField, &serField);
+    (*serializableOperator.mutable_config())[ConfigParameters::STATISTIC_START_FIELD_NAME] = descriptorConfigTypeToProto(serField);
+    SchemaSerializationUtil::serializeField(logicalStatisticFields->statisticEndTsField, &serField);
+    (*serializableOperator.mutable_config())[ConfigParameters::STATISTIC_END_FIELD_NAME] = descriptorConfigTypeToProto(serField);
+    SchemaSerializationUtil::serializeField(logicalStatisticFields->statisticDataField, &serField);
+    (*serializableOperator.mutable_config())[ConfigParameters::STATISTIC_DATA_FIELD_NAME] = descriptorConfigTypeToProto(serField);
+    SchemaSerializationUtil::serializeField(logicalStatisticFields->statisticTypeField, &serField);
+    (*serializableOperator.mutable_config())[ConfigParameters::STATISTIC_TYPE_FIELD_NAME] = descriptorConfigTypeToProto(serField);
+    SchemaSerializationUtil::serializeField(logicalStatisticFields->statisticHashField, &serField);
+    (*serializableOperator.mutable_config())[ConfigParameters::STATISTIC_HASH_FIELD_NAME] = descriptorConfigTypeToProto(serField);
+    SchemaSerializationUtil::serializeField(logicalStatisticFields->statisticNumberOfSeenTuplesField, &serField);
+    (*serializableOperator.mutable_config())[ConfigParameters::STATISTIC_NUMBER_OF_SEEN_TUPLES_FIELD_NAME]
+        = descriptorConfigTypeToProto(serField);
+
     serializableOperator.mutable_operator_()->CopyFrom(proto);
 }
 
 LogicalOperatorRegistryReturnType
-LogicalOperatorGeneratedRegistrar::RegisterWindowedAggregationLogicalOperator(LogicalOperatorRegistryArguments arguments)
+LogicalOperatorGeneratedRegistrar::RegisterStatisticBuildLogicalOperator(LogicalOperatorRegistryArguments arguments)
 {
-    auto aggregationsVariant = arguments.config[WindowedAggregationLogicalOperator::ConfigParameters::WINDOW_AGGREGATIONS];
-    auto keysVariant = arguments.config[WindowedAggregationLogicalOperator::ConfigParameters::WINDOW_KEYS];
-    auto windowInfoVariant = arguments.config[WindowedAggregationLogicalOperator::ConfigParameters::WINDOW_INFOS];
+    auto aggregationsVariant = arguments.config[StatisticBuildLogicalOperator::ConfigParameters::WINDOW_AGGREGATIONS];
+    auto keysVariant = arguments.config[StatisticBuildLogicalOperator::ConfigParameters::WINDOW_KEYS];
+    auto windowInfoVariant = arguments.config[StatisticBuildLogicalOperator::ConfigParameters::WINDOW_INFOS];
 
     if (!std::holds_alternative<AggregationFunctionList>(aggregationsVariant))
     {
@@ -340,24 +335,6 @@ LogicalOperatorGeneratedRegistrar::RegisterWindowedAggregationLogicalOperator(Lo
     {
         auto function = FunctionSerializationUtil::deserializeWindowAggregationFunction(agg);
         windowAggregations.push_back(function);
-    }
-
-    std::vector<FieldAccessLogicalFunction> keys;
-    if (std::holds_alternative<FunctionList>(keysVariant))
-    {
-        auto keyFunctions = std::get<FunctionList>(keysVariant).functions();
-        for (const auto& key : keyFunctions)
-        {
-            auto function = FunctionSerializationUtil::deserializeFunction(key);
-            if (auto fieldAccess = function.tryGet<FieldAccessLogicalFunction>())
-            {
-                keys.push_back(fieldAccess.value());
-            }
-            else
-            {
-                throw UnknownLogicalOperator();
-            }
-        }
     }
 
     std::shared_ptr<Windowing::WindowType> windowType;
@@ -408,10 +385,33 @@ LogicalOperatorGeneratedRegistrar::RegisterWindowedAggregationLogicalOperator(Lo
         throw UnknownLogicalOperator();
     }
 
-    auto logicalOperator = WindowedAggregationLogicalOperator(keys, windowAggregations, windowType);
+
+    /// Do this the same way as it is done in StatisticStoreWriterLogicalOperator, or, even better, write a function (maybe in
+    /// LogicalStatisticFields).
+    auto windowStartVariant = arguments.config[StatisticBuildLogicalOperator::ConfigParameters::STATISTIC_START_FIELD_NAME];
+    auto windowStart = SchemaSerializationUtil::deserializeField(std::get<SerializableSchema_SerializableField>(windowStartVariant));
+    auto windowEndVariant = arguments.config[StatisticBuildLogicalOperator::ConfigParameters::STATISTIC_END_FIELD_NAME];
+    auto windowEnd = SchemaSerializationUtil::deserializeField(std::get<SerializableSchema_SerializableField>(windowEndVariant));
+    auto statisticDataVariant = arguments.config[StatisticBuildLogicalOperator::ConfigParameters::STATISTIC_DATA_FIELD_NAME];
+    auto statisticData = SchemaSerializationUtil::deserializeField(std::get<SerializableSchema_SerializableField>(statisticDataVariant));
+    auto statisticTypeVariant = arguments.config[StatisticBuildLogicalOperator::ConfigParameters::STATISTIC_TYPE_FIELD_NAME];
+    auto statisticType = SchemaSerializationUtil::deserializeField(std::get<SerializableSchema_SerializableField>(statisticTypeVariant));
+    auto statisticHashVariant = arguments.config[StatisticBuildLogicalOperator::ConfigParameters::STATISTIC_HASH_FIELD_NAME];
+    auto statisticHash = SchemaSerializationUtil::deserializeField(std::get<SerializableSchema_SerializableField>(statisticHashVariant));
+    auto statisticNumberofSeenTuplesVariant
+        = arguments.config[StatisticBuildLogicalOperator::ConfigParameters::STATISTIC_NUMBER_OF_SEEN_TUPLES_FIELD_NAME];
+    auto statisticNumberofSeenTuples
+        = SchemaSerializationUtil::deserializeField(std::get<SerializableSchema_SerializableField>(statisticNumberofSeenTuplesVariant));
+
+    auto logicalStatisticFields
+        = std::make_shared<LogicalStatisticFields>(statisticNumberofSeenTuples, statisticHash, windowStart, windowEnd);
+    logicalStatisticFields->statisticDataField = statisticData;
+    logicalStatisticFields->statisticTypeField = statisticType;
+
+    auto logicalOperator = StatisticBuildLogicalOperator(windowAggregations, windowType, logicalStatisticFields);
     if (arguments.inputSchemas.empty())
     {
-        throw CannotDeserialize("Cannot construct WindowedAggregation");
+        throw CannotDeserialize("Cannot construct StatisticBuild");
     }
     return logicalOperator.withInferredSchema(arguments.inputSchemas);
 }

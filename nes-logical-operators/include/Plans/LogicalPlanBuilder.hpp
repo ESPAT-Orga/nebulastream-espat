@@ -61,12 +61,18 @@ public:
     /// @return the updated queryPlan
     static LogicalPlan addSelection(LogicalFunction selectionFunction, const LogicalPlan& queryPlan);
 
-    static LogicalPlan addWindowAggregation(
+    static LogicalPlan addStatisticBuild(
         LogicalPlan queryPlan,
         const std::shared_ptr<Windowing::WindowType>& windowType,
         std::vector<std::shared_ptr<WindowAggregationLogicalFunction>> windowAggs,
         std::vector<FieldAccessLogicalFunction> onKeys,
-        std::shared_ptr<LogicalStatisticFields> logicalStatisticFields = nullptr);
+        std::shared_ptr<LogicalStatisticFields> logicalStatisticFields);
+
+    static LogicalPlan addWindowAggregation(
+        LogicalPlan queryPlan,
+        const std::shared_ptr<Windowing::WindowType>& windowType,
+        std::vector<std::shared_ptr<WindowAggregationLogicalFunction>> windowAggs,
+        std::vector<FieldAccessLogicalFunction> onKeys);
 
     static LogicalPlan addStatisticStoreWriter(
         const LogicalPlan& queryPlan,

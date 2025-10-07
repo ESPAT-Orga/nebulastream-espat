@@ -42,19 +42,13 @@
 namespace NES
 {
 
-class WindowedAggregationLogicalOperator final : public OriginIdAssigner
+class WindowedAggregationLogicalOperator : public OriginIdAssigner
 {
 public:
     WindowedAggregationLogicalOperator(
         std::vector<FieldAccessLogicalFunction> groupingKey,
         std::vector<std::shared_ptr<WindowAggregationLogicalFunction>> aggregationFunctions,
         std::shared_ptr<Windowing::WindowType> windowType);
-
-    WindowedAggregationLogicalOperator(
-        std::vector<FieldAccessLogicalFunction> groupingKey,
-        std::vector<std::shared_ptr<WindowAggregationLogicalFunction>> aggregationFunctions,
-        std::shared_ptr<Windowing::WindowType> windowType,
-        std::shared_ptr<LogicalStatisticFields> logicalStatisticFields);
 
     [[nodiscard]] bool isKeyed() const;
 
@@ -86,15 +80,14 @@ public:
     [[nodiscard]] std::string_view getName() const noexcept;
 
     [[nodiscard]] WindowedAggregationLogicalOperator withInferredSchema(std::vector<Schema> inputSchemas) const;
-    [[nodiscard]] std::string getNumberOfSeenTuplesFieldName() const;
 
 private:
     static constexpr std::string_view NAME = "WindowedAggregation";
+
     std::vector<std::shared_ptr<WindowAggregationLogicalFunction>> aggregationFunctions;
     std::shared_ptr<Windowing::WindowType> windowType;
     std::vector<FieldAccessLogicalFunction> groupingKey;
     WindowMetaData windowMetaData;
-    std::shared_ptr<LogicalStatisticFields> logicalStatisticFields;
 
     std::vector<LogicalOperator> children;
     TraitSet traitSet;

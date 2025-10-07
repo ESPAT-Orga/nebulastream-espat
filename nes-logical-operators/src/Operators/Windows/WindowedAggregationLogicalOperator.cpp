@@ -23,17 +23,12 @@
 #include <utility>
 #include <variant>
 #include <vector>
-
 #include <Configurations/Descriptor.hpp>
 #include <DataTypes/DataType.hpp>
 #include <DataTypes/Schema.hpp>
 #include <Functions/FieldAccessLogicalFunction.hpp>
 #include <Identifiers/Identifiers.hpp>
 #include <Operators/LogicalOperator.hpp>
-#include <Operators/Statistic/LogicalStatisticFields.hpp>
-#include <Operators/Windows/Aggregations/Histogram/EquiWidthHistogramLogicalFunction.hpp>
-#include <Operators/Windows/Aggregations/Sample/ReservoirSampleLogicalFunction.hpp>
-#include <Operators/Windows/Aggregations/Sketch/CountMinSketchLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/WindowAggregationLogicalFunction.hpp>
 #include <Serialization/LogicalFunctionReflection.hpp>
 #include <Serialization/WindowTypeReflection.hpp>
@@ -58,22 +53,7 @@ WindowedAggregationLogicalOperator::WindowedAggregationLogicalOperator(
     std::vector<FieldAccessLogicalFunction> groupingKey,
     std::vector<std::shared_ptr<WindowAggregationLogicalFunction>> aggregationFunctions,
     std::shared_ptr<Windowing::WindowType> windowType)
-    : aggregationFunctions(std::move(aggregationFunctions))
-    , windowType(std::move(windowType))
-    , groupingKey(std::move(groupingKey))
-    , logicalStatisticFields(std::make_shared<LogicalStatisticFields>())
-{
-}
-
-WindowedAggregationLogicalOperator::WindowedAggregationLogicalOperator(
-    std::vector<FieldAccessLogicalFunction> groupingKey,
-    std::vector<std::shared_ptr<WindowAggregationLogicalFunction>> aggregationFunctions,
-    std::shared_ptr<Windowing::WindowType> windowType,
-    std::shared_ptr<LogicalStatisticFields> logicalStatisticFields)
-    : aggregationFunctions(std::move(aggregationFunctions))
-    , windowType(std::move(windowType))
-    , groupingKey(std::move(groupingKey))
-    , logicalStatisticFields(std::move(logicalStatisticFields))
+    : aggregationFunctions(std::move(aggregationFunctions)), windowType(std::move(windowType)), groupingKey(std::move(groupingKey))
 {
 }
 
@@ -153,17 +133,10 @@ WindowedAggregationLogicalOperator WindowedAggregationLogicalOperator::withInfer
     }
 
     std::vector<std::shared_ptr<WindowAggregationLogicalFunction>> newFunctions;
-    bool isStatisticAggregation = false;
     for (const auto& agg : getWindowAggregation())
     {
         auto aggInferStamp = std::make_shared<WindowAggregationLogicalFunction>(agg->withInferredStamp(firstSchema));
         newFunctions.push_back(aggInferStamp);
-        // TODO - have a StatisticBuild logical operator instead of reusing the window aggregation
-        //      -this could still inherit from the window aggregation logical operator
-        //      - but it also inherits from the LogicalStatisticOperator.- we can then still lower it to a windowed aggregation
-        isStatisticAggregation |= (std::dynamic_pointer_cast<CountMinSketchLogicalFunction>(agg) != nullptr)
-            | (std::dynamic_pointer_cast<EquiWidthHistogramLogicalFunction>(agg) != nullptr)
-            | (std::dynamic_pointer_cast<ReservoirSampleLogicalFunction>(agg) != nullptr);
     }
     copy.aggregationFunctions = newFunctions;
 
@@ -171,9 +144,9 @@ WindowedAggregationLogicalOperator WindowedAggregationLogicalOperator::withInfer
     copy.inputSchema = firstSchema;
     copy.outputSchema = Schema{};
 
-    const auto& newQualifierForSystemField = firstSchema.getQualifierNameForSystemGeneratedFieldsWithSeparator();
-    if (dynamic_cast<Windowing::TimeBasedWindowType*>(getWindowType().get()) != nullptr)
+    if (auto* timeWindow = dynamic_cast<Windowing::TimeBasedWindowType*>(getWindowType().get()) != nullptr)
     {
+        const auto& newQualifierForSystemField = firstSchema.getQualifierNameForSystemGeneratedFieldsWithSeparator();
         copy.windowMetaData.windowStartFieldName = newQualifierForSystemField + "START";
         copy.windowMetaData.windowEndFieldName = newQualifierForSystemField + "END";
         copy.outputSchema.addField(copy.windowMetaData.windowStartFieldName, DataType::Type::UINT64);
@@ -186,11 +159,6 @@ WindowedAggregationLogicalOperator WindowedAggregationLogicalOperator::withInfer
 
     if (isKeyed())
     {
-        if (isStatisticAggregation)
-        {
-            throw CannotInferSchema("Currently, we do not allow grouped statistics aggregations!");
-        }
-
         auto keys = getGroupingKeys();
         auto newKeys = std::vector<FieldAccessLogicalFunction>();
         for (auto& key : keys)
@@ -205,26 +173,7 @@ WindowedAggregationLogicalOperator WindowedAggregationLogicalOperator::withInfer
     {
         copy.outputSchema.addField(agg->getAsField().getFieldName(), agg->getAsField().getDataType());
     }
-
-    if (isStatisticAggregation)
-    {
-        if (aggregationFunctions.size() != 1)
-        {
-            throw CannotInferSchema("Expect exactly one aggregation for a statistic aggregation but found {}", aggregationFunctions.size());
-        }
-        copy.logicalStatisticFields->addQualifierName(newQualifierForSystemField);
-        copy.logicalStatisticFields->statisticStartTsField = {copy.windowMetaData.windowStartFieldName, DataType{DataType::Type::UINT64}};
-        copy.logicalStatisticFields->statisticEndTsField = {copy.windowMetaData.windowEndFieldName, DataType{DataType::Type::UINT64}};
-        copy.logicalStatisticFields->statisticDataField
-            = {aggregationFunctions[0]->getAsField().getFieldName(), aggregationFunctions[0]->getAsField().getDataType()};
-        copy.outputSchema.addField(logicalStatisticFields->statisticNumberOfSeenTuplesField);
-    }
     return copy;
-}
-
-std::string WindowedAggregationLogicalOperator::getNumberOfSeenTuplesFieldName() const
-{
-    return logicalStatisticFields->statisticNumberOfSeenTuplesField.name;
 }
 
 TraitSet WindowedAggregationLogicalOperator::getTraitSet() const
@@ -330,7 +279,18 @@ WindowedAggregationLogicalOperator Unreflector<WindowedAggregationLogicalOperato
     for (const auto& [name, reflectedAggregation] : aggregations)
     {
         auto functionOpt = AggregationLogicalFunctionRegistry::instance().create(
-            name, AggregationLogicalFunctionRegistryArguments{.fields = {}, .reflected = reflectedAggregation});
+            name,
+            AggregationLogicalFunctionRegistryArguments{
+                .fields = {},
+                .reservoirSize = std::nullopt,
+                .sampleHash = std::nullopt,
+                .histogramNumBuckets = std::nullopt,
+                .histogramMinValue = std::nullopt,
+                .histogramMaxValue = std::nullopt,
+                .countMinNumColumns = std::nullopt,
+                .countMinNumRows = std::nullopt,
+                .numberOfSeenTuplesField = std::nullopt,
+                .reflected = reflectedAggregation});
         if (!functionOpt.has_value())
         {
             throw CannotDeserialize("Invalid Aggregation Function of type {}", name);

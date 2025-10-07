@@ -494,10 +494,13 @@ void AntlrSQLQueryPlanCreator::exitPrimaryQuery(AntlrSQLParser::PrimaryQueryCont
         queryPlan = LogicalPlanBuilder::addProjection(helpers.top().preAggregationProjections, /*asterisk=*/true, queryPlan);
     }
 
-    if (helpers.top().windowType != nullptr && helpers.top().joinKeyRelationHelper.empty())
+    auto statisticAggs = std::initializer_list<std::string>{"ReservoirSample", "EquiWidthHistogram", "CountMinSketch"};
+    if (helpers.top().windowType != nullptr && helpers.top().joinKeyRelationHelper.empty()
+        and std::ranges::find(statisticAggs, helpers.top().windowAggs.front().get()->getName()) != std::end(statisticAggs))
     {
+        /// This is actually a statistic operation, not an aggregation
         auto logicalStatisticFields = std::make_shared<LogicalStatisticFields>();
-        queryPlan = LogicalPlanBuilder::addWindowAggregation(
+        queryPlan = LogicalPlanBuilder::addStatisticBuild(
             queryPlan, helpers.top().windowType, helpers.top().windowAggs, helpers.top().groupByFields, logicalStatisticFields);
         const auto windowAggName = helpers.top().windowAggs.front().get()->getName();
         if (windowAggName == "ReservoirSample")
@@ -522,6 +525,12 @@ void AntlrSQLQueryPlanCreator::exitPrimaryQuery(AntlrSQLParser::PrimaryQueryCont
             helpers.top().asterisk = true;
             // TODO We probably know what to project here, so do `helpers.top().addProjection(`.
         }
+    }
+    else if (helpers.top().isInAggFunction())
+    {
+        /// Plain old windowed aggregation
+        queryPlan = LogicalPlanBuilder::addWindowAggregation(
+            queryPlan, helpers.top().windowType, helpers.top().windowAggs, helpers.top().groupByFields);
     }
     if (helpers.top().statProbe.has_value())
     {

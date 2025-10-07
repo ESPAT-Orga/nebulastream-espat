@@ -42,6 +42,7 @@
 #include <Operators/UnionLogicalOperator.hpp>
 #include <Operators/Windows/Aggregations/WindowAggregationLogicalFunction.hpp>
 #include <Operators/Windows/JoinLogicalOperator.hpp>
+#include <Operators/Windows/StatisticBuildLogicalOperator.hpp>
 #include <Operators/Windows/WindowedAggregationLogicalOperator.hpp>
 #include <Plans/LogicalPlan.hpp>
 #include <Util/Common.hpp>
@@ -87,7 +88,7 @@ LogicalPlan LogicalPlanBuilder::addSelection(LogicalFunction selectionFunction, 
     return promoteOperatorToRoot(queryPlan, SelectionLogicalOperator(std::move(selectionFunction)));
 }
 
-LogicalPlan LogicalPlanBuilder::addWindowAggregation(
+LogicalPlan LogicalPlanBuilder::addStatisticBuild(
     LogicalPlan queryPlan,
     const std::shared_ptr<Windowing::WindowType>& windowType,
     std::vector<std::shared_ptr<WindowAggregationLogicalFunction>> windowAggs,
@@ -119,10 +120,48 @@ LogicalPlan LogicalPlanBuilder::addWindowAggregation(
 
     if (logicalStatisticFields)
     {
+        if (not onKeys.empty())
+        {
+            throw NotImplemented("Statistics do not support group by at this time");
+        }
         return promoteOperatorToRoot(
-            queryPlan,
-            WindowedAggregationLogicalOperator(std::move(onKeys), std::move(windowAggs), windowType, std::move(logicalStatisticFields)));
+            queryPlan, StatisticBuildLogicalOperator(std::move(windowAggs), windowType, std::move(logicalStatisticFields)));
     }
+    else
+    {
+        throw NotImplemented("Cannot add a statisticBuild logical operator without fields");
+    }
+}
+
+LogicalPlan LogicalPlanBuilder::addWindowAggregation(
+    LogicalPlan queryPlan,
+    const std::shared_ptr<Windowing::WindowType>& windowType,
+    std::vector<std::shared_ptr<WindowAggregationLogicalFunction>> windowAggs,
+    std::vector<FieldAccessLogicalFunction> onKeys)
+{
+    PRECONDITION(not queryPlan.getRootOperators().empty(), "invalid query plan, as the root operator is empty");
+
+    if (auto* timeBasedWindowType = dynamic_cast<Windowing::TimeBasedWindowType*>(windowType.get()))
+    {
+        switch (timeBasedWindowType->getTimeCharacteristic().getType())
+        {
+            case Windowing::TimeCharacteristic::Type::IngestionTime:
+                queryPlan = promoteOperatorToRoot(queryPlan, IngestionTimeWatermarkAssignerLogicalOperator());
+                break;
+            case Windowing::TimeCharacteristic::Type::EventTime:
+                queryPlan = promoteOperatorToRoot(
+                    queryPlan,
+                    EventTimeWatermarkAssignerLogicalOperator(
+                        FieldAccessLogicalFunction(timeBasedWindowType->getTimeCharacteristic().field.name),
+                        timeBasedWindowType->getTimeCharacteristic().getTimeUnit()));
+                break;
+        }
+    }
+    else
+    {
+        throw NotImplemented("Only TimeBasedWindowType is supported for now");
+    }
+
     return promoteOperatorToRoot(queryPlan, WindowedAggregationLogicalOperator(std::move(onKeys), std::move(windowAggs), windowType));
 }
 

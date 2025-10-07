@@ -33,6 +33,7 @@ public:
     Schema::Field statisticTypeField = {"STATISTICTYPE", DataType{DataType::Type::UINT64}};
 
     LogicalStatisticFields() = default;
+    bool operator==(const LogicalStatisticFields&) const = default;
 
     LogicalStatisticFields(
         Schema::Field statisticNumberOfSeenTuplesField,

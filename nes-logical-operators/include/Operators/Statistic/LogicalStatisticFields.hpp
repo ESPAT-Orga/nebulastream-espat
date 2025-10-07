@@ -33,6 +33,7 @@ public:
 
     LogicalStatisticFields() = default;
 
+    // TODO(nmlt) As I understand it the statisticData fieldname is the "asField". So it is settable in the SQL query and should also be part of the constructor?
     LogicalStatisticFields(
         Schema::Field statisticNumberOfSeenTuplesField,
         Schema::Field statisticHashField,

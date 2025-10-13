@@ -26,6 +26,9 @@ class ZstdCompressPhysicalFunction final : public PhysicalFunctionConcept
 {
 public:
     ZstdCompressPhysicalFunction(PhysicalFunction childPhysicalFunction, DataType type, uint32_t compressionLevel);
+    size_t static compress(
+        size_t inputSize, int8_t* inputData, size_t compressedMaxSize, int8_t* compressedData, uint32_t compressionLevel);
+    static void copyCompressionResultAndSize(int8_t* destination, int8_t* source, size_t compressedSize);
     [[nodiscard]] VarVal execute(const Record& record, ArenaRef& arena) const override;
 
 private:

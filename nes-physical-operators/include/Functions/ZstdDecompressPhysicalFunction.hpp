@@ -26,6 +26,8 @@ class ZstdDecompressPhysicalFunction final : public PhysicalFunctionConcept
 {
 public:
     ZstdDecompressPhysicalFunction(PhysicalFunction childPhysicalFunction, DataType type);
+    static void decompressVarSized(size_t inputSize, int8_t* inputData, size_t decompressedSize, int8_t* decompressedData);
+    static void decompressFixedSize(size_t inputSize, int8_t* inputData, size_t decompressedSize, int8_t* decompressedData);
     [[nodiscard]] VarVal execute(const Record& record, ArenaRef& arena) const override;
 
 private:

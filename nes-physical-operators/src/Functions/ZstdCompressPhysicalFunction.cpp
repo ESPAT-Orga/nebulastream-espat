@@ -32,8 +32,8 @@ VarVal ZstdCompressPhysicalFunction::execute(const Record& record, ArenaRef& are
     const auto value = childPhysicalFunction.execute(record, arena);
 
     /// get the size and the memory location of the value
-    auto valueMem = nautilus::val<int8_t*>(0);
-    auto valueSize = nautilus::val<uint32_t>(0);
+    nautilus::val<int8_t*> valueMem{0};
+    nautilus::val<uint32_t> valueSize{0};
     if (type.type == DataType::Type::VARSIZED)
     {
         auto varSizedValueInput = value.cast<VariableSizedData>();
@@ -52,39 +52,14 @@ VarVal ZstdCompressPhysicalFunction::execute(const Record& record, ArenaRef& are
     auto maxCompressedSize = nautilus::invoke(+[](size_t inputSize) { return ZSTD_compressBound(inputSize); }, valueSize);
     auto tempBufferCompressed = arena.allocateMemory(maxCompressedSize);
     auto compressionLevelValue = nautilus::val<size_t>(compressionLevel);
-    auto compressedSize = nautilus::invoke(
-        +[](size_t inputSize, int8_t* inputData, size_t compressedMaxSize, int8_t* compressedData, uint32_t compressionLevel)
-        {
-            auto actualSize = ZSTD_compress(compressedData, compressedMaxSize, inputData, inputSize, compressionLevel);
-            if (ZSTD_isError(actualSize))
-            {
-                NES_DEBUG("Zstd Compression error: {}", ZSTD_getErrorName(actualSize));
-                throw std::exception();
-            }
-            return actualSize;
-        },
-        valueSize,
-        valueMem,
-        maxCompressedSize,
-        tempBufferCompressed,
-        compressionLevelValue);
+    auto compressedSize = nautilus::invoke(compress, valueSize, valueMem, maxCompressedSize, tempBufferCompressed, compressionLevelValue);
 
     /// copy the compressed data to a buffer fitting it's actual size
     auto compressedVarSizedTotalSize = compressedSize + nautilus::val<size_t>(sizeof(uint32_t));
     /// this allocation can be optimized away if we use the original buffer. But this requires some additional metadata to handle the
     /// case when the compressed data is not actually smaller than the original
     auto memCompressedVarSized = arena.allocateMemory(compressedVarSizedTotalSize);
-    nautilus::invoke(
-        +[](int8_t* destination, int8_t* source, size_t compressedSize)
-        {
-            /// set the size field of the varsized value
-            *std::bit_cast<uint32_t*>(destination) = static_cast<uint32_t>(compressedSize);
-            /// copy data
-            std::memcpy((destination + sizeof(uint32_t)), source, compressedSize);
-        },
-        memCompressedVarSized,
-        tempBufferCompressed,
-        compressedSize);
+    nautilus::invoke(copyCompressionResultAndSize, memCompressedVarSized, tempBufferCompressed, compressedSize);
 
     VariableSizedData compressedDataVarsized(memCompressedVarSized);
     return compressedDataVarsized;
@@ -93,5 +68,25 @@ VarVal ZstdCompressPhysicalFunction::execute(const Record& record, ArenaRef& are
 ZstdCompressPhysicalFunction::ZstdCompressPhysicalFunction(PhysicalFunction childPhysicalFunction, DataType type, uint32_t compressionLevel)
     : childPhysicalFunction(childPhysicalFunction), type(type), compressionLevel(compressionLevel)
 {
+}
+
+size_t ZstdCompressPhysicalFunction::compress(
+    size_t inputSize, int8_t* inputData, size_t compressedMaxSize, int8_t* compressedData, uint32_t compressionLevel)
+{
+    auto actualSize = ZSTD_compress(compressedData, compressedMaxSize, inputData, inputSize, compressionLevel);
+    if (ZSTD_isError(actualSize))
+    {
+        NES_DEBUG("Zstd Compression error: {}", ZSTD_getErrorName(actualSize));
+        throw std::exception();
+    }
+    return actualSize;
+}
+
+void ZstdCompressPhysicalFunction::copyCompressionResultAndSize(int8_t* destination, int8_t* source, size_t compressedSize)
+{
+    /// set the size field of the varsized value
+    *std::bit_cast<uint32_t*>(destination) = static_cast<uint32_t>(compressedSize);
+    /// copy data
+    std::memcpy((destination + sizeof(uint32_t)), source, compressedSize);
 }
 }

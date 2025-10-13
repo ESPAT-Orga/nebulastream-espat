@@ -43,14 +43,14 @@ bool ZstdCompressLogicalFunction::operator==(const LogicalFunctionConcept& rhs) 
 {
     if (const auto* other = dynamic_cast<const ZstdCompressLogicalFunction*>(&rhs))
     {
-        return child == other->child;
+        return child == other->child && compressionLevel == other->compressionLevel;
     }
     return false;
 }
 
 std::string ZstdCompressLogicalFunction::explain(ExplainVerbosity verbosity) const
 {
-    return fmt::format("ZSTD_COMPRESS({})", child.explain(verbosity));
+    return fmt::format("ZSTD_COMPRESS({}, {})", child.explain(verbosity), static_cast<uint8_t>(compressionLevel));
 }
 
 DataType ZstdCompressLogicalFunction::getDataType() const
@@ -97,6 +97,7 @@ SerializableFunction ZstdCompressLogicalFunction::serialize() const
 {
     SerializableFunction serializedFunction;
     serializedFunction.set_function_type(NAME);
+    serializedFunction.set_compression_level(static_cast<uint8_t>(compressionLevel));
     serializedFunction.add_children()->CopyFrom(child.serialize());
     DataTypeSerializationUtil::serializeDataType(getDataType(), serializedFunction.mutable_data_type());
     return serializedFunction;
@@ -112,8 +113,8 @@ LogicalFunctionGeneratedRegistrar::RegisterZstdCompressLogicalFunction(LogicalFu
     return ZstdCompressLogicalFunction(arguments.children[0]);
 }
 
-uint32_t ZstdCompressLogicalFunction::getCompressionLevel() const
+uint8_t ZstdCompressLogicalFunction::getZstdCompressionLevel() const
 {
-    return compressionLevel;
+    return static_cast<uint8_t>(compressionLevel);
 }
 }

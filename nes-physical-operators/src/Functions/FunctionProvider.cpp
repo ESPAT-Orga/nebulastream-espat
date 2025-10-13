@@ -56,7 +56,8 @@ PhysicalFunction FunctionProvider::lowerFunction(LogicalFunction logicalFunction
     if (const auto zstdCompressFunction = logicalFunction.tryGet<ZstdCompressLogicalFunction>())
     {
         INVARIANT(childFunction.size() == 1, "ZstdCompressFunction expects exactly one child!");
-        return ZstdCompressPhysicalFunction(childFunction[0], logicalFunction.getDataType(), zstdCompressFunction->getCompressionLevel());
+        return ZstdCompressPhysicalFunction(
+            childFunction[0], logicalFunction.getDataType(), zstdCompressFunction->getZstdCompressionLevel());
     }
 
     /// 3. Calling the registry to create an executable function.

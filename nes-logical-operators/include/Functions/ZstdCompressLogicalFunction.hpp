@@ -27,6 +27,16 @@
 namespace NES
 {
 
+/// Zstd offers compression levels ranging from 1 to 22
+/// A low compression level results in fast execution time but larger compressed output
+/// A high compression level results in slower execution time but smaller compressed output
+enum class CompressionLevel : uint8_t
+{
+    LOW = 1,
+    MEDIUM = 11,
+    HIGH = 22
+};
+
 class ZstdCompressLogicalFunction final : public LogicalFunctionConcept
 {
 public:
@@ -48,12 +58,13 @@ public:
     [[nodiscard]] std::string_view getType() const override;
     [[nodiscard]] std::string explain(ExplainVerbosity verbosity) const override;
 
-    [[nodiscard]] uint32_t getCompressionLevel() const;
+    [[nodiscard]] uint8_t getZstdCompressionLevel() const;
 
 private:
     DataType dataType;
     LogicalFunction child;
-    uint32_t compressionLevel;
+
+    CompressionLevel compressionLevel = CompressionLevel::MEDIUM;
 };
 }
 

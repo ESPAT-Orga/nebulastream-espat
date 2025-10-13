@@ -32,11 +32,14 @@ namespace NES
 VarVal ZstdDecompressPhysicalFunction::execute(const Record& record, ArenaRef& arena) const
 {
     const auto value = childPhysicalFunction.execute(record, arena);
+    nautilus::val<uint32_t> decompressedSize{0};
+    nautilus::val<uint8_t*> memDecompressed{nullptr};
+    auto varSizedValueCompressed = value.cast<VariableSizedData>();
+
     if (type.type == DataType::Type::VARSIZED)
     {
-        auto varSizedValueCompressed = value.cast<VariableSizedData>();
-
-        auto decompressedSize = nautilus::invoke(
+        /// retrieve the size of the original data from zstd's metadata
+        decompressedSize = nautilus::invoke(
             +[](uint8_t* compressed, size_t inputSize) { return static_cast<uint64_t>(ZSTD_getFrameContentSize(compressed, inputSize)); },
             varSizedValueCompressed.getContent(),
             varSizedValueCompressed.getContentSize());
@@ -44,50 +47,30 @@ VarVal ZstdDecompressPhysicalFunction::execute(const Record& record, ArenaRef& a
         /// if it is possible to perform an arena allocation outside of nautilus, the number of invokes could be reduced to one for the
         /// whole function
         auto decompressedVarSizedTotalSize = decompressedSize + nautilus::val<size_t>(sizeof(uint32_t));
-        auto memDecompressed = arena.allocateMemory(decompressedVarSizedTotalSize);
+        memDecompressed = arena.allocateMemory(decompressedVarSizedTotalSize);
 
         nautilus::invoke(
-            +[](size_t inputSize, int8_t* inputData, size_t decompressedSize, int8_t* decompressedData)
-            {
-                *std::bit_cast<uint32_t*>(decompressedData) = static_cast<uint32_t>(decompressedSize);
-                size_t actualSize = ZSTD_decompress(decompressedData + sizeof(uint32_t), decompressedSize, inputData, inputSize);
-                if (ZSTD_isError(actualSize))
-                {
-                    NES_DEBUG("Zstd Decompression error: {}", ZSTD_getErrorName(actualSize));
-                    throw std::exception();
-                }
-            },
+            decompressVarSized,
             varSizedValueCompressed.getContentSize(),
             varSizedValueCompressed.getContent(),
             decompressedSize,
             memDecompressed);
 
-        VariableSizedData decompressedVarSized(memDecompressed);
-        return decompressedVarSized;
+        return VariableSizedData(memDecompressed);
     }
     else
     {
-        auto varSizedValueCompressed = value.cast<VariableSizedData>();
-        auto decompressedSize = nautilus::val<uint32_t>(type.getSizeInBytes());
+        decompressedSize = nautilus::val<uint32_t>(type.getSizeInBytes());
 
-        auto memDecompressed = arena.allocateMemory(decompressedSize);
+        memDecompressed = arena.allocateMemory(decompressedSize);
         nautilus::invoke(
-            +[](size_t inputSize, int8_t* inputData, size_t decompressedSize, int8_t* decompressedData)
-            {
-                size_t actualSize = ZSTD_decompress(decompressedData, decompressedSize, inputData, inputSize);
-                if (ZSTD_isError(actualSize))
-                {
-                    NES_DEBUG("Zstd Decompression error: {}", ZSTD_getErrorName(actualSize));
-                    throw std::exception();
-                }
-            },
+            decompressFixedSize,
             varSizedValueCompressed.getContentSize(),
             varSizedValueCompressed.getContent(),
             decompressedSize,
             memDecompressed);
 
-        auto decompressedValue = VarVal::readVarValFromMemory(memDecompressed, type.type);
-        return decompressedValue;
+        return VarVal::readVarValFromMemory(memDecompressed, type.type);
     }
 }
 
@@ -105,4 +88,26 @@ PhysicalFunctionRegistryReturnType PhysicalFunctionGeneratedRegistrar::RegisterZ
     return ZstdDecompressPhysicalFunction(function, physicalFunctionRegistryArguments.dataType);
 }
 
+void ZstdDecompressPhysicalFunction::decompressVarSized(
+    size_t inputSize, int8_t* inputData, size_t decompressedSize, int8_t* decompressedData)
+{
+    *std::bit_cast<uint32_t*>(decompressedData) = static_cast<uint32_t>(decompressedSize);
+    size_t actualSize = ZSTD_decompress(decompressedData + sizeof(uint32_t), decompressedSize, inputData, inputSize);
+    if (ZSTD_isError(actualSize))
+    {
+        NES_DEBUG("Zstd Decompression error: {}", ZSTD_getErrorName(actualSize));
+        throw std::exception();
+    }
+}
+
+void ZstdDecompressPhysicalFunction::decompressFixedSize(
+    size_t inputSize, int8_t* inputData, size_t decompressedSize, int8_t* decompressedData)
+{
+    size_t actualSize = ZSTD_decompress(decompressedData, decompressedSize, inputData, inputSize);
+    if (ZSTD_isError(actualSize))
+    {
+        NES_DEBUG("Zstd Decompression error: {}", ZSTD_getErrorName(actualSize));
+        throw std::exception();
+    }
+}
 }

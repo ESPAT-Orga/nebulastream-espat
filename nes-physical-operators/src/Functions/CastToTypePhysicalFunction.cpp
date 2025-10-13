@@ -39,7 +39,7 @@ VarVal CastToTypePhysicalFunction::execute(const Record& record, ArenaRef& arena
 PhysicalFunctionRegistryReturnType
 PhysicalFunctionGeneratedRegistrar::RegisterCastToTypePhysicalFunction(PhysicalFunctionRegistryArguments physicalFunctionRegistryArguments)
 {
-    PRECONDITION(physicalFunctionRegistryArguments.childFunctions.size() == 1, "CastFieldPhysicalFunction expects exact one child!");
+    PRECONDITION(physicalFunctionRegistryArguments.childFunctions.size() == 1, "CastFieldPhysicalFunction expects exactly one child!");
     auto function = physicalFunctionRegistryArguments.childFunctions[0];
     return CastToTypePhysicalFunction(function, physicalFunctionRegistryArguments.dataType);
 }

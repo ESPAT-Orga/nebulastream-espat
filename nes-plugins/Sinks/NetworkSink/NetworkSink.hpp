@@ -70,6 +70,10 @@ public:
 
     void start(PipelineExecutionContext& pipelineExecutionContext) override;
     void execute(const TupleBuffer& inputBuffer, PipelineExecutionContext& pec) override;
+    bool handlingBackpressure() const;
+    bool loadThresholdReached() const;
+    bool isUnderLoad() const;
+    bool checkLoadOfPrioritySinks() const;
     void stop(PipelineExecutionContext& pec) override;
 
     static DescriptorConfig::Config validateAndFormat(std::unordered_map<std::string, std::string> config);
@@ -87,6 +91,7 @@ private:
     std::string connectionAddr;
     std::string thisConnection;
     std::atomic_bool closed;
+    std::vector<std::shared_ptr<NetworkSink>> prioritySinks;
 };
 
 struct ConfigParametersNetworkSink

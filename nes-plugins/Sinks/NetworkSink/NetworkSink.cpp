@@ -165,6 +165,15 @@ void NetworkSink::execute(const TupleBuffer& inputBuffer, PipelineExecutionConte
         children.emplace_back(childBuffer.getBuffer<uint8_t>(), childBuffer.getBufferSize());
     }
 
+    if (checkLoadOfPrioritySinks())
+    {
+        if (const auto emit = backpressureHandler.onFull(inputBuffer, valve))
+        {
+            pec.emitBuffer(*emit, PipelineExecutionContext::ContinuationPolicy::REPEAT);
+        }
+        return;
+    }
+
     /// Set data and send over the network
     const auto sendResult = try_send_on_channel(
         **channel,
@@ -199,6 +208,34 @@ void NetworkSink::execute(const TupleBuffer& inputBuffer, PipelineExecutionConte
             }
         }
     }
+}
+
+bool NetworkSink::handlingBackpressure() const
+{
+    /// it is enough already to just check on empty here as `hasbackpressure` will only be true if it is non-empty
+    return backpressureHandler.empty();
+}
+
+bool NetworkSink::loadThresholdReached() const
+{
+    return  true;
+}
+
+bool NetworkSink::isUnderLoad() const
+{
+    return handlingBackpressure() || loadThresholdReached();
+}
+
+bool NetworkSink::checkLoadOfPrioritySinks() const
+{
+    for (auto prioSink : prioritySinks)
+    {
+        if (prioSink->isUnderLoad())
+        {
+            return true;
+        }
+    }
+    return false;
 }
 
 std::ostream& NetworkSink::toString(std::ostream& str) const

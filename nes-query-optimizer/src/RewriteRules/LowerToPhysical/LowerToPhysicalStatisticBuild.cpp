@@ -12,7 +12,7 @@
     limitations under the License.
 */
 
-#include <RewriteRules/LowerToPhysical/LowerToPhysicalWindowedAggregation.hpp>
+#include <RewriteRules/LowerToPhysical/LowerToPhysicalStatisticBuild.hpp>
 
 #include <cstdint>
 #include <memory>
@@ -176,14 +176,14 @@ getAggregationPhysicalFunctions(const LogicalOperator& logicalOperator, const Wi
 }
 }
 
-RewriteRuleResultSubgraph LowerToPhysicalWindowedAggregation::apply(LogicalOperator logicalOperator)
+RewriteRuleResultSubgraph LowerToPhysicalStatisticBuild::apply(LogicalOperator logicalOperator)
 {
-    PRECONDITION(logicalOperator.tryGet<WindowedAggregationLogicalOperator>() || logicalOperator.tryGet<StatisticBuildLogicalOperator>(), "Expected a WindowedAggregationLogicalOperator or StatisticBuildLogicalOperator");
+    PRECONDITION(logicalOperator.tryGet<StatisticBuildLogicalOperator>(), "Expected a StatisticBuildLogicalOperator");
     PRECONDITION(logicalOperator.getInputOriginIds().size() == 1, "Expected one origin id vector");
     PRECONDITION(logicalOperator.getOutputOriginIds().size() == 1, "Expected one output origin id");
     PRECONDITION(logicalOperator.getInputSchemas().size() == 1, "Expected one input schema");
 
-    auto aggregation = logicalOperator.get<WindowedAggregationLogicalOperator>();
+    auto aggregation = logicalOperator.get<StatisticBuildLogicalOperator>();
     auto handlerId = getNextOperatorHandlerId();
     auto outputSchema = aggregation.getOutputSchema();
     auto inputOriginIds = aggregation.getInputOriginIds()[0];
@@ -256,13 +256,13 @@ RewriteRuleResultSubgraph LowerToPhysicalWindowedAggregation::apply(LogicalOpera
         std::vector{buildWrapper});
 
     /// Creates a physical leaf for each logical leaf. Required, as this operator can have any number of sources.
-    std::vector leafes(logicalOperator.getChildren().size(), buildWrapper);
-    return {.root = probeWrapper, .leafs = {leafes}};
+    std::vector leaves(logicalOperator.getChildren().size(), buildWrapper);
+    return {.root = probeWrapper, .leafs = {leaves}};
 }
 
 std::unique_ptr<AbstractRewriteRule>
-RewriteRuleGeneratedRegistrar::RegisterWindowedAggregationRewriteRule(RewriteRuleRegistryArguments argument) /// NOLINT
+RewriteRuleGeneratedRegistrar::RegisterStatisticBuildRewriteRule(RewriteRuleRegistryArguments argument) /// NOLINT
 {
-    return std::make_unique<LowerToPhysicalWindowedAggregation>(argument.conf);
+    return std::make_unique<LowerToPhysicalStatisticBuild>(argument.conf);
 }
 }

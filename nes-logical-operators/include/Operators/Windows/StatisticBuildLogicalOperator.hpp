@@ -28,6 +28,7 @@
 #include <Identifiers/Identifiers.hpp>
 #include <Operators/LogicalOperator.hpp>
 #include <Operators/Statistic/LogicalStatisticFields.hpp>
+#include <Operators/Windows/WindowedAggregationLogicalOperator.hpp>
 #include <Operators/Windows/Aggregations/WindowAggregationLogicalFunction.hpp>
 #include <Traits/OriginIdAssignerTrait.hpp>
 #include <Traits/Trait.hpp>
@@ -40,15 +41,14 @@
 namespace NES
 {
 
-class WindowedAggregationLogicalOperator : public LogicalOperatorConcept
+class StatisticBuildLogicalOperator final : public WindowedAggregationLogicalOperator
 {
 public:
-    WindowedAggregationLogicalOperator(
+    StatisticBuildLogicalOperator(
         std::vector<FieldAccessLogicalFunction> groupingKey,
         std::vector<std::shared_ptr<WindowAggregationLogicalFunction>> aggregationFunctions,
-        std::shared_ptr<Windowing::WindowType> windowType);
-
-    [[nodiscard]] bool isKeyed() const;
+        std::shared_ptr<Windowing::WindowType> windowType,
+        std::shared_ptr<LogicalStatisticFields> logicalStatisticFields);
 
     [[nodiscard]] std::vector<std::shared_ptr<WindowAggregationLogicalFunction>> getWindowAggregation() const;
     void setWindowAggregation(std::vector<std::shared_ptr<WindowAggregationLogicalFunction>> windowAggregation);
@@ -84,6 +84,7 @@ public:
     [[nodiscard]] std::string_view getName() const noexcept override;
 
     [[nodiscard]] LogicalOperator withInferredSchema(std::vector<Schema> inputSchemas) const override;
+    [[nodiscard]] std::string getNumberOfSeenTuplesFieldName() const;
 
     struct ConfigParameters
     {
@@ -103,42 +104,52 @@ public:
             std::nullopt,
             [](const std::unordered_map<std::string, std::string>& config) { return DescriptorConfig::tryGet(WINDOW_KEYS, config); }};
 
-        static inline const DescriptorConfig::ConfigParameter<std::string> WINDOW_START_FIELD_NAME{
-            "windowStartFieldName",
+        static inline const DescriptorConfig::ConfigParameter<std::string> STATISTIC_START_FIELD_NAME{
+            "statisticStartFieldName",
             std::nullopt,
             [](const std::unordered_map<std::string, std::string>& config)
-            { return DescriptorConfig::tryGet(WINDOW_START_FIELD_NAME, config); }};
+            { return DescriptorConfig::tryGet(STATISTIC_START_FIELD_NAME, config); }};
 
-        static inline const DescriptorConfig::ConfigParameter<std::string> WINDOW_END_FIELD_NAME{
-            "windowEndFieldName",
+        static inline const DescriptorConfig::ConfigParameter<std::string> STATISTIC_END_FIELD_NAME{
+            "statisticEndFieldName",
             std::nullopt,
             [](const std::unordered_map<std::string, std::string>& config)
-            { return DescriptorConfig::tryGet(WINDOW_END_FIELD_NAME, config); }};
+            { return DescriptorConfig::tryGet(STATISTIC_END_FIELD_NAME, config); }};
 
         static inline const DescriptorConfig::ConfigParameter<std::string> WINDOW_INFOS{
             "windowInfos",
             std::nullopt,
             [](const std::unordered_map<std::string, std::string>& config) { return DescriptorConfig::tryGet(WINDOW_INFOS, config); }};
 
+        static inline const DescriptorConfig::ConfigParameter<std::string> STATISTIC_DATA_FIELD_NAME{
+            "statisticDataFieldName",
+            std::nullopt,
+            [](const std::unordered_map<std::string, std::string>& config) { return DescriptorConfig::tryGet(STATISTIC_DATA_FIELD_NAME, config); }};
+
+        static inline const DescriptorConfig::ConfigParameter<std::string> STATISTIC_TYPE_FIELD_NAME{
+            "statisticTypeFieldName",
+            std::nullopt,
+            [](const std::unordered_map<std::string, std::string>& config) { return DescriptorConfig::tryGet(STATISTIC_TYPE_FIELD_NAME, config); }};
+
+        static inline const DescriptorConfig::ConfigParameter<std::string> STATISTIC_HASH_FIELD_NAME{
+            "statisticHashFieldName",
+            std::nullopt,
+            [](const std::unordered_map<std::string, std::string>& config) { return DescriptorConfig::tryGet(STATISTIC_HASH_FIELD_NAME, config); }};
+
+        static inline const DescriptorConfig::ConfigParameter<std::string> STATISTIC_NUMBER_OF_SEEN_TUPLES_FIELD_NAME{
+            "statisticNumberOfSeenTuplesFieldName",
+            std::nullopt,
+            [](const std::unordered_map<std::string, std::string>& config) { return DescriptorConfig::tryGet(STATISTIC_NUMBER_OF_SEEN_TUPLES_FIELD_NAME, config); }};
+
+
         static inline std::unordered_map<std::string, DescriptorConfig::ConfigParameterContainer> parameterMap
             = DescriptorConfig::createConfigParameterContainerMap(
-                TIME_MS, WINDOW_AGGREGATIONS, WINDOW_INFOS, WINDOW_KEYS, WINDOW_START_FIELD_NAME, WINDOW_END_FIELD_NAME);
+                TIME_MS, WINDOW_AGGREGATIONS, WINDOW_INFOS, WINDOW_KEYS, STATISTIC_START_FIELD_NAME, STATISTIC_END_FIELD_NAME, STATISTIC_DATA_FIELD_NAME, STATISTIC_TYPE_FIELD_NAME, STATISTIC_HASH_FIELD_NAME, STATISTIC_NUMBER_OF_SEEN_TUPLES_FIELD_NAME);
     };
 
 private:
-    static constexpr std::string_view NAME = "WindowedAggregation";
-protected:
-    std::vector<std::shared_ptr<WindowAggregationLogicalFunction>> aggregationFunctions;
-    std::shared_ptr<Windowing::WindowType> windowType;
-    std::vector<FieldAccessLogicalFunction> groupingKey;
-    WindowMetaData windowMetaData;
-    OriginIdAssignerTrait originIdTrait;
-
-    std::vector<LogicalOperator> children;
-    TraitSet traitSet;
-    std::vector<OriginId> inputOriginIds;
-    Schema inputSchema, outputSchema;
-    std::vector<OriginId> outputOriginIds;
+    static constexpr std::string_view NAME = "StatisticBuild";
+    std::shared_ptr<LogicalStatisticFields> logicalStatisticFields;
 };
 
 }

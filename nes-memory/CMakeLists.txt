@@ -10,8 +10,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-add_subdirectory(MemoryLayout)
-
 add_library(nes-memory
         BufferManager.cpp
         BufferManagerStatCollectWrapper.cpp
@@ -21,6 +19,7 @@ add_library(nes-memory
         TaggedPointer.cpp
         TestTupleBuffer.cpp
         UnpooledChunksManager.cpp
+        VariableSizedAccess.cpp
         ${MEMORY_LAYOUT_SOURCES}
 )
 

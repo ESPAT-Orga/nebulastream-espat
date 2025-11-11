@@ -93,9 +93,8 @@ Record PagedVectorRef::replaceRecord(
     /// As calling getNumberOfTuples on each page would require one invoke per page.
     const auto recordBuffer = RecordBuffer(invoke(getTupleBufferForEntryProxy, pagedVectorRef, pos));
     auto recordEntry = invoke(getBufferPosForEntryProxy, pagedVectorRef, pos);
-    const auto oldRecord
-        = memoryProvider->readRecord(memoryProvider->getMemoryLayout()->getSchema().getFieldNames(), recordBuffer, recordEntry);
-    memoryProvider->writeRecord(recordEntry, recordBuffer, record, bufferProvider);
+    const auto oldRecord = bufferRef->readRecord(bufferRef->getMemoryLayout()->getSchema().getFieldNames(), recordBuffer, recordEntry);
+    bufferRef->writeRecord(recordEntry, recordBuffer, record, bufferProvider);
     return oldRecord;
 }
 

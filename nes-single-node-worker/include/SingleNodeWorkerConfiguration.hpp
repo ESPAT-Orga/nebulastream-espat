@@ -1,5 +1,5 @@
 /*
-    Licensed under the Apache License, Version 2.0 (the "License");
+Licensed under the Apache License, Version 2.0 (the "License");
     you may not use this file except in compliance with the License.
     You may obtain a copy of the License at
 
@@ -17,7 +17,6 @@
 #include <Configuration/WorkerConfiguration.hpp>
 #include <Configurations/BaseConfiguration.hpp>
 #include <Configurations/ScalarOption.hpp>
-#include <Util/URI.hpp>
 
 namespace NES
 {
@@ -26,8 +25,9 @@ class SingleNodeWorkerConfiguration final : public BaseConfiguration
 {
 public:
     /// GRPC Server Address URI. By default, it binds to any address and listens on port 8080
-    ScalarOption<NES::URI> grpcAddressUri
+    StringOption grpcAddressUri
         = {"grpc",
+           "[::]:8080",
            R"(The address to try to bind to the server in URI form. If
 the scheme name is omitted, "dns:///" is assumed. To bind to any address,
 please use IPv6 any, i.e., [::]:<port>, which also accepts IPv4

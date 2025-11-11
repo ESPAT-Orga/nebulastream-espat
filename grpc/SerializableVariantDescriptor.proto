@@ -108,6 +108,6 @@ message SerializableVariantDescriptor {
     UInt64List ulongs = 15;
     SerializableFunction function = 16;
     SerializableSchema schema = 17;
-    SerializableSchema.SerializableField field = 17;
+    SerializableSchema.SerializableField field = 18;
   }
 }

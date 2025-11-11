@@ -40,7 +40,8 @@ VarVal ZstdDecompressPhysicalFunction::execute(const Record& record, ArenaRef& a
     {
         /// retrieve the size of the original data from zstd's metadata
         decompressedSize = nautilus::invoke(
-            +[](const uint8_t* compressed, size_t inputSize) { return static_cast<uint64_t>(ZSTD_getFrameContentSize(compressed, inputSize)); },
+            +[](const uint8_t* compressed, size_t inputSize)
+            { return static_cast<uint64_t>(ZSTD_getFrameContentSize(compressed, inputSize)); },
             varSizedValueCompressed.getContent(),
             varSizedValueCompressed.getContentSize());
 

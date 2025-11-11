@@ -28,10 +28,7 @@ class StatisticProviderIteratorImpl;
 /// @brief Abstract struct so that we can pass arguments to the underlying StatisticProviderIteratorImpl
 struct StatisticProviderArguments
 {
-    bool operator==(const StatisticProviderArguments &) const
-    {
-        return true;
-    }
+    bool operator==(const StatisticProviderArguments&) const { return true; }
 
     virtual ~StatisticProviderArguments() = default;
     virtual std::unique_ptr<StatisticProviderArguments> clone() = 0;

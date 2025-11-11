@@ -48,10 +48,12 @@ StatisticProviderIteratorImpl& EquiWidthHistogramIteratorImpl::operator++()
 
 nautilus::val<bool> EquiWidthHistogramIteratorImpl::operator==(const StatisticProviderIteratorImpl& other) const
 {
-    if (const auto otherEquiWidthHistogram = dynamic_cast<const EquiWidthHistogramIteratorImpl*>(&other); otherEquiWidthHistogram != nullptr)
+    if (const auto otherEquiWidthHistogram = dynamic_cast<const EquiWidthHistogramIteratorImpl*>(&other);
+        otherEquiWidthHistogram != nullptr)
     {
         return binMemRef == otherEquiWidthHistogram->binMemRef and statisticMemArea == otherEquiWidthHistogram->statisticMemArea
-            and numberOfBins == otherEquiWidthHistogram->numberOfBins and equiWidthHistogramArgs == otherEquiWidthHistogram->equiWidthHistogramArgs;
+            and numberOfBins == otherEquiWidthHistogram->numberOfBins
+            and equiWidthHistogramArgs == otherEquiWidthHistogram->equiWidthHistogramArgs;
     }
     return false;
 }

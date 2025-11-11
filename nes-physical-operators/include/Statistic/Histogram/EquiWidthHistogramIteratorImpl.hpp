@@ -45,10 +45,10 @@ struct EquiWidthHistogramProviderArguments : StatisticProviderArguments
 
     friend bool operator==(const EquiWidthHistogramProviderArguments& lhs, const EquiWidthHistogramProviderArguments& rhs)
     {
-        return lhs == static_cast<const StatisticProviderArguments&>(rhs)
-            && lhs.binStartFieldName == rhs.binStartFieldName && lhs.binEndFieldName == rhs.binEndFieldName
-            && lhs.binCounterFieldName == rhs.binCounterFieldName && lhs.dataTypeCounter == rhs.dataTypeCounter
-            && lhs.dataTypeStartEnd == rhs.dataTypeStartEnd && lhs.sizeOfDataType == rhs.sizeOfDataType;
+        return lhs == static_cast<const StatisticProviderArguments&>(rhs) && lhs.binStartFieldName == rhs.binStartFieldName
+            && lhs.binEndFieldName == rhs.binEndFieldName && lhs.binCounterFieldName == rhs.binCounterFieldName
+            && lhs.dataTypeCounter == rhs.dataTypeCounter && lhs.dataTypeStartEnd == rhs.dataTypeStartEnd
+            && lhs.sizeOfDataType == rhs.sizeOfDataType;
     }
 
     friend bool operator!=(const EquiWidthHistogramProviderArguments& lhs, const EquiWidthHistogramProviderArguments& rhs)

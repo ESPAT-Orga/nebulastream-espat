@@ -13,12 +13,10 @@
 */
 
 #pragma once
-#include <memory>
 #include <string>
 #include <Configuration/WorkerConfiguration.hpp>
 #include <Configurations/BaseConfiguration.hpp>
 #include <Configurations/ScalarOption.hpp>
-#include <Configurations/Validation/EndpointValidation.hpp>
 
 namespace NES
 {
@@ -26,18 +24,17 @@ namespace NES
 class SingleNodeWorkerConfiguration final : public BaseConfiguration
 {
 public:
-    ScalarOption<std::string> connection = {"connection", "Connection name. This is the {Hostname}:{PORT}"};
+    ScalarOption<NES::URI> connection = {"connection", "Connection name. This is the {Hostname}:{PORT}"};
 
     /// GRPC Server Address URI. By default, it binds to any address and listens on port 8080
-    ScalarOption<std::string> grpcAddressUri
+    ScalarOption<NES::URI> grpcAddressUri
         = {"grpc",
-           "[::]:8080",
+           "localhost:8080",
            R"(The address to try to bind to the server in URI form. If
 the scheme name is omitted, "dns:///" is assumed. To bind to any address,
 please use IPv6 any, i.e., [::]:<port>, which also accepts IPv4
 connections.  Valid values include dns:///localhost:1234,
-192.168.1.1:31416, dns:///[::1]:27182, etc.)",
-           {std::make_shared<EndpointValidation>(EndpointValidation::GRPC)}};
+192.168.1.1:31416, dns:///[::1]:27182, etc.)"};
 
     /// Enable Google Event Trace logging (Chrome tracing format)
     BoolOption enableGoogleEventTrace

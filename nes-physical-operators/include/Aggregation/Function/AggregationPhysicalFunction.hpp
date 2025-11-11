@@ -44,10 +44,8 @@ public:
         DataType inputType, DataType resultType, PhysicalFunction inputFunction, Record::RecordFieldIdentifier resultFieldIdentifier);
 
     /// Adds the incoming record to the existing aggregation state
-    virtual void lift(
-        const nautilus::val<AggregationState*>& aggregationState,
-        PipelineMemoryProvider& pipelineMemoryProvider,
-        const Record& record)
+    virtual void
+    lift(const nautilus::val<AggregationState*>& aggregationState, PipelineMemoryProvider& pipelineMemoryProvider, const Record& record)
         = 0;
 
     /// Combines two aggregation states into one. After calling this method, aggregationState1 contains the combined state

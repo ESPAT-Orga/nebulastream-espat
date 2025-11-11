@@ -17,7 +17,6 @@
 #include <Configuration/WorkerConfiguration.hpp>
 #include <Configurations/BaseConfiguration.hpp>
 #include <Configurations/ScalarOption.hpp>
-#include <Util/URI.hpp>
 
 namespace NES
 {

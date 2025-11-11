@@ -511,8 +511,8 @@ void AntlrSQLQueryPlanCreator::exitPrimaryQuery(AntlrSQLParser::PrimaryQueryCont
         auto probe = helpers.top().statProbe.value();
         queryPlan = LogicalPlanBuilder::addStatProbeOp(helpers.top().statProbe.value(), queryPlan);
         // TODO Adapt for other probes:
-        auto reservoirProbe = probe.get<ReservoirProbeLogicalOperator>();
-        for (auto field : reservoirProbe.sampleSchema)
+        auto reservoirProbe = probe.getAs<ReservoirProbeLogicalOperator>();
+        for (auto field : reservoirProbe->sampleSchema)
         {
             helpers.top().asterisk = true;
         }

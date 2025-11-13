@@ -11,9 +11,10 @@
     See the License for the specific language governing permissions and
     limitations under the License.
 */
+#include <Serialization/SchemaSerializationUtil.hpp>
+
 #include <DataTypes/Schema.hpp>
 #include <Serialization/DataTypeSerializationUtil.hpp>
-#include <Serialization/SchemaSerializationUtil.hpp>
 #include <Util/Logger/Logger.hpp>
 #include <SerializableSchema.pb.h>
 
@@ -27,9 +28,7 @@ SerializableSchema SchemaSerializationUtil::serializeSchema(const Schema& schema
     for (const auto& field : schema.getFields())
     {
         auto* serializedField = serializedSchema->add_fields();
-        serializedField->set_name(field.name);
-        /// serialize data type
-        DataTypeSerializationUtil::serializeDataType(field.dataType, serializedField->mutable_type());
+        SchemaSerializationUtil::serializeField(field, serializedField);
     }
 
     /// Serialize layoutType
@@ -54,10 +53,8 @@ Schema SchemaSerializationUtil::deserializeSchema(const SerializableSchema& seri
     auto deserializedSchema = Schema{Schema::MemoryLayoutType::ROW_LAYOUT};
     for (const auto& serializedField : serializedSchema.fields())
     {
-        const auto& fieldName = serializedField.name();
-        /// de-serialize data type
-        auto type = DataTypeSerializationUtil::deserializeDataType(serializedField.type());
-        deserializedSchema.addField(fieldName, type);
+        const auto field = SchemaSerializationUtil::deserializeField(serializedField);
+        deserializedSchema.addField(field.name, field.dataType);
     }
 
     /// Deserialize layoutType
@@ -79,4 +76,18 @@ Schema SchemaSerializationUtil::deserializeSchema(const SerializableSchema& seri
     }
     return deserializedSchema;
 }
+
+void SchemaSerializationUtil::serializeField(const Schema::Field& field, SerializableSchema_SerializableField* serializableField)
+{
+    serializableField->set_name(field.name);
+    DataTypeSerializationUtil::serializeDataType(field.dataType, serializableField->mutable_type());
+}
+
+Schema::Field SchemaSerializationUtil::deserializeField(const SerializableSchema_SerializableField& serializableField)
+{
+    const auto& fieldName = serializableField.name();
+    auto fieldType = DataTypeSerializationUtil::deserializeDataType(serializableField.type());
+    return {fieldName, fieldType};
+}
+
 }

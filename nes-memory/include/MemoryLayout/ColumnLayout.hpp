@@ -46,6 +46,8 @@ public:
     /// @throws CannotAccessBuffer if the tuple index or the field index is out of bounds.
     /// @return offset in the tuple buffer.
     [[nodiscard]] uint64_t getFieldOffset(uint64_t tupleIndex, uint64_t fieldIndex) const override;
+    [[nodiscard]] nautilus::val<uint64_t>
+    getFieldOffset(nautilus::val<uint64_t> tupleIndex, nautilus::static_val<uint64_t> fieldIndex) const override;
 
     [[nodiscard]] uint64_t getColumnOffset(uint64_t fieldIndex) const;
 

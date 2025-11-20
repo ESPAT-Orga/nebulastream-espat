@@ -41,9 +41,9 @@ extern "C" {
 
     #include "xreg_cortexa53.h"
     #ifdef __clang__
-        #include <include/platform/xpseudo_asm_armclang.h>
+        #include <platform/xpseudo_asm_armclang.h>
     #else
-        #include <include/platform/xpseudo_asm_gcc.h>
+        #include <platform/xpseudo_asm_gcc.h>
     #endif
 
     #ifdef __cplusplus

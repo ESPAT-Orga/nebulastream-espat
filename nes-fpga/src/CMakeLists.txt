@@ -10,6 +10,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+#add_subdirectory(platform)
 add_source_files(nes-fpga
         main.cpp
 )
+
+#target_include_directories(nes-fpga-main PRIVATE ../include)

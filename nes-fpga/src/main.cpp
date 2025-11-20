@@ -13,10 +13,10 @@
 */
 
 /***************************** Include Files *********************************/
-#include <include/platform/sleep.h>
-#include <include/platform/xaxidma.h>
-#include <include/platform/xdebug.h>
-#include <include/platform/xparameters.h>
+#include <platform/sleep.h>
+#include <platform/xaxidma.h>
+#include <platform/xdebug.h>
+#include <platform/xparameters.h>
 
 #if defined(XPAR_UARTNS550_0_BASEADDR)
     #include "xuartns550_l.h" /* to use uartns550 */

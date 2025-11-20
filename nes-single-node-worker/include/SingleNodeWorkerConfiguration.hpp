@@ -24,7 +24,7 @@ namespace NES
 class SingleNodeWorkerConfiguration final : public BaseConfiguration
 {
 public:
-    StringOption connection = {"connection", "", "Connection name. This is the {Hostname}:{PORT}"};
+    ScalarOption<NES::URI> connection = {"connection", "Connection name. This is the {Hostname}:{PORT}"};
 
     /// GRPC Server Address URI. By default, it binds to any address and listens on port 8080
     StringOption grpcAddressUri

@@ -68,6 +68,9 @@ nlohmann::json GoogleEventTracePrinter::createTraceEvent(
         case Category::System:
             event["cat"] = "system";
             break;
+        case Category::BufferManager:
+            event["cat"] = "bufferManager";
+            break;
     }
 
     /// Convert phase enum to string
@@ -157,7 +160,7 @@ void GoogleEventTracePrinter::threadRoutine(const std::stop_token& token)
 
                     auto traceEvent = createTraceEvent(
                         fmt::format("Recycle pooled buffer of size {}", getBufferEvent.bufferSize),
-                        Category::System, //todo adjust
+                        Category::BufferManager,
                         Phase::Instant, //todo adjust
                         timestampToMicroseconds(getBufferEvent.timestamp),
                         0,
@@ -173,7 +176,7 @@ void GoogleEventTracePrinter::threadRoutine(const std::stop_token& token)
 
                     auto traceEvent = createTraceEvent(
                         fmt::format("Get buffer of size {}", getBufferEvent.bufferSize),
-                        Category::System, //todo adjust
+                        Category::BufferManager,
                         Phase::Instant, //todo adjust
                         timestampToMicroseconds(getBufferEvent.timestamp),
                         0,

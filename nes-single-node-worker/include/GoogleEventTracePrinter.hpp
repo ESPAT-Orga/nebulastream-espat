@@ -72,7 +72,8 @@ private:
         Query,
         Pipeline,
         Task,
-        System
+        System,
+        BufferManager
     };
 
     enum class Phase : int

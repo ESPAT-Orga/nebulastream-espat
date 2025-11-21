@@ -405,6 +405,13 @@ void GoogleEventTracePrinter::onEvent(SystemEvent event)
     events.writeIfNotFull(std::visit([]<typename T>(T&& arg) { return CombinedEventType(std::forward<T>(arg)); }, std::move(event)));
 }
 
+void GoogleEventTracePrinter::onEvent(BaseBufferManagerEvent event)
+{
+    (void)event;
+    //TODO enable
+    // events.writeIfNotFull(std::visit([]<typename T>(T&& arg) { return CombinedEventType(std::forward<T>(arg)); }, std::move(event)));
+}
+
 GoogleEventTracePrinter::GoogleEventTracePrinter(const std::filesystem::path& path) : file(path, std::ios::out | std::ios::trunc)
 {
     NES_INFO("Writing Google Event Trace to: {}", path);

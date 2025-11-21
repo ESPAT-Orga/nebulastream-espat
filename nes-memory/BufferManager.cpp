@@ -26,6 +26,7 @@
 #include <optional>
 #include <utility>
 #include <unistd.h>
+
 #include <Runtime/AbstractBufferProvider.hpp>
 #include <Runtime/BufferRecycler.hpp>
 #include <Runtime/TupleBuffer.hpp>
@@ -33,6 +34,7 @@
 #include <folly/MPMCQueue.h>
 #include <ErrorHandling.hpp>
 #include <TupleBufferImpl.hpp>
+#include "Runtime/BufferManagerStatisticListener.hpp"
 
 namespace NES
 {
@@ -176,10 +178,15 @@ std::optional<TupleBuffer> BufferManager::getBufferNoBlocking()
     detail::MemorySegment* memSegment = nullptr;
     if (!availableBuffers.read(memSegment))
     {
+        //TODO also record allocation failure
         return std::nullopt;
     }
     if (memSegment->controlBlock->prepare(shared_from_this()))
     {
+        //TODO: create event
+        //TODO: if we do it here, we might not be able to get the thread id and the query id
+        //TODO: what does the segment size depend on?
+        statistic->onEvent(GetBufferEvent(memSegment->size));
         return TupleBuffer(memSegment->controlBlock.get(), memSegment->ptr, memSegment->size);
     }
     throw InvalidRefCountForBuffer("[BufferManager] got buffer with invalid reference counter");
@@ -195,6 +202,11 @@ std::optional<TupleBuffer> BufferManager::getBufferWithTimeout(const std::chrono
     }
     if (memSegment->controlBlock->prepare(shared_from_this()))
     {
+        //TODO: create event
+        //TODO: if we do it here, we might not be able to get the thread id and the query id
+        //TODO: what does the segment size depend on?
+        //TODO: investigate object slicing lint
+        statistic->onEvent(GetBufferEvent(memSegment->size));
         return TupleBuffer(memSegment->controlBlock.get(), memSegment->ptr, memSegment->size);
     }
     throw InvalidRefCountForBuffer("[BufferManager] got buffer with invalid reference counter");

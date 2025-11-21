@@ -27,6 +27,7 @@ struct CompositeStatisticListener final : StatisticListener
 {
     void onEvent(Event event) override;
     void onEvent(SystemEvent event) override;
+    void onEvent(BaseBufferManagerEvent event) override;
 
     void addQueryEngineListener(std::shared_ptr<QueryEngineStatisticListener> listener);
     void addSystemListener(std::shared_ptr<SystemEventListener> listener);

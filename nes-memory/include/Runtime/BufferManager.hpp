@@ -30,6 +30,7 @@
 
 namespace NES
 {
+struct BufferManagerStatisticListener;
 
 /**
  * @brief The BufferManager is responsible for:
@@ -150,6 +151,7 @@ private:
 
     std::shared_ptr<std::pmr::memory_resource> memoryResource;
     std::atomic<bool> isDestroyed{false};
+    std::shared_ptr<BufferManagerStatisticListener> statistic;
 };
 
 

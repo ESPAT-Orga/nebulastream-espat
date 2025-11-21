@@ -37,10 +37,10 @@ void CompositeStatisticListener::onEvent(BaseBufferManagerEvent event)
 {
     (void)event;
     //TODO enable
-    // for (auto& listener : queryEngineListeners)
-    // {
-    //     listener->onEvent(event);
-    // }
+    for (auto& listener : bufferManagerListeners)
+    {
+        listener->onEvent(event);
+    }
 }
 
 void CompositeStatisticListener::addQueryEngineListener(std::shared_ptr<QueryEngineStatisticListener> listener)
@@ -57,6 +57,7 @@ void CompositeStatisticListener::addListener(std::shared_ptr<StatisticListener> 
 {
     queryEngineListeners.push_back(listener);
     systemListeners.push_back(listener);
+    bufferManagerListeners.push_back(listener);
 }
 
 bool CompositeStatisticListener::hasListeners() const

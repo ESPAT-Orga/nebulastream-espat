@@ -408,7 +408,6 @@ void GoogleEventTracePrinter::onEvent(SystemEvent event)
 void GoogleEventTracePrinter::onEvent(BaseBufferManagerEvent event)
 {
     (void)event;
-    //TODO enable
     // events.writeIfNotFull(std::visit([]<typename T>(T&& arg) { return CombinedEventType(std::forward<T>(arg)); }, std::move(event)));
 }
 

@@ -37,5 +37,6 @@ struct CompositeStatisticListener final : StatisticListener
 private:
     std::vector<std::shared_ptr<QueryEngineStatisticListener>> queryEngineListeners;
     std::vector<std::shared_ptr<SystemEventListener>> systemListeners;
+    std::vector<std::shared_ptr<BufferManagerStatisticListener>> bufferManagerListeners;
 };
 }

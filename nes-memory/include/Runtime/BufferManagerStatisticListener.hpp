@@ -32,7 +32,7 @@ struct GetBufferEvent : BaseBufferManagerEvent
 {
     // GetBufferEvent(WorkerThreadId threadId, QueryId queryId, size_t bufferSize)
     //     : BaseBufferManagerEvent(threadId, queryId), bufferSize(bufferSize)
-    GetBufferEvent(size_t bufferSize) : BaseBufferManagerEvent(), bufferSize(bufferSize) { }
+    explicit GetBufferEvent(size_t bufferSize) : BaseBufferManagerEvent(), bufferSize(bufferSize) { }
 
     GetBufferEvent() = default;
 
@@ -40,18 +40,18 @@ struct GetBufferEvent : BaseBufferManagerEvent
     size_t bufferSize{};
 };
 
-struct GetBufferEvent : BaseBufferManagerEvent
+struct RecyclePooledBufferEvent : BaseBufferManagerEvent
 {
     // GetBufferEvent(WorkerThreadId threadId, QueryId queryId, size_t bufferSize)
     //     : BaseBufferManagerEvent(threadId, queryId), bufferSize(bufferSize)
-    GetBufferEvent(size_t bufferSize) : BaseBufferManagerEvent(), bufferSize(bufferSize) { }
+    explicit RecyclePooledBufferEvent(size_t bufferSize) : BaseBufferManagerEvent(), bufferSize(bufferSize) { }
 
-    GetBufferEvent() = default;
+    RecyclePooledBufferEvent() = default;
 
     size_t bufferSize{};
 };
 
-using BufferManagerEvent = std::variant<GetBufferEvent>;
+using BufferManagerEvent = std::variant<GetBufferEvent, RecyclePooledBufferEvent>;
 static_assert(std::is_default_constructible_v<BufferManagerEvent>, "Events should be default constructible");
 
 struct BufferManagerStatisticListener

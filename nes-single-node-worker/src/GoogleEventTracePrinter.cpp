@@ -35,6 +35,7 @@
 #include <nlohmann/json.hpp>
 #include <nlohmann/json_fwd.hpp>
 #include <QueryEngineStatisticListener.hpp>
+#include "Runtime/BufferManagerStatisticListener.hpp"
 
 namespace NES
 {
@@ -149,6 +150,22 @@ void GoogleEventTracePrinter::threadRoutine(const std::stop_token& token)
 
         std::visit(
             Overloaded{
+                [&](const RecyclePooledBufferEvent& getBufferEvent)
+                {
+                    auto args = nlohmann::json::object();
+                    args["size"] = getBufferEvent.bufferSize;
+
+                    auto traceEvent = createTraceEvent(
+                        fmt::format("Recycle pooled buffer of size {}", getBufferEvent.bufferSize),
+                        Category::System, //todo adjust
+                        Phase::Instant, //todo adjust
+                        timestampToMicroseconds(getBufferEvent.timestamp),
+                        0,
+                        args);
+                    traceEvent["tid"] = 0; /// System thread
+
+                    emit(traceEvent);
+                },
                 [&](const GetBufferEvent& getBufferEvent)
                 {
                     auto args = nlohmann::json::object();

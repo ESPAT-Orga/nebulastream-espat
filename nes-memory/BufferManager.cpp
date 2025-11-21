@@ -229,6 +229,8 @@ std::optional<TupleBuffer> BufferManager::getUnpooledBuffer(const size_t bufferS
 
 void BufferManager::recyclePooledBuffer(detail::MemorySegment* segment)
 {
+    if (statistic)
+        statistic->onEvent(RecyclePooledBufferEvent(segment->size));
     INVARIANT(segment->isAvailable(), "Recycling buffer callback invoked on used memory segment");
     INVARIANT(
         segment->controlBlock->owningBufferRecycler == nullptr,

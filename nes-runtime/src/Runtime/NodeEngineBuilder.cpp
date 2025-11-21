@@ -25,17 +25,18 @@
 
 namespace NES
 {
-
-
 NodeEngineBuilder::NodeEngineBuilder(const WorkerConfiguration& workerConfiguration, std::shared_ptr<StatisticListener> statisticsListener)
-    : workerConfiguration(workerConfiguration), statisticsListener(std::move(statisticsListener))
+    : workerConfiguration(workerConfiguration)
+    , statisticsListener(std::move(statisticsListener))
 {
 }
 
 std::unique_ptr<NodeEngine> NodeEngineBuilder::build()
 {
     auto bufferManager = BufferManager::create(
-        workerConfiguration.bufferSizeInBytes.getValue(), workerConfiguration.numberOfBuffersInGlobalBufferManager.getValue());
+        workerConfiguration.bufferSizeInBytes.getValue(),
+        workerConfiguration.numberOfBuffersInGlobalBufferManager.getValue(),
+        statisticsListener);
     auto queryLog = std::make_shared<QueryLog>();
 
     auto queryEngine = std::make_unique<QueryEngine>(workerConfiguration.queryEngine, statisticsListener, queryLog, bufferManager);
@@ -43,7 +44,10 @@ std::unique_ptr<NodeEngine> NodeEngineBuilder::build()
     auto sourceProvider = std::make_unique<SourceProvider>(workerConfiguration.defaultMaxInflightBuffers.getValue(), bufferManager);
 
     return std::make_unique<NodeEngine>(
-        std::move(bufferManager), statisticsListener, std::move(queryLog), std::move(queryEngine), std::move(sourceProvider));
+        std::move(bufferManager),
+        statisticsListener,
+        std::move(queryLog),
+        std::move(queryEngine),
+        std::move(sourceProvider));
 }
-
 }

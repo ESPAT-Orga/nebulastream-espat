@@ -38,11 +38,11 @@
 
 namespace NES
 {
-
 BufferManager::BufferManager(
     Private,
     const uint32_t bufferSize,
     const uint32_t numOfBuffers,
+    std::shared_ptr<BufferManagerStatisticListener> statistic,
     std::shared_ptr<std::pmr::memory_resource> memoryResource,
     const uint32_t withAlignment)
     : availableBuffers(numOfBuffers)
@@ -50,15 +50,21 @@ BufferManager::BufferManager(
     , bufferSize(bufferSize)
     , numOfBuffers(numOfBuffers)
     , memoryResource(std::move(memoryResource))
+   , statistic(statistic)
 {
     ((void)withAlignment);
     initialize(DEFAULT_ALIGNMENT);
 }
 
 std::shared_ptr<BufferManager> BufferManager::create(
-    uint32_t bufferSize, uint32_t numOfBuffers, const std::shared_ptr<std::pmr::memory_resource>& memoryResource, uint32_t withAlignment)
+    uint32_t bufferSize,
+    uint32_t numOfBuffers,
+    std::shared_ptr<BufferManagerStatisticListener> statistic,
+    const std::shared_ptr<std::pmr::memory_resource>& memoryResource,
+    uint32_t withAlignment)
 {
-    return std::make_shared<BufferManager>(Private{}, bufferSize, numOfBuffers, memoryResource, withAlignment);
+    (void)statistic;
+    return std::make_shared<BufferManager>(Private{}, bufferSize, numOfBuffers, statistic, memoryResource, withAlignment);
 }
 
 BufferManager::~BufferManager()
@@ -77,9 +83,9 @@ BufferManager::~BufferManager()
         {
             if (!buffer.isAvailable())
             {
-#ifdef NES_DEBUG_TUPLE_BUFFER_LEAKS
+                #ifdef NES_DEBUG_TUPLE_BUFFER_LEAKS
                 buffer.controlBlock->dumpOwningThreadInfo();
-#endif
+                #endif
                 success = false;
             }
         }
@@ -119,7 +125,9 @@ void BufferManager::initialize(uint32_t withAlignment)
     if (withAlignment > 0)
     {
         PRECONDITION(
-            !(withAlignment & (withAlignment - 1)), "NES tries to align memory but alignment={} is not a pow of two", withAlignment);
+            !(withAlignment & (withAlignment - 1)),
+            "NES tries to align memory but alignment={} is not a pow of two",
+            withAlignment);
     }
     PRECONDITION(withAlignment <= page_size, "NES tries to align memory but alignment is invalid: {} <= {}", withAlignment, page_size);
 
@@ -186,7 +194,8 @@ std::optional<TupleBuffer> BufferManager::getBufferNoBlocking()
         //TODO: create event
         //TODO: if we do it here, we might not be able to get the thread id and the query id
         //TODO: what does the segment size depend on?
-        statistic->onEvent(GetBufferEvent(memSegment->size));
+        if (statistic)
+            statistic->onEvent(GetBufferEvent(memSegment->size));
         return TupleBuffer(memSegment->controlBlock.get(), memSegment->ptr, memSegment->size);
     }
     throw InvalidRefCountForBuffer("[BufferManager] got buffer with invalid reference counter");
@@ -206,7 +215,8 @@ std::optional<TupleBuffer> BufferManager::getBufferWithTimeout(const std::chrono
         //TODO: if we do it here, we might not be able to get the thread id and the query id
         //TODO: what does the segment size depend on?
         //TODO: investigate object slicing lint
-        statistic->onEvent(GetBufferEvent(memSegment->size));
+        if (statistic)
+            statistic->onEvent(GetBufferEvent(memSegment->size));
         return TupleBuffer(memSegment->controlBlock.get(), memSegment->ptr, memSegment->size);
     }
     throw InvalidRefCountForBuffer("[BufferManager] got buffer with invalid reference counter");
@@ -221,7 +231,8 @@ void BufferManager::recyclePooledBuffer(detail::MemorySegment* segment)
 {
     INVARIANT(segment->isAvailable(), "Recycling buffer callback invoked on used memory segment");
     INVARIANT(
-        segment->controlBlock->owningBufferRecycler == nullptr, "Buffer should not retain a reference to its parent while not in use");
+        segment->controlBlock->owningBufferRecycler == nullptr,
+        "Buffer should not retain a reference to its parent while not in use");
     USED_IN_DEBUG const auto couldRecycleBuffer = availableBuffers.writeIfNotFull(segment);
     INVARIANT(couldRecycleBuffer, "should always succeed");
 }
@@ -256,5 +267,4 @@ BufferManagerType BufferManager::getBufferManagerType() const
 {
     return BufferManagerType::GLOBAL;
 }
-
 }

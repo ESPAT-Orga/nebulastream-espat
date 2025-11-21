@@ -149,6 +149,22 @@ void GoogleEventTracePrinter::threadRoutine(const std::stop_token& token)
 
         std::visit(
             Overloaded{
+                [&](const GetBufferEvent& getBufferEvent)
+                {
+                    auto args = nlohmann::json::object();
+                    args["size"] = getBufferEvent.bufferSize;
+
+                    auto traceEvent = createTraceEvent(
+                        fmt::format("Get buffer of size {}", getBufferEvent.bufferSize),
+                        Category::System, //todo adjust
+                        Phase::Instant, //todo adjust
+                        timestampToMicroseconds(getBufferEvent.timestamp),
+                        0,
+                        args);
+                    traceEvent["tid"] = 0; /// System thread
+
+                    emit(traceEvent);
+                },
                 [&](const SubmitQuerySystemEvent& submitEvent)
                 {
                     auto args = nlohmann::json::object();
@@ -405,10 +421,10 @@ void GoogleEventTracePrinter::onEvent(SystemEvent event)
     events.writeIfNotFull(std::visit([]<typename T>(T&& arg) { return CombinedEventType(std::forward<T>(arg)); }, std::move(event)));
 }
 
-void GoogleEventTracePrinter::onEvent(BaseBufferManagerEvent event)
+void GoogleEventTracePrinter::onEvent(BufferManagerEvent event)
 {
     (void)event;
-    // events.writeIfNotFull(std::visit([]<typename T>(T&& arg) { return CombinedEventType(std::forward<T>(arg)); }, std::move(event)));
+    events.writeIfNotFull(std::visit([]<typename T>(T&& arg) { return CombinedEventType(std::forward<T>(arg)); }, std::move(event)));
 }
 
 GoogleEventTracePrinter::GoogleEventTracePrinter(const std::filesystem::path& path) : file(path, std::ios::out | std::ios::trunc)

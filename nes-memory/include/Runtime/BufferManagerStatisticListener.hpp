@@ -36,8 +36,23 @@ struct GetBufferEvent : BaseBufferManagerEvent
 
     GetBufferEvent() = default;
 
+    //TODO: do we need this or is the size a system wide setting?
     size_t bufferSize{};
 };
+
+struct GetBufferEvent : BaseBufferManagerEvent
+{
+    // GetBufferEvent(WorkerThreadId threadId, QueryId queryId, size_t bufferSize)
+    //     : BaseBufferManagerEvent(threadId, queryId), bufferSize(bufferSize)
+    GetBufferEvent(size_t bufferSize) : BaseBufferManagerEvent(), bufferSize(bufferSize) { }
+
+    GetBufferEvent() = default;
+
+    size_t bufferSize{};
+};
+
+using BufferManagerEvent = std::variant<GetBufferEvent>;
+static_assert(std::is_default_constructible_v<BufferManagerEvent>, "Events should be default constructible");
 
 struct BufferManagerStatisticListener
 {
@@ -45,6 +60,6 @@ struct BufferManagerStatisticListener
 
     /// This function is called from a WorkerThread!
     /// It should not block, and it has to be thread-safe!
-    virtual void onEvent(BaseBufferManagerEvent event) = 0;
+    virtual void onEvent(BufferManagerEvent event) = 0;
 };
 }

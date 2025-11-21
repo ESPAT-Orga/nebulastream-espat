@@ -33,7 +33,7 @@ void CompositeStatisticListener::onEvent(SystemEvent event)
     }
 }
 
-void CompositeStatisticListener::onEvent(BaseBufferManagerEvent event)
+void CompositeStatisticListener::onEvent(BufferManagerEvent event)
 {
     (void)event;
     //TODO enable

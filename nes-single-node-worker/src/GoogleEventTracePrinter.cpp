@@ -459,7 +459,6 @@ void GoogleEventTracePrinter::threadRoutine(const std::stop_token& token)
             event);
     }
 
-    //todo write durations here instead
     std::sort(
         bufferManagerChanges.begin(),
         bufferManagerChanges.end(),
@@ -474,10 +473,9 @@ void GoogleEventTracePrinter::threadRoutine(const std::stop_token& token)
             auto args = nlohmann::json::object();
             args["size"] = memoryInUse;
             auto traceEvent = createTraceEvent(
-                fmt::format(" Mem {} ({})", memoryInUse, memSliceCount),
+                fmt::format("Used Mem Pooled {} ({})", memoryInUse, memSliceCount),
                 Category::BufferManager,
                 Phase::End,
-                //todo adjust
                 timestampToMicroseconds(change->timestamp),
                 0,
                 args);
@@ -503,7 +501,6 @@ void GoogleEventTracePrinter::threadRoutine(const std::stop_token& token)
                 fmt::format(" Mem {} ({})", memoryInUse, memSliceCount),
                 Category::BufferManager,
                 Phase::Begin,
-                //todo adjust
                 timestampToMicroseconds(change->timestamp),
                 0,
                 args);

@@ -211,9 +211,6 @@ std::optional<TupleBuffer> BufferManager::getBufferWithTimeout(const std::chrono
     }
     if (memSegment->controlBlock->prepare(shared_from_this()))
     {
-        //TODO: create event
-        //TODO: if we do it here, we might not be able to get the thread id and the query id
-        //TODO: what does the segment size depend on?
         //TODO: investigate object slicing lint
         if (statistic)
             statistic->onEvent(GetBufferEvent(memSegment->size));

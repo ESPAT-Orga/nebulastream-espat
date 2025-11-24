@@ -36,7 +36,17 @@ struct GetBufferEvent : BaseBufferManagerEvent
 
     GetBufferEvent() = default;
 
-    //TODO: do we need this or is the size a system wide setting?
+    size_t bufferSize{};
+};
+
+struct GetUnpooledBufferEvent : BaseBufferManagerEvent
+{
+    // GetBufferEvent(WorkerThreadId threadId, QueryId queryId, size_t bufferSize)
+    //     : BaseBufferManagerEvent(threadId, queryId), bufferSize(bufferSize)
+    explicit GetUnpooledBufferEvent(size_t bufferSize) : BaseBufferManagerEvent(), bufferSize(bufferSize) { }
+
+    GetUnpooledBufferEvent() = default;
+
     size_t bufferSize{};
 };
 
@@ -47,6 +57,17 @@ struct RecyclePooledBufferEvent : BaseBufferManagerEvent
     explicit RecyclePooledBufferEvent(size_t bufferSize) : BaseBufferManagerEvent(), bufferSize(bufferSize) { }
 
     RecyclePooledBufferEvent() = default;
+
+    size_t bufferSize{};
+};
+
+struct RecycleUnpooledBufferEvent : BaseBufferManagerEvent
+{
+    // GetBufferEvent(WorkerThreadId threadId, QueryId queryId, size_t bufferSize)
+    //     : BaseBufferManagerEvent(threadId, queryId), bufferSize(bufferSize)
+    explicit RecycleUnpooledBufferEvent(size_t bufferSize) : BaseBufferManagerEvent(), bufferSize(bufferSize) { }
+
+    RecycleUnpooledBufferEvent() = default;
 
     size_t bufferSize{};
 };

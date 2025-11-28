@@ -48,7 +48,7 @@ Nautilus::Interface::HashMap* HJSlice::getHashMapPtr(const WorkerThreadId worker
     return hashMaps[pos].get();
 }
 
-Nautilus::Interface::HashMap* HJSlice::getHashMapPtrOrCreate(const WorkerThreadId workerThreadId, const JoinBuildSideType& buildSide)
+Nautilus::Interface::HashMap* HJSlice::getHashMapPtrOrCreate(const WorkerThreadId workerThreadId, const JoinBuildSideType& buildSide, PipelineId pipelineId)
 {
     /// Hashmaps of the left build side come before right
     auto pos = (workerThreadId % numberOfHashMapsPerInputStream)
@@ -68,7 +68,7 @@ Nautilus::Interface::HashMap* HJSlice::getHashMapPtrOrCreate(const WorkerThreadI
             createNewHashMapSliceArgs.keySize,
             createNewHashMapSliceArgs.valueSize,
             createNewHashMapSliceArgs.numberOfBuckets,
-            createNewHashMapSliceArgs.pageSize);
+            createNewHashMapSliceArgs.pageSize, pipelineId);
     }
     return hashMaps.at(pos).get();
 }

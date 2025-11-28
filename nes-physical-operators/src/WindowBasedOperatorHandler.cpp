@@ -91,14 +91,19 @@ void WindowBasedOperatorHandler::checkAndTriggerWindows(const BufferMetaData& bu
 
     /// Getting all slices that can be triggered and triggering them
     const auto slicesAndWindowInfo = sliceAndWindowStore->getTriggerableWindowSlices(newGlobalWatermark);
-    triggerSlices(slicesAndWindowInfo, pipelineCtx, TODO);
+    triggerSlices(slicesAndWindowInfo, pipelineCtx, pipelineCtx->getPipelineId());
 }
 
 void WindowBasedOperatorHandler::triggerAllWindows(PipelineExecutionContext* pipelineCtx)
 {
     const auto slicesAndWindowInfo = sliceAndWindowStore->getAllNonTriggeredSlices();
     NES_TRACE("Triggering {} windows for origin: {}", slicesAndWindowInfo.size(), outputOriginId);
-    triggerSlices(slicesAndWindowInfo, pipelineCtx, TODO);
+    triggerSlices(slicesAndWindowInfo, pipelineCtx, pipelineCtx->getPipelineId());
 }
 
+PipelineId WindowBasedOperatorHandler::getPipelineId() const
+{
+    //TODO fix all to non optional
+    return pipelineId.value();
+}
 }

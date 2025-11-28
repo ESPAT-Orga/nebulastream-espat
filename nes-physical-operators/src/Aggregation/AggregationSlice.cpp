@@ -41,7 +41,7 @@ Nautilus::Interface::HashMap* AggregationSlice::getHashMapPtr(const WorkerThread
     return hashMaps[pos].get();
 }
 
-Nautilus::Interface::HashMap* AggregationSlice::getHashMapPtrOrCreate(const WorkerThreadId workerThreadId)
+Nautilus::Interface::HashMap* AggregationSlice::getHashMapPtrOrCreate(const WorkerThreadId workerThreadId, PipelineId pipelineId)
 {
     const auto pos = workerThreadId % hashMaps.size();
     INVARIANT(pos < hashMaps.size(), "The worker thread id should be smaller than the number of hashmaps");
@@ -52,7 +52,7 @@ Nautilus::Interface::HashMap* AggregationSlice::getHashMapPtrOrCreate(const Work
             createNewHashMapSliceArgs.keySize,
             createNewHashMapSliceArgs.valueSize,
             createNewHashMapSliceArgs.numberOfBuckets,
-            createNewHashMapSliceArgs.pageSize);
+            createNewHashMapSliceArgs.pageSize, pipelineId);
     }
     return hashMaps[pos].get();
 }

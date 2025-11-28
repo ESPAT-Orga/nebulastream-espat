@@ -25,6 +25,8 @@
 #include <nautilus/function.hpp>
 #include <nautilus/val.hpp>
 #include <val_ptr.hpp>
+#include <Identifiers/Identifiers.hpp>
+#include <variant>
 
 namespace NES::Nautilus::Interface
 {
@@ -34,9 +36,10 @@ uint64_t getTotalNumberOfEntriesProxy(const PagedVector* pagedVector)
     return pagedVector->getTotalNumberOfEntries();
 }
 
-const TupleBuffer* createNewEntryProxy(PagedVector* pagedVector, AbstractBufferProvider* bufferProvider, const MemoryLayout* memoryLayout)
+//TODO fix with enum
+const TupleBuffer* createNewEntryProxy(PagedVector* pagedVector, AbstractBufferProvider* bufferProvider, const MemoryLayout* memoryLayout, OriginId creatorId)
 {
-    pagedVector->appendPageIfFull(bufferProvider, memoryLayout, TODO);
+    pagedVector->appendPageIfFull(bufferProvider, memoryLayout, creatorId);
     return std::addressof(pagedVector->getLastPage());
 }
 
@@ -68,7 +71,9 @@ PagedVectorRef::PagedVectorRef(
 
 void PagedVectorRef::writeRecord(const Record& record, const nautilus::val<AbstractBufferProvider*>& bufferProvider) const
 {
-    auto recordBuffer = RecordBuffer(invoke(createNewEntryProxy, pagedVectorRef, bufferProvider, memoryLayout));
+    //TODO add enum and propagate
+    const nautilus::val<OriginId> originId(INVALID_ORIGIN_ID);
+    auto recordBuffer = RecordBuffer(invoke(createNewEntryProxy, pagedVectorRef, bufferProvider, memoryLayout, originId));
     auto numTuplesOnPage = recordBuffer.getNumRecords();
     bufferRef->writeRecord(numTuplesOnPage, recordBuffer, record, bufferProvider);
     recordBuffer.setNumRecords(numTuplesOnPage + 1);

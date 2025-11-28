@@ -49,7 +49,7 @@ void CompiledExecutablePipelineStage::execute(const TupleBuffer& inputTupleBuffe
 {
     /// we call the compiled pipeline function with an input buffer and the execution context
     pipelineExecutionContext.setOperatorHandlers(operatorHandlers);
-    Arena arena(pipelineExecutionContext.getBufferManager());
+    Arena arena(pipelineExecutionContext.getBufferManager(), pipelineExecutionContext.getPipelineId());
     compiledPipelineFunction(std::addressof(pipelineExecutionContext), std::addressof(inputTupleBuffer), std::addressof(arena));
 }
 
@@ -84,7 +84,7 @@ CompiledExecutablePipelineStage::compilePipeline() const
 void CompiledExecutablePipelineStage::stop(PipelineExecutionContext& pipelineExecutionContext)
 {
     pipelineExecutionContext.setOperatorHandlers(operatorHandlers);
-    Arena arena(pipelineExecutionContext.getBufferManager());
+    Arena arena(pipelineExecutionContext.getBufferManager(), pipelineExecutionContext.getPipelineId());
     ExecutionContext ctx(std::addressof(pipelineExecutionContext), std::addressof(arena));
     pipeline->getRootOperator().terminate(ctx);
 }
@@ -97,7 +97,7 @@ std::ostream& CompiledExecutablePipelineStage::toString(std::ostream& os) const
 void CompiledExecutablePipelineStage::start(PipelineExecutionContext& pipelineExecutionContext)
 {
     pipelineExecutionContext.setOperatorHandlers(operatorHandlers);
-    Arena arena(pipelineExecutionContext.getBufferManager());
+    Arena arena(pipelineExecutionContext.getBufferManager(), pipelineExecutionContext.getPipelineId());
     ExecutionContext ctx(std::addressof(pipelineExecutionContext), std::addressof(arena));
     CompilationContext compilationCtx{engine};
     pipeline->getRootOperator().setup(ctx, compilationCtx);

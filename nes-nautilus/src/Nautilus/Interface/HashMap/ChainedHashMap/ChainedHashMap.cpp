@@ -56,7 +56,7 @@ uint64_t calcCapacity(const uint64_t numberOfKeys, const double loadFactor)
     return capacity;
 }
 
-ChainedHashMap::ChainedHashMap(uint64_t entrySize, const uint64_t numberOfBuckets, uint64_t pageSize)
+ChainedHashMap::ChainedHashMap(uint64_t entrySize, const uint64_t numberOfBuckets, uint64_t pageSize, PipelineId pipelineId)
     : numberOfTuples(0)
     , pageSize(pageSize)
     , entrySize(entrySize)
@@ -65,6 +65,8 @@ ChainedHashMap::ChainedHashMap(uint64_t entrySize, const uint64_t numberOfBucket
     , entries(nullptr)
     , mask(numberOfChains - 1)
     , destructorCallBack(nullptr)
+    , pipelineId(pipelineId)
+
 {
     PRECONDITION(entrySize > 0, "Entry size has to be greater than 0. Entry size is set to small for entry size {}", entrySize);
     PRECONDITION(
@@ -82,7 +84,7 @@ ChainedHashMap::ChainedHashMap(uint64_t entrySize, const uint64_t numberOfBucket
         numberOfChains);
 }
 
-ChainedHashMap::ChainedHashMap(const uint64_t keySize, const uint64_t valueSize, const uint64_t numberOfBuckets, const uint64_t pageSize)
+ChainedHashMap::ChainedHashMap(const uint64_t keySize, const uint64_t valueSize, const uint64_t numberOfBuckets, const uint64_t pageSize, PipelineId pipelineId)
     : numberOfTuples(0)
     , pageSize(pageSize)
     , entrySize(sizeof(ChainedHashMapEntry) + keySize + valueSize)
@@ -91,6 +93,7 @@ ChainedHashMap::ChainedHashMap(const uint64_t keySize, const uint64_t valueSize,
     , entries(nullptr)
     , mask(numberOfChains - 1)
     , destructorCallBack({})
+    , pipelineId(pipelineId)
 {
     PRECONDITION(entrySize > 0, "Entry size has to be greater than 0. Entry size is set to small for entry size {}", entrySize);
     PRECONDITION(
@@ -120,7 +123,7 @@ void ChainedHashMap::setDestructorCallback(const std::function<void(ChainedHashM
 
 std::unique_ptr<ChainedHashMap> ChainedHashMap::createNewMapWithSameConfiguration(const ChainedHashMap& other)
 {
-    return std::make_unique<ChainedHashMap>(other.entrySize, other.numberOfChains, other.pageSize);
+    return std::make_unique<ChainedHashMap>(other.entrySize, other.numberOfChains, other.pageSize, other.pipelineId);
 }
 
 ChainedHashMapEntry* ChainedHashMap::findChain(const HashFunction::HashValue::raw_type hash) const
@@ -134,7 +137,7 @@ std::span<std::byte> ChainedHashMap::allocateSpaceForVarSized(AbstractBufferProv
     if (varSizedSpace.empty() or varSizedSpace.back().getNumberOfTuples() + neededSize >= varSizedSpace.back().getBufferSize())
     {
         /// We allocate more space than currently necessary for the variable sized data to reduce the allocation overhead
-        auto varSizedBuffer = bufferProvider->getUnpooledBuffer(neededSize * NUMBER_OF_PRE_ALLOCATED_VAR_SIZED_ITEMS, TODO);
+        auto varSizedBuffer = bufferProvider->getUnpooledBuffer(neededSize * NUMBER_OF_PRE_ALLOCATED_VAR_SIZED_ITEMS, pipelineId);
         if (not varSizedBuffer)
         {
             throw CannotAllocateBuffer(
@@ -161,7 +164,7 @@ AbstractHashMapEntry* ChainedHashMap::insertEntry(const HashFunction::HashValue:
         /// We add one more entry to the capacity, as we need to have a valid entry for the last entry in the entries array
         /// We will be using this entry for checking, if we are at the end of our hash map in our EntryIterator
         const auto totalSpace = (numberOfChains + 1) * sizeof(ChainedHashMapEntry*);
-        const auto entryBuffer = bufferProvider->getUnpooledBuffer(totalSpace, TODO);
+        const auto entryBuffer = bufferProvider->getUnpooledBuffer(totalSpace, pipelineId);
         if (not entryBuffer)
         {
             throw CannotAllocateBuffer("Could not allocate memory for ChainedHashMap of size {}", std::to_string(totalSpace));
@@ -177,7 +180,7 @@ AbstractHashMapEntry* ChainedHashMap::insertEntry(const HashFunction::HashValue:
     /// 1. Check if we need to allocate a new page
     if (numberOfTuples % entriesPerPage == 0)
     {
-        auto newPage = bufferProvider->getUnpooledBuffer(pageSize, TODO);
+        auto newPage = bufferProvider->getUnpooledBuffer(pageSize, pipelineId);
         if (not newPage)
         {
             throw CannotAllocateBuffer("Could not allocate memory for new page in ChainedHashMap of size {}", std::to_string(pageSize));

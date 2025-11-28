@@ -74,8 +74,8 @@ public:
         uint64_t numberOfEntries{0};
     };
 
-    ChainedHashMap(uint64_t entrySize, uint64_t numberOfBuckets, uint64_t pageSize);
-    ChainedHashMap(uint64_t keySize, uint64_t valueSize, uint64_t numberOfBuckets, uint64_t pageSize);
+    ChainedHashMap(uint64_t entrySize, uint64_t numberOfBuckets, uint64_t pageSize, PipelineId pipelineId);
+    ChainedHashMap(uint64_t keySize, uint64_t valueSize, uint64_t numberOfBuckets, uint64_t pageSize, PipelineId pipelineId);
     ~ChainedHashMap() override;
     [[nodiscard]] ChainedHashMapEntry* findChain(HashFunction::HashValue::raw_type hash) const;
     std::span<std::byte> allocateSpaceForVarSized(AbstractBufferProvider* bufferProvider, size_t neededSize);
@@ -112,5 +112,6 @@ private:
     ChainedHashMapEntry** entries; /// Stores the pointers to the first entry in each chain
     HashFunction::HashValue::raw_type mask; /// Mask to calculate the bucket position from the hash value. Always a (power of 2)-1
     std::function<void(ChainedHashMapEntry*)> destructorCallBack; /// Callback function to be executed, once the destructor is called
+    PipelineId pipelineId;
 };
 }

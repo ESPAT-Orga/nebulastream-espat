@@ -170,13 +170,13 @@ public:
     static constexpr bool hasSpanningTuple() { return FormatterType::HasSpanningTuple; }
 
     explicit InputFormatterTask(
-        FormatterType inputFormatIndexer, const Schema& schema, const QuotationType quotationType, const ParserConfig& parserConfig)
+        FormatterType inputFormatIndexer, const Schema& schema, const QuotationType quotationType, const ParserConfig& parserConfig, OriginId originId)
 
         : inputFormatIndexer(std::move(inputFormatIndexer))
         , schemaInfo(schema)
         , indexerMetaData(typename FormatterType::IndexerMetaData{parserConfig, schema})
         /// Only if we need to resolve spanning tuples, we need the SequenceShredder
-        , sequenceShredder(hasSpanningTuple() ? std::make_unique<SequenceShredder>(parserConfig.tupleDelimiter.size()) : nullptr)
+        , sequenceShredder(hasSpanningTuple() ? std::make_unique<SequenceShredder>(parserConfig.tupleDelimiter.size(), originId) : nullptr)
 
         /// Since we know the schema, we can create a vector that contains a function that converts the string representation of a field value
         /// to our internal representation in the correct order. During parsing, we iterate over the fields in each tuple, and, using the current
@@ -185,6 +185,7 @@ public:
               schema.getFields()
               | std::views::transform([quotationType](const auto& field) { return getParseFunction(field.dataType.type, quotationType); })
               | std::ranges::to<std::vector>())
+        , originId(originId)
     {
     }
 
@@ -271,6 +272,7 @@ private:
     typename FormatterType::IndexerMetaData indexerMetaData;
     std::unique_ptr<SequenceShredder> sequenceShredder; /// unique_ptr, because mutex is not copiable
     std::vector<ParseFunctionSignature> parseFunctions;
+    OriginId originId;
 
     /// Called by processRawBufferWithTupleDelimiter if the raw buffer contains at least one full tuple.
     /// Iterates over all full tuples, using the indexes in FieldOffsets and parses the tuples into formatted data.
@@ -307,7 +309,7 @@ private:
                 setMetadataOfFormattedBuffer(rawBuffer.getRawBuffer(), formattedBuffer, runningChunkNumber, false);
                 pec.emitBuffer(formattedBuffer, PipelineExecutionContext::ContinuationPolicy::POSSIBLE);
                 /// The 'isLastChunk' member of a new buffer is true pre default. If we don't require another buffer, the flag stays true.
-                formattedBuffer = bufferProvider->getBufferBlocking(TODO);
+                formattedBuffer = bufferProvider->getBufferBlocking(originId);
             }
 
             /// Fill current buffer until either full, or we exhausted tuples in raw buffer

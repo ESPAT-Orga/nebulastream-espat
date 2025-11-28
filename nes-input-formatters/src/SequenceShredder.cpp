@@ -39,7 +39,7 @@
 namespace NES
 {
 
-SequenceShredder::SequenceShredder(const size_t sizeOfTupleDelimiterInBytes)
+SequenceShredder::SequenceShredder(const size_t sizeOfTupleDelimiterInBytes, OriginId originId)
 {
     auto dummyBuffer = BufferManager::create(1, 1)->getBufferBlocking(TODO);
     dummyBuffer.setNumberOfTuples(sizeOfTupleDelimiterInBytes);

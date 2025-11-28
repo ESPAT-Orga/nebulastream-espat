@@ -170,9 +170,9 @@ void BufferManager::initialize(uint32_t withAlignment)
     NES_DEBUG("BufferManager configuration bufferSize={} numOfBuffers={}", this->bufferSize, this->numOfBuffers);
 }
 
-TupleBuffer BufferManager::getBufferBlocking(std::optional<PipelineId> pipelineId)
+TupleBuffer BufferManager::getBufferBlocking(std::optional<std::variant<PipelineId, OriginId>> taskOwnerId)
 {
-    auto buffer = getBufferWithTimeout(GET_BUFFER_TIMEOUT, pipelineId);
+    auto buffer = getBufferWithTimeout(GET_BUFFER_TIMEOUT, taskOwnerId);
     if (buffer.has_value())
     {
         return buffer.value();
@@ -201,7 +201,7 @@ std::optional<TupleBuffer> BufferManager::getBufferNoBlocking(std::optional<Pipe
     throw InvalidRefCountForBuffer("[BufferManager] got buffer with invalid reference counter");
 }
 
-std::optional<TupleBuffer> BufferManager::getBufferWithTimeout(const std::chrono::milliseconds timeoutMs, std::optional<PipelineId> pipelineId)
+std::optional<TupleBuffer> BufferManager::getBufferWithTimeout(const std::chrono::milliseconds timeoutMs, std::optional<std::variant<PipelineId, OriginId>> taskOwnerId)
 {
     detail::MemorySegment* memSegment = nullptr;
     const auto deadline = std::chrono::steady_clock::now() + timeoutMs;
@@ -213,7 +213,7 @@ std::optional<TupleBuffer> BufferManager::getBufferWithTimeout(const std::chrono
     {
         //TODO: investigate object slicing lint
         if (statistic)
-            statistic->onEvent(GetBufferEvent(memSegment->size, pipelineId));
+            statistic->onEvent(GetBufferEvent(memSegment->size, taskOwnerId));
         return TupleBuffer(memSegment->controlBlock.get(), memSegment->ptr, memSegment->size);
     }
     throw InvalidRefCountForBuffer("[BufferManager] got buffer with invalid reference counter");

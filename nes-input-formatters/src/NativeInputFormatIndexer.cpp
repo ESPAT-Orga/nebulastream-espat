@@ -22,6 +22,7 @@ namespace NES
 
 InputFormatIndexerRegistryReturnType RegisterNativeInputFormatIndexer(InputFormatIndexerRegistryArguments arguments)
 {
+    //TODO: propagate creator id
     return arguments.createInputFormatterTaskPipeline<NativeInputFormatIndexer>({}, QuotationType::NONE);
 }
 

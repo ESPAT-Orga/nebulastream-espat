@@ -38,7 +38,7 @@ StreamJoinOperatorHandler::StreamJoinOperatorHandler(
 
 void StreamJoinOperatorHandler::triggerSlices(
     const std::map<WindowInfoAndSequenceNumber, std::vector<std::shared_ptr<Slice>>>& slicesAndWindowInfo,
-    PipelineExecutionContext* pipelineCtx)
+    PipelineExecutionContext* pipelineCtx, std::optional<std::variant<PipelineId, OriginId>>)
 {
     /// For every window, we have to trigger all combination of slices. This is necessary, as we have to give the probe operator all
     /// combinations of slices for a given window to ensure that it has seen all tuples of the window.

@@ -128,7 +128,7 @@ class FieldOffsets final : public FieldIndexFunction<FieldOffsets<NumOffsetsPerF
     }
 
 public:
-    explicit FieldOffsets(AbstractBufferProvider& bufferProvider) : bufferProvider(bufferProvider) { };
+    explicit FieldOffsets(AbstractBufferProvider& bufferProvider, std::optional<std::variant<PipelineId, OriginId>> creatorId) : bufferProvider(bufferProvider), creatorId(creatorId) { };
     ~FieldOffsets() = default;
 
     /// InputFormatter interface functions:
@@ -160,7 +160,7 @@ public:
             this->bufferProvider.getBufferSize());
         this->maxIndex = ((numberOfOffsetsPerTuple)*maxNumberOfTuplesInFormattedBuffer);
         this->totalNumberOfTuples = 0;
-        this->offsetBuffers.emplace_back(this->bufferProvider.getBufferBlocking(TODO));
+        this->offsetBuffers.emplace_back(this->bufferProvider.getBufferBlocking(creatorId));
     }
 
     /// Assures that there is space to write one more tuple and returns a pointer to write the field offsets (of one tuple) to.
@@ -228,6 +228,7 @@ private:
     /// The InputFormatterTask guarantees that the reference to AbstractBufferProvider (ABP) outlives this FieldOffsets instance, since the
     /// InputFormatterTask constructs and deconstructs the FieldOffsets instance in its 'execute' function, which gets the ABP as an argument
     AbstractBufferProvider& bufferProvider; ///NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
+    std::optional<std::variant<PipelineId, OriginId>> creatorId = std::nullopt;
 
     /// Sets the metadata for the current buffer, uses the buffer provider to get a new buffer.
     void allocateNewChildBuffer()
@@ -239,7 +240,7 @@ private:
             (numberOfOffsetsPerTuple));
 
         totalNumberOfTuples += maxNumberOfTuplesInFormattedBuffer;
-        this->offsetBuffers.emplace_back(bufferProvider.getBufferBlocking(TODO));
+        this->offsetBuffers.emplace_back(bufferProvider.getBufferBlocking(creatorId));
         this->currentIndex = 0;
     }
 };

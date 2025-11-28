@@ -173,6 +173,16 @@ void GoogleEventTracePrinter::threadRoutine(const std::stop_token& token)
 
         std::visit(
             Overloaded{
+                [&](const GetUnpooledBufferEvent& getBufferEvent)
+                {
+                    //Todo: implement
+                    (void) getBufferEvent;
+                },
+                [&](const RecycleUnpooledBufferEvent& recycleBufferEvent)
+                {
+                    //Todo: implement
+                    (void) recycleBufferEvent;
+                },
                 [&](const RecyclePooledBufferEvent& recycleBufferEvent)
                 {
                     auto args = nlohmann::json::object();

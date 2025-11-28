@@ -183,7 +183,7 @@ public:
         /// field number, load the correct function for parsing from the vector.
         , parseFunctions(
               schema.getFields()
-              | std::views::transform([quotationType](const auto& field) { return getParseFunction(field.dataType.type, quotationType); })
+              | std::views::transform([quotationType, originId](const auto& field) { return getParseFunction(field.dataType.type, quotationType, originId); })
               | std::ranges::to<std::vector>())
         , originId(originId)
     {
@@ -239,7 +239,7 @@ public:
     requires(FormatterType::IsFormattingRequired and hasSpanningTuple())
     {
         /// Get field delimiter indices of the raw buffer by using the InputFormatIndexer implementation
-        auto fieldIndexFunction = typename FormatterType::FieldIndexFunctionType(*pec.getBufferManager());
+        auto fieldIndexFunction = typename FormatterType::FieldIndexFunctionType(*pec.getBufferManager(), pec.getPipelineId());
         inputFormatIndexer.indexRawBuffer(fieldIndexFunction, rawBuffer, indexerMetaData);
 
         /// If the offset of the _first_ tuple delimiter is not within the rawBuffer, the InputFormatIndexer did not find any tuple delimiter
@@ -351,7 +351,7 @@ private:
         }
 
         /// 1. process leading spanning tuple if required
-        auto formattedBuffer = bufferProvider->getBufferBlocking(TODO);
+        auto formattedBuffer = bufferProvider->getBufferBlocking(pec.getPipelineId());
         if (/* hasLeadingSpanningTuple */ leadingSTBuffers.hasSpanningTuple())
         {
             processSpanningTuple<FormatterType>(
@@ -379,7 +379,7 @@ private:
             {
                 setMetadataOfFormattedBuffer(rawBuffer.getRawBuffer(), formattedBuffer, runningChunkNumber, false);
                 pec.emitBuffer(formattedBuffer, PipelineExecutionContext::ContinuationPolicy::POSSIBLE);
-                formattedBuffer = bufferProvider->getBufferBlocking(TODO);
+                formattedBuffer = bufferProvider->getBufferBlocking(pec.getPipelineId());
             }
 
             processSpanningTuple<FormatterType>(
@@ -421,7 +421,7 @@ private:
             return;
         }
         /// If there is a spanning tuple, get a new buffer for formatted data and process the spanning tuples
-        auto formattedBuffer = bufferProvider->getBufferBlocking(TODO);
+        auto formattedBuffer = bufferProvider->getBufferBlocking(pec.getPipelineId());
         processSpanningTuple<FormatterType>(
             stagedBuffers.getSpanningBuffers(),
             *bufferProvider,

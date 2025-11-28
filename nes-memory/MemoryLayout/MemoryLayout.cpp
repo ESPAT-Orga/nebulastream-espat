@@ -38,7 +38,8 @@ namespace NES
 {
 namespace
 {
-TupleBuffer getNewBufferForVarSized(AbstractBufferProvider& tupleBufferProvider, const uint32_t newBufferSize, std::optional<PipelineId> pipelineId)
+TupleBuffer getNewBufferForVarSized(AbstractBufferProvider& tupleBufferProvider, const uint32_t newBufferSize, std::optional<std::variant<PipelineId,
+                                    OriginId>> pipelineId)
 {
     /// If the fixed size buffers are not large enough, we get an unpooled buffer
     if (tupleBufferProvider.getBufferSize() > newBufferSize)
@@ -89,7 +90,7 @@ void copyVarSizedAndIncrementMetaData(
 template <MemoryLayout::PrependMode PrependMode>
 VariableSizedAccess MemoryLayout::writeVarSized(
     TupleBuffer& tupleBuffer, AbstractBufferProvider& bufferProvider, const std::span<const std::byte> varSizedValue, std
-    ::optional<PipelineId> pipelineId)
+    ::optional<std::variant<PipelineId, OriginId>> pipelineId)
 {
     constexpr uint32_t prependSize = (PrependMode == PREPEND_LENGTH_AS_UINT32) ? sizeof(uint32_t) : 0;
     const auto totalVarSizedLength = varSizedValue.size() + prependSize;
@@ -125,9 +126,11 @@ VariableSizedAccess MemoryLayout::writeVarSized(
 
 /// Explicit instantiations for writeVarSized()
 template VariableSizedAccess
-MemoryLayout::writeVarSized<MemoryLayout::PrependMode::PREPEND_NONE>(TupleBuffer&, AbstractBufferProvider&, std::span<const std::byte>, std::optional<PipelineId> pipelineId);
+MemoryLayout::writeVarSized<MemoryLayout::PrependMode::PREPEND_NONE>(TupleBuffer&, AbstractBufferProvider&, std::span<const std::byte>, std::optional<std::variant<PipelineId, OriginId>>
+                                                                     pipelineId);
 template VariableSizedAccess MemoryLayout::writeVarSized<MemoryLayout::PrependMode::PREPEND_LENGTH_AS_UINT32>(
-    TupleBuffer&, AbstractBufferProvider&, std::span<const std::byte>, std::optional<PipelineId> pipelineId);
+    TupleBuffer&, AbstractBufferProvider&, std::span<const std::byte>, std::optional<std::variant<PipelineId, OriginId>>
+    pipelineId);
 
 std::span<std::byte>
 MemoryLayout::loadAssociatedVarSizedValue(const TupleBuffer& tupleBuffer, const VariableSizedAccess variableSizedAccess)

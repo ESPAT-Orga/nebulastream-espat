@@ -70,5 +70,5 @@ auto parseQuotedFieldString()
 }
 
 /// Takes a vector containing parse function for fields. Adds a parse function that parses strings to the vector.
-ParseFunctionSignature getParseFunction(DataType::Type physicalType, QuotationType quotationType);
+ParseFunctionSignature getParseFunction(DataType::Type physicalType, QuotationType quotationType, std::optional<std::variant<PipelineId, OriginId>> creatorId);
 }

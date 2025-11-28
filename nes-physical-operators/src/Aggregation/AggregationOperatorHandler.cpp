@@ -59,7 +59,7 @@ AggregationOperatorHandler::getCreateNewSlicesFunction(const CreateNewSlicesArgu
     auto newHashMapArgs = dynamic_cast<const CreateNewHashMapSliceArgs&>(newSlicesArguments);
     newHashMapArgs.numberOfBuckets = std::clamp(rollingAverageNumberOfKeys.rlock()->getAverage(), 1UL, maxNumberOfBuckets);
     return std::function(
-        [outputOriginId = outputOriginId, numberOfWorkerThreads = numberOfWorkerThreads, copyOfNewHashMapArgs = newHashMapArgs](
+        [outputOriginId = outputOriginId, numberOfWorkerThreads = numberOfWorkerThreads, copyOfNewHashMapArgs = newHashMapArgs, creatorId = ](
             SliceStart sliceStart, SliceEnd sliceEnd) -> std::vector<std::shared_ptr<Slice>>
         {
             NES_TRACE("Creating new aggregation slice with for slice {}-{} for output origin {}", sliceStart, sliceEnd, outputOriginId);
@@ -69,7 +69,7 @@ AggregationOperatorHandler::getCreateNewSlicesFunction(const CreateNewSlicesArgu
 
 void AggregationOperatorHandler::triggerSlices(
     const std::map<WindowInfoAndSequenceNumber, std::vector<std::shared_ptr<Slice>>>& slicesAndWindowInfo,
-    PipelineExecutionContext* pipelineCtx)
+    PipelineExecutionContext* pipelineCtx, std::optional<std::variant<PipelineId, OriginId>> creatorId)
 {
     for (const auto& [windowInfo, allSlices] : slicesAndWindowInfo)
     {
@@ -105,7 +105,7 @@ void AggregationOperatorHandler::triggerSlices(
         /// - a new hashmap for the probe operator, so that we are not overwriting the thread local hashmaps
         /// - size of EmittedAggregationWindow
         const auto neededBufferSize = sizeof(EmittedAggregationWindow) + (allHashMaps.size() * sizeof(Nautilus::Interface::HashMap*));
-        const auto tupleBufferVal = pipelineCtx->getBufferManager()->getUnpooledBuffer(neededBufferSize, TODO);
+        const auto tupleBufferVal = pipelineCtx->getBufferManager()->getUnpooledBuffer(neededBufferSize, creatorId);
         if (not tupleBufferVal.has_value())
         {
             throw CannotAllocateBuffer("{}B for the hash join window trigger were requested", neededBufferSize);

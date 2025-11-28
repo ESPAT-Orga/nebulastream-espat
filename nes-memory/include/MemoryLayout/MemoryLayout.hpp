@@ -57,7 +57,7 @@ public:
     template <PrependMode PrependMode>
     static VariableSizedAccess
     writeVarSized(TupleBuffer& tupleBuffer, AbstractBufferProvider& bufferProvider, std::span<const std::byte> varSizedValue, std::
-                  optional<PipelineId> pipelineId);
+                  optional<std::variant<PipelineId, OriginId>> pipelineId);
 
     /// @brief Reads the variable sized data and returns the pointer to the var sized data
     /// @return Pointer to variable sized data

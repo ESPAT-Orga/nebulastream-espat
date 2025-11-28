@@ -41,7 +41,7 @@ namespace NES
 
 SequenceShredder::SequenceShredder(const size_t sizeOfTupleDelimiterInBytes, OriginId originId)
 {
-    auto dummyBuffer = BufferManager::create(1, 1)->getBufferBlocking(TODO);
+    auto dummyBuffer = BufferManager::create(1, 1)->getBufferBlocking(originId);
     dummyBuffer.setNumberOfTuples(sizeOfTupleDelimiterInBytes);
     this->spanningTupleBuffer = std::make_unique<STBuffer>(INITIAL_SIZE_OF_ST_BUFFER, std::move(dummyBuffer));
 }

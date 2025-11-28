@@ -88,7 +88,7 @@ public:
     /// if buffer contains data, writes it into the result buffer vector, otherwise, calls the 'repeatTaskCallback'
     bool emitBuffer(const TupleBuffer& resultBuffer, ContinuationPolicy continuationPolicy) override;
 
-    TupleBuffer allocateTupleBuffer() override;
+    TupleBuffer allocateTupleBuffer(std::optional<std::variant<PipelineId, OriginId>> creatorId) override;
 
     void setRepeatTaskCallback(std::function<void()> repeatTaskCallback) { this->repeatTaskCallback = std::move(repeatTaskCallback); }
 

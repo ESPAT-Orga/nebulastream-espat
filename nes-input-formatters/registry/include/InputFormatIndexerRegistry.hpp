@@ -48,8 +48,9 @@ struct InputFormatIndexerRegistryArguments
     template <InputFormatIndexerType FormatterType>
     InputFormatIndexerRegistryReturnType createInputFormatterTaskPipeline(FormatterType inputFormatter, const QuotationType quotationType)
     {
+        //TODO: how do we get the creator id here?
         auto inputFormatterTask
-            = InputFormatterTask<FormatterType>(std::move(inputFormatter), schema, quotationType, inputFormatIndexerConfig);
+            = InputFormatterTask<FormatterType>(std::move(inputFormatter), schema, quotationType, inputFormatIndexerConfig, INVALID_ORIGIN_ID);
         return std::make_unique<InputFormatterTaskPipeline>(std::move(inputFormatterTask));
     }
 

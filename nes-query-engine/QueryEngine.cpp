@@ -236,10 +236,10 @@ struct DefaultPEC final : PipelineExecutionContext
         return threadId;
     }
 
-    TupleBuffer allocateTupleBuffer() override
+    TupleBuffer allocateTupleBuffer(std::optional<std::variant<PipelineId, OriginId>> creatorId) override
     {
         PRECONDITION(!wasRepeated, "A task should terminate after repeating");
-        return bm->getBufferBlocking(TODO);
+        return bm->getBufferBlocking(creatorId);
     }
 
     [[nodiscard]] uint64_t getNumberOfWorkerThreads() const override

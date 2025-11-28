@@ -48,7 +48,7 @@ bool TestPipelineExecutionContext::emitBuffer(const TupleBuffer& resultBuffer, c
     return true;
 }
 
-TupleBuffer TestPipelineExecutionContext::allocateTupleBuffer()
+TupleBuffer TestPipelineExecutionContext::allocateTupleBuffer(std::optional<std::variant<PipelineId, OriginId>> creatorId)
 {
     //TODO remove if necessary
     if (auto buffer = bufferManager->getBufferNoBlocking(std::nullopt))

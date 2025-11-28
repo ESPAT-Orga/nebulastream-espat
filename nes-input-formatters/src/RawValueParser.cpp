@@ -28,53 +28,53 @@
 namespace NES
 {
 
-ParseFunctionSignature getQuotedStringParseFunction()
+ParseFunctionSignature getQuotedStringParseFunction(std::optional<std::variant<PipelineId, OriginId>> creatorId)
 {
-    return [](const std::string_view inputString,
-              const size_t writeOffsetInBytes,
-              AbstractBufferProvider& bufferProvider,
-              TupleBuffer& tupleBufferFormatted)
+    return [creatorId](const std::string_view inputString,
+                       const size_t writeOffsetInBytes,
+                       AbstractBufferProvider& bufferProvider,
+                       TupleBuffer& tupleBufferFormatted)
     {
         INVARIANT(inputString.length() >= 2, "Input string must be at least 2 characters long.");
         const auto inputStringWithoutQuotes = inputString.substr(1, inputString.length() - 2);
         const auto variableSizedAccess = MemoryLayout::writeVarSized<MemoryLayout::PREPEND_LENGTH_AS_UINT32>(
-            tupleBufferFormatted, bufferProvider, std::as_bytes(std::span{inputStringWithoutQuotes}), TODO);
+            tupleBufferFormatted, bufferProvider, std::as_bytes(std::span{inputStringWithoutQuotes}), creatorId);
         const auto combinedIdxOffset = variableSizedAccess.getCombinedIdxOffset();
         const auto parsedValueBytes = std::as_bytes(std::span{&combinedIdxOffset, 1});
         std::ranges::copy(parsedValueBytes, tupleBufferFormatted.getAvailableMemoryArea().begin() + writeOffsetInBytes);
     };
 }
 
-ParseFunctionSignature getBasicStringParseFunction()
+ParseFunctionSignature getBasicStringParseFunction(std::optional<std::variant<PipelineId, OriginId>> creatorId)
 {
-    return [](const std::string_view inputString,
-              const size_t writeOffsetInBytes,
-              AbstractBufferProvider& bufferProvider,
-              TupleBuffer& tupleBufferFormatted)
+    return [creatorId](const std::string_view inputString,
+                       const size_t writeOffsetInBytes,
+                       AbstractBufferProvider& bufferProvider,
+                       TupleBuffer& tupleBufferFormatted)
     {
         const auto variableSizedAccess = MemoryLayout::writeVarSized<MemoryLayout::PREPEND_LENGTH_AS_UINT32>(
-            tupleBufferFormatted, bufferProvider, std::as_bytes(std::span{inputString}), TODO);
+            tupleBufferFormatted, bufferProvider, std::as_bytes(std::span{inputString}), creatorId);
         const auto combinedIdxOffset = variableSizedAccess.getCombinedIdxOffset();
         const auto parsedValueBytes = std::as_bytes(std::span{&combinedIdxOffset, 1});
         std::ranges::copy(parsedValueBytes, tupleBufferFormatted.getAvailableMemoryArea().begin() + writeOffsetInBytes);
     };
 }
 
-ParseFunctionSignature getStringParseFunction(const QuotationType quotationType)
+ParseFunctionSignature getStringParseFunction(const QuotationType quotationType, std::optional<std::variant<PipelineId, OriginId>> creatorId)
 {
     switch (quotationType)
     {
         case QuotationType::NONE: {
-            return getBasicStringParseFunction();
+            return getBasicStringParseFunction(creatorId);
         }
         case QuotationType::DOUBLE_QUOTE: {
-            return getQuotedStringParseFunction();
+            return getQuotedStringParseFunction(creatorId);
         }
     }
     std::unreachable();
 }
 
-ParseFunctionSignature getBasicTypeParseFunction(const DataType::Type physicalType, const QuotationType quotationType)
+ParseFunctionSignature getBasicTypeParseFunction(const DataType::Type physicalType, const QuotationType quotationType, std::optional<std::variant<PipelineId, OriginId>> creatorId)
 {
     switch (physicalType)
     {
@@ -115,7 +115,7 @@ ParseFunctionSignature getBasicTypeParseFunction(const DataType::Type physicalTy
             return parseFieldString<bool>();
         }
         case DataType::Type::VARSIZED: {
-            return getBasicStringParseFunction();
+            return getBasicStringParseFunction(creatorId);
         }
         case DataType::Type::VARSIZED_POINTER_REP: {
             throw NotImplemented("Cannot parse VARSIZED_POINTER_REP type.");
@@ -127,12 +127,13 @@ ParseFunctionSignature getBasicTypeParseFunction(const DataType::Type physicalTy
     return nullptr;
 }
 
-ParseFunctionSignature getParseFunction(const DataType::Type physicalType, const QuotationType quotationType)
+ParseFunctionSignature getParseFunction(const DataType::Type physicalType, const QuotationType quotationType, std::optional<std::variant<PipelineId, OriginId>>
+                                        creatorId)
 {
     if (physicalType == DataType::Type::VARSIZED)
     {
-        return getStringParseFunction(quotationType);
+        return getStringParseFunction(quotationType, creatorId);
     }
-    return getBasicTypeParseFunction(physicalType, quotationType);
+    return getBasicTypeParseFunction(physicalType, quotationType, creatorId);
 }
 }

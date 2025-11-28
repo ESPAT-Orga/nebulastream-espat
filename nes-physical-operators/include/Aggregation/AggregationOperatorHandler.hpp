@@ -78,7 +78,7 @@ public:
 protected:
     void triggerSlices(
         const std::map<WindowInfoAndSequenceNumber, std::vector<std::shared_ptr<Slice>>>& slicesAndWindowInfo,
-        PipelineExecutionContext* pipelineCtx) override;
+        PipelineExecutionContext* pipelineCtx, std::optional<std::variant<PipelineId, OriginId>> creatorId) override;
     folly::Synchronized<RollingAverage<uint64_t>> rollingAverageNumberOfKeys;
     uint64_t maxNumberOfBuckets;
 };

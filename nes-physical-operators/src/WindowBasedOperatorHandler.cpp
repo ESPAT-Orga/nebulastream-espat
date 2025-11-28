@@ -50,6 +50,7 @@ void WindowBasedOperatorHandler::start(PipelineExecutionContext& pipelineExecuti
     numberOfWorkerThreads = pipelineExecutionContext.getNumberOfWorkerThreads();
     watermarkProcessorBuild = std::make_unique<MultiOriginWatermarkProcessor>(inputOrigins);
     watermarkProcessorProbe = std::make_unique<MultiOriginWatermarkProcessor>(std::vector{outputOriginId});
+    pipelineId = pipelineExecutionContext.getPipelineId();
 }
 
 void WindowBasedOperatorHandler::stop(QueryTerminationType, PipelineExecutionContext&)
@@ -90,14 +91,14 @@ void WindowBasedOperatorHandler::checkAndTriggerWindows(const BufferMetaData& bu
 
     /// Getting all slices that can be triggered and triggering them
     const auto slicesAndWindowInfo = sliceAndWindowStore->getTriggerableWindowSlices(newGlobalWatermark);
-    triggerSlices(slicesAndWindowInfo, pipelineCtx);
+    triggerSlices(slicesAndWindowInfo, pipelineCtx, TODO);
 }
 
 void WindowBasedOperatorHandler::triggerAllWindows(PipelineExecutionContext* pipelineCtx)
 {
     const auto slicesAndWindowInfo = sliceAndWindowStore->getAllNonTriggeredSlices();
     NES_TRACE("Triggering {} windows for origin: {}", slicesAndWindowInfo.size(), outputOriginId);
-    triggerSlices(slicesAndWindowInfo, pipelineCtx);
+    triggerSlices(slicesAndWindowInfo, pipelineCtx, TODO);
 }
 
 }

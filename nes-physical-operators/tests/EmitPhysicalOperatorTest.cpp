@@ -67,7 +67,7 @@ class EmitPhysicalOperatorTest : public Testing::BaseUnitTest
             return true;
         }
 
-        TupleBuffer allocateTupleBuffer() override { return bufferManager->getBufferBlocking(TODO); }
+        TupleBuffer allocateTupleBuffer(std::optional<std::variant<PipelineId, OriginId>> creatorId) override { return bufferManager->getBufferBlocking(TODO); }
 
         [[nodiscard]] WorkerThreadId getId() const override { return INITIAL<WorkerThreadId>; }
 

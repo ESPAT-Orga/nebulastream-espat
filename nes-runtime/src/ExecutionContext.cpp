@@ -133,7 +133,7 @@ nautilus::val<TupleBuffer*> ExecutionContext::allocateBuffer() const
             /// As we can only return it to operator code as a ptr we create a new TupleBuffer on the heap.
             /// This increases the reference counter in the buffer.
             /// When the heap allocated buffer is not required anymore, the operator code has to clean up the allocated memory to prevent memory leaks.
-            const auto buffer = pec->allocateTupleBuffer();
+            const auto buffer = pec->allocateTupleBuffer(TODO);
             auto* tb = new TupleBuffer(buffer);
             return tb;
         },

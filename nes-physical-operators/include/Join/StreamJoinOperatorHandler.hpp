@@ -37,7 +37,7 @@ public:
 protected:
     void triggerSlices(
         const std::map<WindowInfoAndSequenceNumber, std::vector<std::shared_ptr<Slice>>>& slicesAndWindowInfo,
-        PipelineExecutionContext* pipelineCtx) override;
+        PipelineExecutionContext* pipelineCtx, std::optional<std::variant<PipelineId, OriginId>> creatorId) override;
 
     /// Emits the left and right slice to the probe
     virtual void emitSlicesToProbe(

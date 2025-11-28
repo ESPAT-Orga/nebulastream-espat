@@ -24,6 +24,8 @@
 #include <ranges>
 #include <thread>
 #include <utility>
+
+#include "Runtime/BufferManagerStatisticListener.hpp"
 #include <Runtime/TupleBuffer.hpp>
 #include <Util/Logger/Logger.hpp>
 #include <fmt/format.h>
@@ -134,7 +136,7 @@ UnpooledChunksManager::allocateSpace(const std::thread::id threadId, const size_
 }
 
 TupleBuffer
-UnpooledChunksManager::getUnpooledBuffer(const size_t neededSize, size_t alignment, const std::shared_ptr<BufferRecycler>& bufferRecycler)
+UnpooledChunksManager::getUnpooledBuffer(const size_t neededSize, size_t alignment, const std::shared_ptr<BufferRecycler>& bufferRecycler, std::shared_ptr<BufferManagerStatisticListener> statistic, std::optional<std::variant<PipelineId, OriginId>> creatorId)
 {
     const auto threadId = std::this_thread::get_id();
 
@@ -165,6 +167,11 @@ UnpooledChunksManager::getUnpooledBuffer(const size_t neededSize, size_t alignme
                 curUnpooledChunk.activeMemorySegments);
             curUnpooledChunk.activeMemorySegments -= 1;
             memorySegment->size = 0;
+
+
+            if (statistic)
+                statistic->onEvent(RecycleUnpooledBufferEvent(memorySegment->size,  memorySegment->controlBlock->getCreatorId()));
+
             if (curUnpooledChunk.activeMemorySegments == 0)
             {
                 /// All memory segments have been removed, therefore, we can deallocate the unpooled chunk
@@ -184,7 +191,7 @@ UnpooledChunksManager::getUnpooledBuffer(const size_t neededSize, size_t alignme
         lockedLocalUnpooledBufferData->emplaceChunkControlBlock(localKeyForUnpooledBufferChunk, std::move(memSegment));
     }
 
-    if (leakedMemSegment->controlBlock->prepare(bufferRecycler, TODO))
+    if (leakedMemSegment->controlBlock->prepare(bufferRecycler, creatorId))
     {
         return TupleBuffer(leakedMemSegment->controlBlock.get(), leakedMemSegment->ptr, neededSize);
     }

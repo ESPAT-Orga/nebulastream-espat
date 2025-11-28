@@ -184,7 +184,7 @@ UnpooledChunksManager::getUnpooledBuffer(const size_t neededSize, size_t alignme
         lockedLocalUnpooledBufferData->emplaceChunkControlBlock(localKeyForUnpooledBufferChunk, std::move(memSegment));
     }
 
-    if (leakedMemSegment->controlBlock->prepare(bufferRecycler))
+    if (leakedMemSegment->controlBlock->prepare(bufferRecycler, TODO))
     {
         return TupleBuffer(leakedMemSegment->controlBlock.get(), leakedMemSegment->ptr, neededSize);
     }

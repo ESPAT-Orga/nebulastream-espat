@@ -108,16 +108,16 @@ public:
     TupleBuffer getBufferBlocking(std::optional<std::variant<PipelineId, OriginId>> taskOwnerId) override;
 
     /// invalid optional if there is no buffer.
-    std::optional<TupleBuffer> getBufferNoBlocking(std::optional<PipelineId> pipelineId) override;
+    std::optional<TupleBuffer> getBufferNoBlocking(std::optional<std::variant<PipelineId, OriginId>> creatorId) override;
 
     /**
      * @brief Returns a new Buffer wrapped in an optional or an invalid option if there is no buffer available within
      * timeoutMs.
      * @param timeoutMs the amount of time to wait for a new buffer to be retuned
-     * @param taskOwnerId
+     * @param creatorId
      * @return a new buffer
      */
-    std::optional<TupleBuffer> getBufferWithTimeout(std::chrono::milliseconds timeoutMs, std::optional<std::variant<PipelineId, OriginId>> taskOwnerId) override;
+    std::optional<TupleBuffer> getBufferWithTimeout(std::chrono::milliseconds timeoutMs, std::optional<std::variant<PipelineId, OriginId>> creatorId) override;
 
     std::optional<TupleBuffer> getUnpooledBuffer(size_t bufferSize) override;
 

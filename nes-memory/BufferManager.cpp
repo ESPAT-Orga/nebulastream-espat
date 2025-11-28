@@ -181,7 +181,7 @@ TupleBuffer BufferManager::getBufferBlocking(std::optional<std::variant<Pipeline
     throw BufferAllocationFailure("Global buffer pool could not allocate buffer before timeout({})", GET_BUFFER_TIMEOUT);
 }
 
-std::optional<TupleBuffer> BufferManager::getBufferNoBlocking(std::optional<PipelineId> pipelineId)
+std::optional<TupleBuffer> BufferManager::getBufferNoBlocking(std::optional<std::variant<PipelineId, OriginId>> creatorId)
 {
     detail::MemorySegment* memSegment = nullptr;
     if (!availableBuffers.read(memSegment))
@@ -189,19 +189,19 @@ std::optional<TupleBuffer> BufferManager::getBufferNoBlocking(std::optional<Pipe
         //TODO also record allocation failure
         return std::nullopt;
     }
-    if (memSegment->controlBlock->prepare(shared_from_this()))
+    if (memSegment->controlBlock->prepare(shared_from_this(), creatorId))
     {
         //TODO: create event
         //TODO: if we do it here, we might not be able to get the thread id and the query id
         //TODO: what does the segment size depend on?
         if (statistic)
-            statistic->onEvent(GetBufferEvent(memSegment->size, pipelineId));
+            statistic->onEvent(GetBufferEvent(memSegment->size, creatorId));
         return TupleBuffer(memSegment->controlBlock.get(), memSegment->ptr, memSegment->size);
     }
     throw InvalidRefCountForBuffer("[BufferManager] got buffer with invalid reference counter");
 }
 
-std::optional<TupleBuffer> BufferManager::getBufferWithTimeout(const std::chrono::milliseconds timeoutMs, std::optional<std::variant<PipelineId, OriginId>> taskOwnerId)
+std::optional<TupleBuffer> BufferManager::getBufferWithTimeout(const std::chrono::milliseconds timeoutMs, std::optional<std::variant<PipelineId, OriginId>> creatorId)
 {
     detail::MemorySegment* memSegment = nullptr;
     const auto deadline = std::chrono::steady_clock::now() + timeoutMs;
@@ -209,11 +209,11 @@ std::optional<TupleBuffer> BufferManager::getBufferWithTimeout(const std::chrono
     {
         return std::nullopt;
     }
-    if (memSegment->controlBlock->prepare(shared_from_this()))
+    if (memSegment->controlBlock->prepare(shared_from_this(), creatorId))
     {
         //TODO: investigate object slicing lint
         if (statistic)
-            statistic->onEvent(GetBufferEvent(memSegment->size, taskOwnerId));
+            statistic->onEvent(GetBufferEvent(memSegment->size, creatorId));
         return TupleBuffer(memSegment->controlBlock.get(), memSegment->ptr, memSegment->size);
     }
     throw InvalidRefCountForBuffer("[BufferManager] got buffer with invalid reference counter");
@@ -227,7 +227,7 @@ std::optional<TupleBuffer> BufferManager::getUnpooledBuffer(const size_t bufferS
 void BufferManager::recyclePooledBuffer(detail::MemorySegment* segment)
 {
     if (statistic)
-        statistic->onEvent(RecyclePooledBufferEvent(segment->size));
+        statistic->onEvent(RecyclePooledBufferEvent(segment->size, segment->controlBlock->getCreatorId()));
     INVARIANT(segment->isAvailable(), "Recycling buffer callback invoked on used memory segment");
     INVARIANT(
         segment->controlBlock->owningBufferRecycler == nullptr,

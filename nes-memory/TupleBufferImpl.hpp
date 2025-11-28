@@ -87,7 +87,7 @@ public:
     /// This method must be called before the BufferManager hands out a TupleBuffer. It ensures that the internal
     /// reference counter is zero. If that's not the case, an exception is thrown.
     /// Returns true if the mem segment can be used to create a TupleBuffer.
-    bool prepare(const std::shared_ptr<BufferRecycler>& recycler);
+    bool prepare(const std::shared_ptr<BufferRecycler>& recycler, std::optional<std::variant<PipelineId, OriginId>> creatorId);
 
     /// Increase the reference counter by one.
     BufferControlBlock* retain();
@@ -109,6 +109,8 @@ public:
     void setLastChunk(bool lastChunk);
     [[nodiscard]] OriginId getOriginId() const noexcept;
     void setOriginId(OriginId originId);
+    [[nodiscard]] std::optional<std::variant<PipelineId, OriginId>> getCreatorId() const noexcept;
+    void setCreatorId(std::optional<std::variant<PipelineId, OriginId>> creatorId);
     void setCreationTimestamp(Timestamp timestamp);
     [[nodiscard]] Timestamp getCreationTimestamp() const noexcept;
     [[nodiscard]] VariableSizedAccess::Index storeChildBuffer(BufferControlBlock* control);
@@ -128,6 +130,7 @@ private:
     bool lastChunk = true;
     Timestamp creationTimestamp = Timestamp(Timestamp::INITIAL_VALUE);
     OriginId originId = INVALID_ORIGIN_ID;
+    std::optional<std::variant<PipelineId, OriginId>> creatorId = std::nullopt;
     std::vector<MemorySegment*> children;
 
 public:

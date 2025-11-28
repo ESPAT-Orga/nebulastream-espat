@@ -49,7 +49,7 @@ public:
 
     virtual TupleBuffer getBufferBlocking(std::optional<std::variant<PipelineId, OriginId>> taskOwnerId) = 0;
 
-    virtual std::optional<TupleBuffer> getBufferNoBlocking(std::optional<PipelineId> pipelineId) = 0;
+    virtual std::optional<TupleBuffer> getBufferNoBlocking(std::optional<std::variant<PipelineId, OriginId>> creatorId) = 0;
 
     virtual std::optional<TupleBuffer> getBufferWithTimeout(std::chrono::milliseconds timeout_ms, std::optional<std::variant<PipelineId, OriginId>> taskOwnerId) = 0;
 

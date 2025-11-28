@@ -49,7 +49,7 @@ using namespace Nautilus;
 /// suitable for storing state across pipeline invocations. For storing state across pipeline invocations, the operator handler should be used.
 struct Arena
 {
-    explicit Arena(std::shared_ptr<AbstractBufferProvider> bufferProvider) : bufferProvider(std::move(bufferProvider)) { }
+    explicit Arena(std::shared_ptr<AbstractBufferProvider> bufferProvider, std::variant<PipelineId, OriginId> creatorId) : bufferProvider(std::move(bufferProvider)) , creatorId(creatorId) { }
 
     /// Allocating memory by the buffer provider. There are three cases:
     /// 1. The required size is larger than the buffer provider's buffer size. In this case, we allocate an unpooled buffer.
@@ -58,6 +58,7 @@ struct Arena
     std::span<std::byte> allocateMemory(size_t sizeInBytes);
 
     std::shared_ptr<AbstractBufferProvider> bufferProvider;
+    std::variant<PipelineId, OriginId> creatorId;
     std::vector<TupleBuffer> fixedSizeBuffers;
     std::vector<TupleBuffer> unpooledBuffers;
     size_t lastAllocationSize{0};

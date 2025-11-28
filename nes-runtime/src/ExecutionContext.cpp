@@ -57,7 +57,7 @@ std::span<std::byte> Arena::allocateMemory(const size_t sizeInBytes)
     /// Case 1
     if (bufferProvider->getBufferSize() < sizeInBytes)
     {
-        const auto unpooledBufferOpt = bufferProvider->getUnpooledBuffer(sizeInBytes, TODO);
+        const auto unpooledBufferOpt = bufferProvider->getUnpooledBuffer(sizeInBytes, creatorId);
         if (not unpooledBufferOpt.has_value())
         {
             throw CannotAllocateBuffer("Cannot allocate unpooled buffer of size " + std::to_string(sizeInBytes));
@@ -69,7 +69,7 @@ std::span<std::byte> Arena::allocateMemory(const size_t sizeInBytes)
 
     if (fixedSizeBuffers.empty())
     {
-        fixedSizeBuffers.emplace_back(bufferProvider->getBufferBlocking(TODO));
+        fixedSizeBuffers.emplace_back(bufferProvider->getBufferBlocking(creatorId));
         lastAllocationSize = bufferProvider->getBufferSize();
         currentOffset += sizeInBytes;
         return fixedSizeBuffers.back().getAvailableMemoryArea().subspan(0, sizeInBytes);
@@ -78,7 +78,7 @@ std::span<std::byte> Arena::allocateMemory(const size_t sizeInBytes)
     /// Case 2
     if (lastAllocationSize < currentOffset + sizeInBytes)
     {
-        fixedSizeBuffers.emplace_back(bufferProvider->getBufferBlocking(TODO));
+        fixedSizeBuffers.emplace_back(bufferProvider->getBufferBlocking(creatorId));
         this->currentOffset = 0;
     }
 
@@ -133,7 +133,7 @@ nautilus::val<TupleBuffer*> ExecutionContext::allocateBuffer() const
             /// As we can only return it to operator code as a ptr we create a new TupleBuffer on the heap.
             /// This increases the reference counter in the buffer.
             /// When the heap allocated buffer is not required anymore, the operator code has to clean up the allocated memory to prevent memory leaks.
-            const auto buffer = pec->allocateTupleBuffer(TODO);
+            const auto buffer = pec->allocateTupleBuffer(pec->getPipelineId());
             auto* tb = new TupleBuffer(buffer);
             return tb;
         },

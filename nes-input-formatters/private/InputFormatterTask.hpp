@@ -120,7 +120,8 @@ void processSpanningTuple(
     const SchemaInfo& schemaInfo,
     const typename FormatterType::IndexerMetaData& indexerMetaData,
     const FormatterType& inputFormatIndexer,
-    const std::vector<ParseFunctionSignature>& parseFunctions)
+    const std::vector<ParseFunctionSignature>& parseFunctions, std::optional<std::variant<PipelineId, OriginId>>
+    creatorId)
 {
     INVARIANT(stagedBuffersSpan.size() >= 2, "A spanning tuple must span across at least two buffers");
     /// If the buffers are not empty, there are at least three buffers
@@ -146,7 +147,7 @@ void processSpanningTuple(
     const auto sizeOfLeadingAndTrailingTupleDelimiter = 2 * indexerMetaData.getTupleDelimitingBytes().size();
     if (completeSpanningTuple.size() > sizeOfLeadingAndTrailingTupleDelimiter)
     {
-        auto fieldIndexFunction = typename FormatterType::FieldIndexFunctionType(bufferProvider);
+        auto fieldIndexFunction = typename FormatterType::FieldIndexFunctionType(bufferProvider, creatorId);
         lastBuffer.setSpanningTuple(completeSpanningTuple);
         inputFormatIndexer.indexRawBuffer(fieldIndexFunction, lastBuffer.getRawTupleBuffer(), indexerMetaData);
         processTuple<typename FormatterType::FieldIndexFunctionType>(
@@ -361,7 +362,7 @@ private:
                 this->schemaInfo,
                 this->indexerMetaData,
                 this->inputFormatIndexer,
-                this->parseFunctions);
+                this->parseFunctions, pec.getPipelineId());
         }
 
         /// 2. process tuples in buffer
@@ -389,7 +390,7 @@ private:
                 this->schemaInfo,
                 this->indexerMetaData,
                 this->inputFormatIndexer,
-                this->parseFunctions);
+                this->parseFunctions, pec.getPipelineId());
         }
         /// If a raw buffer contains exactly one delimiter, but does not complete a spanning tuple, the formatted buffer does not contain a tuple
         if (formattedBuffer.getNumberOfTuples() != 0)
@@ -429,7 +430,7 @@ private:
             this->schemaInfo,
             this->indexerMetaData,
             this->inputFormatIndexer,
-            this->parseFunctions);
+            this->parseFunctions, pec.getPipelineId());
 
         formattedBuffer.setSequenceNumber(rawBuffer.getSequenceNumber());
         formattedBuffer.setChunkNumber(ChunkNumber(runningChunkNumber++));

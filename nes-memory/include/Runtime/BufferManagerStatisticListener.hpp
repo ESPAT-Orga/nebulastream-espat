@@ -74,7 +74,7 @@ struct RecycleUnpooledBufferEvent : BaseBufferManagerEvent
     size_t bufferSize{};
 };
 
-using BufferManagerEvent = std::variant<GetBufferEvent, RecyclePooledBufferEvent>;
+using BufferManagerEvent = std::variant<GetBufferEvent, RecyclePooledBufferEvent, GetUnpooledBufferEvent, RecycleUnpooledBufferEvent>;
 static_assert(std::is_default_constructible_v<BufferManagerEvent>, "Events should be default constructible");
 
 struct BufferManagerStatisticListener

@@ -42,7 +42,8 @@ public:
     PagedVector() = default;
 
     /// Appends a new page to the pages vector if the last page is full.
-    void appendPageIfFull(AbstractBufferProvider* bufferProvider, const MemoryLayout* memoryLayout);
+    void appendPageIfFull(AbstractBufferProvider* bufferProvider, const MemoryLayout* memoryLayout, std::optional<std::variant<PipelineId,
+                          OriginId>> creatorId);
 
     /// Appends the pages of the given PagedVector with the pages of this PagedVector.
     void moveAllPages(PagedVector& other);

@@ -76,7 +76,7 @@ void runAllocations(
     const auto chunkSize = numberOfThreads / numberOfRandomAllocationSizes;
     for (auto& allocation : randomAllocations)
     {
-        allocation.buffer = bufferManager->getUnpooledBuffer(allocation.neededSize);
+        allocation.buffer = bufferManager->getUnpooledBuffer(allocation.neededSize, TODO);
     }
     for (size_t i = 0; i < numberOfThreads; ++i)
     {
@@ -89,7 +89,7 @@ void runAllocations(
                 for (size_t i = start; i < end; ++i)
                 {
                     auto& allocation = randomAllocations[i];
-                    allocation.buffer = bufferManager->getUnpooledBuffer(allocation.neededSize);
+                    allocation.buffer = bufferManager->getUnpooledBuffer(allocation.neededSize, TODO);
                 }
             },
             start,

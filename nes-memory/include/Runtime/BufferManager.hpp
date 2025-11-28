@@ -119,7 +119,7 @@ public:
      */
     std::optional<TupleBuffer> getBufferWithTimeout(std::chrono::milliseconds timeoutMs, std::optional<std::variant<PipelineId, OriginId>> creatorId) override;
 
-    std::optional<TupleBuffer> getUnpooledBuffer(size_t bufferSize) override;
+    std::optional<TupleBuffer> getUnpooledBuffer(size_t bufferSize, std::optional<std::variant<PipelineId, OriginId>> creatorId) override;
 
 
     size_t getBufferSize() const override;

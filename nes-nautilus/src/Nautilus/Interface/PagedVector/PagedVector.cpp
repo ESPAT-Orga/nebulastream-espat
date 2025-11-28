@@ -30,7 +30,8 @@
 namespace NES::Nautilus::Interface
 {
 
-void PagedVector::appendPageIfFull(AbstractBufferProvider* bufferProvider, const MemoryLayout* memoryLayout)
+void PagedVector::appendPageIfFull(AbstractBufferProvider* bufferProvider, const MemoryLayout* memoryLayout, std::optional<std::variant<PipelineId,
+                                   OriginId>> creatorId)
 {
     PRECONDITION(bufferProvider != nullptr, "EntrySize for a pagedVector has to be larger than 0!");
     PRECONDITION(memoryLayout != nullptr, "EntrySize for a pagedVector has to be larger than 0!");
@@ -39,7 +40,7 @@ void PagedVector::appendPageIfFull(AbstractBufferProvider* bufferProvider, const
 
     if (pages.getNumberOfPages() == 0 || pages.getNumberOfTuplesLastPage() >= memoryLayout->getCapacity())
     {
-        if (const auto page = bufferProvider->getUnpooledBuffer(memoryLayout->getBufferSize()); page.has_value())
+        if (const auto page = bufferProvider->getUnpooledBuffer(memoryLayout->getBufferSize(), creatorId); page.has_value())
         {
             pages.addPage(page.value());
         }

@@ -219,9 +219,9 @@ std::optional<TupleBuffer> BufferManager::getBufferWithTimeout(const std::chrono
     throw InvalidRefCountForBuffer("[BufferManager] got buffer with invalid reference counter");
 }
 
-std::optional<TupleBuffer> BufferManager::getUnpooledBuffer(const size_t bufferSize)
+std::optional<TupleBuffer> BufferManager::getUnpooledBuffer(const size_t bufferSize, std::optional<std::variant<PipelineId, OriginId>> creatorId)
 {
-    return unpooledChunksManager->getUnpooledBuffer(bufferSize, DEFAULT_ALIGNMENT, shared_from_this(), statistic, );
+    return unpooledChunksManager->getUnpooledBuffer(bufferSize, DEFAULT_ALIGNMENT, shared_from_this(), statistic, creatorId);
 }
 
 void BufferManager::recyclePooledBuffer(detail::MemorySegment* segment)

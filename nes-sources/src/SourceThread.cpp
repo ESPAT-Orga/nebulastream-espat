@@ -105,7 +105,8 @@ struct SourceHandle
 };
 
 SourceImplementationTermination
-dataSourceThreadRoutine(const std::stop_token& stopToken, Source& source, AbstractBufferProvider& bufferProvider, const EmitFn& emit)
+dataSourceThreadRoutine(const std::stop_token& stopToken, Source& source, AbstractBufferProvider& bufferProvider, const EmitFn& emit, const
+                        OriginId originId)
 {
     const SourceHandle sourceHandle(source);
     while (!stopToken.stop_requested())
@@ -118,7 +119,7 @@ dataSourceThreadRoutine(const std::stop_token& stopToken, Source& source, Abstra
         ///    The thread exits with `EndOfStream`
         /// 4. Failure. The fillTupleBuffer method will throw an exception, the exception is propagted to the SourceThread via the return promise.
         ///    The thread exists with an exception
-        auto emptyBuffer = bufferProvider.getBufferBlocking(TODO);
+        auto emptyBuffer = bufferProvider.getBufferBlocking(originId);
         const auto numReadBytes = source.fillTupleBuffer(emptyBuffer, stopToken);
 
         if (numReadBytes != 0)
@@ -165,7 +166,7 @@ void dataSourceThread(
 
     try
     {
-        result.set_value_at_thread_exit(dataSourceThreadRoutine(stopToken, *source, *bufferProvider, dataEmit));
+        result.set_value_at_thread_exit(dataSourceThreadRoutine(stopToken, *source, *bufferProvider, dataEmit, originId));
         if (!stopToken.stop_requested())
         {
             emit(originId, SourceReturnType::EoS{}, stopToken);

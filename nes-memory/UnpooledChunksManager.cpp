@@ -25,7 +25,7 @@
 #include <thread>
 #include <utility>
 
-#include "Runtime/BufferManagerStatisticListener.hpp"
+#include <Runtime/BufferManagerStatisticListener.hpp>
 #include <Runtime/TupleBuffer.hpp>
 #include <Util/Logger/Logger.hpp>
 #include <fmt/format.h>
@@ -157,7 +157,8 @@ UnpooledChunksManager::getUnpooledBuffer(const size_t neededSize, size_t alignme
         [copyOfMemoryResource = this->memoryResource,
          copyOLastChunkPtr = localKeyForUnpooledBufferChunk,
          copyOfChunk = chunk,
-         copyOfAlignment = alignment](detail::MemorySegment* memorySegment, BufferRecycler*)
+         copyOfAlignment = alignment,
+         statistic](detail::MemorySegment* memorySegment, BufferRecycler*)
         {
             auto lockedLocalUnpooledBufferData = copyOfChunk->wlock();
             auto& curUnpooledChunk = lockedLocalUnpooledBufferData->chunks[copyOLastChunkPtr];

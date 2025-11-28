@@ -36,7 +36,7 @@ uint64_t getTotalNumberOfEntriesProxy(const PagedVector* pagedVector)
 
 const TupleBuffer* createNewEntryProxy(PagedVector* pagedVector, AbstractBufferProvider* bufferProvider, const MemoryLayout* memoryLayout)
 {
-    pagedVector->appendPageIfFull(bufferProvider, memoryLayout);
+    pagedVector->appendPageIfFull(bufferProvider, memoryLayout, TODO);
     return std::addressof(pagedVector->getLastPage());
 }
 

@@ -359,7 +359,7 @@ void ChainedHashMapTestUtils::checkIfValuesAreCorrectViaFindEntry(
     /// Calling now the compiled function to write all values of the map to the output buffer.
     const auto numberOfInputTuples = std::accumulate(
         inputBuffers.begin(), inputBuffers.end(), 0, [](const auto& sum, const auto& buffer) { return sum + buffer.getNumberOfTuples(); });
-    auto bufferOutputOpt = bufferManager->getUnpooledBuffer(numberOfInputTuples * inputSchema.getSizeOfSchemaInBytes());
+    auto bufferOutputOpt = bufferManager->getUnpooledBuffer(numberOfInputTuples * inputSchema.getSizeOfSchemaInBytes(), TODO);
     if (not bufferOutputOpt)
     {
         NES_ERROR("Could not allocate buffer for size {}", numberOfInputTuples * inputSchema.getSizeOfSchemaInBytes());
@@ -391,7 +391,7 @@ void ChainedHashMapTestUtils::checkEntryIterator(
     {
         /// We assume that the valueBuffer has the corresponding values for the keyBuffer.
         /// Under this assumption, we know that the outputBufferForKeys MUST have the same size as the valueBuffer
-        auto bufferOutputOpt = bufferManager->getUnpooledBuffer(inputBuffer.getBufferSize());
+        auto bufferOutputOpt = bufferManager->getUnpooledBuffer(inputBuffer.getBufferSize(), TODO);
         if (not bufferOutputOpt)
         {
             NES_ERROR("Could not allocate buffer for size {}", inputBuffer.getBufferSize());

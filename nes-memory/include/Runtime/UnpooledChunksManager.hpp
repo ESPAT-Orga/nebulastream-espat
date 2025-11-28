@@ -88,7 +88,7 @@ class UnpooledChunksManager
 public:
     explicit UnpooledChunksManager(std::shared_ptr<std::pmr::memory_resource> memoryResource);
     size_t getNumberOfUnpooledBuffers() const;
-    TupleBuffer getUnpooledBuffer(const size_t neededSize, size_t alignment, const std::shared_ptr<BufferRecycler>& bufferRecycler, std::shared_ptr<BufferManagerStatisticListener> statistic, std::optional<std::variant<PipelineId, OriginId>> creatorId)
+    TupleBuffer getUnpooledBuffer(const size_t neededSize, size_t alignment, const std::shared_ptr<BufferRecycler>& bufferRecycler, std::shared_ptr<BufferManagerStatisticListener> statistic, std::optional<std::variant<PipelineId, OriginId>> creatorId);
 };
 
 }

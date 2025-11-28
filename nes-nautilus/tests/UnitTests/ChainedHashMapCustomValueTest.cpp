@@ -170,7 +170,7 @@ TEST_P(ChainedHashMapCustomValueTest, pagedVector)
 
         /// Acquiring a buffer to write the values to that has the needed size
         const auto neededBytes = inputBufferRef->getMemoryLayout()->getSchema().getSizeOfSchemaInBytes() * numberOfRecordsExact;
-        auto outputBufferOpt = bufferManager->getUnpooledBuffer(neededBytes);
+        auto outputBufferOpt = bufferManager->getUnpooledBuffer(neededBytes, TODO);
         if (not outputBufferOpt)
         {
             NES_ERROR("Could not allocate buffer for size {}", neededBytes);

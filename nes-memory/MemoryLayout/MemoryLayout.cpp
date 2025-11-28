@@ -48,7 +48,7 @@ TupleBuffer getNewBufferForVarSized(AbstractBufferProvider& tupleBufferProvider,
             return newBuffer.value();
         }
     }
-    const auto unpooledBuffer = tupleBufferProvider.getUnpooledBuffer(newBufferSize);
+    const auto unpooledBuffer = tupleBufferProvider.getUnpooledBuffer(newBufferSize, pipelineId);
     if (not unpooledBuffer.has_value())
     {
         throw CannotAllocateBuffer("Cannot allocate unpooled buffer of size {}", newBufferSize);

@@ -170,9 +170,9 @@ void BufferManager::initialize(uint32_t withAlignment)
     NES_DEBUG("BufferManager configuration bufferSize={} numOfBuffers={}", this->bufferSize, this->numOfBuffers);
 }
 
-TupleBuffer BufferManager::getBufferBlocking()
+TupleBuffer BufferManager::getBufferBlocking(std::optional<PipelineId> pipelineId)
 {
-    auto buffer = getBufferWithTimeout(GET_BUFFER_TIMEOUT);
+    auto buffer = getBufferWithTimeout(GET_BUFFER_TIMEOUT, pipelineId);
     if (buffer.has_value())
     {
         return buffer.value();
@@ -181,7 +181,7 @@ TupleBuffer BufferManager::getBufferBlocking()
     throw BufferAllocationFailure("Global buffer pool could not allocate buffer before timeout({})", GET_BUFFER_TIMEOUT);
 }
 
-std::optional<TupleBuffer> BufferManager::getBufferNoBlocking()
+std::optional<TupleBuffer> BufferManager::getBufferNoBlocking(std::optional<PipelineId> pipelineId)
 {
     detail::MemorySegment* memSegment = nullptr;
     if (!availableBuffers.read(memSegment))
@@ -195,13 +195,13 @@ std::optional<TupleBuffer> BufferManager::getBufferNoBlocking()
         //TODO: if we do it here, we might not be able to get the thread id and the query id
         //TODO: what does the segment size depend on?
         if (statistic)
-            statistic->onEvent(GetBufferEvent(memSegment->size));
+            statistic->onEvent(GetBufferEvent(memSegment->size, pipelineId));
         return TupleBuffer(memSegment->controlBlock.get(), memSegment->ptr, memSegment->size);
     }
     throw InvalidRefCountForBuffer("[BufferManager] got buffer with invalid reference counter");
 }
 
-std::optional<TupleBuffer> BufferManager::getBufferWithTimeout(const std::chrono::milliseconds timeoutMs)
+std::optional<TupleBuffer> BufferManager::getBufferWithTimeout(const std::chrono::milliseconds timeoutMs, std::optional<PipelineId> pipelineId)
 {
     detail::MemorySegment* memSegment = nullptr;
     const auto deadline = std::chrono::steady_clock::now() + timeoutMs;
@@ -213,7 +213,7 @@ std::optional<TupleBuffer> BufferManager::getBufferWithTimeout(const std::chrono
     {
         //TODO: investigate object slicing lint
         if (statistic)
-            statistic->onEvent(GetBufferEvent(memSegment->size));
+            statistic->onEvent(GetBufferEvent(memSegment->size, pipelineId));
         return TupleBuffer(memSegment->controlBlock.get(), memSegment->ptr, memSegment->size);
     }
     throw InvalidRefCountForBuffer("[BufferManager] got buffer with invalid reference counter");

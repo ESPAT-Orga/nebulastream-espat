@@ -123,7 +123,7 @@ std::vector<TupleBuffer> NautilusTestUtils::createMonotonicallyIncreasingValues(
     {
         /// Depending on the capacity and the number of tuples, we might have to reduce the number of tuples to fill for this iteration
         const auto tuplesToFill = std::min(capacity, numberOfTuples - i);
-        auto buffer = bufferManager.getBufferBlocking();
+        auto buffer = bufferManager.getBufferBlocking(TODO);
         auto outputBufferIndex = createShuffledVector(tuplesToFill);
         const auto sizeVarSizedData = (rand() % (maxSizeVarSizedData + 1 - minSizeVarSizedData)) + minSizeVarSizedData;
         callCompiledFunction<void, TupleBuffer*, AbstractBufferProvider*, uint64_t, uint64_t, uint64_t, uint64_t*>(
@@ -211,7 +211,7 @@ void NautilusTestUtils::compileFillBufferFunction(
 
                             /// Adding the random string to the buffer and returning the pointer to the data
                             const auto combinedIdxOffset = MemoryLayout::writeVarSized<MemoryLayout::PREPEND_LENGTH_AS_UINT32>(
-                                *inputBuffer, *bufferProviderVal, std::as_bytes(std::span{randomString}));
+                                *inputBuffer, *bufferProviderVal, std::as_bytes(std::span{randomString}), TODO);
                             return MemoryLayout::loadAssociatedVarSizedValue(*inputBuffer, combinedIdxOffset).data();
                         },
                         recordBuffer.getReference(),

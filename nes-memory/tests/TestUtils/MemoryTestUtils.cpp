@@ -26,7 +26,7 @@ namespace NES::Testing
 {
 TupleBuffer copyBuffer(const TupleBuffer& buffer, AbstractBufferProvider& provider)
 {
-    auto copiedBuffer = provider.getBufferBlocking();
+    auto copiedBuffer = provider.getBufferBlocking(TODO);
     PRECONDITION(
         copiedBuffer.getBufferSize() >= buffer.getBufferSize(),
         "Attempt to copy buffer of size: {} into smaller buffer of size: {}",

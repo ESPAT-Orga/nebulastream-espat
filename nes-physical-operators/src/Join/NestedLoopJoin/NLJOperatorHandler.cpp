@@ -72,7 +72,7 @@ void NLJOperatorHandler::emitSlicesToProbe(
     nljSliceRight.combinePagedVectors();
     const auto totalNumberOfTuples = nljSliceLeft.getNumberOfTuplesLeft() + nljSliceRight.getNumberOfTuplesRight();
 
-    auto tupleBuffer = pipelineCtx->getBufferManager()->getBufferBlocking();
+    auto tupleBuffer = pipelineCtx->getBufferManager()->getBufferBlocking(TODO);
 
     /// As we are here "emitting" a buffer, we have to set the originId, the seq number, and the watermark.
     /// The watermark cannot be the slice end as some buffers might be still waiting to get processed.

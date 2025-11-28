@@ -22,8 +22,10 @@ struct BaseBufferManagerEvent
     // BaseBufferManagerEvent(WorkerThreadId threadId, QueryId queryId) : threadId(threadId), queryId(queryId) { }
 
     BaseBufferManagerEvent() = default;
+    BaseBufferManagerEvent(std::optional<std::variant<PipelineId, OriginId>> pipelineId) : pipelineId(pipelineId) {}
 
     ChronoClock::time_point timestamp = ChronoClock::now();
+    std::optional<std::variant<PipelineId, OriginId>> pipelineId = std::nullopt;
     // WorkerThreadId threadId = INVALID<WorkerThreadId>;
     // QueryId queryId = INVALID<QueryId>;
 };
@@ -32,7 +34,7 @@ struct GetBufferEvent : BaseBufferManagerEvent
 {
     // GetBufferEvent(WorkerThreadId threadId, QueryId queryId, size_t bufferSize)
     //     : BaseBufferManagerEvent(threadId, queryId), bufferSize(bufferSize)
-    explicit GetBufferEvent(size_t bufferSize) : BaseBufferManagerEvent(), bufferSize(bufferSize) { }
+    explicit GetBufferEvent(size_t bufferSize, std::optional<std::variant<PipelineId, OriginId>> pipelineId) : BaseBufferManagerEvent(pipelineId), bufferSize(bufferSize){ }
 
     GetBufferEvent() = default;
 
@@ -43,7 +45,7 @@ struct GetUnpooledBufferEvent : BaseBufferManagerEvent
 {
     // GetBufferEvent(WorkerThreadId threadId, QueryId queryId, size_t bufferSize)
     //     : BaseBufferManagerEvent(threadId, queryId), bufferSize(bufferSize)
-    explicit GetUnpooledBufferEvent(size_t bufferSize) : BaseBufferManagerEvent(), bufferSize(bufferSize) { }
+    explicit GetUnpooledBufferEvent(size_t bufferSize, std::optional<std::variant<PipelineId, OriginId>> pipelineId) : BaseBufferManagerEvent(pipelineId), bufferSize(bufferSize) { }
 
     GetUnpooledBufferEvent() = default;
 
@@ -54,7 +56,7 @@ struct RecyclePooledBufferEvent : BaseBufferManagerEvent
 {
     // GetBufferEvent(WorkerThreadId threadId, QueryId queryId, size_t bufferSize)
     //     : BaseBufferManagerEvent(threadId, queryId), bufferSize(bufferSize)
-    explicit RecyclePooledBufferEvent(size_t bufferSize) : BaseBufferManagerEvent(), bufferSize(bufferSize) { }
+    explicit RecyclePooledBufferEvent(size_t bufferSize, std::optional<std::variant<PipelineId, OriginId>> pipelineId) : BaseBufferManagerEvent(pipelineId), bufferSize(bufferSize) { }
 
     RecyclePooledBufferEvent() = default;
 
@@ -65,7 +67,7 @@ struct RecycleUnpooledBufferEvent : BaseBufferManagerEvent
 {
     // GetBufferEvent(WorkerThreadId threadId, QueryId queryId, size_t bufferSize)
     //     : BaseBufferManagerEvent(threadId, queryId), bufferSize(bufferSize)
-    explicit RecycleUnpooledBufferEvent(size_t bufferSize) : BaseBufferManagerEvent(), bufferSize(bufferSize) { }
+    explicit RecycleUnpooledBufferEvent(size_t bufferSize, std::optional<std::variant<PipelineId, OriginId>> pipelineId) : BaseBufferManagerEvent(pipelineId), bufferSize(bufferSize) { }
 
     RecycleUnpooledBufferEvent() = default;
 

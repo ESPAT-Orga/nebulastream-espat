@@ -24,6 +24,8 @@
 #include <string>
 #include <type_traits>
 #include <variant>
+#include <variant>
+#include <variant>
 #include <DataTypes/DataType.hpp>
 #include <DataTypes/Schema.hpp>
 #include <Identifiers/NESStrongType.hpp>
@@ -171,7 +173,8 @@ public:
     DynamicField operator[](std::string fieldName) const;
 
     void
-    writeVarSized(std::variant<const uint64_t, const std::string> field, std::string_view value, AbstractBufferProvider& bufferProvider);
+    writeVarSized(std::variant<const uint64_t, const std::string> field, std::string_view value, AbstractBufferProvider& bufferProvider, std
+                  ::optional<PipelineId> pipelineId);
 
     [[nodiscard]] std::string readVarSized(std::variant<const uint64_t, const std::string> field) const;
 

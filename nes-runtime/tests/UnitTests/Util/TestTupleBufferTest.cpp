@@ -71,8 +71,8 @@ public:
                                  .addField("test$t3", DataType::Type::FLOAT64)
                                  .addField("test$t4", DataTypeProvider::provideDataType(DataType::Type::VARSIZED));
 
-        auto tupleBuffer = bufferManager->getBufferBlocking();
-        auto tupleBufferVarSizedData = bufferManager->getBufferBlocking();
+        auto tupleBuffer = bufferManager->getBufferBlocking(TODO);
+        auto tupleBufferVarSizedData = bufferManager->getBufferBlocking(TODO);
 
         testBuffer = std::make_unique<TestTupleBuffer>(TestTupleBuffer::createTestTupleBuffer(tupleBuffer, schema));
         testBufferVarSize
@@ -83,11 +83,11 @@ public:
 TEST_P(TestTupleBufferTest, throwErrorIfEmpty)
 {
     const std::shared_ptr<BufferManager> bufferManager = BufferManager::create(4096, 2);
-    auto tupleBuffer1 = bufferManager->getBufferBlocking();
-    auto tupleBuffer2 = bufferManager->getBufferBlocking();
+    auto tupleBuffer1 = bufferManager->getBufferBlocking(TODO);
+    auto tupleBuffer2 = bufferManager->getBufferBlocking(TODO);
     try
     {
-        auto tupleBuffer3 = bufferManager->getBufferBlocking();
+        auto tupleBuffer3 = bufferManager->getBufferBlocking(TODO);
     }
     catch (const Exception& e)
     {
@@ -104,21 +104,21 @@ TEST_P(TestTupleBufferTest, throwErrorIfEmpty)
 TEST_P(TestTupleBufferTest, throwErrorIfEmptyAfterSequenceOfPulls)
 {
     const std::shared_ptr<BufferManager> bufferManager = BufferManager::create(4096, 3);
-    auto tupleBuffer1 = bufferManager->getBufferBlocking();
-    auto tupleBuffer2 = bufferManager->getBufferBlocking();
-    auto tupleBuffer3 = bufferManager->getBufferBlocking();
+    auto tupleBuffer1 = bufferManager->getBufferBlocking(TODO);
+    auto tupleBuffer2 = bufferManager->getBufferBlocking(TODO);
+    auto tupleBuffer3 = bufferManager->getBufferBlocking(TODO);
 
     tupleBuffer1.release();
     tupleBuffer2.release();
     tupleBuffer3.release();
 
-    tupleBuffer1 = bufferManager->getBufferBlocking();
-    tupleBuffer2 = bufferManager->getBufferBlocking();
-    tupleBuffer3 = bufferManager->getBufferBlocking();
+    tupleBuffer1 = bufferManager->getBufferBlocking(TODO);
+    tupleBuffer2 = bufferManager->getBufferBlocking(TODO);
+    tupleBuffer3 = bufferManager->getBufferBlocking(TODO);
 
     try
     {
-        auto tupleBuffer4 = bufferManager->getBufferBlocking();
+        auto tupleBuffer4 = bufferManager->getBufferBlocking(TODO);
     }
     catch (const Exception& e)
     {
@@ -169,8 +169,8 @@ TEST_P(TestTupleBufferTest, readWritetestBufferTestVarSizeData)
     {
         (*testBufferVarSize)[i]["test$t1"].write<uint16_t>(i);
         (*testBufferVarSize)[i]["test$t3"].write<double_t>(i * 42.0);
-        (*testBufferVarSize)[i].writeVarSized("test$t2", "" + std::to_string(i) + std::to_string(i), *bufferManager);
-        (*testBufferVarSize)[i].writeVarSized("test$t4", std::to_string(i), *bufferManager);
+        (*testBufferVarSize)[i].writeVarSized("test$t2", "" + std::to_string(i) + std::to_string(i), *bufferManager, TODO);
+        (*testBufferVarSize)[i].writeVarSized("test$t4", std::to_string(i), *bufferManager, TODO);
 
         ASSERT_EQ((*testBufferVarSize)[i]["test$t1"].read<uint16_t>(), i);
         ASSERT_EQ((*testBufferVarSize)[i]["test$t3"].read<double_t>(), i * 42.0);
@@ -215,8 +215,8 @@ TEST_P(TestTupleBufferTest, readWritetestBufferTestFullBufferVarSizeData)
     {
         (*testBufferVarSize)[i]["test$t1"].write<uint16_t>(i);
         (*testBufferVarSize)[i]["test$t3"].write<double_t>(i * 42.0);
-        (*testBufferVarSize)[i].writeVarSized("test$t2", "" + std::to_string(i) + std::to_string(i), *bufferManager);
-        (*testBufferVarSize)[i].writeVarSized("test$t4", std::to_string(i), *bufferManager);
+        (*testBufferVarSize)[i].writeVarSized("test$t2", "" + std::to_string(i) + std::to_string(i), *bufferManager, TODO);
+        (*testBufferVarSize)[i].writeVarSized("test$t4", std::to_string(i), *bufferManager, TODO);
 
         ASSERT_EQ((*testBufferVarSize)[i]["test$t1"].read<uint16_t>(), i);
         ASSERT_EQ((*testBufferVarSize)[i]["test$t3"].read<double_t>(), i * 42.0);

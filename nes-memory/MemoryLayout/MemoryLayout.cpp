@@ -38,12 +38,12 @@ namespace NES
 {
 namespace
 {
-TupleBuffer getNewBufferForVarSized(AbstractBufferProvider& tupleBufferProvider, const uint32_t newBufferSize)
+TupleBuffer getNewBufferForVarSized(AbstractBufferProvider& tupleBufferProvider, const uint32_t newBufferSize, std::optional<PipelineId> pipelineId)
 {
     /// If the fixed size buffers are not large enough, we get an unpooled buffer
     if (tupleBufferProvider.getBufferSize() > newBufferSize)
     {
-        if (auto newBuffer = tupleBufferProvider.getBufferNoBlocking(); newBuffer.has_value())
+        if (auto newBuffer = tupleBufferProvider.getBufferNoBlocking(pipelineId); newBuffer.has_value())
         {
             return newBuffer.value();
         }
@@ -88,7 +88,8 @@ void copyVarSizedAndIncrementMetaData(
 
 template <MemoryLayout::PrependMode PrependMode>
 VariableSizedAccess MemoryLayout::writeVarSized(
-    TupleBuffer& tupleBuffer, AbstractBufferProvider& bufferProvider, const std::span<const std::byte> varSizedValue)
+    TupleBuffer& tupleBuffer, AbstractBufferProvider& bufferProvider, const std::span<const std::byte> varSizedValue, std
+    ::optional<PipelineId> pipelineId)
 {
     constexpr uint32_t prependSize = (PrependMode == PREPEND_LENGTH_AS_UINT32) ? sizeof(uint32_t) : 0;
     const auto totalVarSizedLength = varSizedValue.size() + prependSize;
@@ -98,7 +99,7 @@ VariableSizedAccess MemoryLayout::writeVarSized(
     const auto numberOfChildBuffers = tupleBuffer.getNumberOfChildBuffers();
     if (numberOfChildBuffers == 0)
     {
-        auto newChildBuffer = getNewBufferForVarSized(bufferProvider, totalVarSizedLength);
+        auto newChildBuffer = getNewBufferForVarSized(bufferProvider, totalVarSizedLength, pipelineId);
         copyVarSizedAndIncrementMetaData<PrependMode>(newChildBuffer, VariableSizedAccess::Offset{0}, varSizedValue);
         const auto childBufferIndex = tupleBuffer.storeChildBuffer(newChildBuffer);
         return VariableSizedAccess{childBufferIndex};
@@ -110,7 +111,7 @@ VariableSizedAccess MemoryLayout::writeVarSized(
     const auto usedMemorySize = lastChildBuffer.getNumberOfTuples();
     if (usedMemorySize + totalVarSizedLength >= lastChildBuffer.getBufferSize())
     {
-        auto newChildBuffer = getNewBufferForVarSized(bufferProvider, totalVarSizedLength);
+        auto newChildBuffer = getNewBufferForVarSized(bufferProvider, totalVarSizedLength, pipelineId);
         copyVarSizedAndIncrementMetaData<PrependMode>(newChildBuffer, VariableSizedAccess::Offset{0}, varSizedValue);
         const VariableSizedAccess::Index childBufferIndex{tupleBuffer.storeChildBuffer(newChildBuffer)};
         return VariableSizedAccess{childBufferIndex};
@@ -124,9 +125,9 @@ VariableSizedAccess MemoryLayout::writeVarSized(
 
 /// Explicit instantiations for writeVarSized()
 template VariableSizedAccess
-MemoryLayout::writeVarSized<MemoryLayout::PrependMode::PREPEND_NONE>(TupleBuffer&, AbstractBufferProvider&, std::span<const std::byte>);
+MemoryLayout::writeVarSized<MemoryLayout::PrependMode::PREPEND_NONE>(TupleBuffer&, AbstractBufferProvider&, std::span<const std::byte>, std::optional<PipelineId> pipelineId);
 template VariableSizedAccess MemoryLayout::writeVarSized<MemoryLayout::PrependMode::PREPEND_LENGTH_AS_UINT32>(
-    TupleBuffer&, AbstractBufferProvider&, std::span<const std::byte>);
+    TupleBuffer&, AbstractBufferProvider&, std::span<const std::byte>, std::optional<PipelineId> pipelineId);
 
 std::span<std::byte>
 MemoryLayout::loadAssociatedVarSizedValue(const TupleBuffer& tupleBuffer, const VariableSizedAccess variableSizedAccess)

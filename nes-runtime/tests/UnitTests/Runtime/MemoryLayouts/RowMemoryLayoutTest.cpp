@@ -79,7 +79,7 @@ TEST_F(RowMemoryLayoutTest, rowLayoutMapCalcOffsetTest)
     ASSERT_NO_THROW(rowLayout = RowLayout::create(bufferManager->getBufferSize(), schema));
     ASSERT_NE(rowLayout, nullptr);
 
-    auto tupleBuffer = bufferManager->getBufferBlocking();
+    auto tupleBuffer = bufferManager->getBufferBlocking(TODO);
 
     const auto testBuffer = std::make_unique<TestTupleBuffer>(rowLayout, tupleBuffer);
 
@@ -103,7 +103,7 @@ TEST_F(RowMemoryLayoutTest, rowLayoutPushRecordAndReadRecordTestOneRecord)
     ASSERT_NO_THROW(rowLayout = RowLayout::create(bufferManager->getBufferSize(), schema));
     ASSERT_NE(rowLayout, nullptr);
 
-    auto tupleBuffer = bufferManager->getBufferBlocking();
+    auto tupleBuffer = bufferManager->getBufferBlocking(TODO);
 
     const auto testBuffer = std::make_unique<TestTupleBuffer>(rowLayout, tupleBuffer);
 
@@ -130,7 +130,7 @@ TEST_F(RowMemoryLayoutTest, rowLayoutPushRecordAndReadRecordTestMultipleRecord)
     ASSERT_NO_THROW(rowLayout = RowLayout::create(bufferManager->getBufferSize(), schema));
     ASSERT_NE(rowLayout, nullptr);
 
-    auto tupleBuffer = bufferManager->getBufferBlocking();
+    auto tupleBuffer = bufferManager->getBufferBlocking(TODO);
 
     const auto testBuffer = std::make_unique<TestTupleBuffer>(rowLayout, tupleBuffer);
 
@@ -167,7 +167,7 @@ TEST_F(RowMemoryLayoutTest, rowLayoutLayoutFieldSimple)
     ASSERT_NO_THROW(rowLayout = RowLayout::create(bufferManager->getBufferSize(), schema));
     ASSERT_NE(rowLayout, nullptr);
 
-    auto tupleBuffer = bufferManager->getBufferBlocking();
+    auto tupleBuffer = bufferManager->getBufferBlocking(TODO);
 
     const auto testBuffer = std::make_unique<TestTupleBuffer>(rowLayout, tupleBuffer);
 
@@ -208,7 +208,7 @@ TEST_F(RowMemoryLayoutTest, rowLayoutLayoutFieldBoundaryCheck)
     ASSERT_NO_THROW(rowLayout = RowLayout::create(bufferManager->getBufferSize(), schema));
     ASSERT_NE(rowLayout, nullptr);
 
-    auto tupleBuffer = bufferManager->getBufferBlocking();
+    auto tupleBuffer = bufferManager->getBufferBlocking(TODO);
 
     auto testBuffer = std::make_unique<TestTupleBuffer>(rowLayout, tupleBuffer);
 
@@ -261,7 +261,7 @@ TEST_F(RowMemoryLayoutTest, getFieldViaFieldNameRowLayout)
     ASSERT_NO_THROW(rowLayout = RowLayout::create(bufferManager->getBufferSize(), schema));
     ASSERT_NE(rowLayout, nullptr);
 
-    auto tupleBuffer = bufferManager->getBufferBlocking();
+    auto tupleBuffer = bufferManager->getBufferBlocking(TODO);
 
     ASSERT_NO_THROW((RowLayoutField<uint8_t, true>::create("t1", rowLayout, tupleBuffer)));
     ASSERT_NO_THROW((RowLayoutField<uint16_t, true>::create("t2", rowLayout, tupleBuffer)));
@@ -286,7 +286,7 @@ TEST_F(RowMemoryLayoutTest, pushRecordTooManyRecordsRowLayout)
     ASSERT_NO_THROW(rowLayout = RowLayout::create(bufferManager->getBufferSize(), schema));
     ASSERT_NE(rowLayout, nullptr);
 
-    auto tupleBuffer = bufferManager->getBufferBlocking();
+    auto tupleBuffer = bufferManager->getBufferBlocking(TODO);
 
     const auto testBuffer = std::make_unique<TestTupleBuffer>(rowLayout, tupleBuffer);
 

@@ -307,7 +307,7 @@ private:
                 setMetadataOfFormattedBuffer(rawBuffer.getRawBuffer(), formattedBuffer, runningChunkNumber, false);
                 pec.emitBuffer(formattedBuffer, PipelineExecutionContext::ContinuationPolicy::POSSIBLE);
                 /// The 'isLastChunk' member of a new buffer is true pre default. If we don't require another buffer, the flag stays true.
-                formattedBuffer = bufferProvider->getBufferBlocking();
+                formattedBuffer = bufferProvider->getBufferBlocking(TODO);
             }
 
             /// Fill current buffer until either full, or we exhausted tuples in raw buffer
@@ -349,7 +349,7 @@ private:
         }
 
         /// 1. process leading spanning tuple if required
-        auto formattedBuffer = bufferProvider->getBufferBlocking();
+        auto formattedBuffer = bufferProvider->getBufferBlocking(TODO);
         if (/* hasLeadingSpanningTuple */ leadingSTBuffers.hasSpanningTuple())
         {
             processSpanningTuple<FormatterType>(
@@ -377,7 +377,7 @@ private:
             {
                 setMetadataOfFormattedBuffer(rawBuffer.getRawBuffer(), formattedBuffer, runningChunkNumber, false);
                 pec.emitBuffer(formattedBuffer, PipelineExecutionContext::ContinuationPolicy::POSSIBLE);
-                formattedBuffer = bufferProvider->getBufferBlocking();
+                formattedBuffer = bufferProvider->getBufferBlocking(TODO);
             }
 
             processSpanningTuple<FormatterType>(
@@ -419,7 +419,7 @@ private:
             return;
         }
         /// If there is a spanning tuple, get a new buffer for formatted data and process the spanning tuples
-        auto formattedBuffer = bufferProvider->getBufferBlocking();
+        auto formattedBuffer = bufferProvider->getBufferBlocking(TODO);
         processSpanningTuple<FormatterType>(
             stagedBuffers.getSpanningBuffers(),
             *bufferProvider,

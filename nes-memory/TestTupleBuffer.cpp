@@ -74,10 +74,11 @@ DynamicTuple::DynamicTuple(const uint64_t tupleIndex, std::shared_ptr<MemoryLayo
 }
 
 void DynamicTuple::writeVarSized(
-    std::variant<const uint64_t, const std::string> field, std::string_view value, AbstractBufferProvider& bufferProvider)
+    std::variant<const uint64_t, const std::string> field, std::string_view value, AbstractBufferProvider& bufferProvider, std
+    ::optional<PipelineId> pipelineId)
 {
     auto combinedIdxOffset
-        = MemoryLayout::writeVarSized<MemoryLayout::PREPEND_LENGTH_AS_UINT32>(buffer, bufferProvider, std::as_bytes(std::span{value}));
+        = MemoryLayout::writeVarSized<MemoryLayout::PREPEND_LENGTH_AS_UINT32>(buffer, bufferProvider, std::as_bytes(std::span{value}), pipelineId);
     std::visit(
         [this, combinedIdxOffset](const auto& key)
         {

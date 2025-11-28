@@ -239,7 +239,7 @@ struct DefaultPEC final : PipelineExecutionContext
     TupleBuffer allocateTupleBuffer() override
     {
         PRECONDITION(!wasRepeated, "A task should terminate after repeating");
-        return bm->getBufferBlocking();
+        return bm->getBufferBlocking(TODO);
     }
 
     [[nodiscard]] uint64_t getNumberOfWorkerThreads() const override

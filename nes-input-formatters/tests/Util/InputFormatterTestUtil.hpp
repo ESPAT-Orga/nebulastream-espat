@@ -343,7 +343,7 @@ TupleBuffer createTupleBufferFromTuples(const Schema& schema, BufferManager& buf
 {
     PRECONDITION(bufferManager.getNumberOfAvailableBuffers() != 0, "Cannot create a test tuple buffer, if there are no buffers available");
     auto rowLayout = std::make_shared<RowLayout>(bufferManager.getBufferSize(), schema);
-    auto testTupleBuffer = std::make_unique<TestTupleBuffer>(rowLayout, bufferManager.getBufferBlocking());
+    auto testTupleBuffer = std::make_unique<TestTupleBuffer>(rowLayout, bufferManager.getBufferBlocking(TODO));
 
     for (const auto& testTuple : tuples)
     {

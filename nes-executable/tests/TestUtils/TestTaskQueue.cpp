@@ -50,7 +50,8 @@ bool TestPipelineExecutionContext::emitBuffer(const TupleBuffer& resultBuffer, c
 
 TupleBuffer TestPipelineExecutionContext::allocateTupleBuffer()
 {
-    if (auto buffer = bufferManager->getBufferNoBlocking())
+    //TODO remove if necessary
+    if (auto buffer = bufferManager->getBufferNoBlocking(std::nullopt))
     {
         return buffer.value();
     }

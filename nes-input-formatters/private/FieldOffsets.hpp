@@ -160,7 +160,7 @@ public:
             this->bufferProvider.getBufferSize());
         this->maxIndex = ((numberOfOffsetsPerTuple)*maxNumberOfTuplesInFormattedBuffer);
         this->totalNumberOfTuples = 0;
-        this->offsetBuffers.emplace_back(this->bufferProvider.getBufferBlocking());
+        this->offsetBuffers.emplace_back(this->bufferProvider.getBufferBlocking(TODO));
     }
 
     /// Assures that there is space to write one more tuple and returns a pointer to write the field offsets (of one tuple) to.
@@ -239,7 +239,7 @@ private:
             (numberOfOffsetsPerTuple));
 
         totalNumberOfTuples += maxNumberOfTuplesInFormattedBuffer;
-        this->offsetBuffers.emplace_back(bufferProvider.getBufferBlocking());
+        this->offsetBuffers.emplace_back(bufferProvider.getBufferBlocking(TODO));
         this->currentIndex = 0;
     }
 };

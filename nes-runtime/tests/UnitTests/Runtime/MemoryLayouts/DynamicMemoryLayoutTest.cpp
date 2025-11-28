@@ -61,7 +61,7 @@ public:
             ASSERT_NO_THROW(layout = RowLayout::create(bufferManager->getBufferSize(), schema));
             ASSERT_NE(layout, nullptr);
 
-            auto tupleBuffer = bufferManager->getBufferBlocking();
+            auto tupleBuffer = bufferManager->getBufferBlocking(TODO);
             testBuffer = std::make_unique<TestTupleBuffer>(layout, tupleBuffer);
         }
         else
@@ -70,7 +70,7 @@ public:
             ASSERT_NO_THROW(layout = ColumnLayout::create(bufferManager->getBufferSize(), schema));
             ASSERT_NE(layout, nullptr);
 
-            auto tupleBuffer = bufferManager->getBufferBlocking();
+            auto tupleBuffer = bufferManager->getBufferBlocking(TODO);
             testBuffer = std::make_unique<TestTupleBuffer>(layout, tupleBuffer);
         }
     }

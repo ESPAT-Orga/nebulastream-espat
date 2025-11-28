@@ -38,7 +38,7 @@ ParseFunctionSignature getQuotedStringParseFunction()
         INVARIANT(inputString.length() >= 2, "Input string must be at least 2 characters long.");
         const auto inputStringWithoutQuotes = inputString.substr(1, inputString.length() - 2);
         const auto variableSizedAccess = MemoryLayout::writeVarSized<MemoryLayout::PREPEND_LENGTH_AS_UINT32>(
-            tupleBufferFormatted, bufferProvider, std::as_bytes(std::span{inputStringWithoutQuotes}));
+            tupleBufferFormatted, bufferProvider, std::as_bytes(std::span{inputStringWithoutQuotes}), TODO);
         const auto combinedIdxOffset = variableSizedAccess.getCombinedIdxOffset();
         const auto parsedValueBytes = std::as_bytes(std::span{&combinedIdxOffset, 1});
         std::ranges::copy(parsedValueBytes, tupleBufferFormatted.getAvailableMemoryArea().begin() + writeOffsetInBytes);
@@ -53,7 +53,7 @@ ParseFunctionSignature getBasicStringParseFunction()
               TupleBuffer& tupleBufferFormatted)
     {
         const auto variableSizedAccess = MemoryLayout::writeVarSized<MemoryLayout::PREPEND_LENGTH_AS_UINT32>(
-            tupleBufferFormatted, bufferProvider, std::as_bytes(std::span{inputString}));
+            tupleBufferFormatted, bufferProvider, std::as_bytes(std::span{inputString}), TODO);
         const auto combinedIdxOffset = variableSizedAccess.getCombinedIdxOffset();
         const auto parsedValueBytes = std::as_bytes(std::span{&combinedIdxOffset, 1});
         std::ranges::copy(parsedValueBytes, tupleBufferFormatted.getAvailableMemoryArea().begin() + writeOffsetInBytes);

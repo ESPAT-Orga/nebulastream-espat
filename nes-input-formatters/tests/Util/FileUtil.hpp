@@ -282,7 +282,7 @@ inline std::vector<TupleBuffer> loadTupleBuffersFromFile(
                 return header;
             }(file);
 
-            auto parentBuffer = bufferProvider.getBufferBlocking();
+            auto parentBuffer = bufferProvider.getBufferBlocking(TODO);
             const auto numBytesInBuffer = bufferHeader.numberOfTuples * sizeOfSchemaInBytes;
             file.read(parentBuffer.getAvailableMemoryArea<char>().data(), static_cast<std::streamsize>(numBytesInBuffer));
 

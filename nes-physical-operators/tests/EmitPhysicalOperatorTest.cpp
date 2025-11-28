@@ -67,7 +67,7 @@ class EmitPhysicalOperatorTest : public Testing::BaseUnitTest
             return true;
         }
 
-        TupleBuffer allocateTupleBuffer() override { return bufferManager->getBufferBlocking(); }
+        TupleBuffer allocateTupleBuffer() override { return bufferManager->getBufferBlocking(TODO); }
 
         [[nodiscard]] WorkerThreadId getId() const override { return INITIAL<WorkerThreadId>; }
 
@@ -206,7 +206,7 @@ public:
         OriginId originId = INITIAL<OriginId>,
         size_t numberOfTuples = 0)
     {
-        auto buffer = bm->getBufferBlocking();
+        auto buffer = bm->getBufferBlocking(TODO);
         buffer.setNumberOfTuples(numberOfTuples);
         buffer.setLastChunk(isLastChunk);
         buffer.setChunkNumber(ChunkNumber(chunkNumber));

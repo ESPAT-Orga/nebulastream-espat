@@ -187,7 +187,7 @@ public:
         /// To avoid (future) errors by creating a TupleBuffer without a valid control block, we create a single valid (dummy) tuple buffer
         /// All threads share the reference to that buffer throughout this test
         const auto testBufferManager = NES::BufferManager::create(1, 1);
-        const auto dummyBuffer = testBufferManager->getBufferBlocking();
+        const auto dummyBuffer = testBufferManager->getBufferBlocking(TODO);
         const TestThreadPool testThreadPool = TestThreadPool<NUM_THREADS>(upperBound, fixedSeed, dummyBuffer);
         testThreadPool.waitForCompletion();
         const auto checkSum = testThreadPool.getCheckSum();

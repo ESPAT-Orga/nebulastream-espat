@@ -14,6 +14,7 @@
 
 #include <Generator.hpp>
 
+#include <fstream>
 #include <memory>
 #include <ostream>
 #include <ranges>
@@ -33,26 +34,59 @@ namespace NES
 
 void Generator::generateTuple(std::ostream& ostream)
 {
-    PRECONDITION(not this->fields.empty(), "Cannot generate a row if there are no fields!");
-    const auto generateField = Overloaded{
-        [this, &ostream](GeneratorFields::BaseStoppableGeneratorField& field)
-        {
-            const bool fieldAlreadyStopped = field.stop;
-            field.generate(ostream, this->randEng);
-            if (field.stop && !fieldAlreadyStopped)
-            {
-                this->numStoppedFields++;
-            }
-        },
-        [this, &ostream](GeneratorFields::BaseGeneratorField& field) { field.generate(ostream, this->randEng); }};
-
-    std::visit(generateField, *this->fields.front());
-    for (auto& field : this->fields | std::views::drop(1))
+    if (fromFile.empty())
     {
-        ostream << Generator::fieldDelimiter;
-        std::visit(generateField, *field);
+        PRECONDITION(not this->fields.empty(), "Cannot generate a row if there are no fields!");
+        const auto generateField = Overloaded{
+            [this, &ostream](GeneratorFields::BaseStoppableGeneratorField& field)
+            {
+                const bool fieldAlreadyStopped = field.stop;
+                field.generate(ostream, this->randEng);
+                if (field.stop && !fieldAlreadyStopped)
+                {
+                    this->numStoppedFields++;
+                }
+            },
+            [this, &ostream](GeneratorFields::BaseGeneratorField& field) { field.generate(ostream, this->randEng); }};
+
+        std::visit(generateField, *this->fields.front());
+        for (auto& field : this->fields | std::views::drop(1))
+        {
+            ostream << Generator::fieldDelimiter;
+            std::visit(generateField, *field);
+        }
+        ostream << Generator::tupleDelimiter;
     }
-    ostream << Generator::tupleDelimiter;
+    else
+    {
+        if (not fileStream.is_open())
+        {
+            fileStream.open(fromFile);
+            /// Next line always fails, so as a workaround instead we use the if statement below.
+            ///INVARIANT(not fileStream.is_open(), "Failed to open file");
+            if (not fileStream.is_open())
+            {
+                INVARIANT(false, "Failed to open file {}", fromFile);
+            }
+        }
+
+        std::string line;
+        if (not std::getline(fileStream, line))
+        {
+            this->numStoppedFields = this->fields.size();
+            return;
+        }
+        std::string_view line_view{line};
+        INVARIANT(line_view.size() > 0, "Failed to read line from file {}, line size is 0", fromFile);
+        auto fields = line_view | std::views::split(',');
+        ostream << std::string_view(*std::ranges::begin(fields));
+        for (auto field : fields | std::views::drop(1))
+        {
+            ostream << Generator::fieldDelimiter;
+            ostream << std::string_view(field);
+        }
+        ostream << Generator::tupleDelimiter;
+    }
 }
 
 void Generator::addField(std::unique_ptr<GeneratorFields::GeneratorFieldType> field)

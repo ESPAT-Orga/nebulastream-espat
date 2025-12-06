@@ -33,6 +33,7 @@
 #include <folly/MPMCQueue.h>
 #include <ErrorHandling.hpp>
 #include <TupleBufferImpl.hpp>
+#include <Runtime/BufferManagerStatisticListener.hpp>
 
 namespace NES
 {
@@ -41,6 +42,7 @@ BufferManager::BufferManager(
     Private,
     const uint32_t bufferSize,
     const uint32_t numOfBuffers,
+    std::shared_ptr<BufferManagerStatisticListener> statistic,
     std::shared_ptr<std::pmr::memory_resource> memoryResource,
     const uint32_t withAlignment)
     : availableBuffers(numOfBuffers)
@@ -48,15 +50,20 @@ BufferManager::BufferManager(
     , bufferSize(bufferSize)
     , numOfBuffers(numOfBuffers)
     , memoryResource(std::move(memoryResource))
+   , statistic(statistic)
 {
     ((void)withAlignment);
     initialize(DEFAULT_ALIGNMENT);
 }
 
 std::shared_ptr<BufferManager> BufferManager::create(
-    uint32_t bufferSize, uint32_t numOfBuffers, const std::shared_ptr<std::pmr::memory_resource>& memoryResource, uint32_t withAlignment)
+    uint32_t bufferSize,
+    uint32_t numOfBuffers,
+    std::shared_ptr<BufferManagerStatisticListener> statistic,
+    const std::shared_ptr<std::pmr::memory_resource>& memoryResource,
+    uint32_t withAlignment)
 {
-    return std::make_shared<BufferManager>(Private{}, bufferSize, numOfBuffers, memoryResource, withAlignment);
+    return std::make_shared<BufferManager>(Private{}, bufferSize, numOfBuffers, statistic, memoryResource, withAlignment);
 }
 
 BufferManager::~BufferManager()
@@ -180,6 +187,8 @@ std::optional<TupleBuffer> BufferManager::getBufferNoBlocking()
     }
     if (memSegment->controlBlock->prepare(shared_from_this()))
     {
+        if (statistic)
+            statistic->onEvent(GetBufferEvent(memSegment->size));
         return TupleBuffer(memSegment->controlBlock.get(), memSegment->ptr, memSegment->size);
     }
     throw InvalidRefCountForBuffer("[BufferManager] got buffer with invalid reference counter");
@@ -195,6 +204,8 @@ std::optional<TupleBuffer> BufferManager::getBufferWithTimeout(const std::chrono
     }
     if (memSegment->controlBlock->prepare(shared_from_this()))
     {
+        if (statistic)
+            statistic->onEvent(GetBufferEvent(memSegment->size));
         return TupleBuffer(memSegment->controlBlock.get(), memSegment->ptr, memSegment->size);
     }
     throw InvalidRefCountForBuffer("[BufferManager] got buffer with invalid reference counter");
@@ -202,11 +213,13 @@ std::optional<TupleBuffer> BufferManager::getBufferWithTimeout(const std::chrono
 
 std::optional<TupleBuffer> BufferManager::getUnpooledBuffer(const size_t bufferSize)
 {
-    return unpooledChunksManager->getUnpooledBuffer(bufferSize, DEFAULT_ALIGNMENT, shared_from_this());
+    return unpooledChunksManager->getUnpooledBuffer(bufferSize, DEFAULT_ALIGNMENT, shared_from_this(), statistic);
 }
 
 void BufferManager::recyclePooledBuffer(detail::MemorySegment* segment)
 {
+    if (statistic)
+        statistic->onEvent(RecyclePooledBufferEvent(segment->size));
     INVARIANT(segment->isAvailable(), "Recycling buffer callback invoked on used memory segment");
     INVARIANT(
         segment->controlBlock->owningBufferRecycler == nullptr, "Buffer should not retain a reference to its parent while not in use");

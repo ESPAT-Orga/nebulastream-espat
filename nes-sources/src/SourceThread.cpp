@@ -152,7 +152,6 @@ void dataSourceThread(
     ///NOLINTNEXTLINE(performance-unnecessary-value-param) `jthread` does not allow references
     std::shared_ptr<AbstractBufferProvider> bufferProvider)
 {
-    //TODO: only do this if statistics collection is on
     BufferManagerStatCollectWrapper bufferProviderWrapper(bufferProvider, originId);
     threadSetup(originId);
 

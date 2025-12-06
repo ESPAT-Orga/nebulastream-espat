@@ -13,6 +13,8 @@
 */
 #pragma once
 
+#include <Runtime/AbstractBufferProvider.hpp>
+
 namespace NES
 {
 using ChronoClock = std::chrono::system_clock;

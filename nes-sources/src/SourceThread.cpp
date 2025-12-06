@@ -37,6 +37,7 @@
 #include <cpptrace/from_current.hpp>
 #include <fmt/format.h>
 #include <ErrorHandling.hpp>
+#include <Runtime/BufferManagerStatCollectWrapper.hpp>
 
 namespace NES
 {
@@ -151,6 +152,8 @@ void dataSourceThread(
     ///NOLINTNEXTLINE(performance-unnecessary-value-param) `jthread` does not allow references
     std::shared_ptr<AbstractBufferProvider> bufferProvider)
 {
+    //TODO: only do this if statistics collection is on
+    BufferManagerStatCollectWrapper bufferProviderWrapper(bufferProvider, originId);
     threadSetup(originId);
 
     size_t sequenceNumberGenerator = SequenceNumber::INITIAL;
@@ -165,7 +168,7 @@ void dataSourceThread(
 
     try
     {
-        result.set_value_at_thread_exit(dataSourceThreadRoutine(stopToken, *source, *bufferProvider, dataEmit));
+        result.set_value_at_thread_exit(dataSourceThreadRoutine(stopToken, *source, bufferProviderWrapper, dataEmit));
         if (!stopToken.stop_requested())
         {
             emit(originId, SourceReturnType::EoS{}, stopToken);

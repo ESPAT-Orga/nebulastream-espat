@@ -131,13 +131,13 @@ bool BufferControlBlock::prepare(const std::shared_ptr<BufferRecycler>& recycler
     fillThreadOwnershipInfo(info.threadName, info.callstack);
     owningThreads[std::this_thread::get_id()].emplace_back(info);
 #endif
+    this->creatorId = creatorId;
     if (referenceCounter.compare_exchange_strong(expected, 1))
     {
         const auto previousOwner = std::exchange(this->owningBufferRecycler, recycler);
         INVARIANT(previousOwner == nullptr, "Buffer should not retain a reference to its owner while unused");
         return true;
     }
-    this->creatorId = creatorId;
     NES_ERROR("Invalid reference counter: {}", expected);
     return false;
 }

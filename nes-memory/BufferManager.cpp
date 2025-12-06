@@ -188,7 +188,10 @@ std::optional<TupleBuffer> BufferManager::getBufferNoBlocking(BufferCreatorId cr
     if (memSegment->controlBlock->prepare(shared_from_this(), creatorId))
     {
         if (statistic)
+        {
+            INVARIANT(creatorId.has_value(), "Recycling buffer callback invoked on used memory segment");
             statistic->onEvent(GetBufferEvent(memSegment->size, creatorId));
+        }
         return TupleBuffer(memSegment->controlBlock.get(), memSegment->ptr, memSegment->size);
     }
     throw InvalidRefCountForBuffer("[BufferManager] got buffer with invalid reference counter");
@@ -205,7 +208,10 @@ std::optional<TupleBuffer> BufferManager::getBufferWithTimeout(const std::chrono
     if (memSegment->controlBlock->prepare(shared_from_this(), creatorId))
     {
         if (statistic)
+        {
+            INVARIANT(creatorId.has_value(), "Recycling buffer callback invoked on used memory segment");
             statistic->onEvent(GetBufferEvent(memSegment->size, creatorId));
+        }
         return TupleBuffer(memSegment->controlBlock.get(), memSegment->ptr, memSegment->size);
     }
     throw InvalidRefCountForBuffer("[BufferManager] got buffer with invalid reference counter");
@@ -219,7 +225,10 @@ std::optional<TupleBuffer> BufferManager::getUnpooledBuffer(const size_t bufferS
 void BufferManager::recyclePooledBuffer(detail::MemorySegment* segment)
 {
     if (statistic)
+    {
+        INVARIANT(segment->controlBlock->getCreatorId(), "Recycling buffer callback invoked on used memory segment");
         statistic->onEvent(RecyclePooledBufferEvent(segment->size, segment->controlBlock->getCreatorId()));
+    }
     INVARIANT(segment->isAvailable(), "Recycling buffer callback invoked on used memory segment");
     INVARIANT(
         segment->controlBlock->owningBufferRecycler == nullptr, "Buffer should not retain a reference to its parent while not in use");

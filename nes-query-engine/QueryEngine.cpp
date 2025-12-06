@@ -53,6 +53,7 @@
 #include <RunningQueryPlan.hpp>
 #include <Task.hpp>
 #include <TaskQueue.hpp>
+#include <Runtime/BufferManagerStatCollectWrapper.hpp>
 
 namespace NES
 {
@@ -223,7 +224,7 @@ struct DefaultPEC final : PipelineExecutionContext
         std::function<void(const TupleBuffer& tb, std::chrono::milliseconds)> repeatHandler)
         : handler(std::move(handler))
         , repeatHandler(std::move(repeatHandler))
-        , bm(std::move(bm))
+        , bm(BufferManagerStatCollectWrapper::create(std::move(bm), pipelineId))
         , numberOfThreads(numberOfThreads)
         , threadId(threadId)
         , pipelineId(pipelineId)

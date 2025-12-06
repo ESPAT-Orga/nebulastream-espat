@@ -170,7 +170,10 @@ UnpooledChunksManager::getUnpooledBuffer(const size_t neededSize, size_t alignme
 
 
             if (statistic)
+            {
+                INVARIANT(memorySegment->controlBlock->getCreatorId().has_value(), "Recycling buffer callback invoked on used memory segment");
                 statistic->onEvent(RecycleUnpooledBufferEvent(memorySegment->size,  memorySegment->controlBlock->getCreatorId()));
+            }
 
             if (curUnpooledChunk.activeMemorySegments == 0)
             {

@@ -224,7 +224,7 @@ struct DefaultPEC final : PipelineExecutionContext
         std::function<void(const TupleBuffer& tb, std::chrono::milliseconds)> repeatHandler)
         : handler(std::move(handler))
         , repeatHandler(std::move(repeatHandler))
-        , bm(BufferManagerStatCollectWrapper::create(std::move(bm), pipelineId))
+        , bm(std::make_shared<BufferManagerStatCollectWrapper>(bm, pipelineId))
         , numberOfThreads(numberOfThreads)
         , threadId(threadId)
         , pipelineId(pipelineId)

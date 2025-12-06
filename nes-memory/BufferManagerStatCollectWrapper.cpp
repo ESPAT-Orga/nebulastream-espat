@@ -41,44 +41,60 @@ namespace NES
 {
 
 BufferManagerStatCollectWrapper::BufferManagerStatCollectWrapper(
-    Private p,
-    const uint32_t bufferSize,
-    const uint32_t numOfBuffers,
-    std::shared_ptr<BufferManagerStatisticListener> statistic,
-    std::shared_ptr<std::pmr::memory_resource> memoryResource,
-    const uint32_t withAlignment, BufferCreatorId bufferCreatorId)
-: BufferManager(p, bufferSize, numOfBuffers, statistic, memoryResource, withAlignment), creatorId(bufferCreatorId)
-{
-}
+        std::shared_ptr<AbstractBufferProvider> bufferManager,
+        BufferCreatorId creatorId )
+: bufferManager (bufferManager), creatorId (creatorId) {}
 
-std::shared_ptr<BufferManager> BufferManagerStatCollectWrapper::create(
-    uint32_t bufferSize,
-    uint32_t numOfBuffers,
-    std::shared_ptr<BufferManagerStatisticListener> statistic,
-    const std::shared_ptr<std::pmr::memory_resource>& memoryResource,
-    uint32_t withAlignment, BufferCreatorId creatorId)
-{
-    return std::make_shared<BufferManagerStatCollectWrapper>(Private{}, bufferSize, numOfBuffers, statistic, memoryResource, withAlignment, creatorId);
-}
+// std::shared_ptr<BufferManager> BufferManagerStatCollectWrapper::create(
+//     uint32_t bufferSize,
+//     uint32_t numOfBuffers,
+//     std::shared_ptr<BufferManagerStatisticListener> statistic,
+//     const std::shared_ptr<std::pmr::memory_resource>& memoryResource,
+//     uint32_t withAlignment, BufferCreatorId creatorId)
+// {
+//     return std::make_shared<BufferManagerStatCollectWrapper>(Private{}, bufferSize, numOfBuffers, statistic, memoryResource, withAlignment, creatorId);
+// }
+
+BufferManagerStatCollectWrapper::~BufferManagerStatCollectWrapper() {}
 
 TupleBuffer BufferManagerStatCollectWrapper::getBufferBlocking(BufferCreatorId)
 {
-    return BufferManager::getBufferBlocking(this->creatorId);
+    return bufferManager->getBufferBlocking(this->creatorId);
 }
 
 std::optional<TupleBuffer> BufferManagerStatCollectWrapper::getBufferNoBlocking(BufferCreatorId)
 {
-    return BufferManager::getBufferNoBlocking(this->creatorId);
+    return bufferManager->getBufferNoBlocking(this->creatorId);
 
 }
 
 std::optional<TupleBuffer> BufferManagerStatCollectWrapper::getBufferWithTimeout(const std::chrono::milliseconds timeoutMs, BufferCreatorId)
 {
-    return BufferManager::getBufferWithTimeout(timeoutMs, this->creatorId);
+    return bufferManager->getBufferWithTimeout(timeoutMs, this->creatorId);
 }
 
 std::optional<TupleBuffer> BufferManagerStatCollectWrapper::getUnpooledBuffer(const size_t bufferSize, BufferCreatorId)
 {
-    return BufferManager::getUnpooledBuffer(bufferSize, this->creatorId);
+    return bufferManager->getUnpooledBuffer(bufferSize, this->creatorId);
+}
+
+size_t BufferManagerStatCollectWrapper::getBufferSize() const
+{
+    return bufferManager->getBufferSize();
+}
+
+size_t BufferManagerStatCollectWrapper::getNumOfPooledBuffers() const
+{
+    return bufferManager->getNumOfPooledBuffers();
+}
+
+size_t BufferManagerStatCollectWrapper::getNumOfUnpooledBuffers() const
+{
+    return bufferManager->getNumOfUnpooledBuffers();
+}
+
+BufferManagerType BufferManagerStatCollectWrapper::getBufferManagerType() const
+{
+    return bufferManager->getBufferManagerType();
 }
 }

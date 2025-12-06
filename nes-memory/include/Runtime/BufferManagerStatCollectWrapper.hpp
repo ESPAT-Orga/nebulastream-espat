@@ -28,6 +28,8 @@
 #include <Runtime/UnpooledChunksManager.hpp>
 #include <folly/MPMCQueue.h>
 
+#include "BufferManager.hpp"
+
 namespace NES
 {
 struct BufferManagerStatisticListener;
@@ -52,57 +54,36 @@ struct BufferManagerStatisticListener;
  * been returned to the BufferManager by some component.
  *
  */
-class BufferManager : public std::enable_shared_from_this<BufferManager>, public BufferRecycler, public AbstractBufferProvider
+class BufferManagerStatCollectWrapper final : public std::enable_shared_from_this<BufferManagerStatCollectWrapper>, public BufferManager
 {
-    friend class TupleBuffer;
-    friend class detail::MemorySegment;
-
-    /// Hide the BufferManager constructor and only allow creation via BufferManager::create().
-    /// Following: https://en.cppreference.com/w/cpp/memory/enable_shared_from_this
-    protected:
-    struct Private
-    {
-        explicit Private() = default;
-    };
-
-    static constexpr auto DEFAULT_BUFFER_SIZE = 8 * 1024;
-    static constexpr auto DEFAULT_NUMBER_OF_BUFFERS = 1024;
-    static constexpr auto DEFAULT_ALIGNMENT = 64;
 
 public:
-    explicit BufferManager(
+    explicit BufferManagerStatCollectWrapper(
         Private,
         uint32_t bufferSize,
         uint32_t numOfBuffers,
         std::shared_ptr<BufferManagerStatisticListener> statistic,
         std::shared_ptr<std::pmr::memory_resource> memoryResource,
-        uint32_t withAlignment);
+        uint32_t withAlignment, BufferCreatorId creatorId );
 
     /// Creates a new global buffer manager
-    /// @param bufferSize the size of each buffer in bytes
-    /// @param numOfBuffers the total number of buffers in the pool
-    /// @param withAlignment the alignment of each buffer, default is 64 so ony cache line aligned buffers, This value must be a pow of two and smaller than page size
-    /// @param memoryResource resource for allocating and deallocating memory
+    /// @param bufferSize
+    /// @param numOfBuffers
+    /// @param statistic
+    /// @param memoryResource
+    /// @param withAlignment
+    /// @param creatorId the id of the pipeline or source using this object
     static std::shared_ptr<BufferManager> create(
-        uint32_t bufferSize = DEFAULT_BUFFER_SIZE,
-        uint32_t numOfBuffers = DEFAULT_NUMBER_OF_BUFFERS,
-        std::shared_ptr<BufferManagerStatisticListener> statistic = nullptr,
-        const std::shared_ptr<std::pmr::memory_resource>& memoryResource = std::make_shared<NesDefaultMemoryAllocator>(),
-        uint32_t withAlignment = DEFAULT_ALIGNMENT);
+        uint32_t bufferSize,
+        uint32_t numOfBuffers,
+        std::shared_ptr<BufferManagerStatisticListener> statistic,
+        const std::shared_ptr<std::pmr::memory_resource>& memoryResource,
+        uint32_t withAlignment,
+        BufferCreatorId creatorId);
 
-    BufferManager(const BufferManager&) = delete;
-    BufferManager& operator=(const BufferManager&) = delete;
-    ~BufferManager() override;
-
-    BufferManagerType getBufferManagerType() const override;
-
-private:
-    /**
-     * @brief Configure the BufferManager to use numOfBuffers buffers of size bufferSize bytes.
-     * This is a one shot call. A second invocation of this call will fail
-     * @param withAlignment
-     */
-    void initialize(uint32_t withAlignment);
+    BufferManagerStatCollectWrapper(const BufferManager&) = delete;
+    BufferManagerStatCollectWrapper& operator=(const BufferManager&) = delete;
+    ~BufferManagerStatCollectWrapper() override;
 
 public:
     /// This blocks until a buffer is available.
@@ -122,40 +103,11 @@ public:
 
     std::optional<TupleBuffer> getUnpooledBuffer(size_t bufferSize, BufferCreatorId creatorId = std::nullopt) override;
 
-
-    size_t getBufferSize() const override;
-    size_t getNumOfPooledBuffers() const override;
-    size_t getNumOfUnpooledBuffers() const override;
-    size_t getNumberOfAvailableBuffers() const;
-
-    /**
-     * @brief Recycle a pooled buffer by making it available to others
-     * @param buffer
-     */
-    void recyclePooledBuffer(detail::MemorySegment* segment) override;
-
-    /**
-    * @brief Recycle an unpooled buffer by making it available to others
-    * @param buffer
-    */
-    void recycleUnpooledBuffer(detail::MemorySegment* segment, const AllocationThreadInfo&) override;
+    //TODO pull the statistics collection completely into this class, so that we do not have to change anything in the buffer manage itself
 
 private:
-    std::vector<detail::MemorySegment> allBuffers;
-
-    folly::MPMCQueue<detail::MemorySegment*> availableBuffers;
-
-    std::shared_ptr<NES::UnpooledChunksManager> unpooledChunksManager;
-
-    size_t bufferSize;
-    size_t numOfBuffers;
-
-    uint8_t* basePointer{nullptr};
-    size_t allocatedAreaSize;
-
-    std::shared_ptr<std::pmr::memory_resource> memoryResource;
-    std::atomic<bool> isDestroyed{false};
-    std::shared_ptr<BufferManagerStatisticListener> statistic;
+    //std::shared_ptr<BufferManager> bufferManager;
+    BufferCreatorId creatorId;
 };
 
 

@@ -194,7 +194,7 @@ std::optional<TupleBuffer> BufferManager::getBufferNoBlocking(BufferCreatorId cr
     throw InvalidRefCountForBuffer("[BufferManager] got buffer with invalid reference counter");
 }
 
-std::optional<TupleBuffer> BufferManager::getBufferWithTimeout(const std::chrono::milliseconds timeoutMs, std::optional<std::variant<PipelineId, OriginId>> creatorId)
+std::optional<TupleBuffer> BufferManager::getBufferWithTimeout(const std::chrono::milliseconds timeoutMs, BufferCreatorId creatorId)
 {
     detail::MemorySegment* memSegment = nullptr;
     const auto deadline = std::chrono::steady_clock::now() + timeoutMs;

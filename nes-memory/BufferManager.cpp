@@ -226,6 +226,7 @@ void BufferManager::recyclePooledBuffer(detail::MemorySegment* segment)
 {
     if (statistic)
     {
+        //TODO: why do these get lost?
         INVARIANT(segment->controlBlock->getCreatorId().has_value(), "Recycling buffer callback invoked on used memory segment");
         statistic->onEvent(RecyclePooledBufferEvent(segment->size, segment->controlBlock->getCreatorId()));
     }

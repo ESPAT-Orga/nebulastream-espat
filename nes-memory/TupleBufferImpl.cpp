@@ -121,7 +121,7 @@ void fillThreadOwnershipInfo(std::string& threadName, cpptrace::raw_trace& calls
     callstack = cpptrace::raw_trace::current(1);
 }
 #endif
-bool BufferControlBlock::prepare(const std::shared_ptr<BufferRecycler>& recycler)
+bool BufferControlBlock::prepare(const std::shared_ptr<BufferRecycler>& recycler, BufferCreatorId creatorId)
 {
     int32_t expected = 0;
 #ifdef NES_DEBUG_TUPLE_BUFFER_LEAKS
@@ -137,6 +137,7 @@ bool BufferControlBlock::prepare(const std::shared_ptr<BufferRecycler>& recycler
         INVARIANT(previousOwner == nullptr, "Buffer should not retain a reference to its owner while unused");
         return true;
     }
+    this->creatorId = creatorId;
     NES_ERROR("Invalid reference counter: {}", expected);
     return false;
 }
@@ -300,6 +301,16 @@ OriginId BufferControlBlock::getOriginId() const noexcept
 void BufferControlBlock::setOriginId(const OriginId originId)
 {
     this->originId = originId;
+}
+
+std::optional<std::variant<PipelineId, OriginId>> BufferControlBlock::getCreatorId() const noexcept
+{
+    return creatorId;
+}
+
+void BufferControlBlock::setCreatorId(std::optional<std::variant<PipelineId, OriginId>> creatorId)
+{
+    this->creatorId = creatorId;
 }
 
 /// -----------------------------------------------------------------------------

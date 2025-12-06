@@ -25,6 +25,8 @@
 /// fixed: buffer manager that we use for sources
 namespace NES
 {
+
+using BufferCreatorId = std::optional<std::variant<PipelineId, OriginId>>;
 enum class BufferManagerType : uint8_t
 {
     GLOBAL,
@@ -47,14 +49,14 @@ public:
     virtual size_t getNumOfPooledBuffers() const = 0;
     virtual size_t getNumOfUnpooledBuffers() const = 0;
 
-    virtual TupleBuffer getBufferBlocking() = 0;
+    virtual TupleBuffer getBufferBlocking(BufferCreatorId creatorId = std::nullopt) = 0;
 
-    virtual std::optional<TupleBuffer> getBufferNoBlocking() = 0;
+    virtual std::optional<TupleBuffer> getBufferNoBlocking(BufferCreatorId creatorId = std::nullopt) = 0;
 
-    virtual std::optional<TupleBuffer> getBufferWithTimeout(std::chrono::milliseconds timeout_ms) = 0;
+    virtual std::optional<TupleBuffer> getBufferWithTimeout(std::chrono::milliseconds timeout_ms, BufferCreatorId creatorId = std::nullopt) = 0;
 
     /// Returns an unpooled buffer of size bufferSize wrapped in an optional or an invalid option if an error
-    virtual std::optional<TupleBuffer> getUnpooledBuffer(size_t bufferSize) = 0;
+    virtual std::optional<TupleBuffer> getUnpooledBuffer(size_t bufferSize, BufferCreatorId creatorId = std::nullopt) = 0;
 };
 
 }

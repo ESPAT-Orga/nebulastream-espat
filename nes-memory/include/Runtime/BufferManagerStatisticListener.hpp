@@ -20,13 +20,15 @@ using ChronoClock = std::chrono::system_clock;
 struct BaseBufferManagerEvent
 {
     BaseBufferManagerEvent() = default;
+    BaseBufferManagerEvent(BufferCreatorId creatorId) : creatorId(creatorId) {}
 
     ChronoClock::time_point timestamp = ChronoClock::now();
+    BufferCreatorId creatorId = std::nullopt;
 };
 
 struct GetBufferEvent : BaseBufferManagerEvent
 {
-    explicit GetBufferEvent(size_t bufferSize) : bufferSize(bufferSize){ }
+    explicit GetBufferEvent(size_t bufferSize, BufferCreatorId creatorId) : BaseBufferManagerEvent(creatorId), bufferSize(bufferSize){ }
 
     GetBufferEvent() = default;
 
@@ -35,7 +37,7 @@ struct GetBufferEvent : BaseBufferManagerEvent
 
 struct GetUnpooledBufferEvent : BaseBufferManagerEvent
 {
-    explicit GetUnpooledBufferEvent(size_t bufferSize) :  bufferSize(bufferSize) { }
+    explicit GetUnpooledBufferEvent(size_t bufferSize, BufferCreatorId creatorId) : BaseBufferManagerEvent(creatorId), bufferSize(bufferSize) { }
 
     GetUnpooledBufferEvent() = default;
 
@@ -44,7 +46,7 @@ struct GetUnpooledBufferEvent : BaseBufferManagerEvent
 
 struct RecyclePooledBufferEvent : BaseBufferManagerEvent
 {
-    explicit RecyclePooledBufferEvent(size_t bufferSize) : bufferSize(bufferSize) { }
+    explicit RecyclePooledBufferEvent(size_t bufferSize, BufferCreatorId creatorId) : BaseBufferManagerEvent(creatorId), bufferSize(bufferSize) { }
 
     RecyclePooledBufferEvent() = default;
 
@@ -53,7 +55,7 @@ struct RecyclePooledBufferEvent : BaseBufferManagerEvent
 
 struct RecycleUnpooledBufferEvent : BaseBufferManagerEvent
 {
-    explicit RecycleUnpooledBufferEvent(size_t bufferSize) : bufferSize(bufferSize) { }
+    explicit RecycleUnpooledBufferEvent(size_t bufferSize, BufferCreatorId creatorId) : BaseBufferManagerEvent(creatorId), bufferSize(bufferSize) { }
 
     RecycleUnpooledBufferEvent() = default;
 

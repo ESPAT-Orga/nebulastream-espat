@@ -226,7 +226,7 @@ void BufferManager::recyclePooledBuffer(detail::MemorySegment* segment)
 {
     if (statistic)
     {
-        INVARIANT(segment->controlBlock->getCreatorId(), "Recycling buffer callback invoked on used memory segment");
+        INVARIANT(segment->controlBlock->getCreatorId().has_value(), "Recycling buffer callback invoked on used memory segment");
         statistic->onEvent(RecyclePooledBufferEvent(segment->size, segment->controlBlock->getCreatorId()));
     }
     INVARIANT(segment->isAvailable(), "Recycling buffer callback invoked on used memory segment");

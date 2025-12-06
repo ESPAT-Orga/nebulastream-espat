@@ -35,6 +35,7 @@
 #include <nlohmann/json.hpp>
 #include <nlohmann/json_fwd.hpp>
 #include <QueryEngineStatisticListener.hpp>
+#include <Runtime/BufferManagerStatisticListener.hpp>
 
 namespace NES
 {
@@ -66,6 +67,9 @@ nlohmann::json GoogleEventTracePrinter::createTraceEvent(
             break;
         case Category::System:
             event["cat"] = "system";
+            break;
+        case Category::BufferManager:
+            event["cat"] = "bufferManager";
             break;
     }
 
@@ -120,12 +124,26 @@ void GoogleEventTracePrinter::writeTraceFooter()
     }
 }
 
+enum class BufferManagerAction
+{
+    GetBuffer,
+    RecycleBuffer
+};
+
+struct BufferManagerChange
+{
+    BufferManagerAction action;
+    size_t bufferSize;
+    ChronoClock::time_point timestamp;
+};
+
 void GoogleEventTracePrinter::threadRoutine(const std::stop_token& token)
 {
     setThreadName("GoogleEventTracePrinter");
     writeTraceHeader();
 
     bool firstEvent = true;
+    std::vector<BufferManagerChange> bufferManagerChanges;
 
     /// Helper function to emit events with proper comma handling
     auto emit = [&](const nlohmann::json& evt)
@@ -149,6 +167,55 @@ void GoogleEventTracePrinter::threadRoutine(const std::stop_token& token)
 
         std::visit(
             Overloaded{
+                [&](const GetUnpooledBufferEvent& getBufferEvent)
+                {
+                    //Todo: implement
+                    (void) getBufferEvent;
+                },
+                [&](const RecycleUnpooledBufferEvent& recycleBufferEvent)
+                {
+                    //Todo: implement
+                    (void) recycleBufferEvent;
+                },
+                [&](const RecyclePooledBufferEvent& recycleBufferEvent)
+                {
+                    auto args = nlohmann::json::object();
+                    args["size"] = recycleBufferEvent.bufferSize;
+                    auto traceEvent = createTraceEvent(
+                        fmt::format("Recycle pooled buffer of size {}", recycleBufferEvent.bufferSize),
+                        Category::BufferManager,
+                        Phase::Instant,
+                        //todo adjust
+                        timestampToMicroseconds(recycleBufferEvent.timestamp),
+                        0,
+                        args);
+                    traceEvent["tid"] = 0; /// System thread
+
+                    bufferManagerChanges.emplace_back(
+                        BufferManagerAction::RecycleBuffer,
+                        recycleBufferEvent.bufferSize,
+                        recycleBufferEvent.timestamp);
+
+                    emit(traceEvent);
+                },
+                [&](const GetBufferEvent& getBufferEvent)
+                {
+                    auto args = nlohmann::json::object();
+                    args["size"] = getBufferEvent.bufferSize;
+                    auto traceEvent = createTraceEvent(
+                        fmt::format("Get pooled buffer of size {}", getBufferEvent.bufferSize),
+                        Category::BufferManager,
+                        Phase::Instant,
+                        //todo adjust
+                        timestampToMicroseconds(getBufferEvent.timestamp),
+                        0,
+                        args);
+                    traceEvent["tid"] = 0; /// System thread
+
+                    emit(traceEvent);
+
+                    bufferManagerChanges.emplace_back(BufferManagerAction::GetBuffer, getBufferEvent.bufferSize, getBufferEvent.timestamp);
+                },
                 [&](const SubmitQuerySystemEvent& submitEvent)
                 {
                     auto args = nlohmann::json::object();
@@ -391,6 +458,57 @@ void GoogleEventTracePrinter::threadRoutine(const std::stop_token& token)
             event);
     }
 
+    std::sort(
+        bufferManagerChanges.begin(),
+        bufferManagerChanges.end(),
+        [](const BufferManagerChange& lhs, const BufferManagerChange& rhs) { return lhs.timestamp < rhs.timestamp; });
+
+    int memoryInUse = 0;
+    size_t memSliceCount = 0;
+    for (auto change = bufferManagerChanges.begin(); change != bufferManagerChanges.end(); ++change)
+    {
+        if (change > bufferManagerChanges.begin())
+        {
+            auto args = nlohmann::json::object();
+            args["size"] = memoryInUse;
+            auto traceEvent = createTraceEvent(
+                fmt::format("Used Mem Pooled {} ({})", memoryInUse, memSliceCount),
+                Category::BufferManager,
+                Phase::End,
+                timestampToMicroseconds(change->timestamp),
+                0,
+                args);
+            traceEvent["tid"] = 0; /// System thread
+
+            emit(traceEvent);
+        }
+
+        if (change->action == BufferManagerAction::RecycleBuffer)
+        {
+            memoryInUse -= change->bufferSize;
+        } else
+        {
+            memoryInUse += change->bufferSize;
+        }
+
+        memSliceCount++;
+        if (change < bufferManagerChanges.end() - 1)
+        {
+            auto args = nlohmann::json::object();
+            args["size"] = memoryInUse;
+            auto traceEvent = createTraceEvent(
+                fmt::format(" Mem {} ({})", memoryInUse, memSliceCount),
+                Category::BufferManager,
+                Phase::Begin,
+                timestampToMicroseconds(change->timestamp),
+                0,
+                args);
+            traceEvent["tid"] = 0; /// System thread
+
+            emit(traceEvent);
+        }
+    }
+
     /// Write the footer when the thread stops
     writeTraceFooter();
 }
@@ -405,7 +523,14 @@ void GoogleEventTracePrinter::onEvent(SystemEvent event)
     events.writeIfNotFull(std::visit([]<typename T>(T&& arg) { return CombinedEventType(std::forward<T>(arg)); }, std::move(event)));
 }
 
-GoogleEventTracePrinter::GoogleEventTracePrinter(const std::filesystem::path& path) : file(path, std::ios::out | std::ios::trunc)
+void GoogleEventTracePrinter::onEvent(BufferManagerEvent event)
+{
+    (void)event;
+    events.writeIfNotFull(std::visit([]<typename T>(T&& arg) { return CombinedEventType(std::forward<T>(arg)); }, std::move(event)));
+}
+
+GoogleEventTracePrinter::GoogleEventTracePrinter(const std::filesystem::path& path)
+    : file(path, std::ios::out | std::ios::trunc)
 {
     NES_INFO("Writing Google Event Trace to: {}", path);
 }

@@ -33,13 +33,13 @@
 #include <nlohmann/json.hpp>
 #include <nlohmann/json_fwd.hpp>
 
-template <typename Var1, typename Var2>
+template <typename Var1, typename Var2, typename... Ts3>
 struct FlattenVariant;
 
-template <typename... Ts1, typename... Ts2>
-struct FlattenVariant<std::variant<Ts1...>, std::variant<Ts2...>>
+template <typename... Ts1, typename... Ts2, typename... Ts3>
+struct FlattenVariant<std::variant<Ts1...>, std::variant<Ts2...>, std::variant<Ts3...>>
 {
-    using type = std::variant<Ts1..., Ts2...>;
+    using type = std::variant<Ts1..., Ts2..., Ts3...>;
 };
 
 namespace NES
@@ -48,9 +48,10 @@ namespace NES
 /// chrome://tracing/ interface for performance analysis (or any other event trace visualizer)
 struct GoogleEventTracePrinter final : StatisticListener
 {
-    using CombinedEventType = FlattenVariant<SystemEvent, Event>::type;
+    using CombinedEventType = FlattenVariant<SystemEvent, Event, BufferManagerEvent>::type;
     void onEvent(Event event) override;
     void onEvent(SystemEvent event) override;
+    void onEvent(BufferManagerEvent event) override;
 
     /// Constructs a GoogleEventTracePrinter that writes to the specified file path
     /// @param path The file path where the trace will be written
@@ -71,7 +72,8 @@ private:
         Query,
         Pipeline,
         Task,
-        System
+        System,
+        BufferManager
     };
 
     enum class Phase : int

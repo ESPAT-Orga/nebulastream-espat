@@ -46,7 +46,8 @@ SingleNodeWorker& SingleNodeWorker::operator=(SingleNodeWorker&& other) noexcept
 SingleNodeWorker::SingleNodeWorker(const SingleNodeWorkerConfiguration& configuration)
     : listener(std::make_shared<CompositeStatisticListener>()), configuration(configuration)
 {
-    if (configuration.enableGoogleEventTrace.getValue())
+    // if (configuration.enableGoogleEventTrace.getValue())
+    if (true)
     {
         auto googleTracePrinter = std::make_shared<GoogleEventTracePrinter>(
             fmt::format("GoogleEventTrace_{:%Y-%m-%d_%H-%M-%S}_{:d}.json", std::chrono::system_clock::now(), ::getpid()));

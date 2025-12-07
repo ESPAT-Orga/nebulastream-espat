@@ -127,7 +127,7 @@ void GoogleEventTracePrinter::writeTraceFooter()
 
 
 void GoogleEventTracePrinter::emitBufferUsagePeriods(
-    std::vector<BufferManagerChange> bufferManagerChanges, std::function<void(const nlohmann::json& evt)> emit)
+    std::vector<BufferManagerChange> bufferManagerChanges, std::function<void(const nlohmann::json& evt)> emit, std::string label)
 {
     std::sort(
         bufferManagerChanges.begin(),
@@ -143,7 +143,7 @@ void GoogleEventTracePrinter::emitBufferUsagePeriods(
             auto args = nlohmann::json::object();
             args["size"] = memoryInUse;
             auto traceEvent = createTraceEvent(
-                fmt::format("Used Mem Pooled {} ({})", memoryInUse, memSliceCount),
+                fmt::format("Mem {} creator {}: {} ({})", label, change->creatorId, memoryInUse, memSliceCount),
                 Category::BufferManager,
                 Phase::End,
                 timestampToMicroseconds(change->timestamp),
@@ -169,7 +169,7 @@ void GoogleEventTracePrinter::emitBufferUsagePeriods(
             auto args = nlohmann::json::object();
             args["size"] = memoryInUse;
             auto traceEvent = createTraceEvent(
-                fmt::format(" Mem {} ({})", memoryInUse, memSliceCount),
+                fmt::format(" Mem {} creator {}: {} ({})", label, change->creatorId, memoryInUse, memSliceCount),
                 Category::BufferManager,
                 Phase::Begin,
                 timestampToMicroseconds(change->timestamp),
@@ -228,7 +228,7 @@ void GoogleEventTracePrinter::threadRoutine(const std::stop_token& token)
 
                     emit(traceEvent);
 
-                    unpooledBufferChanges.emplace_back(BufferManagerAction::GetBuffer, getBufferEvent.bufferSize, getBufferEvent.timestamp);
+                    unpooledBufferChanges.emplace_back(BufferManagerAction::GetBuffer, getBufferEvent.creatorId, getBufferEvent.bufferSize, getBufferEvent.timestamp);
                 },
                 [&](const RecycleUnpooledBufferEvent& recycleBufferEvent)
                 {
@@ -245,6 +245,7 @@ void GoogleEventTracePrinter::threadRoutine(const std::stop_token& token)
 
                     unpooledBufferChanges.emplace_back(
                         BufferManagerAction::RecycleBuffer,
+                        recycleBufferEvent.creatorId,
                         recycleBufferEvent.bufferSize,
                         recycleBufferEvent.timestamp);
 
@@ -266,6 +267,7 @@ void GoogleEventTracePrinter::threadRoutine(const std::stop_token& token)
 
                     pooledBufferChanges.emplace_back(
                         BufferManagerAction::RecycleBuffer,
+                        recycleBufferEvent.creatorId,
                         recycleBufferEvent.bufferSize,
                         recycleBufferEvent.timestamp);
 
@@ -286,7 +288,7 @@ void GoogleEventTracePrinter::threadRoutine(const std::stop_token& token)
 
                     emit(traceEvent);
 
-                    pooledBufferChanges.emplace_back(BufferManagerAction::GetBuffer, getBufferEvent.bufferSize, getBufferEvent.timestamp);
+                    pooledBufferChanges.emplace_back(BufferManagerAction::GetBuffer, getBufferEvent.creatorId, getBufferEvent.bufferSize, getBufferEvent.timestamp);
                 },
                 [&](const SubmitQuerySystemEvent& submitEvent)
                 {
@@ -530,8 +532,8 @@ void GoogleEventTracePrinter::threadRoutine(const std::stop_token& token)
             event);
     }
 
-    emitBufferUsagePeriods(pooledBufferChanges, emit);
-    emitBufferUsagePeriods(unpooledBufferChanges, emit);
+    emitBufferUsagePeriods(pooledBufferChanges, emit, "pooled");
+    emitBufferUsagePeriods(unpooledBufferChanges, emit, "unpooled");
 
     /// Write the footer when the thread stops
     writeTraceFooter();

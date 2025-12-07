@@ -93,6 +93,7 @@ private:
     struct BufferManagerChange
     {
         BufferManagerAction action;
+        BufferCreatorId creatorId;
         size_t bufferSize;
         ChronoClock::time_point timestamp;
     };
@@ -107,8 +108,8 @@ private:
     void writeTraceHeader();
     void writeTraceFooter();
 
-    void emitBufferUsagePeriods(
-        std::vector<BufferManagerChange> bufferManagerChanges, std::function<void(const nlohmann::json& evt)> emit);
+void emitBufferUsagePeriods(
+    std::vector<BufferManagerChange> bufferManagerChanges, std::function<void(const nlohmann::json& evt)> emit, std::string label);
 
     std::ofstream file;
     folly::MPMCQueue<CombinedEventType> events{QUEUE_LENGTH};

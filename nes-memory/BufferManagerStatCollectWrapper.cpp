@@ -62,16 +62,16 @@ void BufferManagerStatCollectWrapper::collectPooledBufferStatistics(TupleBuffer 
     }
 }
 
-TupleBuffer BufferManagerStatCollectWrapper::getBufferBlocking(BufferCreatorId)
+TupleBuffer BufferManagerStatCollectWrapper::getBufferBlocking()
 {
-    auto buffer = bufferManager->getBufferBlocking(this->creatorId);
+    auto buffer = bufferManager->getBufferBlocking();
     collectPooledBufferStatistics(buffer);
     return buffer;
 }
 
-std::optional<TupleBuffer> BufferManagerStatCollectWrapper::getBufferNoBlocking(BufferCreatorId)
+std::optional<TupleBuffer> BufferManagerStatCollectWrapper::getBufferNoBlocking()
 {
-    auto buffer = bufferManager->getBufferNoBlocking(this->creatorId);
+    auto buffer = bufferManager->getBufferNoBlocking();
     if (buffer)
     {
         collectPooledBufferStatistics(buffer.value());
@@ -80,9 +80,9 @@ std::optional<TupleBuffer> BufferManagerStatCollectWrapper::getBufferNoBlocking(
 
 }
 
-std::optional<TupleBuffer> BufferManagerStatCollectWrapper::getBufferWithTimeout(const std::chrono::milliseconds timeoutMs, BufferCreatorId)
+std::optional<TupleBuffer> BufferManagerStatCollectWrapper::getBufferWithTimeout(const std::chrono::milliseconds timeoutMs)
 {
-    auto buffer = bufferManager->getBufferWithTimeout(timeoutMs, this->creatorId);
+    auto buffer = bufferManager->getBufferWithTimeout(timeoutMs);
     if (buffer)
     {
         collectPooledBufferStatistics(buffer.value());
@@ -90,9 +90,9 @@ std::optional<TupleBuffer> BufferManagerStatCollectWrapper::getBufferWithTimeout
     return buffer;
 }
 
-std::optional<TupleBuffer> BufferManagerStatCollectWrapper::getUnpooledBuffer(const size_t bufferSize, BufferCreatorId)
+std::optional<TupleBuffer> BufferManagerStatCollectWrapper::getUnpooledBuffer(const size_t bufferSize)
 {
-    auto buffer = bufferManager->getUnpooledBuffer(bufferSize, this->creatorId);
+    auto buffer = bufferManager->getUnpooledBuffer(bufferSize);
     if (buffer && statistic)
     {
         statistic->onEvent(GetUnpooledBufferEvent(buffer->getBufferSize(), creatorId));

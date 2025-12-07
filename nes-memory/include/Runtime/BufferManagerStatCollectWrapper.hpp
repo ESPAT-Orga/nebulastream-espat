@@ -59,23 +59,8 @@ class BufferManagerStatCollectWrapper final : public std::enable_shared_from_thi
 
 public:
     explicit BufferManagerStatCollectWrapper(
-        std::shared_ptr<NES::AbstractBufferProvider> bufferManager,
+        std::shared_ptr<BufferManager> bufferManager,
         BufferCreatorId creatorId );
-
-    /// Creates a new global buffer manager
-    /// @param bufferSize
-    /// @param numOfBuffers
-    /// @param statistic
-    /// @param memoryResource
-    /// @param withAlignment
-    /// @param creatorId the id of the pipeline or source using this object
-    // static std::shared_ptr<BufferManager> create(
-    //     uint32_t bufferSize,
-    //     uint32_t numOfBuffers,
-    //     std::shared_ptr<BufferManagerStatisticListener> statistic,
-    //     const std::shared_ptr<std::pmr::memory_resource>& memoryResource,
-    //     uint32_t withAlignment,
-    //     BufferCreatorId creatorId);
 
     BufferManagerStatCollectWrapper(const BufferManager&) = delete;
     BufferManagerStatCollectWrapper& operator=(const BufferManager&) = delete;
@@ -103,13 +88,10 @@ public:
     size_t getNumOfUnpooledBuffers() const override;
     BufferManagerType getBufferManagerType() const override;
 
-    //TODO pull the statistics collection completely into this class, so that we do not have to change anything in the buffer manage itself
-
 private:
     void collectPooledBufferStatistics(TupleBuffer buffer);
-    std::shared_ptr<AbstractBufferProvider> bufferManager;
+    std::shared_ptr<BufferManager> bufferManager;
     BufferCreatorId creatorId;
-    std::shared_ptr<BufferManagerStatisticListener> statistic;
 };
 
 

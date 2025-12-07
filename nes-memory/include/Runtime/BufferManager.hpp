@@ -95,6 +95,7 @@ public:
     ~BufferManager() override;
 
     BufferManagerType getBufferManagerType() const override;
+    std::shared_ptr<BufferManagerStatisticListener> getBufferManagerStatisticListener();
 
 private:
     /**

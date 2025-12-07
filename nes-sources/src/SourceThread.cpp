@@ -152,7 +152,13 @@ void dataSourceThread(
     ///NOLINTNEXTLINE(performance-unnecessary-value-param) `jthread` does not allow references
     std::shared_ptr<AbstractBufferProvider> bufferProvider)
 {
-    BufferManagerStatCollectWrapper bufferProviderWrapper(bufferProvider, originId);
+    auto bufferManager = std::dynamic_pointer_cast<BufferManager>(bufferProvider);
+    if (bufferManager && bufferManager->getBufferManagerStatisticListener())
+    {
+        // BufferManagerStatCollectWrapper bufferProviderWrapper(bufferManager, originId);
+        bufferProvider = std::make_shared<BufferManagerStatCollectWrapper>(bufferManager, originId);
+    }
+
     threadSetup(originId);
 
     size_t sequenceNumberGenerator = SequenceNumber::INITIAL;
@@ -167,7 +173,7 @@ void dataSourceThread(
 
     try
     {
-        result.set_value_at_thread_exit(dataSourceThreadRoutine(stopToken, *source, bufferProviderWrapper, dataEmit));
+        result.set_value_at_thread_exit(dataSourceThreadRoutine(stopToken, *source, *bufferProvider, dataEmit));
         if (!stopToken.stop_requested())
         {
             emit(originId, SourceReturnType::EoS{}, stopToken);

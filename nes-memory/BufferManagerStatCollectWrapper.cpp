@@ -43,7 +43,7 @@ namespace NES
 {
 
 BufferManagerStatCollectWrapper::BufferManagerStatCollectWrapper(
-        std::shared_ptr<AbstractBufferProvider> bufferManager,
+        std::shared_ptr<BufferManager> bufferManager,
         BufferCreatorId creatorId )
 : bufferManager (bufferManager), creatorId (creatorId) {}
 
@@ -51,11 +51,12 @@ BufferManagerStatCollectWrapper::~BufferManagerStatCollectWrapper() {}
 
 void BufferManagerStatCollectWrapper::collectPooledBufferStatistics(TupleBuffer buffer)
 {
+    auto statistic = bufferManager->getBufferManagerStatisticListener();
     if (statistic)
     {
         INVARIANT(creatorId.has_value(), "Recycling buffer callback invoked on used memory segment");
         statistic->onEvent(GetPooledBufferEvent(buffer.getBufferSize(), creatorId));
-        buffer.setRecycleStatisticsCallback([statistic = this->statistic, size = buffer.getBufferSize(), creatorId = this->creatorId](detail::MemorySegment*)
+        buffer.setRecycleStatisticsCallback([statistic, size = buffer.getBufferSize(), creatorId = this->creatorId](detail::MemorySegment*)
         {
             statistic->onEvent(RecyclePooledBufferEvent(size,  creatorId));
         });
@@ -93,11 +94,12 @@ std::optional<TupleBuffer> BufferManagerStatCollectWrapper::getBufferWithTimeout
 std::optional<TupleBuffer> BufferManagerStatCollectWrapper::getUnpooledBuffer(const size_t bufferSize)
 {
     auto buffer = bufferManager->getUnpooledBuffer(bufferSize);
+    auto statistic = bufferManager->getBufferManagerStatisticListener();
     if (buffer && statistic)
     {
         statistic->onEvent(GetUnpooledBufferEvent(buffer->getBufferSize(), creatorId));
         INVARIANT(creatorId.has_value(), "Recycling buffer callback invoked on used memory segment");
-        buffer->setRecycleStatisticsCallback([statistic = this->statistic, size = buffer->getBufferSize(), creatorId = this->creatorId](detail::MemorySegment*)
+        buffer->setRecycleStatisticsCallback([statistic, size = buffer->getBufferSize(), creatorId = this->creatorId](detail::MemorySegment*)
         {
             statistic->onEvent(RecycleUnpooledBufferEvent(size,  creatorId));
         });

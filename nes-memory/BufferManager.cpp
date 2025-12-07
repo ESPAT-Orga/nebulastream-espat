@@ -252,4 +252,9 @@ BufferManagerType BufferManager::getBufferManagerType() const
     return BufferManagerType::GLOBAL;
 }
 
+std::shared_ptr<BufferManagerStatisticListener> BufferManager::getBufferManagerStatisticListener()
+{
+    return statisticListener;
+}
+
 }

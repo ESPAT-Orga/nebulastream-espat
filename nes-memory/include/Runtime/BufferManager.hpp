@@ -104,10 +104,10 @@ private:
 
 public:
     /// This blocks until a buffer is available.
-    TupleBuffer getBufferBlocking() override;
+    TupleBuffer getBufferBlocking(BufferCreatorId creatorId = std::nullopt) override;
 
     /// invalid optional if there is no buffer.
-    std::optional<TupleBuffer> getBufferNoBlocking() override;
+    std::optional<TupleBuffer> getBufferNoBlocking(BufferCreatorId creatorId = std::nullopt) override;
 
     /**
      * @brief Returns a new Buffer wrapped in an optional or an invalid option if there is no buffer available within
@@ -116,9 +116,9 @@ public:
      * @param creatorId the source or pipeline requesting the buffer
      * @return a new buffer
      */
-    std::optional<TupleBuffer> getBufferWithTimeout(std::chrono::milliseconds timeoutMs) override;
+    std::optional<TupleBuffer> getBufferWithTimeout(std::chrono::milliseconds timeoutMs, BufferCreatorId creatorId = std::nullopt) override;
 
-    std::optional<TupleBuffer> getUnpooledBuffer(size_t bufferSize) override;
+    std::optional<TupleBuffer> getUnpooledBuffer(size_t bufferSize, BufferCreatorId creatorId = std::nullopt) override;
 
 
     size_t getBufferSize() const override;

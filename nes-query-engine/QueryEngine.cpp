@@ -34,6 +34,7 @@
 #include <Identifiers/NESStrongType.hpp>
 #include <Listeners/AbstractQueryStatusListener.hpp>
 #include <Runtime/AbstractBufferProvider.hpp>
+#include <Runtime/BufferManagerStatCollectWrapper.hpp>
 #include <Runtime/Execution/OperatorHandler.hpp>
 #include <Runtime/QueryTerminationType.hpp>
 #include <Runtime/TupleBuffer.hpp>
@@ -226,11 +227,21 @@ struct DefaultPEC final : PipelineExecutionContext
         std::function<void(const TupleBuffer& tb, std::chrono::milliseconds)> repeatHandler)
         : handler(std::move(handler))
         , repeatHandler(std::move(repeatHandler))
-        , bm(std::move(bm))
         , numberOfThreads(numberOfThreads)
         , threadId(threadId)
         , pipelineId(pipelineId)
     {
+        auto bufferManager = std::dynamic_pointer_cast<BufferManager>(bm);
+
+        /// check if statistics should be collected
+        if (bufferManager && bufferManager->getBufferManagerStatisticListener())
+        {
+            this->bm = std::make_shared<BufferManagerStatCollectWrapper>(bufferManager, pipelineId);
+        }
+        else
+        {
+            this->bm = bm;
+        }
     }
 
     [[nodiscard]] WorkerThreadId getWorkerThreadId() const override

@@ -27,6 +27,7 @@ struct CompositeStatisticListener final : StatisticListener
 {
     void onEvent(Event event) override;
     void onEvent(SystemEvent event) override;
+    void onEvent(BufferManagerEvent event) override;
 
     void addQueryEngineListener(std::shared_ptr<QueryEngineStatisticListener> listener);
     void addSystemListener(std::shared_ptr<SystemEventListener> listener);
@@ -36,5 +37,6 @@ struct CompositeStatisticListener final : StatisticListener
 private:
     std::vector<std::shared_ptr<QueryEngineStatisticListener>> queryEngineListeners;
     std::vector<std::shared_ptr<SystemEventListener>> systemListeners;
+    std::vector<std::shared_ptr<BufferManagerStatisticListener>> bufferManagerListeners;
 };
 }

@@ -182,7 +182,7 @@ void GoogleEventTracePrinter::threadRoutine(const std::stop_token& token)
                     auto args = nlohmann::json::object();
                     args["size"] = recycleBufferEvent.bufferSize;
                     auto traceEvent = createTraceEvent(
-                        fmt::format("Recycle pooled buffer of size {}", recycleBufferEvent.bufferSize),
+                        fmt::format("Recycle pooled buffer: creator {}, size {}", recycleBufferEvent.creatorId, recycleBufferEvent.bufferSize),
                         Category::BufferManager,
                         Phase::Instant,
                         //todo adjust
@@ -206,7 +206,6 @@ void GoogleEventTracePrinter::threadRoutine(const std::stop_token& token)
                         fmt::format("Get pooled buffer of size {}", getBufferEvent.bufferSize),
                         Category::BufferManager,
                         Phase::Instant,
-                        //todo adjust
                         timestampToMicroseconds(getBufferEvent.timestamp),
                         0,
                         args);

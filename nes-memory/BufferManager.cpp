@@ -42,7 +42,6 @@ BufferManager::BufferManager(
     Private,
     const uint32_t bufferSize,
     const uint32_t numOfBuffers,
-    std::shared_ptr<BufferManagerStatisticListener> statistic,
     std::shared_ptr<std::pmr::memory_resource> memoryResource,
     const uint32_t withAlignment)
     : availableBuffers(numOfBuffers)
@@ -58,11 +57,10 @@ BufferManager::BufferManager(
 std::shared_ptr<BufferManager> BufferManager::create(
     uint32_t bufferSize,
     uint32_t numOfBuffers,
-    std::shared_ptr<BufferManagerStatisticListener> statistic,
     const std::shared_ptr<std::pmr::memory_resource>& memoryResource,
     uint32_t withAlignment)
 {
-    return std::make_shared<BufferManager>(Private{}, bufferSize, numOfBuffers, statistic, memoryResource, withAlignment);
+    return std::make_shared<BufferManager>(Private{}, bufferSize, numOfBuffers, memoryResource, withAlignment);
 }
 
 BufferManager::~BufferManager()
@@ -166,9 +164,9 @@ void BufferManager::initialize(uint32_t withAlignment)
     NES_DEBUG("BufferManager configuration bufferSize={} numOfBuffers={}", this->bufferSize, this->numOfBuffers);
 }
 
-TupleBuffer BufferManager::getBufferBlocking(BufferCreatorId creatorId)
+TupleBuffer BufferManager::getBufferBlocking()
 {
-    auto buffer = getBufferWithTimeout(GET_BUFFER_TIMEOUT, creatorId);
+    auto buffer = getBufferWithTimeout(GET_BUFFER_TIMEOUT);
     if (buffer.has_value())
     {
         return buffer.value();
@@ -177,21 +175,21 @@ TupleBuffer BufferManager::getBufferBlocking(BufferCreatorId creatorId)
     throw BufferAllocationFailure("Global buffer pool could not allocate buffer before timeout({})", GET_BUFFER_TIMEOUT);
 }
 
-std::optional<TupleBuffer> BufferManager::getBufferNoBlocking(BufferCreatorId creatorId)
+std::optional<TupleBuffer> BufferManager::getBufferNoBlocking()
 {
     detail::MemorySegment* memSegment = nullptr;
     if (!availableBuffers.read(memSegment))
     {
         return std::nullopt;
     }
-    if (memSegment->controlBlock->prepare(shared_from_this(), creatorId))
+    if (memSegment->controlBlock->prepare(shared_from_this()))
     {
         return TupleBuffer(memSegment->controlBlock.get(), memSegment->ptr, memSegment->size);
     }
     throw InvalidRefCountForBuffer("[BufferManager] got buffer with invalid reference counter");
 }
 
-std::optional<TupleBuffer> BufferManager::getBufferWithTimeout(const std::chrono::milliseconds timeoutMs, BufferCreatorId creatorId)
+std::optional<TupleBuffer> BufferManager::getBufferWithTimeout(const std::chrono::milliseconds timeoutMs)
 {
     detail::MemorySegment* memSegment = nullptr;
     const auto deadline = std::chrono::steady_clock::now() + timeoutMs;
@@ -199,30 +197,20 @@ std::optional<TupleBuffer> BufferManager::getBufferWithTimeout(const std::chrono
     {
         return std::nullopt;
     }
-    if (memSegment->controlBlock->prepare(shared_from_this(), creatorId))
+    if (memSegment->controlBlock->prepare(shared_from_this()))
     {
-        if (statistic)
-        {
-            INVARIANT(creatorId.has_value(), "Recycling buffer callback invoked on used memory segment");
-            statistic->onEvent(GetPooledBufferEvent(memSegment->size, creatorId));
-        }
         return TupleBuffer(memSegment->controlBlock.get(), memSegment->ptr, memSegment->size);
     }
     throw InvalidRefCountForBuffer("[BufferManager] got buffer with invalid reference counter");
 }
 
-std::optional<TupleBuffer> BufferManager::getUnpooledBuffer(const size_t bufferSize, BufferCreatorId creatorId)
+std::optional<TupleBuffer> BufferManager::getUnpooledBuffer(const size_t bufferSize)
 {
-    return unpooledChunksManager->getUnpooledBuffer(bufferSize, DEFAULT_ALIGNMENT, shared_from_this(), statistic, creatorId);
+    return unpooledChunksManager->getUnpooledBuffer(bufferSize, DEFAULT_ALIGNMENT, shared_from_this());
 }
 
 void BufferManager::recyclePooledBuffer(detail::MemorySegment* segment)
 {
-    if (statistic)
-    {
-        INVARIANT(segment->controlBlock->getCreatorId().has_value(), "Recycling buffer callback invoked on used memory segment");
-        statistic->onEvent(RecyclePooledBufferEvent(segment->size, segment->controlBlock->getCreatorId()));
-    }
     INVARIANT(segment->isAvailable(), "Recycling buffer callback invoked on used memory segment");
     INVARIANT(
         segment->controlBlock->owningBufferRecycler == nullptr, "Buffer should not retain a reference to its parent while not in use");

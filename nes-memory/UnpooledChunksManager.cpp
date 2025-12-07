@@ -135,7 +135,7 @@ UnpooledChunksManager::allocateSpace(const std::thread::id threadId, const size_
 }
 
 TupleBuffer
-UnpooledChunksManager::getUnpooledBuffer(const size_t neededSize, size_t alignment, const std::shared_ptr<BufferRecycler>& bufferRecycler, std::shared_ptr<BufferManagerStatisticListener> statistic, BufferCreatorId creatorId)
+UnpooledChunksManager::getUnpooledBuffer(const size_t neededSize, size_t alignment, const std::shared_ptr<BufferRecycler>& bufferRecycler)
 {
     const auto threadId = std::this_thread::get_id();
 
@@ -156,8 +156,8 @@ UnpooledChunksManager::getUnpooledBuffer(const size_t neededSize, size_t alignme
         [copyOfMemoryResource = this->memoryResource,
          copyOLastChunkPtr = localKeyForUnpooledBufferChunk,
          copyOfChunk = chunk,
-         copyOfAlignment = alignment,
-         statistic](detail::MemorySegment* memorySegment, BufferRecycler*)
+         copyOfAlignment = alignment
+         ](detail::MemorySegment* memorySegment, BufferRecycler*)
         {
             auto lockedLocalUnpooledBufferData = copyOfChunk->wlock();
             auto& curUnpooledChunk = lockedLocalUnpooledBufferData->chunks[copyOLastChunkPtr];
@@ -187,7 +187,7 @@ UnpooledChunksManager::getUnpooledBuffer(const size_t neededSize, size_t alignme
         lockedLocalUnpooledBufferData->emplaceChunkControlBlock(localKeyForUnpooledBufferChunk, std::move(memSegment));
     }
 
-    if (leakedMemSegment->controlBlock->prepare(bufferRecycler, creatorId))
+    if (leakedMemSegment->controlBlock->prepare(bufferRecycler))
     {
         return TupleBuffer(leakedMemSegment->controlBlock.get(), leakedMemSegment->ptr, neededSize);
     }

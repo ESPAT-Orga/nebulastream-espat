@@ -108,6 +108,7 @@ public:
 private:
     std::shared_ptr<AbstractBufferProvider> bufferManager;
     BufferCreatorId creatorId;
+    std::shared_ptr<BufferManagerStatisticListener> statistic;
 };
 
 

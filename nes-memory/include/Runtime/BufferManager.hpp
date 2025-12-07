@@ -155,7 +155,6 @@ private:
 
     std::shared_ptr<std::pmr::memory_resource> memoryResource;
     std::atomic<bool> isDestroyed{false};
-    std::shared_ptr<BufferManagerStatisticListener> statistic;
 };
 
 

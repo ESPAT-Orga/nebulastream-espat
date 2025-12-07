@@ -59,7 +59,13 @@ BufferManagerStatCollectWrapper::~BufferManagerStatCollectWrapper() {}
 
 TupleBuffer BufferManagerStatCollectWrapper::getBufferBlocking(BufferCreatorId)
 {
-    return bufferManager->getBufferBlocking(this->creatorId);
+    auto buffer = bufferManager->getBufferBlocking(this->creatorId);
+    if (statistic)
+    {
+        INVARIANT(creatorId.has_value(), "Recycling buffer callback invoked on used memory segment");
+        statistic->onEvent(GetBufferEvent(buffer.getBufferSize(), creatorId));
+    }
+    return buffer;
 }
 
 std::optional<TupleBuffer> BufferManagerStatCollectWrapper::getBufferNoBlocking(BufferCreatorId)
@@ -75,7 +81,16 @@ std::optional<TupleBuffer> BufferManagerStatCollectWrapper::getBufferWithTimeout
 
 std::optional<TupleBuffer> BufferManagerStatCollectWrapper::getUnpooledBuffer(const size_t bufferSize, BufferCreatorId)
 {
-    return bufferManager->getUnpooledBuffer(bufferSize, this->creatorId);
+    auto buffer = bufferManager->getUnpooledBuffer(bufferSize, this->creatorId);
+    if (statistic)
+    {
+        INVARIANT(creatorId.has_value(), "Recycling buffer callback invoked on used memory segment");
+        buffer->setRecycleStatisticsCallback([statistic = this->statistic, size = buffer->getBufferSize(), creatorId = this->creatorId](detail::MemorySegment*)
+        {
+            statistic->onEvent(RecycleUnpooledBufferEvent(size,  creatorId));
+        });
+    }
+    return buffer;
 }
 
 size_t BufferManagerStatCollectWrapper::getBufferSize() const

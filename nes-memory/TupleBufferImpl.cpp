@@ -121,7 +121,7 @@ void fillThreadOwnershipInfo(std::string& threadName, cpptrace::raw_trace& calls
     callstack = cpptrace::raw_trace::current(1);
 }
 #endif
-bool BufferControlBlock::prepare(const std::shared_ptr<BufferRecycler>& recycler, BufferCreatorId creatorId)
+bool BufferControlBlock::prepare(const std::shared_ptr<BufferRecycler>& recycler)
 {
     int32_t expected = 0;
 #ifdef NES_DEBUG_TUPLE_BUFFER_LEAKS
@@ -131,7 +131,6 @@ bool BufferControlBlock::prepare(const std::shared_ptr<BufferRecycler>& recycler
     fillThreadOwnershipInfo(info.threadName, info.callstack);
     owningThreads[std::this_thread::get_id()].emplace_back(info);
 #endif
-    this->creatorId = creatorId;
     if (referenceCounter.compare_exchange_strong(expected, 1))
     {
         const auto previousOwner = std::exchange(this->owningBufferRecycler, recycler);
@@ -197,6 +196,10 @@ bool BufferControlBlock::release()
         const auto recycler = std::move(owningBufferRecycler);
         numberOfTuples = 0;
         recycleCallback(owner, recycler.get());
+        if (recycleStatisticsCallback)
+        {
+            recycleStatisticsCallback.value()(owner);
+        }
         return true;
     }
     else
@@ -311,6 +314,12 @@ std::optional<std::variant<PipelineId, OriginId>> BufferControlBlock::getCreator
 void BufferControlBlock::setCreatorId(std::optional<std::variant<PipelineId, OriginId>> creatorId)
 {
     this->creatorId = creatorId;
+}
+
+
+void BufferControlBlock::setRecycleStatisticsCallback(std::optional<std::function<void(MemorySegment*, BufferRecycler*)>> statisticsCallback)
+{
+    this->recycleStatisticsCallback = std::move(statisticsCallback);
 }
 
 /// -----------------------------------------------------------------------------

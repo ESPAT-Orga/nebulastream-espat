@@ -174,6 +174,12 @@ void TupleBuffer::setOriginId(const OriginId id) noexcept
     controlBlock->setOriginId(id);
 }
 
+void TupleBuffer::setRecycleStatisticsCallback(std::optional<std::function<void(detail::MemorySegment*)>> statisticsCallback)
+{
+    controlBlock->setRecycleStatisticsCallback(std::move(statisticsCallback));
+}
+
+
 VariableSizedAccess::Index TupleBuffer::storeChildBuffer(TupleBuffer& buffer) noexcept
 {
     TupleBuffer empty;

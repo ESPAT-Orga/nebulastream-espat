@@ -26,6 +26,8 @@
 #include <variant>
 #include <Identifiers/Identifiers.hpp>
 #include <Runtime/AbstractBufferProvider.hpp>
+#include <Runtime/BufferManager.hpp>
+#include <Runtime/BufferManagerStatCollectWrapper.hpp>
 #include <Runtime/TupleBuffer.hpp>
 #include <Sources/Source.hpp>
 #include <Sources/SourceReturnType.hpp>
@@ -146,6 +148,14 @@ void dataSourceThread(
     ///NOLINTNEXTLINE(performance-unnecessary-value-param) `jthread` does not allow references
     std::shared_ptr<AbstractBufferProvider> bufferProvider)
 {
+    auto bufferManager = std::dynamic_pointer_cast<BufferManager>(bufferProvider);
+
+    /// check if statistics should be collected
+    if (bufferManager && bufferManager->getBufferManagerStatisticListener())
+    {
+        bufferProvider = std::make_shared<BufferManagerStatCollectWrapper>(bufferManager, originId);
+    }
+
     size_t sequenceNumberGenerator = SequenceNumber::INITIAL;
     const EmitFn dataEmit = [&](TupleBuffer&& buffer, bool shouldAddMetadata)
     {

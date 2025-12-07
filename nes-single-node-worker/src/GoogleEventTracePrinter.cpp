@@ -25,17 +25,19 @@
 #include <tuple>
 #include <utility>
 #include <variant>
+
 #include <Identifiers/Identifiers.hpp>
 #include <Listeners/SystemEventListener.hpp>
+#include <Runtime/BufferManagerStatisticListener.hpp>
+#include <Util/ThreadNaming.hpp>
 #include <Util/Logger/Logger.hpp>
 #include <Util/Overloaded.hpp>
-#include <Util/ThreadNaming.hpp>
 #include <fmt/format.h>
 #include <folly/MPMCQueue.h>
 #include <nlohmann/json.hpp>
 #include <nlohmann/json_fwd.hpp>
 #include <QueryEngineStatisticListener.hpp>
-#include <Runtime/BufferManagerStatisticListener.hpp>
+#include "Runtime/BufferManager.hpp"
 
 namespace NES
 {
@@ -124,7 +126,15 @@ void GoogleEventTracePrinter::writeTraceFooter()
     }
 }
 
-
+std::string creatorToString(BufferCreatorId id)
+{
+    auto value = id.value();
+    if (std::holds_alternative<OriginId>(value))
+    {
+        return "source " + std::get<OriginId>(value).toString();
+    }
+    return "pipeline " + std::get<PipelineId>(value).toString();
+}
 
 void GoogleEventTracePrinter::emitBufferUsagePeriods(
     std::vector<BufferManagerChange> bufferManagerChanges, std::function<void(const nlohmann::json& evt)> emit, std::string label)
@@ -143,7 +153,7 @@ void GoogleEventTracePrinter::emitBufferUsagePeriods(
             auto args = nlohmann::json::object();
             args["size"] = memoryInUse;
             auto traceEvent = createTraceEvent(
-                fmt::format("Mem {} creator {}: {} ({})", label, change->creatorId, memoryInUse, memSliceCount),
+                fmt::format("Mem {}, {}: {} ({})", label, creatorToString(change->creatorId), memoryInUse, memSliceCount),
                 Category::BufferManager,
                 Phase::End,
                 timestampToMicroseconds(change->timestamp),
@@ -169,7 +179,7 @@ void GoogleEventTracePrinter::emitBufferUsagePeriods(
             auto args = nlohmann::json::object();
             args["size"] = memoryInUse;
             auto traceEvent = createTraceEvent(
-                fmt::format(" Mem {} creator {}: {} ({})", label, change->creatorId, memoryInUse, memSliceCount),
+                fmt::format(" Mem {}, {}: {} ({})", label, creatorToString(change->creatorId), memoryInUse, memSliceCount),
                 Category::BufferManager,
                 Phase::Begin,
                 timestampToMicroseconds(change->timestamp),
@@ -181,6 +191,8 @@ void GoogleEventTracePrinter::emitBufferUsagePeriods(
         }
     }
 }
+
+
 
 void GoogleEventTracePrinter::threadRoutine(const std::stop_token& token)
 {
@@ -218,7 +230,7 @@ void GoogleEventTracePrinter::threadRoutine(const std::stop_token& token)
                     auto args = nlohmann::json::object();
                     args["size"] = getBufferEvent.bufferSize;
                     auto traceEvent = createTraceEvent(
-                        fmt::format("Get unpooled buffer: creator {}, size {}", getBufferEvent.creatorId, getBufferEvent.bufferSize),
+                        fmt::format("Get unpooled buffer: {}, size {}", creatorToString(getBufferEvent.creatorId), getBufferEvent.bufferSize),
                         Category::BufferManager,
                         Phase::Instant,
                         timestampToMicroseconds(getBufferEvent.timestamp),
@@ -235,7 +247,7 @@ void GoogleEventTracePrinter::threadRoutine(const std::stop_token& token)
                     auto args = nlohmann::json::object();
                     args["size"] = recycleBufferEvent.bufferSize;
                     auto traceEvent = createTraceEvent(
-                        fmt::format("Recycle unpooled buffer: creator {}, size {}", recycleBufferEvent.creatorId, recycleBufferEvent.bufferSize),
+                        fmt::format("Recycle unpooled buffer: creator {}, size {}", creatorToString(recycleBufferEvent.creatorId), recycleBufferEvent.bufferSize),
                         Category::BufferManager,
                         Phase::Instant,
                         timestampToMicroseconds(recycleBufferEvent.timestamp),

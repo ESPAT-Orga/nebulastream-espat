@@ -34,13 +34,13 @@
 #include <nlohmann/json_fwd.hpp>
 #include <Thread.hpp>
 
-template <typename Var1, typename Var2>
+template <typename Var1, typename Var2, typename... Ts3>
 struct FlattenVariant;
 
-template <typename... Ts1, typename... Ts2>
-struct FlattenVariant<std::variant<Ts1...>, std::variant<Ts2...>>
+template <typename... Ts1, typename... Ts2, typename... Ts3>
+struct FlattenVariant<std::variant<Ts1...>, std::variant<Ts2...>, std::variant<Ts3...>>
 {
-    using type = std::variant<Ts1..., Ts2...>;
+    using type = std::variant<Ts1..., Ts2..., Ts3...>;
 };
 
 namespace NES
@@ -49,9 +49,10 @@ namespace NES
 /// chrome://tracing/ interface for performance analysis (or any other event trace visualizer)
 struct GoogleEventTracePrinter final : StatisticListener
 {
-    using CombinedEventType = FlattenVariant<SystemEvent, Event>::type;
+    using CombinedEventType = FlattenVariant<SystemEvent, Event, BufferManagerEvent>::type;
     void onEvent(Event event) override;
     void onEvent(SystemEvent event) override;
+    void onEvent(BufferManagerEvent event) override;
 
     /// Constructs a GoogleEventTracePrinter that writes to the specified file path
     /// @param path The file path where the trace will be written
@@ -72,7 +73,8 @@ private:
         Query,
         Pipeline,
         Task,
-        System
+        System,
+        BufferManager
     };
 
     enum class Phase : int
@@ -80,6 +82,20 @@ private:
         Begin,
         End,
         Instant
+    };
+
+    enum class BufferManagerAction
+    {
+        GetBuffer,
+        RecycleBuffer
+    };
+
+    struct BufferManagerChange
+    {
+        BufferManagerAction action;
+        BufferCreatorId creatorId;
+        size_t bufferSize;
+        ChronoClock::time_point timestamp;
     };
 
     static uint64_t timestampToMicroseconds(const std::chrono::system_clock::time_point& timestamp);
@@ -91,6 +107,9 @@ private:
     void threadRoutine(const std::stop_token& token);
     void writeTraceHeader();
     void writeTraceFooter();
+
+    void emitBufferUsagePeriods(
+        std::vector<BufferManagerChange> bufferManagerChanges, std::function<void(const nlohmann::json& evt)> emit, std::string label);
 
     std::ofstream file;
     folly::MPMCQueue<CombinedEventType> events{QUEUE_LENGTH};

@@ -168,13 +168,6 @@ UnpooledChunksManager::getUnpooledBuffer(const size_t neededSize, size_t alignme
             curUnpooledChunk.activeMemorySegments -= 1;
             memorySegment->size = 0;
 
-
-            if (statistic)
-            {
-                INVARIANT(memorySegment->controlBlock->getCreatorId().has_value(), "Recycling buffer callback invoked on used memory segment");
-                statistic->onEvent(RecycleUnpooledBufferEvent(memorySegment->size,  memorySegment->controlBlock->getCreatorId()));
-            }
-
             if (curUnpooledChunk.activeMemorySegments == 0)
             {
                 /// All memory segments have been removed, therefore, we can deallocate the unpooled chunk

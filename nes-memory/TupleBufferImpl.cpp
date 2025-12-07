@@ -306,18 +306,7 @@ void BufferControlBlock::setOriginId(const OriginId originId)
     this->originId = originId;
 }
 
-std::optional<std::variant<PipelineId, OriginId>> BufferControlBlock::getCreatorId() const noexcept
-{
-    return creatorId;
-}
-
-void BufferControlBlock::setCreatorId(std::optional<std::variant<PipelineId, OriginId>> creatorId)
-{
-    this->creatorId = creatorId;
-}
-
-
-void BufferControlBlock::setRecycleStatisticsCallback(std::optional<std::function<void(MemorySegment*, BufferRecycler*)>> statisticsCallback)
+void BufferControlBlock::setRecycleStatisticsCallback(std::optional<std::function<void(MemorySegment*)>> statisticsCallback)
 {
     this->recycleStatisticsCallback = std::move(statisticsCallback);
 }

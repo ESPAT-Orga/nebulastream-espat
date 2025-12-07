@@ -112,7 +112,7 @@ public:
     void setOriginId(OriginId originId);
     [[nodiscard]] BufferCreatorId getCreatorId() const noexcept;
     void setCreatorId(BufferCreatorId creatorId);
-    void setRecycleStatisticsCallback(std::optional<std::function<void(MemorySegment*, BufferRecycler*)>> statisticsCallback);
+    void setRecycleStatisticsCallback(std::optional<std::function<void(MemorySegment*)>> statisticsCallback);
     void setCreationTimestamp(Timestamp timestamp);
     [[nodiscard]] Timestamp getCreationTimestamp() const noexcept;
     [[nodiscard]] VariableSizedAccess::Index storeChildBuffer(BufferControlBlock* control);

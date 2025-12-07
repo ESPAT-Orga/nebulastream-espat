@@ -198,7 +198,7 @@ void GoogleEventTracePrinter::threadRoutine(const std::stop_token& token)
 
                     emit(traceEvent);
                 },
-                [&](const GetUnpooledBufferEvent& getBufferEvent)
+                [&](const GetPooledBufferEvent& getBufferEvent)
                 {
                     auto args = nlohmann::json::object();
                     args["size"] = getBufferEvent.bufferSize;

@@ -74,6 +74,7 @@ public:
         Private,
         uint32_t bufferSize,
         uint32_t numOfBuffers,
+        std::shared_ptr<BufferManagerStatisticListener> statisticListener,
         std::shared_ptr<std::pmr::memory_resource> memoryResource,
         uint32_t withAlignment);
 
@@ -85,6 +86,7 @@ public:
     static std::shared_ptr<BufferManager> create(
         uint32_t bufferSize = DEFAULT_BUFFER_SIZE,
         uint32_t numOfBuffers = DEFAULT_NUMBER_OF_BUFFERS,
+        std::shared_ptr<BufferManagerStatisticListener> statisticListener = nullptr,
         const std::shared_ptr<std::pmr::memory_resource>& memoryResource = std::make_shared<NesDefaultMemoryAllocator>(),
         uint32_t withAlignment = DEFAULT_ALIGNMENT);
 
@@ -104,10 +106,10 @@ private:
 
 public:
     /// This blocks until a buffer is available.
-    TupleBuffer getBufferBlocking(BufferCreatorId creatorId = std::nullopt) override;
+    TupleBuffer getBufferBlocking() override;
 
     /// invalid optional if there is no buffer.
-    std::optional<TupleBuffer> getBufferNoBlocking(BufferCreatorId creatorId = std::nullopt) override;
+    std::optional<TupleBuffer> getBufferNoBlocking() override;
 
     /**
      * @brief Returns a new Buffer wrapped in an optional or an invalid option if there is no buffer available within
@@ -116,9 +118,9 @@ public:
      * @param creatorId the source or pipeline requesting the buffer
      * @return a new buffer
      */
-    std::optional<TupleBuffer> getBufferWithTimeout(std::chrono::milliseconds timeoutMs, BufferCreatorId creatorId = std::nullopt) override;
+    std::optional<TupleBuffer> getBufferWithTimeout(std::chrono::milliseconds timeoutMs) override;
 
-    std::optional<TupleBuffer> getUnpooledBuffer(size_t bufferSize, BufferCreatorId creatorId = std::nullopt) override;
+    std::optional<TupleBuffer> getUnpooledBuffer(size_t bufferSize) override;
 
 
     size_t getBufferSize() const override;
@@ -153,6 +155,7 @@ private:
 
     std::shared_ptr<std::pmr::memory_resource> memoryResource;
     std::atomic<bool> isDestroyed{false};
+    std::shared_ptr<BufferManagerStatisticListener> statisticListener;
 };
 
 

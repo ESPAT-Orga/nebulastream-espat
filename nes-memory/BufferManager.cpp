@@ -42,6 +42,7 @@ BufferManager::BufferManager(
     Private,
     const uint32_t bufferSize,
     const uint32_t numOfBuffers,
+    std::shared_ptr<BufferManagerStatisticListener> statisticListener,
     std::shared_ptr<std::pmr::memory_resource> memoryResource,
     const uint32_t withAlignment)
     : availableBuffers(numOfBuffers)
@@ -49,6 +50,7 @@ BufferManager::BufferManager(
     , bufferSize(bufferSize)
     , numOfBuffers(numOfBuffers)
     , memoryResource(std::move(memoryResource))
+    , statisticListener(statisticListener)
 {
     ((void)withAlignment);
     initialize(DEFAULT_ALIGNMENT);
@@ -57,10 +59,11 @@ BufferManager::BufferManager(
 std::shared_ptr<BufferManager> BufferManager::create(
     uint32_t bufferSize,
     uint32_t numOfBuffers,
+    std::shared_ptr<BufferManagerStatisticListener> statisticListener,
     const std::shared_ptr<std::pmr::memory_resource>& memoryResource,
     uint32_t withAlignment)
 {
-    return std::make_shared<BufferManager>(Private{}, bufferSize, numOfBuffers, memoryResource, withAlignment);
+    return std::make_shared<BufferManager>(Private{}, bufferSize, numOfBuffers, statisticListener, memoryResource, withAlignment);
 }
 
 BufferManager::~BufferManager()

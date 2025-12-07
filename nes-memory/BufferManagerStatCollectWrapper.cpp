@@ -47,16 +47,6 @@ BufferManagerStatCollectWrapper::BufferManagerStatCollectWrapper(
         BufferCreatorId creatorId )
 : bufferManager (bufferManager), creatorId (creatorId) {}
 
-// std::shared_ptr<BufferManager> BufferManagerStatCollectWrapper::create(
-//     uint32_t bufferSize,
-//     uint32_t numOfBuffers,
-//     std::shared_ptr<BufferManagerStatisticListener> statistic,
-//     const std::shared_ptr<std::pmr::memory_resource>& memoryResource,
-//     uint32_t withAlignment, BufferCreatorId creatorId)
-// {
-//     return std::make_shared<BufferManagerStatCollectWrapper>(Private{}, bufferSize, numOfBuffers, statistic, memoryResource, withAlignment, creatorId);
-// }
-
 BufferManagerStatCollectWrapper::~BufferManagerStatCollectWrapper() {}
 
 void BufferManagerStatCollectWrapper::collectPooledBufferStatistics(TupleBuffer buffer)

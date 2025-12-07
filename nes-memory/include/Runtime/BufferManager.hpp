@@ -74,7 +74,6 @@ public:
         Private,
         uint32_t bufferSize,
         uint32_t numOfBuffers,
-        std::shared_ptr<BufferManagerStatisticListener> statistic,
         std::shared_ptr<std::pmr::memory_resource> memoryResource,
         uint32_t withAlignment);
 
@@ -86,7 +85,6 @@ public:
     static std::shared_ptr<BufferManager> create(
         uint32_t bufferSize = DEFAULT_BUFFER_SIZE,
         uint32_t numOfBuffers = DEFAULT_NUMBER_OF_BUFFERS,
-        std::shared_ptr<BufferManagerStatisticListener> statistic = nullptr,
         const std::shared_ptr<std::pmr::memory_resource>& memoryResource = std::make_shared<NesDefaultMemoryAllocator>(),
         uint32_t withAlignment = DEFAULT_ALIGNMENT);
 

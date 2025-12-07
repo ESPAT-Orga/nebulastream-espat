@@ -50,7 +50,6 @@ BufferManager::BufferManager(
     , bufferSize(bufferSize)
     , numOfBuffers(numOfBuffers)
     , memoryResource(std::move(memoryResource))
-   , statistic(statistic)
 {
     ((void)withAlignment);
     initialize(DEFAULT_ALIGNMENT);
@@ -187,11 +186,6 @@ std::optional<TupleBuffer> BufferManager::getBufferNoBlocking(BufferCreatorId cr
     }
     if (memSegment->controlBlock->prepare(shared_from_this(), creatorId))
     {
-        if (statistic)
-        {
-            INVARIANT(creatorId.has_value(), "Recycling buffer callback invoked on used memory segment");
-            statistic->onEvent(GetPooledBufferEvent(memSegment->size, creatorId));
-        }
         return TupleBuffer(memSegment->controlBlock.get(), memSegment->ptr, memSegment->size);
     }
     throw InvalidRefCountForBuffer("[BufferManager] got buffer with invalid reference counter");

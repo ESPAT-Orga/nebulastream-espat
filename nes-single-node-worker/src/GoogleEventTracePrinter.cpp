@@ -124,18 +124,63 @@ void GoogleEventTracePrinter::writeTraceFooter()
     }
 }
 
-enum class BufferManagerAction
-{
-    GetBuffer,
-    RecycleBuffer
-};
 
-struct BufferManagerChange
+
+void GoogleEventTracePrinter::emitBufferUsagePeriods(
+    std::vector<BufferManagerChange> bufferManagerChanges, std::function<void(const nlohmann::json& evt)> emit)
 {
-    BufferManagerAction action;
-    size_t bufferSize;
-    ChronoClock::time_point timestamp;
-};
+    std::sort(
+        bufferManagerChanges.begin(),
+        bufferManagerChanges.end(),
+        [](const BufferManagerChange& lhs, const BufferManagerChange& rhs) { return lhs.timestamp < rhs.timestamp; });
+
+    int memoryInUse = 0;
+    size_t memSliceCount = 0;
+    for (auto change = bufferManagerChanges.begin(); change != bufferManagerChanges.end(); ++change)
+    {
+        if (change > bufferManagerChanges.begin())
+        {
+            auto args = nlohmann::json::object();
+            args["size"] = memoryInUse;
+            auto traceEvent = createTraceEvent(
+                fmt::format("Used Mem Pooled {} ({})", memoryInUse, memSliceCount),
+                Category::BufferManager,
+                Phase::End,
+                timestampToMicroseconds(change->timestamp),
+                0,
+                args);
+            traceEvent["tid"] = 0; /// System thread
+
+            emit(traceEvent);
+        }
+
+        if (change->action == BufferManagerAction::RecycleBuffer)
+        {
+            memoryInUse -= change->bufferSize;
+        }
+        else
+        {
+            memoryInUse += change->bufferSize;
+        }
+
+        memSliceCount++;
+        if (change < bufferManagerChanges.end() - 1)
+        {
+            auto args = nlohmann::json::object();
+            args["size"] = memoryInUse;
+            auto traceEvent = createTraceEvent(
+                fmt::format(" Mem {} ({})", memoryInUse, memSliceCount),
+                Category::BufferManager,
+                Phase::Begin,
+                timestampToMicroseconds(change->timestamp),
+                0,
+                args);
+            traceEvent["tid"] = 0; /// System thread
+
+            emit(traceEvent);
+        }
+    }
+}
 
 void GoogleEventTracePrinter::threadRoutine(const std::stop_token& token)
 {
@@ -143,7 +188,8 @@ void GoogleEventTracePrinter::threadRoutine(const std::stop_token& token)
     writeTraceHeader();
 
     bool firstEvent = true;
-    std::vector<BufferManagerChange> bufferManagerChanges;
+    std::vector<BufferManagerChange> pooledBufferChanges;
+    std::vector<BufferManagerChange> unpooledBufferChanges;
 
     /// Helper function to emit events with proper comma handling
     auto emit = [&](const nlohmann::json& evt)
@@ -169,13 +215,40 @@ void GoogleEventTracePrinter::threadRoutine(const std::stop_token& token)
             Overloaded{
                 [&](const GetUnpooledBufferEvent& getBufferEvent)
                 {
-                    //Todo: implement
-                    (void) getBufferEvent;
+                    auto args = nlohmann::json::object();
+                    args["size"] = getBufferEvent.bufferSize;
+                    auto traceEvent = createTraceEvent(
+                        fmt::format("Get unpooled buffer: creator {}, size {}", getBufferEvent.creatorId, getBufferEvent.bufferSize),
+                        Category::BufferManager,
+                        Phase::Instant,
+                        timestampToMicroseconds(getBufferEvent.timestamp),
+                        0,
+                        args);
+                    traceEvent["tid"] = 0; /// System thread
+
+                    emit(traceEvent);
+
+                    unpooledBufferChanges.emplace_back(BufferManagerAction::GetBuffer, getBufferEvent.bufferSize, getBufferEvent.timestamp);
                 },
                 [&](const RecycleUnpooledBufferEvent& recycleBufferEvent)
                 {
-                    //Todo: implement
-                    (void) recycleBufferEvent;
+                    auto args = nlohmann::json::object();
+                    args["size"] = recycleBufferEvent.bufferSize;
+                    auto traceEvent = createTraceEvent(
+                        fmt::format("Recycle unpooled buffer: creator {}, size {}", recycleBufferEvent.creatorId, recycleBufferEvent.bufferSize),
+                        Category::BufferManager,
+                        Phase::Instant,
+                        timestampToMicroseconds(recycleBufferEvent.timestamp),
+                        0,
+                        args);
+                    traceEvent["tid"] = 0; /// System thread
+
+                    unpooledBufferChanges.emplace_back(
+                        BufferManagerAction::RecycleBuffer,
+                        recycleBufferEvent.bufferSize,
+                        recycleBufferEvent.timestamp);
+
+                    emit(traceEvent);
                 },
                 [&](const RecyclePooledBufferEvent& recycleBufferEvent)
                 {
@@ -191,7 +264,7 @@ void GoogleEventTracePrinter::threadRoutine(const std::stop_token& token)
                         args);
                     traceEvent["tid"] = 0; /// System thread
 
-                    bufferManagerChanges.emplace_back(
+                    pooledBufferChanges.emplace_back(
                         BufferManagerAction::RecycleBuffer,
                         recycleBufferEvent.bufferSize,
                         recycleBufferEvent.timestamp);
@@ -203,7 +276,7 @@ void GoogleEventTracePrinter::threadRoutine(const std::stop_token& token)
                     auto args = nlohmann::json::object();
                     args["size"] = getBufferEvent.bufferSize;
                     auto traceEvent = createTraceEvent(
-                        fmt::format("Get pooled buffer of size {}", getBufferEvent.bufferSize),
+                        fmt::format("Get pooled buffer: creator {}, size {}", getBufferEvent.creatorId, getBufferEvent.bufferSize),
                         Category::BufferManager,
                         Phase::Instant,
                         timestampToMicroseconds(getBufferEvent.timestamp),
@@ -213,7 +286,7 @@ void GoogleEventTracePrinter::threadRoutine(const std::stop_token& token)
 
                     emit(traceEvent);
 
-                    bufferManagerChanges.emplace_back(BufferManagerAction::GetBuffer, getBufferEvent.bufferSize, getBufferEvent.timestamp);
+                    pooledBufferChanges.emplace_back(BufferManagerAction::GetBuffer, getBufferEvent.bufferSize, getBufferEvent.timestamp);
                 },
                 [&](const SubmitQuerySystemEvent& submitEvent)
                 {
@@ -457,56 +530,8 @@ void GoogleEventTracePrinter::threadRoutine(const std::stop_token& token)
             event);
     }
 
-    std::sort(
-        bufferManagerChanges.begin(),
-        bufferManagerChanges.end(),
-        [](const BufferManagerChange& lhs, const BufferManagerChange& rhs) { return lhs.timestamp < rhs.timestamp; });
-
-    int memoryInUse = 0;
-    size_t memSliceCount = 0;
-    for (auto change = bufferManagerChanges.begin(); change != bufferManagerChanges.end(); ++change)
-    {
-        if (change > bufferManagerChanges.begin())
-        {
-            auto args = nlohmann::json::object();
-            args["size"] = memoryInUse;
-            auto traceEvent = createTraceEvent(
-                fmt::format("Used Mem Pooled {} ({})", memoryInUse, memSliceCount),
-                Category::BufferManager,
-                Phase::End,
-                timestampToMicroseconds(change->timestamp),
-                0,
-                args);
-            traceEvent["tid"] = 0; /// System thread
-
-            emit(traceEvent);
-        }
-
-        if (change->action == BufferManagerAction::RecycleBuffer)
-        {
-            memoryInUse -= change->bufferSize;
-        } else
-        {
-            memoryInUse += change->bufferSize;
-        }
-
-        memSliceCount++;
-        if (change < bufferManagerChanges.end() - 1)
-        {
-            auto args = nlohmann::json::object();
-            args["size"] = memoryInUse;
-            auto traceEvent = createTraceEvent(
-                fmt::format(" Mem {} ({})", memoryInUse, memSliceCount),
-                Category::BufferManager,
-                Phase::Begin,
-                timestampToMicroseconds(change->timestamp),
-                0,
-                args);
-            traceEvent["tid"] = 0; /// System thread
-
-            emit(traceEvent);
-        }
-    }
+    emitBufferUsagePeriods(pooledBufferChanges, emit);
+    emitBufferUsagePeriods(unpooledBufferChanges, emit);
 
     /// Write the footer when the thread stops
     writeTraceFooter();

@@ -83,6 +83,20 @@ private:
         Instant
     };
 
+
+    enum class BufferManagerAction
+    {
+        GetBuffer,
+        RecycleBuffer
+    };
+
+    struct BufferManagerChange
+    {
+        BufferManagerAction action;
+        size_t bufferSize;
+        ChronoClock::time_point timestamp;
+    };
+
     static uint64_t timestampToMicroseconds(const std::chrono::system_clock::time_point& timestamp);
 
     static nlohmann::json createTraceEvent(
@@ -92,6 +106,9 @@ private:
     void threadRoutine(const std::stop_token& token);
     void writeTraceHeader();
     void writeTraceFooter();
+
+    void emitBufferUsagePeriods(
+        std::vector<BufferManagerChange> bufferManagerChanges, std::function<void(const nlohmann::json& evt)> emit);
 
     std::ofstream file;
     folly::MPMCQueue<CombinedEventType> events{QUEUE_LENGTH};

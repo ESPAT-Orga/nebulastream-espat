@@ -169,6 +169,7 @@ public:
 
     [[nodiscard]] OriginId getOriginId() const noexcept;
     void setOriginId(OriginId id) noexcept;
+    void setRecycleStatisticsCallback(std::optional<std::function<void(detail::MemorySegment*)>> statisticsCallback);
 
     ///@brief attach a child tuple buffer to the parent. the child tuple buffer is then identified via NestedTupleBufferKey
     [[nodiscard]] VariableSizedAccess::Index storeChildBuffer(TupleBuffer& buffer) noexcept;

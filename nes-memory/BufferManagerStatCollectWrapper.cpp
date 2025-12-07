@@ -26,10 +26,12 @@
 #include <optional>
 #include <utility>
 #include <unistd.h>
+
 #include <Runtime/AbstractBufferProvider.hpp>
 #include <Runtime/BufferRecycler.hpp>
 #include <Runtime/TupleBuffer.hpp>
 #include <Util/Logger/Logger.hpp>
+#include <boost/asio/buffer.hpp>
 #include <folly/MPMCQueue.h>
 #include <gmock/internal/gmock-internal-utils.h>
 
@@ -57,30 +59,45 @@ BufferManagerStatCollectWrapper::BufferManagerStatCollectWrapper(
 
 BufferManagerStatCollectWrapper::~BufferManagerStatCollectWrapper() {}
 
-TupleBuffer BufferManagerStatCollectWrapper::getBufferBlocking(BufferCreatorId)
+void BufferManagerStatCollectWrapper::collectPooledBufferStatistics(TupleBuffer buffer)
 {
-    auto buffer = bufferManager->getBufferBlocking(this->creatorId);
     if (statistic)
     {
         INVARIANT(creatorId.has_value(), "Recycling buffer callback invoked on used memory segment");
-        statistic->onEvent(GetBufferEvent(buffer.getBufferSize(), creatorId));
+        statistic->onEvent(GetPooledBufferEvent(buffer.getBufferSize(), creatorId));
         buffer.setRecycleStatisticsCallback([statistic = this->statistic, size = buffer.getBufferSize(), creatorId = this->creatorId](detail::MemorySegment*)
         {
             statistic->onEvent(RecyclePooledBufferEvent(size,  creatorId));
         });
     }
+}
+
+TupleBuffer BufferManagerStatCollectWrapper::getBufferBlocking(BufferCreatorId)
+{
+    auto buffer = bufferManager->getBufferBlocking(this->creatorId);
+    collectPooledBufferStatistics(buffer);
     return buffer;
 }
 
 std::optional<TupleBuffer> BufferManagerStatCollectWrapper::getBufferNoBlocking(BufferCreatorId)
 {
-    return bufferManager->getBufferNoBlocking(this->creatorId);
+    auto buffer = bufferManager->getBufferNoBlocking(this->creatorId);
+    if (buffer)
+    {
+        collectPooledBufferStatistics(buffer.value());
+    }
+    return buffer;
 
 }
 
 std::optional<TupleBuffer> BufferManagerStatCollectWrapper::getBufferWithTimeout(const std::chrono::milliseconds timeoutMs, BufferCreatorId)
 {
-    return bufferManager->getBufferWithTimeout(timeoutMs, this->creatorId);
+    auto buffer = bufferManager->getBufferWithTimeout(timeoutMs, this->creatorId);
+    if (buffer)
+    {
+        collectPooledBufferStatistics(buffer.value());
+    }
+    return buffer;
 }
 
 std::optional<TupleBuffer> BufferManagerStatCollectWrapper::getUnpooledBuffer(const size_t bufferSize, BufferCreatorId)
@@ -88,6 +105,7 @@ std::optional<TupleBuffer> BufferManagerStatCollectWrapper::getUnpooledBuffer(co
     auto buffer = bufferManager->getUnpooledBuffer(bufferSize, this->creatorId);
     if (buffer && statistic)
     {
+        statistic->onEvent(GetUnpooledBufferEvent(buffer->getBufferSize(), creatorId));
         INVARIANT(creatorId.has_value(), "Recycling buffer callback invoked on used memory segment");
         buffer->setRecycleStatisticsCallback([statistic = this->statistic, size = buffer->getBufferSize(), creatorId = this->creatorId](detail::MemorySegment*)
         {

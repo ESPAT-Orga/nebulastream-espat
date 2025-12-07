@@ -28,11 +28,11 @@ struct BaseBufferManagerEvent
     BufferCreatorId creatorId = std::nullopt;
 };
 
-struct GetBufferEvent : BaseBufferManagerEvent
+struct GetPooledBufferEvent : BaseBufferManagerEvent
 {
-    explicit GetBufferEvent(size_t bufferSize, BufferCreatorId creatorId) : BaseBufferManagerEvent(creatorId), bufferSize(bufferSize){ }
+    explicit GetPooledBufferEvent(size_t bufferSize, BufferCreatorId creatorId) : BaseBufferManagerEvent(creatorId), bufferSize(bufferSize){ }
 
-    GetBufferEvent() = default;
+    GetPooledBufferEvent() = default;
 
     size_t bufferSize{};
 };
@@ -64,7 +64,7 @@ struct RecycleUnpooledBufferEvent : BaseBufferManagerEvent
     size_t bufferSize{};
 };
 
-using BufferManagerEvent = std::variant<GetBufferEvent, RecyclePooledBufferEvent, GetUnpooledBufferEvent, RecycleUnpooledBufferEvent>;
+using BufferManagerEvent = std::variant<GetPooledBufferEvent, RecyclePooledBufferEvent, GetUnpooledBufferEvent, RecycleUnpooledBufferEvent>;
 static_assert(std::is_default_constructible_v<BufferManagerEvent>, "Events should be default constructible");
 
 struct BufferManagerStatisticListener

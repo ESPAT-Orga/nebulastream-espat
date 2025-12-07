@@ -190,7 +190,7 @@ std::optional<TupleBuffer> BufferManager::getBufferNoBlocking(BufferCreatorId cr
         if (statistic)
         {
             INVARIANT(creatorId.has_value(), "Recycling buffer callback invoked on used memory segment");
-            statistic->onEvent(GetBufferEvent(memSegment->size, creatorId));
+            statistic->onEvent(GetPooledBufferEvent(memSegment->size, creatorId));
         }
         return TupleBuffer(memSegment->controlBlock.get(), memSegment->ptr, memSegment->size);
     }
@@ -210,7 +210,7 @@ std::optional<TupleBuffer> BufferManager::getBufferWithTimeout(const std::chrono
         if (statistic)
         {
             INVARIANT(creatorId.has_value(), "Recycling buffer callback invoked on used memory segment");
-            statistic->onEvent(GetBufferEvent(memSegment->size, creatorId));
+            statistic->onEvent(GetPooledBufferEvent(memSegment->size, creatorId));
         }
         return TupleBuffer(memSegment->controlBlock.get(), memSegment->ptr, memSegment->size);
     }

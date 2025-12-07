@@ -106,6 +106,7 @@ public:
     //TODO pull the statistics collection completely into this class, so that we do not have to change anything in the buffer manage itself
 
 private:
+    void collectPooledBufferStatistics(TupleBuffer buffer);
     std::shared_ptr<AbstractBufferProvider> bufferManager;
     BufferCreatorId creatorId;
     std::shared_ptr<BufferManagerStatisticListener> statistic;

@@ -128,7 +128,7 @@ ReservoirSamplePhysicalFunction::lower(nautilus::val<AggregationState*> aggregat
     auto numberOfSeenTuples = readValueFromMemRef<uint64_t>(numberOfSeenTuplesRef);
     auto sampleDataSize = readValueFromMemRef<uint64_t>(sampleDataSizeRef);
 
-    /// Acquiring memory for the sample. We need enough for the sample with its meta data + 4B for storing the size of the
+    /// Acquiring memory for the sample. We need enough for the sample with its meta data  for storing the size of the
     /// variable sized data that doubles as the total size of the synopses
     ReservoirSampleHeaderRef header;
     const auto requiredMemoryInBytes = header.getTotalSize(sampleDataSize);

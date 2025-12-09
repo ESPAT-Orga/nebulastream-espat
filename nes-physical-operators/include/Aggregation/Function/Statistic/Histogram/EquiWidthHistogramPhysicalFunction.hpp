@@ -15,9 +15,16 @@
 #pragma once
 #include <Aggregation/Function/AggregationPhysicalFunction.hpp>
 #include <DataTypes/DataType.hpp>
+#include <Nautilus/Interface/BufferRef/TupleBufferRef.hpp>
 
 namespace NES
 {
+/// Counts occurrences between `minValue` and `maxValue` into `numberOfBins` bins.
+///
+/// Values higher (and lower) are added to the highest bin.
+/// Saves its bins like this: lower bound of bin n, counter of bin n, upper bound of bin n where n=0, ..., numberOfBins
+///
+/// The metadata field has the numberOfBins
 class EquiWidthHistogramPhysicalFunction final : public AggregationPhysicalFunction
 {
 public:
@@ -26,7 +33,8 @@ public:
         DataType resultType,
         PhysicalFunction inputFunction,
         Record::RecordFieldIdentifier resultFieldIdentifier,
-        const std::string_view numberOfSeenTuplesFieldName,
+        std::string_view numberOfSeenTuplesFieldName,
+        DataType counterType,
         uint64_t numberOfBins,
         uint64_t minValue,
         uint64_t maxValue);
@@ -49,10 +57,16 @@ private:
     uint64_t numberOfBins;
     uint64_t minValue;
     uint64_t maxValue;
+    /// Set by constructor and calculated from the values above.
     uint64_t binWidth;
+
     DataType dataTypeCounter;
-    DataType dataTypeLowerUpperBound{DataType::Type::UINT64};
+    DataType dataTypeLowerUpperBound;
+    /// Calculated from the datatypes above.
     uint64_t totalBinSize;
+    /// Calculated from the datatype of upper and lower bound. The offset of the counter from the start of the bin.
     uint64_t counterOffset;
+
+    uint32_t loweredMetaDataSize{sizeof(uint64_t)};
 };
 }

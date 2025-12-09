@@ -21,6 +21,7 @@
 #include <ranges>
 #include <Nautilus/Interface/HashMap/ChainedHashMap/ChainedHashMap.hpp>
 #include <Nautilus/Interface/HashMap/ChainedHashMap/ChainedHashMapRef.hpp>
+#include <Statistic/StatisticProvider.hpp>
 #include <std/cstring.h>
 
 #include <AggregationPhysicalFunctionRegistry.hpp>
@@ -33,6 +34,7 @@ void EquiWidthHistogramPhysicalFunction::lift(
     /// Getting the bin index
     auto value = inputFunction.execute(record, pipelineMemoryProvider.arena);
     auto binIdx = (value.cast<nautilus::val<uint64_t>>() - nautilus::val<uint64_t>{minValue}) / nautilus::val<uint64_t>{binWidth};
+    /// In case of an underflow (value < minValue) they are just also put into the uppermost bin.
     if (binIdx >= numberOfBins)
     {
         /// If the value is maxValue, we would get a bin index that is larger than the number of bins
@@ -59,19 +61,19 @@ void EquiWidthHistogramPhysicalFunction::combine(
 {
     /// We assume that both histograms have the exact same min, max, and number of bins.
     /// Therefore, we can simply iterate through all bins and then sum up their counters
-    auto leftCounterRef = static_cast<nautilus::val<int8_t*>>(aggregationState1) + nautilus::val<uint64_t>{counterOffset};
-    auto rightCounterRef = static_cast<nautilus::val<int8_t*>>(aggregationState2) + nautilus::val<uint64_t>{counterOffset};
+    auto counterRef1 = static_cast<nautilus::val<int8_t*>>(aggregationState1) + nautilus::val<uint64_t>{counterOffset};
+    auto counterRef2 = static_cast<nautilus::val<int8_t*>>(aggregationState2) + nautilus::val<uint64_t>{counterOffset};
 
     for (nautilus::static_val<uint64_t> counterIdx = 0; counterIdx < numberOfBins; ++counterIdx)
     {
-        auto leftCounter = VarVal::readVarValFromMemory(leftCounterRef, dataTypeCounter.type);
-        auto rightCounter = VarVal::readVarValFromMemory(rightCounterRef, dataTypeCounter.type);
-        rightCounter = rightCounter + leftCounter;
-        rightCounter.writeToMemory(leftCounterRef);
+        auto counter1 = VarVal::readVarValFromMemory(counterRef1, dataTypeCounter.type);
+        auto counter2 = VarVal::readVarValFromMemory(counterRef2, dataTypeCounter.type);
+        counter1 = counter2 + counter1;
+        counter1.writeToMemory(counterRef1);
 
         /// Incrementing left and right counter ref
-        leftCounterRef += totalBinSize;
-        rightCounterRef += totalBinSize;
+        counterRef1 += totalBinSize;
+        counterRef2 += totalBinSize;
     }
 
     /// Combining the number of seen tuples of both histograms
@@ -89,26 +91,30 @@ Record
 EquiWidthHistogramPhysicalFunction::lower(nautilus::val<AggregationState*> aggregationState, PipelineMemoryProvider& pipelineMemoryProvider)
 {
     /// Need to acquire new memory, as the current memory for the bins will be deleted.
-    /// We need an additional 4B for the size of the variable sized data, as we store the statistics as var-sized data.
-    const auto histogramMemorySize = getSizeOfStateInBytes() + 4;
+    constexpr auto loweredHeaderSize
+        = StatisticProviderIteratorImpl::sizeOfMetaDataSize + StatisticProviderIteratorImpl::sizeOfTotalAreaSize;
+    const auto histogramMemorySize = getSizeOfStateInBytes() + loweredHeaderSize + loweredMetaDataSize;
     const auto histogramMemory = pipelineMemoryProvider.arena.allocateMemory(histogramMemorySize);
 
     /// Copying all bins to the newly acquired memory and adding the size of the variable sized data (histogram)
-    nautilus::memcpy(histogramMemory + nautilus::val<uint64_t>{4}, aggregationState, getSizeOfStateInBytes());
-    const nautilus::val<uint32_t> sizeOfVariableSizedData{static_cast<uint32_t>(getSizeOfStateInBytes())};
+    const nautilus::val<uint32_t> sizeOfVariableSizedData{static_cast<uint32_t>(histogramMemorySize)};
     VarVal{sizeOfVariableSizedData}.writeToMemory(histogramMemory);
+    VarVal{loweredMetaDataSize}.writeToMemory(histogramMemory + nautilus::val<uint64_t>{4});
+    VarVal{numberOfBins}.writeToMemory(histogramMemory + nautilus::val<uint64_t>{loweredHeaderSize});
+    nautilus::memcpy(
+        histogramMemory + nautilus::val<uint64_t>{loweredHeaderSize} + nautilus::val<uint64_t>{loweredMetaDataSize},
+        aggregationState,
+        getSizeOfStateInBytes());
 
     /// Reading the number of seen tuples
     const auto numberOfSeenTuplesRef
         = static_cast<nautilus::val<int8_t*>>(aggregationState) + nautilus::val<uint64_t>{totalBinSize * numberOfBins};
-    auto numberOfSeenTuples = readValueFromMemRef<uint64_t>(numberOfSeenTuplesRef);
+    const auto numberOfSeenTuples = readValueFromMemRef<uint64_t>(numberOfSeenTuplesRef);
 
     /// Adding the histogram to the result record
     Record record;
     record.write(numberOfSeenTuplesFieldName, numberOfSeenTuples);
-    record.write(
-        resultFieldIdentifier,
-        VariableSizedData{histogramMemory + nautilus::val<uint64_t>{4}, nautilus::val<uint64_t>{getSizeOfStateInBytes()}});
+    record.write(resultFieldIdentifier, VariableSizedData{histogramMemory, nautilus::val<uint64_t>{histogramMemorySize}});
     return record;
 }
 
@@ -117,7 +123,7 @@ void EquiWidthHistogramPhysicalFunction::reset(nautilus::val<AggregationState*> 
     /// Going through all buckets, setting their lower, upper bound and resetting their counter to 0
     auto lowerBoundRef = static_cast<nautilus::val<int8_t*>>(aggregationState);
     auto counterRef = lowerBoundRef + nautilus::val<uint64_t>{counterOffset};
-    auto upperBoundRef = counterRef + nautilus::val<uint64_t>{counterOffset + dataTypeCounter.getSizeInBytes()};
+    auto upperBoundRef = counterRef + nautilus::val<uint64_t>{counterOffset};
     VarVal lowerBound{minValue};
     VarVal upperBound{minValue + binWidth};
     auto counter = VarVal::readVarValFromMemory(counterRef, dataTypeCounter.type);
@@ -160,6 +166,7 @@ EquiWidthHistogramPhysicalFunction::EquiWidthHistogramPhysicalFunction(
     PhysicalFunction inputFunction,
     Record::RecordFieldIdentifier resultFieldIdentifier,
     const std::string_view numberOfSeenTuplesFieldName,
+    DataType counterType,
     const uint64_t numberOfBins,
     const uint64_t minValue,
     const uint64_t maxValue)
@@ -169,7 +176,8 @@ EquiWidthHistogramPhysicalFunction::EquiWidthHistogramPhysicalFunction(
     , minValue(minValue)
     , maxValue(maxValue)
     , binWidth((maxValue - minValue) / numberOfBins)
-    , dataTypeCounter(resultType)
+    , dataTypeCounter(counterType)
+    , dataTypeLowerUpperBound(inputType)
     , totalBinSize((dataTypeCounter.getSizeInBytes() + 2 * dataTypeLowerUpperBound.getSizeInBytes()))
     , counterOffset(dataTypeLowerUpperBound.getSizeInBytes())
 {
@@ -184,6 +192,7 @@ AggregationPhysicalFunctionGeneratedRegistrar::RegisterEquiWidthHistogramAggrega
     AggregationPhysicalFunctionRegistryArguments arguments)
 {
     INVARIANT(arguments.numberOfSeenTuplesFieldName.has_value(), "Number of seen tuples is not set");
+    INVARIANT(arguments.counterType.has_value(), "counterType is not set");
     INVARIANT(arguments.numberOfBins.has_value(), "Number of buckets is not set");
     INVARIANT(arguments.minValue.has_value(), "Min value is not set");
     INVARIANT(arguments.maxValue.has_value(), "Max value is not set");
@@ -194,6 +203,7 @@ AggregationPhysicalFunctionGeneratedRegistrar::RegisterEquiWidthHistogramAggrega
         arguments.inputFunction,
         arguments.resultFieldIdentifier,
         arguments.numberOfSeenTuplesFieldName.value(),
+        arguments.counterType.value(),
         arguments.numberOfBins.value(),
         arguments.minValue.value(),
         arguments.maxValue.value());

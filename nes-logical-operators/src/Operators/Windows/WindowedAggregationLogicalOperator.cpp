@@ -282,14 +282,15 @@ WindowedAggregationLogicalOperator Unreflector<WindowedAggregationLogicalOperato
             name,
             AggregationLogicalFunctionRegistryArguments{
                 .fields = {},
-                .reservoirSize = std::nullopt,
                 .sampleHash = std::nullopt,
+                .numberOfSeenTuplesField = std::nullopt,
+                .reservoirSize = std::nullopt,
                 .histogramNumBuckets = std::nullopt,
                 .histogramMinValue = std::nullopt,
                 .histogramMaxValue = std::nullopt,
+                .histogramCounterType = std::nullopt,
                 .countMinNumColumns = std::nullopt,
                 .countMinNumRows = std::nullopt,
-                .numberOfSeenTuplesField = std::nullopt,
                 .reflected = reflectedAggregation});
         if (!functionOpt.has_value())
         {

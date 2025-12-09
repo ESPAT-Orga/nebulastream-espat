@@ -53,6 +53,7 @@
 #include <Operators/Windows/Aggregations/AvgAggregationLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/CountAggregationLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/Histogram/EquiWidthHistogramLogicalFunction.hpp>
+#include <Operators/Windows/Aggregations/Histogram/EquiWidthHistogramProbeLogicalOperator.hpp>
 #include <Operators/Windows/Aggregations/MaxAggregationLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/MedianAggregationLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/MinAggregationLogicalFunction.hpp>
@@ -502,27 +503,33 @@ void AntlrSQLQueryPlanCreator::exitPrimaryQuery(AntlrSQLParser::PrimaryQueryCont
         queryPlan = LogicalPlanBuilder::addStatisticBuild(
             queryPlan, helpers.top().windowType, helpers.top().windowAggs, helpers.top().groupByFields, logicalStatisticFields);
         const auto windowAggName = helpers.top().windowAggs.front().get()->getName();
+
+        if (not helpers.top().statProbe.has_value())
+        {
+            const auto hash = FieldAccessLogicalFunction{
+                LogicalStatisticFields().statisticHashField.dataType, LogicalStatisticFields().statisticHashField.name};
+            helpers.top().addProjection(std::nullopt, hash);
+            const auto start = FieldAccessLogicalFunction{
+                LogicalStatisticFields().statisticStartTsField.dataType, LogicalStatisticFields().statisticStartTsField.name};
+            helpers.top().addProjection(std::nullopt, start);
+            const auto end = FieldAccessLogicalFunction{
+                LogicalStatisticFields().statisticEndTsField.dataType, LogicalStatisticFields().statisticEndTsField.name};
+            helpers.top().addProjection(std::nullopt, end);
+            const auto numTuples = FieldAccessLogicalFunction{
+                LogicalStatisticFields().statisticNumberOfSeenTuplesField.dataType,
+                LogicalStatisticFields().statisticNumberOfSeenTuplesField.name};
+            helpers.top().addProjection(std::nullopt, numTuples);
+        }
+
         if (windowAggName == "ReservoirSample")
         {
-            auto agg = helpers.top().windowAggs.front();
-            /// This is a hack to get the new projection operator to work.
-            /// The projection operator wants to know which fields its going to project here, in its member projections.
-            /// But as we do not yet know the source's schema, we cannot give it the schema of the sample. So instead we just project all input fields:
-            helpers.top().asterisk = true;
-            if (not helpers.top().statisticHash.has_value())
-            {
-                throw InvalidQuerySyntax("ReservoirSample must have a statistic hash!");
-            }
             queryPlan = LogicalPlanBuilder::addStatisticStoreWriter(
                 queryPlan, logicalStatisticFields, helpers.top().statisticHash.value(), Statistic::StatisticType::Reservoir_Sample);
         }
-        if (windowAggName == "EquiWidthHistogram")
+        else if (windowAggName == "EquiWidthHistogram")
         {
-            /// This is a hack to get the new projection operator to work.
-            /// The projection operator wants to know which fields its going to project here, in its member projections.
-            /// But as we do not yet know the source's schema, we cannot give it the schema of the sample. So instead we just project all input fields:
-            helpers.top().asterisk = true;
-            // TODO We probably know what to project here, so do `helpers.top().addProjection(`.
+            queryPlan = LogicalPlanBuilder::addStatisticStoreWriter(
+                queryPlan, logicalStatisticFields, helpers.top().statisticHash.value(), Statistic::StatisticType::Equi_Width_Histogram);
         }
     }
     else if (helpers.top().isInAggFunction())
@@ -533,13 +540,34 @@ void AntlrSQLQueryPlanCreator::exitPrimaryQuery(AntlrSQLParser::PrimaryQueryCont
     }
     if (helpers.top().statProbe.has_value())
     {
-        auto probe = helpers.top().statProbe.value();
-        queryPlan = LogicalPlanBuilder::addStatProbeOp(helpers.top().statProbe.value(), queryPlan);
-        // TODO Adapt for other probes:
-        auto reservoirProbe = probe.getAs<ReservoirProbeLogicalOperator>();
-        for (auto field : reservoirProbe->sampleSchema)
+        auto op = helpers.top().statProbe.value();
+        queryPlan = LogicalPlanBuilder::addStatProbeOp(op, queryPlan);
+
+        const auto windowStart = FieldAccessLogicalFunction{
+            LogicalStatisticFields().statisticStartTsField.dataType, LogicalStatisticFields().statisticStartTsField.name};
+        const auto windowEnd = FieldAccessLogicalFunction{
+            LogicalStatisticFields().statisticEndTsField.dataType, LogicalStatisticFields().statisticEndTsField.name};
+        helpers.top().addProjection(std::nullopt, windowStart);
+        helpers.top().addProjection(std::nullopt, windowEnd);
+        if (auto probeOpt = op.tryGetAs<ReservoirProbeLogicalOperator>())
         {
-            helpers.top().asterisk = true;
+            const auto probe = probeOpt.value().get();
+            for (auto schemaField : probe.sampleSchema.getFields())
+            {
+                const auto field = FieldAccessLogicalFunction{schemaField.dataType, schemaField.name};
+                helpers.top().addProjection(std::nullopt, field);
+            }
+        }
+        else if (auto probeOpt = op.tryGetAs<EquiWidthHistogramProbeLogicalOperator>())
+        {
+            const auto probe = probeOpt.value().get();
+            const auto start = FieldAccessLogicalFunction{probe.startEndType, probe.binStartFieldName};
+            const auto end = FieldAccessLogicalFunction{probe.startEndType, probe.binEndFieldName};
+            const auto counter = FieldAccessLogicalFunction{probe.counterType, probe.binCounterFieldName};
+
+            helpers.top().addProjection(std::nullopt, start);
+            helpers.top().addProjection(std::nullopt, end);
+            helpers.top().addProjection(std::nullopt, counter);
         }
     }
 
@@ -976,8 +1004,8 @@ void AntlrSQLQueryPlanCreator::exitFunctionCall(AntlrSQLParser::FunctionCallCont
                         "Expected constant (sample hash) as first argument of Reservoir_Probe function call, got nothing at {}",
                         context->getText());
                 }
-                const uint64_t sampleHash = parseConstant(helpers.top().constantBuilder.front(), "sampleHash");
-                helpers.top().statisticHash = sampleHash;
+                const uint64_t statisticHash = parseConstant(helpers.top().constantBuilder.front(), "statisticHash");
+                helpers.top().statisticHash = statisticHash;
                 if (helpers.top().functionBuilder.empty())
                 {
                     throw InvalidQuerySyntax("Sample requires sample fields as arguments at {}", context->getText());
@@ -1004,7 +1032,7 @@ void AntlrSQLQueryPlanCreator::exitFunctionCall(AntlrSQLParser::FunctionCallCont
                 const auto asFieldIfNotOverwritten = FieldAccessLogicalFunction{
                     LogicalStatisticFields().statisticDataField.dataType, LogicalStatisticFields().statisticDataField.name};
                 helpers.top().windowAggs.push_back(std::make_shared<WindowAggregationLogicalFunction>(
-                    ReservoirSampleLogicalFunction{uselessOnField, asFieldIfNotOverwritten, sampleFields, reservoirSize, sampleHash}));
+                    ReservoirSampleLogicalFunction(uselessOnField, asFieldIfNotOverwritten, sampleFields, reservoirSize, statisticHash)));
                 break;
             }
             else if (funcName == "RESERVOIR_PROBE")
@@ -1015,7 +1043,7 @@ void AntlrSQLQueryPlanCreator::exitFunctionCall(AntlrSQLParser::FunctionCallCont
                         "Expected constant (sample hash) as first argument of Reservoir_Probe function call, got nothing at {}",
                         context->getText());
                 }
-                const uint64_t sampleHash = parseConstant(helpers.top().constantBuilder.back(), "sampleHash");
+                const uint64_t statisticHash = parseConstant(helpers.top().constantBuilder.back(), "statisticHash");
                 helpers.top().constantBuilder.pop_back();
                 if (helpers.top().functionBuilder.empty())
                 {
@@ -1038,19 +1066,36 @@ void AntlrSQLQueryPlanCreator::exitFunctionCall(AntlrSQLParser::FunctionCallCont
                     sampleSchema.addField(nameFieldAccFn.getFieldName(), datatype.value());
                 }
                 helpers.top().functionBuilder.clear();
-                helpers.top().statProbe = ReservoirProbeLogicalOperator(sampleHash, sampleSchema);
+                helpers.top().statProbe = ReservoirProbeLogicalOperator(statisticHash, sampleSchema);
                 break;
             }
             else if (funcName == "EQUIWIDTHHISTOGRAM")
             {
-                if (helpers.top().functionBuilder.size() != 1
+                if (helpers.top().constantBuilder.empty())
+                {
+                    throw InvalidQuerySyntax(
+                        "Expected constant (statistic hash) as first argument of EQUIWIDTHHISTOGRAM function call, got nothing at {}",
+                        context->getText());
+                }
+                const uint64_t statisticHash = parseConstant(helpers.top().constantBuilder.front(), "statisticHash");
+                helpers.top().statisticHash = statisticHash;
+                if (helpers.top().functionBuilder.size() != 2
                     && helpers.top().functionBuilder.back().tryGetAs<FieldAccessLogicalFunction>())
                 {
-                    throw InvalidQuerySyntax("EQUIWIDTHHISTOGRAM requires the first argument to be a fieldname");
+                    throw InvalidQuerySyntax(
+                        "EQUIWIDTHHISTOGRAM requires the second argument to be a fieldname and the last to be a datatype in lower case");
                 }
-                const auto fieldName = helpers.top().functionBuilder.back().getAs<FieldAccessLogicalFunction>().get();
+                auto counterDatatypeOption = helpers.top().functionBuilder.back();
                 helpers.top().functionBuilder.pop_back();
-                if (helpers.top().constantBuilder.size() != 3)
+                INVARIANT(
+                    counterDatatypeOption.tryGetAs<FieldAccessLogicalFunction>().has_value(),
+                    "counter datatype was not a FieldAccessLogicalFunction");
+                auto counterDatatypeFn = counterDatatypeOption.getAs<FieldAccessLogicalFunction>();
+                auto counterDatatype = DataTypeProvider::tryProvideDataType(counterDatatypeFn.get().getFieldName());
+                INVARIANT(counterDatatype.has_value(), "counter datatype was not a datatype");
+                const auto fieldName = helpers.top().functionBuilder.back().tryGetAs<FieldAccessLogicalFunction>().value().get();
+                helpers.top().functionBuilder.pop_back();
+                if (helpers.top().constantBuilder.size() != 4)
                 {
                     throw InvalidQuerySyntax("EQUIWIDTHHISTOGRAM requires the arguments numBuckets, minValue, maxValue to be constants");
                 }
@@ -1060,8 +1105,46 @@ void AntlrSQLQueryPlanCreator::exitFunctionCall(AntlrSQLParser::FunctionCallCont
                 helpers.top().constantBuilder.pop_back();
                 const auto numBuckets = parseConstant(helpers.top().constantBuilder.back(), "numBuckets");
                 helpers.top().constantBuilder.pop_back();
-                helpers.top().windowAggs.push_back(std::make_shared<WindowAggregationLogicalFunction>(
-                    EquiWidthHistogramLogicalFunction{fieldName, numBuckets, minValue, maxValue}));
+                const auto asFieldIfNotOverwritten = FieldAccessLogicalFunction{
+                    LogicalStatisticFields().statisticDataField.dataType, LogicalStatisticFields().statisticDataField.name};
+                helpers.top().windowAggs.push_back(std::make_shared<WindowAggregationLogicalFunction>(EquiWidthHistogramLogicalFunction{
+                    fieldName, asFieldIfNotOverwritten, numBuckets, minValue, maxValue, statisticHash, counterDatatype.value()}));
+                break;
+            }
+            else if (funcName == "EQUIWIDTHHISTOGRAM_PROBE")
+            {
+                if (helpers.top().constantBuilder.empty())
+                {
+                    throw InvalidQuerySyntax(
+                        "Expected constant (sample hash) as first argument of EQUIWIDTH_PROBE function call, got nothing at {}",
+                        context->getText());
+                }
+                const uint64_t statisticHash = parseConstant(helpers.top().constantBuilder.back(), "statisticHash");
+                helpers.top().constantBuilder.pop_back();
+                if (helpers.top().functionBuilder.empty())
+                {
+                    throw InvalidQuerySyntax(
+                        "Expected counter datatype and start/end datatype as lowercase arguments, got {}", context->getText());
+                }
+                INVARIANT(
+                    helpers.top().functionBuilder.size() >= 2, "Expected at least two elements: counter datatype and start/end datatype");
+                auto startEndDatatypeOption = helpers.top().functionBuilder.back();
+                helpers.top().functionBuilder.pop_back();
+                auto counterDatatypeOption = helpers.top().functionBuilder.back();
+                helpers.top().functionBuilder.pop_back();
+                INVARIANT(
+                    counterDatatypeOption.tryGetAs<FieldAccessLogicalFunction>().has_value()
+                        and startEndDatatypeOption.tryGetAs<FieldAccessLogicalFunction>().has_value(),
+                    "counter datatype or start/end datatype was not a FieldAccessLogicalFunction");
+                auto counterDatatypeFn = counterDatatypeOption.getAs<FieldAccessLogicalFunction>();
+                auto startEndDatatypeFn = startEndDatatypeOption.getAs<FieldAccessLogicalFunction>();
+                auto counterDatatype = DataTypeProvider::tryProvideDataType(counterDatatypeFn.get().getFieldName());
+                auto startEndDatatype = DataTypeProvider::tryProvideDataType(startEndDatatypeFn.get().getFieldName());
+                INVARIANT(
+                    counterDatatype.has_value() and startEndDatatype.has_value(),
+                    "counter datatype or start/end datatype was not a datatype");
+                helpers.top().statProbe
+                    = EquiWidthHistogramProbeLogicalOperator(statisticHash, counterDatatype.value(), startEndDatatype.value());
                 break;
             }
             else if (funcName == "COUNTMINSKETCH")

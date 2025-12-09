@@ -32,10 +32,17 @@ namespace NES
 {
 
 EquiWidthHistogramLogicalFunction::EquiWidthHistogramLogicalFunction(
-    const FieldAccessLogicalFunction& onField, const uint64_t numBuckets, const uint64_t minValue, const uint64_t maxValue)
+    const FieldAccessLogicalFunction& onField,
+    const uint64_t numBuckets,
+    const uint64_t minValue,
+    const uint64_t maxValue,
+    const uint64_t statisticHash,
+    const DataType counterType)
     : numBuckets(numBuckets)
     , minValue(minValue)
     , maxValue(maxValue)
+    , statisticHash(statisticHash)
+    , counterType(counterType)
     , inputStamp(onField.getDataType())
     , partialAggregateStamp(DataType::Type::UNDEFINED)
     , finalAggregateStamp(DataType::Type::VARSIZED)
@@ -49,10 +56,14 @@ EquiWidthHistogramLogicalFunction::EquiWidthHistogramLogicalFunction(
     const FieldAccessLogicalFunction& asField,
     const uint64_t numBuckets,
     const uint64_t minValue,
-    const uint64_t maxValue)
+    const uint64_t maxValue,
+    const uint64_t statisticHash,
+    const DataType counterType)
     : numBuckets(numBuckets)
     , minValue(minValue)
     , maxValue(maxValue)
+    , statisticHash(statisticHash)
+    , counterType(counterType)
     , inputStamp(onField.getDataType())
     , partialAggregateStamp(DataType::Type::UNDEFINED)
     , finalAggregateStamp(DataType::Type::VARSIZED)
@@ -89,13 +100,16 @@ Reflected Reflector<EquiWidthHistogramLogicalFunction>::operator()(const EquiWid
         .asField = function.getAsField(),
         .numBuckets = function.numBuckets,
         .minValue = function.minValue,
-        .maxValue = function.maxValue});
+        .maxValue = function.maxValue,
+        .statisticHash = function.statisticHash,
+        .counterType = function.counterType});
 }
 
 EquiWidthHistogramLogicalFunction Unreflector<EquiWidthHistogramLogicalFunction>::operator()(const Reflected& reflected) const
 {
     auto data = unreflect<detail::ReflectedEquiWidthHistogramLogicalFunction>(reflected);
-    return EquiWidthHistogramLogicalFunction{data.onField, data.asField, data.numBuckets, data.minValue, data.maxValue};
+    return EquiWidthHistogramLogicalFunction{
+        data.onField, data.asField, data.numBuckets, data.minValue, data.maxValue, data.statisticHash, data.counterType};
 }
 
 EquiWidthHistogramLogicalFunction EquiWidthHistogramLogicalFunction::withInferredStamp(const Schema& schema) const
@@ -203,16 +217,20 @@ AggregationLogicalFunctionGeneratedRegistrar::RegisterEquiWidthHistogramAggregat
     }
     /// We assume the fields vector starts with onField, asField
     PRECONDITION(arguments.fields.size() >= 2, "EquiWidthHistogramLogicalFunction requires onField and asField");
-    PRECONDITION(arguments.histogramMinValue.has_value(), "EquiWidthHistogramLogicalFunction requires min value to be set!");
-    PRECONDITION(arguments.histogramMaxValue.has_value(), "EquiWidthHistogramLogicalFunction requires max value be set!");
-    PRECONDITION(arguments.histogramNumBuckets.has_value(), "EquiWidthHistogramLogicalFunction requires number of buckets to be set!");
+    PRECONDITION(arguments.histogramMinValue.has_value(), "EquiWidthHistogramLogicalFunction requires min value to be set");
+    PRECONDITION(arguments.histogramMaxValue.has_value(), "EquiWidthHistogramLogicalFunction requires max value be set");
+    PRECONDITION(arguments.histogramNumBuckets.has_value(), "EquiWidthHistogramLogicalFunction requires number of buckets to be set");
+    PRECONDITION(arguments.sampleHash.has_value(), "EquiWidthHistogramLogicalFunction requires statisticHash to be set");
+    PRECONDITION(arguments.histogramCounterType.has_value(), "EquiWidthHistogramLogicalFunction requires counterType to be set");
 
     return std::make_shared<WindowAggregationLogicalFunction>(EquiWidthHistogramLogicalFunction{
         arguments.fields[0],
         arguments.fields[1],
         arguments.histogramNumBuckets.value(),
         arguments.histogramMinValue.value(),
-        arguments.histogramMaxValue.value()});
+        arguments.histogramMaxValue.value(),
+        arguments.sampleHash.value(),
+        arguments.histogramCounterType.value()});
 }
 
 }

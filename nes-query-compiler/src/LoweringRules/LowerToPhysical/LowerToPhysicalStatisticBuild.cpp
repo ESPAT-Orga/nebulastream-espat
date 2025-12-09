@@ -154,6 +154,7 @@ std::vector<std::shared_ptr<AggregationPhysicalFunction>> getAggregationPhysical
             if (logicalEquiWidthHistogram.has_value())
             {
                 aggregationArguments.numberOfSeenTuplesFieldName = logicalOperator.getNumberOfSeenTuplesFieldName();
+                aggregationArguments.counterType = logicalEquiWidthHistogram->get().counterType;
                 aggregationArguments.minValue = logicalEquiWidthHistogram->get().minValue;
                 aggregationArguments.maxValue = logicalEquiWidthHistogram->get().maxValue;
                 aggregationArguments.numberOfBins = logicalEquiWidthHistogram->get().numBuckets;

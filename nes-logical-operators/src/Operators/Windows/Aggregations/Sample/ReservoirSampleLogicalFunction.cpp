@@ -202,6 +202,7 @@ AggregationLogicalFunctionGeneratedRegistrar::RegisterReservoirSampleAggregation
         arguments.fields.size() >= 3,
         "ReservoirSampleLogicalFunction requires onField (even though unused), asField, and at least one field for the sample");
     PRECONDITION(arguments.reservoirSize.has_value(), "ReservoirSampleLogicalFunction requires reservoirSize to be set!");
+    PRECONDITION(arguments.sampleHash.has_value(), "ReservoirSampleLogicalFunction requires statisticHash to be set!");
 
     const std::vector<FieldAccessLogicalFunction> sampleFields{
         std::make_move_iterator(arguments.fields.begin() + 2), std::make_move_iterator(arguments.fields.end())};

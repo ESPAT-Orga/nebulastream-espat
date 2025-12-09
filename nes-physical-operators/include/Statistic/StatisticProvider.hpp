@@ -96,14 +96,15 @@ public:
 
     virtual nautilus::val<bool> operator!=(const StatisticProviderIteratorImpl& other) const { return not(*this == other); }
 
+    static inline constexpr uint32_t sizeOfTotalAreaSize = 4;
+    static inline constexpr uint32_t sizeOfMetaDataSize = 4;
+
 protected:
     friend class StatisticProvider::StatisticProviderIterator;
     /// Methods for setting/advancing
     virtual void advanceToBegin() = 0;
     virtual void advanceToEnd() = 0;
 
-    nautilus::val<uint32_t> sizeOfTotalAreaSize = 4;
-    nautilus::val<uint32_t> sizeOfMetaDataSize = 4;
     nautilus::val<int8_t*> statisticMemArea;
 };
 

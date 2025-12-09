@@ -36,7 +36,12 @@ namespace NES
 {
 
 EquiWidthHistogramLogicalFunction::EquiWidthHistogramLogicalFunction(
-    const FieldAccessLogicalFunction& onField, const uint64_t numBuckets, const uint64_t minValue, const uint64_t maxValue)
+    const FieldAccessLogicalFunction& onField,
+    const uint64_t numBuckets,
+    const uint64_t minValue,
+    const uint64_t maxValue,
+    const uint64_t statisticHash,
+    const DataType counterType)
     : WindowAggregationLogicalFunction(
           onField.getDataType(),
           DataTypeProvider::provideDataType(partialAggregateStampType),
@@ -45,6 +50,8 @@ EquiWidthHistogramLogicalFunction::EquiWidthHistogramLogicalFunction(
     , numBuckets(numBuckets)
     , minValue(minValue)
     , maxValue(maxValue)
+    , statisticHash(statisticHash)
+    , counterType(counterType)
 {
 }
 
@@ -53,7 +60,9 @@ EquiWidthHistogramLogicalFunction::EquiWidthHistogramLogicalFunction(
     const FieldAccessLogicalFunction& asField,
     const uint64_t numBuckets,
     const uint64_t minValue,
-    const uint64_t maxValue)
+    const uint64_t maxValue,
+    const uint64_t statisticHash,
+    const DataType counterType)
     : WindowAggregationLogicalFunction(
           onField.getDataType(),
           DataTypeProvider::provideDataType(partialAggregateStampType),
@@ -63,6 +72,8 @@ EquiWidthHistogramLogicalFunction::EquiWidthHistogramLogicalFunction(
     , numBuckets(numBuckets)
     , minValue(minValue)
     , maxValue(maxValue)
+    , statisticHash(statisticHash)
+    , counterType(counterType)
 {
 }
 
@@ -121,9 +132,14 @@ NES::SerializableAggregationFunction EquiWidthHistogramLogicalFunction::serializ
 
     serializedAggregationFunction.mutable_as_field()->CopyFrom(asFieldFuc);
     serializedAggregationFunction.mutable_on_field()->CopyFrom(onFieldFuc);
+
     serializedAggregationFunction.set_histogram_num_buckets(numBuckets);
     serializedAggregationFunction.set_histogram_min_value(minValue);
     serializedAggregationFunction.set_histogram_max_value(maxValue);
+    DataTypeSerializationUtil::serializeDataType(counterType, serializedAggregationFunction.mutable_histogram_counter_type());
+
+    serializedAggregationFunction.set_sample_hash(statisticHash);
+
     return serializedAggregationFunction;
 }
 
@@ -133,16 +149,20 @@ AggregationLogicalFunctionGeneratedRegistrar::RegisterEquiWidthHistogramAggregat
 {
     /// We assume the fields vector starts with onField, asField
     PRECONDITION(arguments.fields.size() >= 2, "EquiWidthHistogramLogicalFunction requires onField and asField");
-    PRECONDITION(arguments.histogramMinValue.has_value(), "EquiWidthHistogramLogicalFunction requires min value to be set!");
-    PRECONDITION(arguments.histogramMaxValue.has_value(), "EquiWidthHistogramLogicalFunction requires max value be set!");
-    PRECONDITION(arguments.histogramNumBuckets.has_value(), "EquiWidthHistogramLogicalFunction requires number of buckets to be set!");
+    PRECONDITION(arguments.histogramMinValue.has_value(), "EquiWidthHistogramLogicalFunction requires min value to be set");
+    PRECONDITION(arguments.histogramMaxValue.has_value(), "EquiWidthHistogramLogicalFunction requires max value be set");
+    PRECONDITION(arguments.histogramNumBuckets.has_value(), "EquiWidthHistogramLogicalFunction requires number of buckets to be set");
+    PRECONDITION(arguments.sampleHash.has_value(), "EquiWidthHistogramLogicalFunction requires statisticHash to be set");
+    PRECONDITION(arguments.histogramCounterType.has_value(), "EquiWidthHistogramLogicalFunction requires counterType to be set");
 
     const auto equiWidthHist = std::make_shared<EquiWidthHistogramLogicalFunction>(
         arguments.fields[0],
         arguments.fields[1],
         arguments.histogramNumBuckets.value(),
         arguments.histogramMinValue.value(),
-        arguments.histogramMaxValue.value());
+        arguments.histogramMaxValue.value(),
+        arguments.sampleHash.value(),
+        arguments.histogramCounterType.value());
     return equiWidthHist;
 }
 

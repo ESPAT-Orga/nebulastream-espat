@@ -60,12 +60,12 @@ nautilus::val<bool> EquiWidthHistogramIteratorImpl::operator==(const StatisticPr
 
 void EquiWidthHistogramIteratorImpl::advanceToBegin()
 {
-    const auto noTuplesMemRef = statisticMemArea + (sizeOfTotalAreaSize + sizeOfMetaDataSize);
-    numberOfBins = readValueFromMemRef<uint64_t>(noTuplesMemRef);
+    const auto numBinsMemRef = statisticMemArea + (sizeOfTotalAreaSize + sizeOfMetaDataSize);
+    numberOfBins = readValueFromMemRef<uint64_t>(numBinsMemRef);
 
     const auto metaDataSizeRef = statisticMemArea + sizeOfTotalAreaSize;
     const auto metaDataSize = readValueFromMemRef<uint32_t>(metaDataSizeRef);
-    binMemRef = statisticMemArea + sizeOfTotalAreaSize + sizeOfMetaDataSize + metaDataSize;
+    binMemRef = statisticMemArea + nautilus::val<uint64_t>{sizeOfTotalAreaSize + sizeOfMetaDataSize} + metaDataSize;
 }
 
 void EquiWidthHistogramIteratorImpl::advanceToEnd()
@@ -76,6 +76,6 @@ void EquiWidthHistogramIteratorImpl::advanceToEnd()
     const auto metaDataSizeRef = statisticMemArea + sizeOfTotalAreaSize;
     const auto metaDataSize = readValueFromMemRef<uint32_t>(metaDataSizeRef);
     binMemRef
-        = statisticMemArea + sizeOfTotalAreaSize + sizeOfMetaDataSize + metaDataSize + numberOfBins * equiWidthHistogramArgs.sizeOfDataType;
+        = statisticMemArea + nautilus::val<uint64_t>{sizeOfTotalAreaSize + sizeOfMetaDataSize} + metaDataSize + numberOfBins * equiWidthHistogramArgs.sizeOfDataType;
 }
 }

@@ -152,6 +152,7 @@ getAggregationPhysicalFunctions(const StatisticBuildLogicalOperator& logicalOper
         {
             const auto logicalEquiWidthHistogram = std::dynamic_pointer_cast<EquiWidthHistogramLogicalFunction>(descriptor);
             aggregationArguments.numberOfSeenTuplesFieldName = logicalOperator.getNumberOfSeenTuplesFieldName();
+            aggregationArguments.counterType = logicalEquiWidthHistogram->counterType;
             aggregationArguments.minValue = logicalEquiWidthHistogram->minValue;
             aggregationArguments.maxValue = logicalEquiWidthHistogram->maxValue;
             aggregationArguments.numberOfBins = logicalEquiWidthHistogram->numBuckets;

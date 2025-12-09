@@ -41,6 +41,7 @@ struct AggregationPhysicalFunctionRegistryArguments
     /// ReservoirSample:
     std::optional<uint64_t> sampleSize{};
     /// EquiWidthHistogram:
+    std::optional<DataType> counterType{};
     std::optional<uint64_t> numberOfBins{};
     std::optional<uint64_t> minValue{};
     std::optional<uint64_t> maxValue{};

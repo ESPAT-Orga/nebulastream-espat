@@ -62,22 +62,22 @@ nautilus::val<bool> CountMinIteratorImpl::operator==(const StatisticProviderIter
 
 void CountMinIteratorImpl::advanceToBegin()
 {
-    numberOfRows = readValueFromMemRef<uint64_t>(statisticMemArea + sizeOfTotalAreaSize + sizeOfMetaDataSize);
+    numberOfRows = readValueFromMemRef<uint64_t>(statisticMemArea + nautilus::val<uint64_t>(sizeOfTotalAreaSize + sizeOfMetaDataSize));
     numberOfColumns
-        = readValueFromMemRef<uint64_t>(statisticMemArea + sizeOfTotalAreaSize + sizeOfMetaDataSize + nautilus::val<uint64_t>(8));
+        = readValueFromMemRef<uint64_t>(statisticMemArea + nautilus::val<uint64_t>{sizeOfTotalAreaSize + sizeOfMetaDataSize} + nautilus::val<uint64_t>(8));
 
 
     const auto metaDataSize = readValueFromMemRef<uint32_t>(statisticMemArea + sizeOfTotalAreaSize);
     counterCol = 0;
     counterRow = 0;
-    curCounter = statisticMemArea + sizeOfTotalAreaSize + sizeOfMetaDataSize + metaDataSize;
+    curCounter = statisticMemArea + nautilus::val<uint64_t>{sizeOfTotalAreaSize + sizeOfMetaDataSize} + metaDataSize;
 }
 
 void CountMinIteratorImpl::advanceToEnd()
 {
-    numberOfRows = readValueFromMemRef<uint64_t>(statisticMemArea + sizeOfTotalAreaSize + sizeOfMetaDataSize);
+    numberOfRows = readValueFromMemRef<uint64_t>(statisticMemArea + nautilus::val<uint8_t>(sizeOfTotalAreaSize + sizeOfMetaDataSize));
     numberOfColumns
-        = readValueFromMemRef<uint64_t>(statisticMemArea + sizeOfTotalAreaSize + sizeOfMetaDataSize + nautilus::val<uint64_t>(8));
+        = readValueFromMemRef<uint64_t>(statisticMemArea + nautilus::val<uint64_t>{sizeOfTotalAreaSize + sizeOfMetaDataSize} + nautilus::val<uint64_t>{8});
 
     counterCol = numberOfColumns;
     counterRow = numberOfRows;

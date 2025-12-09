@@ -74,8 +74,9 @@ message SerializableAggregationFunction {
     optional uint64 histogram_num_buckets = 7;
     optional uint64 histogram_min_value = 8;
     optional uint64 histogram_max_value = 9;
-    optional uint64 count_min_num_columns = 10;
-    optional uint64 count_min_num_rows = 11;
+    optional SerializableDataType histogram_counter_type = 10;
+    optional uint64 count_min_num_columns = 11;
+    optional uint64 count_min_num_rows = 12;
 }
 
 message AggregationFunctionList {

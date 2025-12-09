@@ -482,6 +482,7 @@ void AntlrSQLQueryPlanCreator::exitPrimaryQuery(AntlrSQLParser::PrimaryQueryCont
         queryPlan = LogicalPlanBuilder::addSelection(std::move(*whereExpr), queryPlan);
     }
 
+    /// TODO Use statisticHash as marker that it's a statistic operation instead of an aggregation.
     auto statisticAggs = std::initializer_list<std::string>{"ReservoirSample", "EquiWidthHistogram", "CountMinSketch"};
     if (helpers.top().isInAggFunction()
         and std::ranges::find(statisticAggs, helpers.top().windowAggs.front().get()->getName()) != std::end(statisticAggs))
@@ -493,7 +494,6 @@ void AntlrSQLQueryPlanCreator::exitPrimaryQuery(AntlrSQLParser::PrimaryQueryCont
         const auto windowAggName = helpers.top().windowAggs.front().get()->getName();
         if (windowAggName == "ReservoirSample")
         {
-            auto agg = helpers.top().windowAggs.front();
             /// This is a hack to get the new projection operator to work.
             /// The projection operator wants to know which fields its going to project here, in its member projections.
             /// But as we do not yet know the source's schema, we cannot give it the schema of the sample. So instead we just project all input fields:
@@ -964,11 +964,11 @@ void AntlrSQLQueryPlanCreator::exitFunctionCall(AntlrSQLParser::FunctionCallCont
                 if (helpers.top().constantBuilder.empty())
                 {
                     throw InvalidQuerySyntax(
-                        "Expected constant (sample hash) as first argument of Reservoir_Probe function call, got nothing at {}",
+                        "Expected constant (sample hash) as first argument of Reservoir function call, got nothing at {}",
                         context->getText());
                 }
-                const uint64_t sampleHash = parseConstant(helpers.top().constantBuilder.front(), "sampleHash");
-                helpers.top().statisticHash = sampleHash;
+                const uint64_t statisticHash = parseConstant(helpers.top().constantBuilder.front(), "statisticHash");
+                helpers.top().statisticHash = statisticHash;
                 if (helpers.top().functionBuilder.empty())
                 {
                     throw InvalidQuerySyntax("Sample requires sample fields as arguments at {}", context->getText());
@@ -995,7 +995,7 @@ void AntlrSQLQueryPlanCreator::exitFunctionCall(AntlrSQLParser::FunctionCallCont
                 const auto asFieldIfNotOverwritten = FieldAccessLogicalFunction{
                     LogicalStatisticFields().statisticDataField.dataType, LogicalStatisticFields().statisticDataField.name};
                 helpers.top().windowAggs.push_back(std::make_shared<ReservoirSampleLogicalFunction>(
-                    uselessOnField, asFieldIfNotOverwritten, sampleFields, reservoirSize, sampleHash));
+                    uselessOnField, asFieldIfNotOverwritten, sampleFields, reservoirSize, statisticHash));
                 break;
             }
             else if (funcName == "RESERVOIR_PROBE")
@@ -1006,7 +1006,7 @@ void AntlrSQLQueryPlanCreator::exitFunctionCall(AntlrSQLParser::FunctionCallCont
                         "Expected constant (sample hash) as first argument of Reservoir_Probe function call, got nothing at {}",
                         context->getText());
                 }
-                const uint64_t sampleHash = parseConstant(helpers.top().constantBuilder.back(), "sampleHash");
+                const uint64_t statisticHash = parseConstant(helpers.top().constantBuilder.back(), "statisticHash");
                 helpers.top().constantBuilder.pop_back();
                 if (helpers.top().functionBuilder.empty())
                 {
@@ -1029,18 +1029,26 @@ void AntlrSQLQueryPlanCreator::exitFunctionCall(AntlrSQLParser::FunctionCallCont
                     sampleSchema.addField(nameFieldAccFn.getFieldName(), datatype.value());
                 }
                 helpers.top().functionBuilder.clear();
-                helpers.top().statProbe = ReservoirProbeLogicalOperator(sampleHash, sampleSchema);
+                helpers.top().statProbe = ReservoirProbeLogicalOperator(statisticHash, sampleSchema);
                 break;
             }
             else if (funcName == "EQUIWIDTHHISTOGRAM")
             {
+                if (helpers.top().constantBuilder.empty())
+                {
+                    throw InvalidQuerySyntax(
+                        "Expected constant (sample hash) as first argument of EQUIWIDTHHISTOGRAM function call, got nothing at {}",
+                        context->getText());
+                }
+                const uint64_t statisticHash = parseConstant(helpers.top().constantBuilder.front(), "statisticHash");
+                helpers.top().statisticHash = statisticHash;
                 if (helpers.top().functionBuilder.size() != 1 && helpers.top().functionBuilder.back().tryGet<FieldAccessLogicalFunction>())
                 {
-                    throw InvalidQuerySyntax("EQUIWIDTHHISTOGRAM requires the first argument to be a fieldname");
+                    throw InvalidQuerySyntax("EQUIWIDTHHISTOGRAM requires the second argument to be a fieldname");
                 }
                 const auto fieldName = helpers.top().functionBuilder.back().tryGet<FieldAccessLogicalFunction>().value();
                 helpers.top().functionBuilder.pop_back();
-                if (helpers.top().constantBuilder.size() != 3)
+                if (helpers.top().constantBuilder.size() != 4)
                 {
                     throw InvalidQuerySyntax("EQUIWIDTHHISTOGRAM requires the arguments numBuckets, minValue, maxValue to be constants");
                 }
@@ -1050,8 +1058,10 @@ void AntlrSQLQueryPlanCreator::exitFunctionCall(AntlrSQLParser::FunctionCallCont
                 helpers.top().constantBuilder.pop_back();
                 const auto numBuckets = parseConstant(helpers.top().constantBuilder.back(), "numBuckets");
                 helpers.top().constantBuilder.pop_back();
+                const auto asFieldIfNotOverwritten = FieldAccessLogicalFunction{
+                    LogicalStatisticFields().statisticDataField.dataType, LogicalStatisticFields().statisticDataField.name};
                 helpers.top().windowAggs.push_back(
-                    std::make_shared<EquiWidthHistogramLogicalFunction>(fieldName, numBuckets, minValue, maxValue));
+                    std::make_shared<EquiWidthHistogramLogicalFunction>(fieldName, asFieldIfNotOverwritten, numBuckets, minValue, maxValue, statisticHash));
                 break;
             }
             else if (funcName == "COUNTMINSKETCH")

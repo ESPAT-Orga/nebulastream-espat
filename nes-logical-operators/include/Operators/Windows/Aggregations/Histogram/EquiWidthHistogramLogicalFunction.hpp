@@ -34,13 +34,14 @@ public:
     /// `numBuckets` number of buckets the histogram should have.
     /// `minValue` start value of the histogram
     /// `maxValue` end value of the histogram
-    EquiWidthHistogramLogicalFunction(const FieldAccessLogicalFunction& onField, uint64_t numBuckets, uint64_t minValue, uint64_t maxValue);
+    EquiWidthHistogramLogicalFunction(const FieldAccessLogicalFunction& onField, uint64_t numBuckets, uint64_t minValue, uint64_t maxValue, uint64_t statisticHash);
     EquiWidthHistogramLogicalFunction(
         const FieldAccessLogicalFunction& onField,
         const FieldAccessLogicalFunction& asField,
         uint64_t numBuckets,
         uint64_t minValue,
-        uint64_t maxValue);
+        uint64_t maxValue,
+        uint64_t statisticHash);
 
     void inferStamp(const Schema& schema) override;
     ~EquiWidthHistogramLogicalFunction() override = default;
@@ -50,6 +51,8 @@ public:
     uint64_t numBuckets;
     uint64_t minValue;
     uint64_t maxValue;
+
+    uint64_t statisticHash;
 
 private:
     static constexpr std::string_view NAME = "EquiWidthHistogram";

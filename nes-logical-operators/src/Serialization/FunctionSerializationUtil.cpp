@@ -65,31 +65,34 @@ deserializeWindowAggregationFunction(const SerializableAggregationFunction& seri
     auto asField = deserializeFunction(serializedFunction.as_field());
 
     AggregationLogicalFunctionRegistryArguments args;
-    if (type == "ReservoirSample")
+    if (serializedFunction.has_sample_hash())
     {
-        args.reservoirSize = serializedFunction.reservoir_size();
         args.sampleHash = serializedFunction.sample_hash();
-        auto fieldsFns = serializedFunction.sample_fields().functions();
-        args.fields = std::vector{
-            fieldsFns
-            | std::views::transform(
-                [](const auto& fn)
-                {
-                    const auto logFn = deserializeFunction(fn);
-                    return logFn.template get<FieldAccessLogicalFunction>();
-                })
-            | std::ranges::to<std::vector>()};
-    }
-    if (type == "EquiWidthHistogram")
-    {
-        args.histogramMinValue = serializedFunction.histogram_min_value();
-        args.histogramMaxValue = serializedFunction.histogram_max_value();
-        args.histogramNumBuckets = serializedFunction.histogram_num_buckets();
-    }
-    if (type == "CountMinSketch")
-    {
-        args.countMinNumColumns = serializedFunction.count_min_num_columns();
-        args.countMinNumRows = serializedFunction.count_min_num_rows();
+        if (type == "ReservoirSample")
+        {
+            args.reservoirSize = serializedFunction.reservoir_size();
+            auto fieldsFns = serializedFunction.sample_fields().functions();
+            args.fields = std::vector{
+                fieldsFns
+                | std::views::transform(
+                    [](const auto& fn)
+                    {
+                        const auto logFn = deserializeFunction(fn);
+                        return logFn.template get<FieldAccessLogicalFunction>();
+                    })
+                | std::ranges::to<std::vector>()};
+        }
+        if (type == "EquiWidthHistogram")
+        {
+            args.histogramMinValue = serializedFunction.histogram_min_value();
+            args.histogramMaxValue = serializedFunction.histogram_max_value();
+            args.histogramNumBuckets = serializedFunction.histogram_num_buckets();
+        }
+        if (type == "CountMinSketch")
+        {
+            args.countMinNumColumns = serializedFunction.count_min_num_columns();
+            args.countMinNumRows = serializedFunction.count_min_num_rows();
+        }
     }
 
     if (auto fieldAccess = onField.tryGet<FieldAccessLogicalFunction>())

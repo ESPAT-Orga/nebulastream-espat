@@ -94,11 +94,11 @@ deserializeWindowAggregationFunction(const SerializableAggregationFunction& seri
         args.countMinNumRows = serializedFunction.count_min_num_rows();
     }
 
-    if (auto fieldAccess = onField.tryGet<FieldAccessLogicalFunction>())
+    if (auto fieldAccess = onField.tryGetAs<FieldAccessLogicalFunction>())
     {
-        if (auto asFieldAccess = asField.tryGet<FieldAccessLogicalFunction>())
+        if (auto asFieldAccess = asField.tryGetAs<FieldAccessLogicalFunction>())
         {
-            args.fields.insert(args.fields.begin(), {fieldAccess.value(), asFieldAccess.value()});
+            args.fields.insert(args.fields.begin(), {fieldAccess.value().get(), asFieldAccess.value().get()});
 
             if (auto function = AggregationLogicalFunctionRegistry::instance().create(type, args))
             {

@@ -77,22 +77,15 @@ std::string_view EquiWidthHistogramLogicalFunction::getName() const noexcept
 ///  Remove when not necessary anymore in upstream NES.
 void EquiWidthHistogramLogicalFunction::inferStamp(const Schema& schema)
 {
-    (void)schema;
     /// We first infer the dataType of the input field and set the output dataType as the same.
-    ///Set fully qualified name for the as Field
+    /// We infer the datatype on the onField only to get the `attributeNameResolver`.
+    onField = onField.withInferredDataType(schema).get<FieldAccessLogicalFunction>();
     const auto onFieldName = onField.getFieldName();
     const auto asFieldName = asField.getFieldName();
 
-    const auto attributeNameResolver = "stream$";
-    if (onFieldName.find(Schema::ATTRIBUTE_NAME_SEPARATOR) == std::string::npos)
-    {
-        onField = onField.withFieldName(attributeNameResolver + onFieldName).get<FieldAccessLogicalFunction>();
-    }
-    else
-    {
-        const auto fieldName = onFieldName.substr(onFieldName.find_last_of(Schema::ATTRIBUTE_NAME_SEPARATOR) + 1);
-        onField = onField.withFieldName(attributeNameResolver + fieldName).get<FieldAccessLogicalFunction>();
-    }
+    const auto attributeNameResolver = onFieldName.substr(0, onFieldName.find(Schema::ATTRIBUTE_NAME_SEPARATOR) + 1);
+
+    ///If on and as field name are different then append the attribute name resolver from on field to the as field
     if (asFieldName.find(Schema::ATTRIBUTE_NAME_SEPARATOR) == std::string::npos)
     {
         asField = asField.withFieldName(attributeNameResolver + asFieldName).get<FieldAccessLogicalFunction>();
@@ -103,7 +96,7 @@ void EquiWidthHistogramLogicalFunction::inferStamp(const Schema& schema)
         asField = asField.withFieldName(attributeNameResolver + fieldName).get<FieldAccessLogicalFunction>();
     }
     inputStamp = onField.getDataType();
-    finalAggregateStamp = DataTypeProvider::provideDataType(DataType::Type::VARSIZED);
+    finalAggregateStamp = DataType{DataType::Type::VARSIZED};
     asField = asField.withDataType(getFinalAggregateStamp()).get<FieldAccessLogicalFunction>();
 }
 

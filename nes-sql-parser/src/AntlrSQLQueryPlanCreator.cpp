@@ -507,11 +507,23 @@ void AntlrSQLQueryPlanCreator::exitPrimaryQuery(AntlrSQLParser::PrimaryQueryCont
         }
         if (windowAggName == "EquiWidthHistogram")
         {
-            /// This is a hack to get the new projection operator to work.
-            /// The projection operator wants to know which fields its going to project here, in its member projections.
-            /// But as we do not yet know the source's schema, we cannot give it the schema of the sample. So instead we just project all input fields:
-            helpers.top().asterisk = true;
-            // TODO We probably know what to project here, so do `helpers.top().addProjection(`.
+            if (not helpers.top().statProbe.has_value())
+            {
+                const auto hash = FieldAccessLogicalFunction{
+                    LogicalStatisticFields().statisticHashField.dataType, LogicalStatisticFields().statisticHashField.name};
+                helpers.top().addProjection(std::nullopt, hash);
+                const auto start = FieldAccessLogicalFunction{
+                    LogicalStatisticFields().statisticStartTsField.dataType, LogicalStatisticFields().statisticStartTsField.name};
+                helpers.top().addProjection(std::nullopt, start);
+                const auto end = FieldAccessLogicalFunction{
+                    LogicalStatisticFields().statisticEndTsField.dataType, LogicalStatisticFields().statisticEndTsField.name};
+                helpers.top().addProjection(std::nullopt, end);
+                const auto numTuples = FieldAccessLogicalFunction{
+                    LogicalStatisticFields().statisticNumberOfSeenTuplesField.dataType, LogicalStatisticFields().statisticNumberOfSeenTuplesField.name};
+                helpers.top().addProjection(std::nullopt, numTuples);
+            }
+            queryPlan = LogicalPlanBuilder::addStatisticStoreWriter(
+                queryPlan, logicalStatisticFields, helpers.top().statisticHash.value(), Statistic::StatisticType::Equi_Width_Histogram);
         }
     }
     else if (helpers.top().isInAggFunction())

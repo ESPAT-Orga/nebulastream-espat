@@ -35,6 +35,7 @@ void EquiWidthHistogramPhysicalFunction::lift(
     /// Getting the bin index
     auto value = inputFunction.execute(record, pipelineMemoryProvider.arena);
     auto binIdx = (value.cast<nautilus::val<uint64_t>>() - nautilus::val<uint64_t>{minValue}) / nautilus::val<uint64_t>{binWidth};
+    /// TODO Check for underflows
     if (binIdx >= numberOfBins)
     {
         /// If the value is maxValue, we would get a bin index that is larger than the number of bins
@@ -61,19 +62,19 @@ void EquiWidthHistogramPhysicalFunction::combine(
 {
     /// We assume that both histograms have the exact same min, max, and number of bins.
     /// Therefore, we can simply iterate through all bins and then sum up their counters
-    auto leftCounterRef = static_cast<nautilus::val<int8_t*>>(aggregationState1) + nautilus::val<uint64_t>{counterOffset};
-    auto rightCounterRef = static_cast<nautilus::val<int8_t*>>(aggregationState2) + nautilus::val<uint64_t>{counterOffset};
+    auto counterRef1 = static_cast<nautilus::val<int8_t*>>(aggregationState1) + nautilus::val<uint64_t>{counterOffset};
+    auto counterRef2 = static_cast<nautilus::val<int8_t*>>(aggregationState2) + nautilus::val<uint64_t>{counterOffset};
 
     for (nautilus::static_val<uint64_t> counterIdx = 0; counterIdx < numberOfBins; ++counterIdx)
     {
-        auto leftCounter = VarVal::readVarValFromMemory(leftCounterRef, dataTypeCounter.type);
-        auto rightCounter = VarVal::readVarValFromMemory(rightCounterRef, dataTypeCounter.type);
-        rightCounter = rightCounter + leftCounter;
-        rightCounter.writeToMemory(leftCounterRef);
+        auto counter1 = VarVal::readVarValFromMemory(counterRef1, dataTypeCounter.type);
+        auto counter2 = VarVal::readVarValFromMemory(counterRef2, dataTypeCounter.type);
+        counter1 = counter2 + counter1;
+        counter1.writeToMemory(counterRef1);
 
         /// Incrementing left and right counter ref
-        leftCounterRef += totalBinSize;
-        rightCounterRef += totalBinSize;
+        counterRef1 += totalBinSize;
+        counterRef2 += totalBinSize;
     }
 
     /// Combining the number of seen tuples of both histograms
@@ -117,7 +118,7 @@ void EquiWidthHistogramPhysicalFunction::reset(nautilus::val<AggregationState*> 
     /// Going through all buckets, setting their lower, upper bound and resetting their counter to 0
     auto lowerBoundRef = static_cast<nautilus::val<int8_t*>>(aggregationState);
     auto counterRef = lowerBoundRef + nautilus::val<uint64_t>{counterOffset};
-    auto upperBoundRef = counterRef + nautilus::val<uint64_t>{counterOffset + dataTypeCounter.getSizeInBytes()};
+    auto upperBoundRef = counterRef + nautilus::val<uint64_t>{counterOffset};
     VarVal lowerBound{minValue};
     VarVal upperBound{minValue + binWidth};
     auto counter = VarVal::readVarValFromMemory(counterRef, dataTypeCounter.type);
@@ -169,7 +170,7 @@ EquiWidthHistogramPhysicalFunction::EquiWidthHistogramPhysicalFunction(
     , minValue(minValue)
     , maxValue(maxValue)
     , binWidth((maxValue - minValue) / numberOfBins)
-    , dataTypeCounter(resultType)
+    , dataTypeCounter(DataType::Type::UINT64)
     , totalBinSize((dataTypeCounter.getSizeInBytes() + 2 * dataTypeLowerUpperBound.getSizeInBytes()))
     , counterOffset(dataTypeLowerUpperBound.getSizeInBytes())
 {

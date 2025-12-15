@@ -15,9 +15,14 @@
 #pragma once
 #include <Aggregation/Function/AggregationPhysicalFunction.hpp>
 #include <DataTypes/DataType.hpp>
+#include <Nautilus/Interface/BufferRef/TupleBufferRef.hpp>
 
 namespace NES
 {
+/// Counts occurrences between `minValue` and `maxValue` into `numberOfBins` bins.
+///
+/// Values higher (and lower) are added to the highest bin.
+/// Saves its bins like this: lower bound of bin n, counter of bin n, upper bound of bin n where n=0, ..., numberOfBins
 class EquiWidthHistogramPhysicalFunction final : public AggregationPhysicalFunction
 {
 public:
@@ -50,7 +55,9 @@ private:
     uint64_t minValue;
     uint64_t maxValue;
     uint64_t binWidth;
+    /// TODO Why should this even be in the configurable? To save space?
     DataType dataTypeCounter;
+    /// TODO Instead of hardcoding this it should be passed in the constructor from inputType
     DataType dataTypeLowerUpperBound{DataType::Type::UINT64};
     uint64_t totalBinSize;
     uint64_t counterOffset;

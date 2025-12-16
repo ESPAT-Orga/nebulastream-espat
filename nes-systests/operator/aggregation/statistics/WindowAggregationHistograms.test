@@ -48,8 +48,8 @@ SELECT EQUIWIDTHHISTOGRAM(44, value, 5, 0, 25) FROM stream WINDOW TUMBLING(times
 
 # Simple equi width histogram
 # histogram_Probe arguments: (Stat Hash)
-SELECT statisticStart, statisticEnd, bucketKey, bucketValue FROM (
-    SELECT EQUIWIDTH_PROBE(45, 0, 25, 5)
+SELECT statisticStart, statisticEnd, binStart, binCounter, binEnd FROM (
+    SELECT EQUIWIDTH_PROBE(45, uint64, uint64)
     FROM (
         SELECT EQUIWIDTHHISTOGRAM(45, value, 5, 0, 25) FROM stream WINDOW TUMBLING(timestamp, size 5 sec)
     )

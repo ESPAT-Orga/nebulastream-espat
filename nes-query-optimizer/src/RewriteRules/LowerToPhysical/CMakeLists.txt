@@ -23,3 +23,4 @@ add_plugin(EventTimeWatermarkAssigner RewriteRule nes-query-optimizer LowerToPhy
 add_plugin(StatisticBuild RewriteRule nes-query-optimizer LowerToPhysicalStatisticBuild.cpp)
 add_plugin(StatisticStoreWriter RewriteRule nes-query-optimizer LowerToPhysicalStatisticStoreWriter.cpp)
 add_plugin(ReservoirProbe RewriteRule nes-query-optimizer LowerToPhysicalReservoirProbe.cpp)
+add_plugin(EquiWidthProbe RewriteRule nes-query-optimizer LowerToPhysicalEquiWidthProbe.cpp)

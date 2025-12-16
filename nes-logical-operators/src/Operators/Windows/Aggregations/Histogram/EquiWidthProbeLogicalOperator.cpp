@@ -21,6 +21,8 @@
 #include <utility>
 #include <variant>
 #include <vector>
+
+#include <DataTypes/DataTypeProvider.hpp>
 #include <Configurations/Descriptor.hpp>
 #include <Functions/FieldAssignmentLogicalFunction.hpp>
 #include <Identifiers/Identifiers.hpp>
@@ -36,18 +38,19 @@
 #include <LogicalOperatorRegistry.hpp>
 #include <SerializableOperator.pb.h>
 #include <SerializableVariantDescriptor.pb.h>
+#include <Serialization/DataTypeSerializationUtil.hpp>
 
 namespace NES
 {
 
-EquiWidthProbeLogicalOperator::EquiWidthProbeLogicalOperator(const uint64_t statisticHash, uint64_t minValue, uint64_t maxValue, uint64_t numBuckets)
-    : statisticHash(statisticHash), minValue(minValue), maxValue(maxValue), numBuckets(numBuckets)
+EquiWidthProbeLogicalOperator::EquiWidthProbeLogicalOperator(const uint64_t statisticHash, DataType counterType, DataType startEndType)
+    : statisticHash(statisticHash), counterType(counterType), startEndType(startEndType)
 {
 }
 
 EquiWidthProbeLogicalOperator::EquiWidthProbeLogicalOperator(
-    uint64_t stashHash, uint64_t minValue, uint64_t maxValue, uint64_t numBuckets, LogicalStatisticFields logicalStatisticFields)
-    : LogicalStatisticFields(std::move(logicalStatisticFields)), statisticHash(stashHash), minValue(minValue), maxValue(maxValue), numBuckets(numBuckets)
+    uint64_t stashHash, DataType counterType, DataType startEndType, LogicalStatisticFields logicalStatisticFields)
+    : LogicalStatisticFields(std::move(logicalStatisticFields)), statisticHash(stashHash), counterType(counterType), startEndType(startEndType)
 {
 }
 
@@ -58,7 +61,7 @@ std::string_view EquiWidthProbeLogicalOperator::getName() const noexcept
 
 bool EquiWidthProbeLogicalOperator::operator==(const EquiWidthProbeLogicalOperator& rhs) const
 {
-    return statisticHash == rhs.statisticHash and minValue == rhs.minValue and maxValue == rhs.maxValue and numBuckets == rhs.numBuckets and inputSchema == rhs.inputSchema and outputSchema == rhs.outputSchema and inputOriginIds == rhs.inputOriginIds and outputOriginIds == rhs.outputOriginIds;
+    return statisticHash == rhs.statisticHash and counterType == rhs.counterType and startEndType == rhs.startEndType and inputSchema == rhs.inputSchema and outputSchema == rhs.outputSchema and inputOriginIds == rhs.inputOriginIds and outputOriginIds == rhs.outputOriginIds;
 };
 
 EquiWidthProbeLogicalOperator EquiWidthProbeLogicalOperator::withInferredSchema(const std::vector<Schema>& inputSchemas) const
@@ -146,7 +149,7 @@ std::string EquiWidthProbeLogicalOperator::explain(ExplainVerbosity verbosity, O
 {
     if (verbosity == ExplainVerbosity::Debug)
     {
-        return fmt::format("EQUIWIDTH_PROBE(opId: {}, statHash: {}, minValue: {}, maxValue: {}, numBuckets: {})", id, statisticHash, minValue, maxValue, numBuckets);
+        return fmt::format("EQUIWIDTH_PROBE(opId: {}, statHash: {}, counterType: {}, startEndType: {})", id, statisticHash, counterType, startEndType);
     }
     return fmt::format("EQUIWIDTH_PROBE()", statisticHash);
 }
@@ -183,9 +186,9 @@ void EquiWidthProbeLogicalOperator::serialize(SerializableOperator& serializable
     serializeAndAddToConfig(statisticHashField, LogicalStatisticFields::ConfigParameters::STATISTIC_HASH_FIELD);
     serializeAndAddToConfig(statisticNumberOfSeenTuplesField, LogicalStatisticFields::ConfigParameters::STATISTIC_NUMBER_OF_SEEN_TUPLES);
     (*serializableOperator.mutable_config())[ConfigParameters::STATISTIC_HASH] = descriptorConfigTypeToProto(statisticHash);
-    (*serializableOperator.mutable_config())[ConfigParameters::MIN_VALUE] = descriptorConfigTypeToProto(minValue);
-    (*serializableOperator.mutable_config())[ConfigParameters::MAX_VALUE] = descriptorConfigTypeToProto(maxValue);
-    (*serializableOperator.mutable_config())[ConfigParameters::NUM_BUCKETS] = descriptorConfigTypeToProto(numBuckets);
+    SerializableDataType counterTypeSerializable;
+    (*serializableOperator.mutable_config())[ConfigParameters::COUNTER_TYPE] = descriptorConfigTypeToProto(std::string(magic_enum::enum_name<DataType::Type>(counterType.type)));
+    (*serializableOperator.mutable_config())[ConfigParameters::START_END_TYPE] = descriptorConfigTypeToProto(std::string(magic_enum::enum_name<DataType::Type>(startEndType.type)));;
 
     serializableOperator.mutable_operator_()->CopyFrom(proto);
 }
@@ -196,12 +199,10 @@ LogicalOperatorGeneratedRegistrar::RegisterEquiWidthProbeLogicalOperator(NES::Lo
     auto statisticHashValue = std::get_if<uint64_t>(&arguments.config[EquiWidthProbeLogicalOperator::ConfigParameters::STATISTIC_HASH]);
     INVARIANT(statisticHashValue, "Wrong value in ConfigParameter::STATISTIC_HASH!");
 
-    auto minValueValue = std::get_if<uint64_t>(&arguments.config[EquiWidthProbeLogicalOperator::ConfigParameters::MIN_VALUE]);
-    INVARIANT(minValueValue, "Wrong value in ConfigParameter::MIN_VALUE!");
-    auto maxValueValue = std::get_if<uint64_t>(&arguments.config[EquiWidthProbeLogicalOperator::ConfigParameters::MAX_VALUE]);
-    INVARIANT(maxValueValue, "Wrong value in ConfigParameter::MAX_VALUE!");
-    auto numBucketsValue = std::get_if<uint64_t>(&arguments.config[EquiWidthProbeLogicalOperator::ConfigParameters::NUM_BUCKETS]);
-    INVARIANT(numBucketsValue, "Wrong value in ConfigParameter::NUM_BUCKETS!");
+    auto counterTypeValue = std::get_if<std::string>(&arguments.config[EquiWidthProbeLogicalOperator::ConfigParameters::COUNTER_TYPE]);
+    INVARIANT(counterTypeValue, "Wrong value in ConfigParameter::COUNTER_TYPE!");
+    auto startEndType = std::get_if<std::string>(&arguments.config[EquiWidthProbeLogicalOperator::ConfigParameters::START_END_TYPE]);
+    INVARIANT(startEndType, "Wrong value in ConfigParameter::START_END_TYPE!");
 
     auto statisticEndTs = arguments.config[LogicalStatisticFields::ConfigParameters::STATISTIC_END_TS];
     auto statisticStartTs = arguments.config[LogicalStatisticFields::ConfigParameters::STATISTIC_START_TS];
@@ -226,7 +227,8 @@ LogicalOperatorGeneratedRegistrar::RegisterEquiWidthProbeLogicalOperator(NES::Lo
 
     auto logicalOperator = EquiWidthProbeLogicalOperator(
         *statisticHashValue,
-        *minValueValue, *maxValueValue, *numBucketsValue,
+        DataTypeProvider::provideDataType(*counterTypeValue),
+        DataTypeProvider::provideDataType(*startEndType),
         LogicalStatisticFields{statisticNumberOfSeenTuplesField, statisticHashField, statisticStartTsField, statisticEndTsField});
     return logicalOperator.withInferredSchema(arguments.inputSchemas);
 }

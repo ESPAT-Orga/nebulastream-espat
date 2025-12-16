@@ -38,8 +38,8 @@ class SerializableOperator;
 class EquiWidthProbeLogicalOperator final : public LogicalStatisticFields, public OriginIdAssigner
 {
 public:
-    explicit EquiWidthProbeLogicalOperator(uint64_t statisticHash, uint64_t minValue, uint64_t maxValue, uint64_t numBuckets);
-    explicit EquiWidthProbeLogicalOperator(uint64_t statisticHash, uint64_t minValue, uint64_t maxValue, uint64_t numBuckets, LogicalStatisticFields logicalStatisticFields);
+    explicit EquiWidthProbeLogicalOperator(uint64_t statisticHash, DataType counterType, DataType startEndType);
+    explicit EquiWidthProbeLogicalOperator(uint64_t statisticHash, DataType counterType, DataType startEndType, LogicalStatisticFields logicalStatisticFields);
 
     [[nodiscard]] bool operator==(const EquiWidthProbeLogicalOperator& rhs) const;
     void serialize(SerializableOperator&) const;
@@ -65,29 +65,23 @@ public:
             std::nullopt,
             [](const std::unordered_map<std::string, std::string>& config) { return DescriptorConfig::tryGet(STATISTIC_HASH, config); }};
 
-        static inline const DescriptorConfig::ConfigParameter<std::string> MIN_VALUE{
-            "minValue",
+        static inline const DescriptorConfig::ConfigParameter<std::string> COUNTER_TYPE{
+            "counterType",
             std::nullopt,
-            [](const std::unordered_map<std::string, std::string>& config) { return DescriptorConfig::tryGet(MIN_VALUE, config); }};
+            [](const std::unordered_map<std::string, std::string>& config) { return DescriptorConfig::tryGet(COUNTER_TYPE, config); }};
 
-        static inline const DescriptorConfig::ConfigParameter<std::string> MAX_VALUE{
-            "maxValue",
+        static inline const DescriptorConfig::ConfigParameter<std::string> START_END_TYPE{
+            "startEndType",
             std::nullopt,
-            [](const std::unordered_map<std::string, std::string>& config) { return DescriptorConfig::tryGet(MAX_VALUE, config); }};
-
-        static inline const DescriptorConfig::ConfigParameter<std::string> NUM_BUCKETS{
-            "numBuckets",
-            std::nullopt,
-            [](const std::unordered_map<std::string, std::string>& config) { return DescriptorConfig::tryGet(NUM_BUCKETS, config); }};
+            [](const std::unordered_map<std::string, std::string>& config) { return DescriptorConfig::tryGet(START_END_TYPE, config); }};
 
         static inline std::unordered_map<std::string, DescriptorConfig::ConfigParameterContainer> parameterMap
-            = DescriptorConfig::createConfigParameterContainerMap(STATISTIC_HASH, MIN_VALUE, MAX_VALUE, NUM_BUCKETS);
+            = DescriptorConfig::createConfigParameterContainerMap(STATISTIC_HASH, COUNTER_TYPE, START_END_TYPE);
     };
 
     uint64_t statisticHash;
-    uint64_t minValue;
-    uint64_t maxValue;
-    uint64_t numBuckets;
+    DataType counterType;
+    DataType startEndType;
 
 private:
     static constexpr std::string_view NAME = "EquiWidthProbe";

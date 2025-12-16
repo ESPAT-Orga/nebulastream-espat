@@ -54,6 +54,7 @@
 #include <Operators/Windows/Aggregations/AvgAggregationLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/CountAggregationLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/Histogram/EquiWidthHistogramLogicalFunction.hpp>
+#include <Operators/Windows/Aggregations/Histogram/EquiWidthProbeLogicalOperator.hpp>
 #include <Operators/Windows/Aggregations/MaxAggregationLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/MedianAggregationLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/MinAggregationLogicalFunction.hpp>
@@ -537,11 +538,12 @@ void AntlrSQLQueryPlanCreator::exitPrimaryQuery(AntlrSQLParser::PrimaryQueryCont
         auto probe = helpers.top().statProbe.value();
         queryPlan = LogicalPlanBuilder::addStatProbeOp(helpers.top().statProbe.value(), queryPlan);
         // TODO Adapt for other probes:
-        auto reservoirProbe = probe.getAs<ReservoirProbeLogicalOperator>();
-        for (auto field : reservoirProbe->sampleSchema)
-        {
-            helpers.top().asterisk = true;
-        }
+        // auto reservoirProbe = probe.getAs<ReservoirProbeLogicalOperator>();
+        // for (auto field : reservoirProbe->sampleSchema)
+        // {
+        //
+        // }
+        helpers.top().asterisk = true;
     }
 
     queryPlan = LogicalPlanBuilder::addProjection(helpers.top().getProjections(), helpers.top().asterisk, queryPlan);
@@ -1074,6 +1076,29 @@ void AntlrSQLQueryPlanCreator::exitFunctionCall(AntlrSQLParser::FunctionCallCont
                     LogicalStatisticFields().statisticDataField.dataType, LogicalStatisticFields().statisticDataField.name};
                 helpers.top().windowAggs.push_back(
                     std::make_shared<EquiWidthHistogramLogicalFunction>(fieldName, asFieldIfNotOverwritten, numBuckets, minValue, maxValue, statisticHash));
+                break;
+            }
+            else if (funcName == "EQUIWIDTH_PROBE")
+            {
+                if (helpers.top().constantBuilder.empty())
+                {
+                    throw InvalidQuerySyntax(
+                        "Expected constant (sample hash) as first argument of EQUIWIDTH_PROBE function call, got nothing at {}",
+                        context->getText());
+                }
+                const uint64_t statisticHash = parseConstant(helpers.top().constantBuilder.back(), "statisticHash");
+                helpers.top().constantBuilder.pop_back();
+                if (helpers.top().constantBuilder.size() < 3)
+                {
+                    throw InvalidQuerySyntax("EQUIWIDTH_PROBE requires the arguments numBuckets, minValue, maxValue to be constants at {}", context->getText());
+                }
+                const auto maxValue = parseConstant(helpers.top().constantBuilder.back(), "maxValue");
+                helpers.top().constantBuilder.pop_back();
+                const auto minValue = parseConstant(helpers.top().constantBuilder.back(), "minValue");
+                helpers.top().constantBuilder.pop_back();
+                const auto numBuckets = parseConstant(helpers.top().constantBuilder.back(), "numBuckets");
+                helpers.top().constantBuilder.pop_back();
+                helpers.top().statProbe = EquiWidthProbeLogicalOperator(statisticHash, minValue, maxValue, numBuckets);
                 break;
             }
             else if (funcName == "COUNTMINSKETCH")

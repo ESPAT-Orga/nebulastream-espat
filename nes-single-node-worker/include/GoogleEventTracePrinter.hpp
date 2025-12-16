@@ -111,9 +111,8 @@ private:
     void emitBufferUsagePeriods(
         std::vector<BufferManagerChange> bufferManagerChanges, std::function<void(const nlohmann::json& evt)> emit, std::string label);
 
-    std::ofstream file;
+    std::filesystem::path outputPath;
     folly::MPMCQueue<CombinedEventType> events{QUEUE_LENGTH};
-    Thread traceThread;
     std::atomic<bool> headerWritten{false};
     std::atomic<bool> footerWritten{false};
 
@@ -123,5 +122,8 @@ private:
     /// Track active queries and pipelines for cleanup
     std::unordered_map<QueryId, std::pair<std::chrono::system_clock::time_point, WorkerThreadId>> activeQueries;
     std::unordered_map<PipelineId, std::tuple<QueryId, std::chrono::system_clock::time_point, WorkerThreadId>> activePipelines;
+
+    /// Must be declared last so it's destroyed first, ensuring the thread stops before maps are destroyed
+    Thread traceThread;
 };
 }

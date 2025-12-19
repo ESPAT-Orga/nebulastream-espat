@@ -61,6 +61,7 @@ public:
     explicit SourceThread(
         BackpressureListener backpressureListener,
         OriginId originId, /// Todo #241: Rethink use of originId for sources, use new identifier for unique identification.
+        PipelineId pipelineId,
         std::shared_ptr<AbstractBufferProvider> bufferManager,
         std::unique_ptr<Source> sourceImplementation);
 
@@ -90,6 +91,7 @@ public:
 
 protected:
     OriginId originId;
+    PipelineId pipelineId;
     std::shared_ptr<AbstractBufferProvider> localBufferManager;
     std::unique_ptr<Source> sourceImplementation;
     std::atomic_bool started;

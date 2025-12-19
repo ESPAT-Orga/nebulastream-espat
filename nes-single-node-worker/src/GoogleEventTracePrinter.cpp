@@ -126,12 +126,7 @@ void GoogleEventTracePrinter::writeTraceFooter()
 
 std::string creatorToString(BufferCreatorId id)
 {
-    auto value = id.value();
-    if (std::holds_alternative<OriginId>(value))
-    {
-        return "source " + std::get<OriginId>(value).toString();
-    }
-    return "pipeline " + std::get<PipelineId>(value).toString();
+    return "pipeline " + id.value().toString();
 }
 
 void GoogleEventTracePrinter::emitBufferUsagePeriods(

@@ -103,15 +103,16 @@ protected:
     [[nodiscard]] std::ostream& toString(std::ostream& str) const override;
 
 public:
-    explicit TestSource(OriginId sourceId, const std::shared_ptr<TestSourceControl>& control);
+    explicit TestSource(OriginId sourceId, PipelineId pipelineId, const std::shared_ptr<TestSourceControl>& control);
     ~TestSource() override;
 
 private:
     OriginId sourceId;
+    PipelineId pipelineId;
     std::shared_ptr<TestSourceControl> control;
 };
 
 std::pair<std::unique_ptr<SourceHandle>, std::shared_ptr<TestSourceControl>>
-getTestSource(BackpressureListener backpressureListener, OriginId originId, std::shared_ptr<AbstractBufferProvider> bufferPool);
+getTestSource(BackpressureListener backpressureListener, OriginId originId, PipelineId pipelineId, std::shared_ptr<AbstractBufferProvider> bufferPool);
 
 }

@@ -18,7 +18,7 @@
 namespace NES
 {
 using ChronoClock = std::chrono::system_clock;
-using BufferCreatorId = std::optional<std::variant<PipelineId, OriginId>>;
+using BufferCreatorId = std::optional<PipelineId>;
 
 struct BaseBufferManagerEvent
 {

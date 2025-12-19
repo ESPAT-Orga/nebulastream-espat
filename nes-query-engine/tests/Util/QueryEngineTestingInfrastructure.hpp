@@ -447,6 +447,7 @@ struct QueryPlanBuilder
     struct SourceDescriptor
     {
         OriginId sourceId = INVALID<OriginId>;
+        PipelineId pipelineId = INVALID<PipelineId>;
     };
 
     struct PipelineDescriptor

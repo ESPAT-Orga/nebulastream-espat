@@ -112,7 +112,10 @@ private:
     std::shared_ptr<TestSourceControl> control;
 };
 
-std::pair<std::unique_ptr<SourceHandle>, std::shared_ptr<TestSourceControl>>
-getTestSource(BackpressureListener backpressureListener, OriginId originId, PipelineId pipelineId, std::shared_ptr<AbstractBufferProvider> bufferPool);
+std::pair<std::unique_ptr<SourceHandle>, std::shared_ptr<TestSourceControl>> getTestSource(
+    BackpressureListener backpressureListener,
+    OriginId originId,
+    PipelineId pipelineId,
+    std::shared_ptr<AbstractBufferProvider> bufferPool);
 
 }

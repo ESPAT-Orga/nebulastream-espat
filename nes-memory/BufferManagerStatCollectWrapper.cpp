@@ -23,8 +23,8 @@
 namespace NES
 {
 
-BufferManagerStatCollectWrapper::BufferManagerStatCollectWrapper(std::shared_ptr<BufferManager> bufferManager, BufferCreatorId creatorId)
-    : bufferManager(bufferManager), creatorId(creatorId)
+BufferManagerStatCollectWrapper::BufferManagerStatCollectWrapper(std::shared_ptr<BufferManager> bufferManager, PipelineId pipelineId)
+    : bufferManager(bufferManager), pipelineId(pipelineId)
 {
 }
 
@@ -37,10 +37,10 @@ void BufferManagerStatCollectWrapper::collectPooledBufferStatistics(TupleBuffer 
     auto statistic = bufferManager->getBufferManagerStatisticListener();
     if (statistic)
     {
-        INVARIANT(creatorId.has_value(), "Recycling buffer callback invoked on used memory segment");
-        statistic->onEvent(GetPooledBufferEvent(buffer.getBufferSize(), creatorId));
-        buffer.setRecycleStatisticsCallback([statistic, size = buffer.getBufferSize(), creatorId = this->creatorId](detail::MemorySegment*)
-                                            { statistic->onEvent(RecyclePooledBufferEvent(size, creatorId)); });
+        INVARIANT(pipelineId != INVALID_PIPELINE_ID, "Recycling buffer callback invoked but invalid pipeline id found");
+        statistic->onEvent(GetPooledBufferEvent(buffer.getBufferSize(), pipelineId));
+        buffer.setRecycleStatisticsCallback([statistic, size = buffer.getBufferSize(), pipelineId = this->pipelineId](
+                                                detail::MemorySegment*) { statistic->onEvent(ReturnPooledBufferEvent(size, pipelineId)); });
     }
 }
 
@@ -77,11 +77,11 @@ std::optional<TupleBuffer> BufferManagerStatCollectWrapper::getUnpooledBuffer(co
     auto statistic = bufferManager->getBufferManagerStatisticListener();
     if (buffer && statistic)
     {
-        statistic->onEvent(GetUnpooledBufferEvent(buffer->getBufferSize(), creatorId));
-        INVARIANT(creatorId.has_value(), "Recycling buffer callback invoked on used memory segment");
+        statistic->onEvent(GetUnpooledBufferEvent(buffer->getBufferSize(), pipelineId));
+        INVARIANT(pipelineId != INVALID_PIPELINE_ID, "Recycling buffer callback invoked but invalid pipeline id found");
         buffer->setRecycleStatisticsCallback(
-            [statistic, size = buffer->getBufferSize(), creatorId = this->creatorId](detail::MemorySegment*)
-            { statistic->onEvent(RecycleUnpooledBufferEvent(size, creatorId)); });
+            [statistic, size = buffer->getBufferSize(), pipelineId = this->pipelineId](detail::MemorySegment*)
+            { statistic->onEvent(RecycleUnpooledBufferEvent(size, pipelineId)); });
     }
     return buffer;
 }

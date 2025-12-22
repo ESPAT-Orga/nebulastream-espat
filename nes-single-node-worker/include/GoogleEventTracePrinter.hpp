@@ -93,7 +93,7 @@ private:
     struct BufferManagerChange
     {
         BufferManagerAction action;
-        BufferCreatorId creatorId;
+        PipelineId pipelineId;
         size_t bufferSize;
         ChronoClock::time_point timestamp;
     };

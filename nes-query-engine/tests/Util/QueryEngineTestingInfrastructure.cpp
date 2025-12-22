@@ -313,39 +313,36 @@ void TestingHarness::expectQueryStatusEvents(QueryId id, std::initializer_list<Q
                 queryRunning.emplace(id, std::make_unique<std::promise<void>>());
                 EXPECT_CALL(*status, logQueryStatusChange(id, QueryState::Running, ::testing::_))
                     .Times(1)
-                    .WillOnce(
-                        ::testing::Invoke(
-                            [this](auto id, auto, auto)
-                            {
-                                queryRunning.at(id)->set_value();
-                                return true;
-                            }));
+                    .WillOnce(::testing::Invoke(
+                        [this](auto id, auto, auto)
+                        {
+                            queryRunning.at(id)->set_value();
+                            return true;
+                        }));
                 break;
             case QueryState::Stopped:
                 ASSERT_TRUE(queryTermination.try_emplace(id, std::make_unique<std::promise<void>>()).second)
                     << "Registered multiple query terminations";
                 EXPECT_CALL(*status, logQueryStatusChange(id, QueryState::Stopped, ::testing::_))
                     .Times(1)
-                    .WillOnce(
-                        ::testing::Invoke(
-                            [this](auto id, auto, auto)
-                            {
-                                queryTermination.at(id)->set_value();
-                                return true;
-                            }));
+                    .WillOnce(::testing::Invoke(
+                        [this](auto id, auto, auto)
+                        {
+                            queryTermination.at(id)->set_value();
+                            return true;
+                        }));
                 break;
             case QueryState::Failed:
                 ASSERT_TRUE(queryTermination.try_emplace(id, std::make_unique<std::promise<void>>()).second)
                     << "Registered multiple query terminations";
                 EXPECT_CALL(*status, logQueryFailure(id, ::testing::_, ::testing::_))
                     .Times(1)
-                    .WillOnce(
-                        ::testing::Invoke(
-                            [this](const auto& id, const auto&, auto)
-                            {
-                                queryTermination.at(id)->set_value();
-                                return true;
-                            }));
+                    .WillOnce(::testing::Invoke(
+                        [this](const auto& id, const auto&, auto)
+                        {
+                            queryTermination.at(id)->set_value();
+                            return true;
+                        }));
                 break;
         }
     }

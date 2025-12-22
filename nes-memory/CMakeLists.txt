@@ -14,6 +14,7 @@ add_subdirectory(MemoryLayout)
 
 add_library(nes-memory
         BufferManager.cpp
+        BufferManagerStatCollectWrapper.cpp
         TupleBufferImpl.cpp
         TupleBuffer.cpp
         NesDefaultMemoryAllocator.cpp

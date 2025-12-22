@@ -42,6 +42,7 @@ struct CompiledQueryPlan
         /// The Source representation in the `CompiledQueryPlan` is still an abstract source representation. During Query Instantiation
         /// the descriptor and originId are instantiated into concrete source implementation.
         OriginId originId;
+        PipelineId pipelineId;
         OperatorId operatorId;
         SourceDescriptor descriptor;
 

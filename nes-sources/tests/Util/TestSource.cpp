@@ -219,7 +219,8 @@ std::ostream& NES::TestSource::toString(std::ostream& str) const
     return str << "Test Source";
 }
 
-NES::TestSource::TestSource(OriginId sourceId, const std::shared_ptr<TestSourceControl>& control) : sourceId(sourceId), control(control)
+NES::TestSource::TestSource(OriginId sourceId, PipelineId pipelineId, const std::shared_ptr<TestSourceControl>& control)
+    : sourceId(std::move(sourceId)), pipelineId(std::move(pipelineId)), control(control)
 {
 }
 
@@ -228,14 +229,19 @@ NES::TestSource::~TestSource()
     control->destroyed.set_value();
 }
 
-std::pair<std::unique_ptr<NES::SourceHandle>, std::shared_ptr<NES::TestSourceControl>>
-NES::getTestSource(BackpressureListener backpressureListener, OriginId originId, std::shared_ptr<AbstractBufferProvider> bufferPool)
+std::pair<std::unique_ptr<NES::SourceHandle>, std::shared_ptr<NES::TestSourceControl>> NES::getTestSource(
+    BackpressureListener backpressureListener, OriginId originId, PipelineId pipelineId, std::shared_ptr<AbstractBufferProvider> bufferPool)
 {
     auto ctrl = std::make_shared<TestSourceControl>();
-    auto testSource = std::make_unique<TestSource>(originId, ctrl);
+    auto testSource = std::make_unique<TestSource>(originId, pipelineId, ctrl);
     SourceRuntimeConfiguration runtimeConfig{DEFAULT_NUMBER_OF_LOCAL_BUFFERS};
 
     auto sourceHandle = std::make_unique<SourceHandle>(
-        std::move(backpressureListener), std::move(originId), std::move(runtimeConfig), std::move(bufferPool), std::move(testSource));
+        std::move(backpressureListener),
+        std::move(originId),
+        std::move(pipelineId),
+        std::move(runtimeConfig),
+        std::move(bufferPool),
+        std::move(testSource));
     return {std::move(sourceHandle), ctrl};
 }

@@ -30,6 +30,7 @@
 
 namespace NES
 {
+struct BufferManagerStatisticListener;
 
 /**
  * @brief The BufferManager is responsible for:
@@ -72,6 +73,7 @@ public:
         Private,
         uint32_t bufferSize,
         uint32_t numOfBuffers,
+        std::shared_ptr<BufferManagerStatisticListener> bufferManagerListener,
         std::shared_ptr<std::pmr::memory_resource> memoryResource,
         uint32_t withAlignment);
 
@@ -83,6 +85,7 @@ public:
     static std::shared_ptr<BufferManager> create(
         uint32_t bufferSize = DEFAULT_BUFFER_SIZE,
         uint32_t numOfBuffers = DEFAULT_NUMBER_OF_BUFFERS,
+        std::shared_ptr<BufferManagerStatisticListener> bufferManagerListener = nullptr,
         const std::shared_ptr<std::pmr::memory_resource>& memoryResource = std::make_shared<NesDefaultMemoryAllocator>(),
         uint32_t withAlignment = DEFAULT_ALIGNMENT);
 
@@ -91,6 +94,7 @@ public:
     ~BufferManager() override;
 
     BufferManagerType getBufferManagerType() const override;
+    std::shared_ptr<BufferManagerStatisticListener> getBufferManagerStatisticListener();
 
 private:
     /**
@@ -150,6 +154,7 @@ private:
 
     std::shared_ptr<std::pmr::memory_resource> memoryResource;
     std::atomic<bool> isDestroyed{false};
+    std::shared_ptr<BufferManagerStatisticListener> bufferManagerListener;
 };
 
 

@@ -109,6 +109,7 @@ public:
     void setLastChunk(bool lastChunk);
     [[nodiscard]] OriginId getOriginId() const noexcept;
     void setOriginId(OriginId originId);
+    void setRecycleStatisticsCallback(std::optional<std::function<void(MemorySegment*)>> statisticsCallback);
     void setCreationTimestamp(Timestamp timestamp);
     [[nodiscard]] Timestamp getCreationTimestamp() const noexcept;
     [[nodiscard]] VariableSizedAccess::Index storeChildBuffer(BufferControlBlock* control);
@@ -134,6 +135,7 @@ public:
     MemorySegment* owner;
     std::shared_ptr<BufferRecycler> owningBufferRecycler = nullptr;
     std::function<void(MemorySegment*, BufferRecycler*)> recycleCallback;
+    std::optional<std::function<void(MemorySegment*)>> recycleStatisticsCallback = std::nullopt;
 
 #ifdef NES_DEBUG_TUPLE_BUFFER_LEAKS
 private:

@@ -76,9 +76,9 @@ ExecutableQueryPlan::instantiate(CompiledQueryPlan& compiledQueryPlan, const Sou
         throw NotImplemented("Currently our execution model expects exactly one sink per query plan");
     }
 
-    auto& [pipelineId, descriptor, predecessors] = compiledQueryPlan.sinks.front();
+    auto& [sinkPipelineId, sinkDescriptor, predecessors] = compiledQueryPlan.sinks.front();
 
-    auto sink = ExecutablePipeline::create(pipelineId, lower(std::move(backpressureController), descriptor), {});
+    auto sink = ExecutablePipeline::create(sinkPipelineId, lower(std::move(backpressureController), sinkDescriptor), {});
     compiledQueryPlan.pipelines.push_back(sink);
     for (const auto& predecessor : predecessors)
     {
@@ -91,10 +91,11 @@ ExecutableQueryPlan::instantiate(CompiledQueryPlan& compiledQueryPlan, const Sou
     }
 
 
-    for (auto [originId, operatorId, descriptor, successors] : compiledQueryPlan.sources)
+    for (auto [originId, sourcePipelineId, operatorId, sourceDescriptor, successors] : compiledQueryPlan.sources)
     {
         std::ranges::copy(instantiatedSinksWithSourcePredecessor[operatorId], std::back_inserter(successors));
-        instantiatedSources.emplace_back(sourceProvider.lower(originId, backpressureListener, descriptor), std::move(successors));
+        instantiatedSources.emplace_back(
+            sourceProvider.lower(originId, sourcePipelineId, backpressureListener, sourceDescriptor), std::move(successors));
     }
 
 

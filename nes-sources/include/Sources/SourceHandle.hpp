@@ -47,6 +47,7 @@ public:
     explicit SourceHandle(
         BackpressureListener backpressureListener,
         OriginId originId, /// Todo #241: Rethink use of originId for sources, use new identifier for unique identification.
+        PipelineId pipelineId,
         SourceRuntimeConfiguration configuration,
         std::shared_ptr<AbstractBufferProvider> bufferPool,
         std::unique_ptr<Source> sourceImplementation);

@@ -39,7 +39,8 @@ public:
 
     /// Returning a shared pointer, because sources may be shared by multiple executable query plans (qeps).
     [[nodiscard]] std::unique_ptr<SourceHandle>
-    lower(OriginId originId, PipelineId pipelineId, BackpressureListener backpressureListener, const SourceDescriptor& sourceDescriptor) const;
+    lower(OriginId originId, PipelineId pipelineId, BackpressureListener backpressureListener, const SourceDescriptor& sourceDescriptor)
+        const;
 
     [[nodiscard]] bool contains(const std::string& sourceType) const;
 };

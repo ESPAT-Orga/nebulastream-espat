@@ -94,7 +94,8 @@ ExecutableQueryPlan::instantiate(CompiledQueryPlan& compiledQueryPlan, const Sou
     for (auto [originId, sourcePipelineId, operatorId, sourceDescriptor, successors] : compiledQueryPlan.sources)
     {
         std::ranges::copy(instantiatedSinksWithSourcePredecessor[operatorId], std::back_inserter(successors));
-        instantiatedSources.emplace_back(sourceProvider.lower(originId, sourcePipelineId, backpressureListener, sourceDescriptor), std::move(successors));
+        instantiatedSources.emplace_back(
+            sourceProvider.lower(originId, sourcePipelineId, backpressureListener, sourceDescriptor), std::move(successors));
     }
 
 

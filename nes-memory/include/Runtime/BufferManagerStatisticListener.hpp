@@ -18,48 +18,47 @@
 namespace NES
 {
 using ChronoClock = std::chrono::system_clock;
-using BufferCreatorId = std::optional<PipelineId>;
 
 struct BaseBufferManagerEvent
 {
     BaseBufferManagerEvent() = default;
 
-    BaseBufferManagerEvent(BufferCreatorId creatorId, size_t bufferSize) : creatorId(creatorId), bufferSize(bufferSize) { }
+    BaseBufferManagerEvent(PipelineId pipelineID, size_t bufferSize) : pipelineId(pipelineID), bufferSize(bufferSize) { }
 
     ChronoClock::time_point timestamp = ChronoClock::now();
-    BufferCreatorId creatorId = std::nullopt;
+    PipelineId pipelineId = INVALID_PIPELINE_ID;
     size_t bufferSize{};
 };
 
 struct GetPooledBufferEvent : BaseBufferManagerEvent
 {
-    explicit GetPooledBufferEvent(size_t bufferSize, BufferCreatorId creatorId) : BaseBufferManagerEvent(creatorId, bufferSize) { }
+    explicit GetPooledBufferEvent(size_t bufferSize, PipelineId pipelineID) : BaseBufferManagerEvent(pipelineID, bufferSize) { }
 
     GetPooledBufferEvent() = default;
 };
 
 struct GetUnpooledBufferEvent : BaseBufferManagerEvent
 {
-    explicit GetUnpooledBufferEvent(size_t bufferSize, BufferCreatorId creatorId) : BaseBufferManagerEvent(creatorId, bufferSize) { }
+    explicit GetUnpooledBufferEvent(size_t bufferSize, PipelineId pipelineId) : BaseBufferManagerEvent(pipelineId, bufferSize) { }
 
     GetUnpooledBufferEvent() = default;
 };
 
-struct RecyclePooledBufferEvent : BaseBufferManagerEvent
+struct ReturnPooledBufferEvent : BaseBufferManagerEvent
 {
-    explicit RecyclePooledBufferEvent(size_t bufferSize, BufferCreatorId creatorId) : BaseBufferManagerEvent(creatorId, bufferSize) { }
+    explicit ReturnPooledBufferEvent(size_t bufferSize, PipelineId pipelineId) : BaseBufferManagerEvent(pipelineId, bufferSize) { }
 
-    RecyclePooledBufferEvent() = default;
+    ReturnPooledBufferEvent() = default;
 };
 
 struct RecycleUnpooledBufferEvent : BaseBufferManagerEvent
 {
-    explicit RecycleUnpooledBufferEvent(size_t bufferSize, BufferCreatorId creatorId) : BaseBufferManagerEvent(creatorId, bufferSize) { }
+    explicit RecycleUnpooledBufferEvent(size_t bufferSize, PipelineId pipelineId) : BaseBufferManagerEvent(pipelineId, bufferSize) { }
 
     RecycleUnpooledBufferEvent() = default;
 };
 
-using BufferManagerEvent = std::variant<GetPooledBufferEvent, RecyclePooledBufferEvent, GetUnpooledBufferEvent, RecycleUnpooledBufferEvent>;
+using BufferManagerEvent = std::variant<GetPooledBufferEvent, ReturnPooledBufferEvent, GetUnpooledBufferEvent, RecycleUnpooledBufferEvent>;
 static_assert(std::is_default_constructible_v<BufferManagerEvent>, "Events should be default constructible");
 
 struct BufferManagerStatisticListener

@@ -48,7 +48,12 @@ std::unique_ptr<SourceHandle> SourceProvider::lower(
         SourceRuntimeConfiguration runtimeConfig{maxInflightBuffers};
 
         return std::make_unique<SourceHandle>(
-            std::move(backpressureListener), std::move(originId), std::move(pipelineId), std::move(runtimeConfig), bufferPool, std::move(source.value()));
+            std::move(backpressureListener),
+            std::move(originId),
+            std::move(pipelineId),
+            std::move(runtimeConfig),
+            bufferPool,
+            std::move(source.value()));
     }
     throw UnknownSourceType("unknown source descriptor type: {}", sourceDescriptor.getSourceType());
 }

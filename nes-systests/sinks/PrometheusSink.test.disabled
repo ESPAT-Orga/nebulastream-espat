@@ -1,0 +1,19 @@
+# name: sinks/PrometheusSink.test
+# description: Creating prometheus sinks
+# groups: [Sinks]
+
+CREATE LOGICAL SOURCE generator10K(field1 FLOAT64, field2 FLOAT64);
+CREATE PHYSICAL SOURCE FOR generator10K TYPE Generator SET(
+       'ALL' as `SOURCE`.STOP_GENERATOR_WHEN_SEQUENCE_FINISHES,
+       1000000 AS `SOURCE`.MAX_RUNTIME_MS,
+       1 AS `SOURCE`.SEED,
+       'FIXED' AS `SOURCE`.GENERATOR_RATE_TYPE,
+       'emit_rate 10' AS `SOURCE`.GENERATOR_RATE_CONFIG,
+       'SEQUENCE FLOAT64 0 10000 1, SEQUENCE INT64 0 100 1' AS `SOURCE`.GENERATOR_SCHEMA
+);
+
+# This test will not terminate for a long time and then fail. It can be used running in paralel to
+# a prometheus server that consumes the exposed metrics
+# Setting INPUT_FORMAT has not effect but has to be set to keep the test from crashing
+SELECT * FROM generator10K INTO Prometheus('127.0.0.1:8080' AS `SINK`.SERVER_URL, 'CSV' AS `SINK`.INPUT_FORMAT);
+----

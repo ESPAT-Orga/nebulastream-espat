@@ -206,6 +206,10 @@ bool BufferControlBlock::release()
         const auto recycler = std::move(owningBufferRecycler);
         numberOfTuples = 0;
         recycleCallback(owner, recycler.get());
+        if (recycleStatisticsCallback)
+        {
+            recycleStatisticsCallback.value()(owner);
+        }
         return true;
     }
     else
@@ -300,6 +304,11 @@ OriginId BufferControlBlock::getOriginId() const noexcept
 void BufferControlBlock::setOriginId(const OriginId originId)
 {
     this->originId = originId;
+}
+
+void BufferControlBlock::setRecycleStatisticsCallback(std::optional<std::function<void(MemorySegment*)>> statisticsCallback)
+{
+    this->recycleStatisticsCallback = std::move(statisticsCallback);
 }
 
 /// -----------------------------------------------------------------------------

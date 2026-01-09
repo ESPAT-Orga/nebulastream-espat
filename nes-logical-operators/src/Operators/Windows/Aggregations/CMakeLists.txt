@@ -29,3 +29,4 @@ add_plugin(CountMinSketch AggregationLogicalFunction nes-logical-operators Sketc
 # Statistic Probe Operators
 add_plugin(ReservoirProbe LogicalOperator nes-logical-operators Sample/ReservoirProbeLogicalOperator.cpp)
 add_plugin(EquiWidthHistogramProbe LogicalOperator nes-logical-operators Histogram/EquiWidthHistogramProbeLogicalOperator.cpp)
+add_plugin(CountMinSketchProbe LogicalOperator nes-logical-operators Sketch/CountMinSketchProbeLogicalOperator.cpp)

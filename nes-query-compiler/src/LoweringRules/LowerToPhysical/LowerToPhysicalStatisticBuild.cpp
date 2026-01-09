@@ -166,8 +166,10 @@ std::vector<std::shared_ptr<AggregationPhysicalFunction>> getAggregationPhysical
             if (logicalCountMinSketch.has_value())
             {
                 aggregationArguments.numberOfSeenTuplesFieldName = logicalOperator.getNumberOfSeenTuplesFieldName();
+                aggregationArguments.counterType = logicalCountMinSketch->get().counterType;
                 aggregationArguments.columns = logicalCountMinSketch->get().columns;
                 aggregationArguments.rows = logicalCountMinSketch->get().rows;
+                aggregationArguments.seed = logicalCountMinSketch->get().seed;
             }
         }
 
@@ -232,7 +234,10 @@ LoweringRuleResultSubgraph LowerToPhysicalStatisticBuild::apply(LogicalOperator 
     }
     const auto entrySize = sizeof(ChainedHashMapEntry) + keySize + valueSize;
     const auto numberOfBuckets = conf.numberOfPartitions.getValue();
-    const auto pageSize = conf.pageSize.getValue();
+    const bool hasCountMinSketch = std::ranges::any_of(
+        aggregation->getWindowAggregation(), [](const auto& function) { return function && function->getName() == "CountMinSketch"; });
+
+    const auto pageSize = hasCountMinSketch ? conf.countMinAggregationHashMapPageSize.getValue() : conf.pageSize.getValue();
     const auto entriesPerPage = pageSize / entrySize;
 
     const auto& [fieldKeyNames, fieldValueNames] = getKeyAndValueFields(*aggregation);

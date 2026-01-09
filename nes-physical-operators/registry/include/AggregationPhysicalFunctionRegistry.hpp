@@ -38,6 +38,7 @@ struct AggregationPhysicalFunctionRegistryArguments
     std::optional<std::shared_ptr<TupleBufferRef>> bufferRefPagedVector;
     bool includeNullValues;
     std::optional<std::string> numberOfSeenTuplesFieldName{};
+    /// ReservoirSample and CountMinSketch:
     std::optional<uint64_t> seed{};
     /// ReservoirSample:
     std::optional<uint64_t> sampleSize{};

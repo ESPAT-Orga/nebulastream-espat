@@ -283,7 +283,7 @@ WindowedAggregationLogicalOperator Unreflector<WindowedAggregationLogicalOperato
             AggregationLogicalFunctionRegistryArguments{
                 .fields = {},
                 .sampleHash = std::nullopt,
-                .numberOfSeenTuplesField = std::nullopt,
+                .seed = std::nullopt,
                 .reservoirSize = std::nullopt,
                 .histogramNumBuckets = std::nullopt,
                 .histogramMinValue = std::nullopt,

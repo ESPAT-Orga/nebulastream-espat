@@ -33,9 +33,17 @@ namespace NES
 {
 
 CountMinSketchLogicalFunction::CountMinSketchLogicalFunction(
-    const FieldAccessLogicalFunction& onField, const uint64_t columns, const uint64_t rows)
+    const FieldAccessLogicalFunction& onField,
+    const uint64_t columns,
+    const uint64_t rows,
+    const uint64_t seed,
+    const DataType counterType,
+    const Statistic::StatisticHash statisticHash)
     : columns(columns)
     , rows(rows)
+    , seed(seed)
+    , counterType(counterType)
+    , statisticHash(statisticHash)
     , inputStamp(onField.getDataType())
     , partialAggregateStamp(DataTypeProvider::provideDataType(DataType::Type::UNDEFINED, DataType::NULLABLE::NOT_NULLABLE))
     , finalAggregateStamp(DataTypeProvider::provideDataType(DataType::Type::VARSIZED, DataType::NULLABLE::NOT_NULLABLE))
@@ -45,9 +53,18 @@ CountMinSketchLogicalFunction::CountMinSketchLogicalFunction(
 }
 
 CountMinSketchLogicalFunction::CountMinSketchLogicalFunction(
-    const FieldAccessLogicalFunction& onField, const FieldAccessLogicalFunction& asField, const uint64_t columns, const uint64_t rows)
+    const FieldAccessLogicalFunction& onField,
+    const FieldAccessLogicalFunction& asField,
+    const uint64_t columns,
+    const uint64_t rows,
+    const uint64_t seed,
+    const DataType counterType,
+    const Statistic::StatisticHash statisticHash)
     : columns(columns)
     , rows(rows)
+    , seed(seed)
+    , counterType(counterType)
+    , statisticHash(statisticHash)
     , inputStamp(onField.getDataType())
     , partialAggregateStamp(DataTypeProvider::provideDataType(DataType::Type::UNDEFINED, DataType::NULLABLE::NOT_NULLABLE))
     , finalAggregateStamp(DataTypeProvider::provideDataType(DataType::Type::VARSIZED, DataType::NULLABLE::NOT_NULLABLE))
@@ -71,16 +88,23 @@ Reflected CountMinSketchLogicalFunction::reflect() const
     return NES::reflect(this);
 }
 
-Reflected Reflector<CountMinSketchLogicalFunction>::operator()(const CountMinSketchLogicalFunction& function) const
+Reflected Reflector<CountMinSketchLogicalFunction>::operator()(const CountMinSketchLogicalFunction& op) const
 {
     return reflect(detail::ReflectedCountMinSketchLogicalFunction{
-        .onField = function.getOnField(), .asField = function.getAsField(), .columns = function.columns, .rows = function.rows});
+        .statisticHash = op.statisticHash,
+        .onField = op.getOnField(),
+        .asField = op.getAsField(),
+        .columns = op.columns,
+        .rows = op.rows,
+        .seed = op.seed,
+        .counterType = op.counterType});
 }
 
 CountMinSketchLogicalFunction Unreflector<CountMinSketchLogicalFunction>::operator()(const Reflected& reflected) const
 {
     auto data = unreflect<detail::ReflectedCountMinSketchLogicalFunction>(reflected);
-    return CountMinSketchLogicalFunction{data.onField, data.asField, data.columns, data.rows};
+    return CountMinSketchLogicalFunction{
+        data.onField, data.asField, data.columns, data.rows, data.seed, data.counterType, data.statisticHash};
 }
 
 CountMinSketchLogicalFunction CountMinSketchLogicalFunction::withInferredStamp(const Schema& schema) const
@@ -190,13 +214,8 @@ AggregationLogicalFunctionRegistryReturnType AggregationLogicalFunctionGenerated
     {
         return std::make_shared<WindowAggregationLogicalFunction>(unreflect<CountMinSketchLogicalFunction>(arguments.reflected));
     }
-    /// We assume the fields vector starts with onField, asField
-    PRECONDITION(arguments.fields.size() >= 2, "CountMinSketchLogicalFunction requires onField and asField");
-    PRECONDITION(arguments.countMinNumColumns.has_value(), "CountMinSketchLogicalFunction requires number of columns to be set!");
-    PRECONDITION(arguments.countMinNumRows.has_value(), "CountMinSketchLogicalFunction requires number of rows to be set!");
-
-    return std::make_shared<WindowAggregationLogicalFunction>(CountMinSketchLogicalFunction{
-        arguments.fields[0], arguments.fields[1], arguments.countMinNumColumns.value(), arguments.countMinNumRows.value()});
+    PRECONDITION(false, "Expected arguments are missing");
+    std::unreachable();
 }
 
 }

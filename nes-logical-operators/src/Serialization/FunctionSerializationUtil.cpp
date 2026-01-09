@@ -70,6 +70,7 @@ deserializeWindowAggregationFunction(const SerializableAggregationFunction& seri
     if (serializedFunction.has_sample_hash())
     {
         args.sampleHash = serializedFunction.sample_hash();
+        /// TODO We do not use numberOfSeenTuplesField?
         if (type == "ReservoirSample")
         {
             args.reservoirSize = serializedFunction.reservoir_size();
@@ -96,6 +97,8 @@ deserializeWindowAggregationFunction(const SerializableAggregationFunction& seri
         {
             args.countMinNumColumns = serializedFunction.count_min_num_columns();
             args.countMinNumRows = serializedFunction.count_min_num_rows();
+            args.seed = serializedFunction.seed();
+            args.histogramCounterType = DataTypeSerializationUtil::deserializeDataType(serializedFunction.histogram_counter_type());
         }
     }
 

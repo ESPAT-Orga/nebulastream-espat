@@ -21,23 +21,38 @@
 #include <Functions/FieldAccessLogicalFunction.hpp>
 #include <Operators/Statistic/LogicalStatisticFields.hpp>
 #include <Operators/Windows/Aggregations/WindowAggregationLogicalFunction.hpp>
+#include <Statistic.hpp>
 
 namespace NES
 {
 
 /// The CountMinSketch estimates counts of `asField` values, where accuracy depends on `columns` and `rows`.
-/// The actual errors can be taken from the paper: An Improved Data Stream Summary: The Count- Min Sketch and its Applications
+/// The actual errors can be taken from the paper: An Improved Data Stream Summary: The Count-Min Sketch and its Applications
 /// https://dimacs.rutgers.edu/~graham/pubs/papers/cm-full.pdf
 class CountMinSketchLogicalFunction final : public WindowAggregationLogicalFunction
 {
 public:
+    CountMinSketchLogicalFunction(
+        const FieldAccessLogicalFunction& onField,
+        uint64_t columns,
+        uint64_t rows,
+        uint64_t seed,
+        DataType counterType,
+        Statistic::StatisticHash statisticHash);
     /// `onField` the field for which the sketch should be created
     /// `asField` used when the sketch should be renamed in the query
     /// `columns` how many possible "buckets" per hashfunction
     /// `rows` equal to number of hash functions used
-    CountMinSketchLogicalFunction(const FieldAccessLogicalFunction& onField, uint64_t columns, uint64_t rows);
+    /// `seed` used to generate seeds to differentiate the hash functions between `rows`
+    /// `counterType` datatype of each entry in the `column`x`row` matrix
     CountMinSketchLogicalFunction(
-        const FieldAccessLogicalFunction& onField, const FieldAccessLogicalFunction& asField, uint64_t columns, uint64_t rows);
+        const FieldAccessLogicalFunction& onField,
+        const FieldAccessLogicalFunction& asField,
+        uint64_t columns,
+        uint64_t rows,
+        uint64_t seed,
+        DataType counterType,
+        Statistic::StatisticHash statisticHash);
 
     void inferStamp(const Schema& schema) override;
     ~CountMinSketchLogicalFunction() override = default;
@@ -46,6 +61,10 @@ public:
 
     uint64_t columns;
     uint64_t rows;
+    uint64_t seed;
+
+    DataType counterType;
+    Statistic::StatisticHash statisticHash;
 
 private:
     static constexpr std::string_view NAME = "CountMinSketch";

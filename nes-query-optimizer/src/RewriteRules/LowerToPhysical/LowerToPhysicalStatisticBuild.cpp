@@ -39,7 +39,6 @@
 #include <Operators/Windows/Aggregations/Sample/ReservoirSampleLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/Sketch/CountMinSketchLogicalFunction.hpp>
 #include <Operators/Windows/StatisticBuildLogicalOperator.hpp>
-#include <Operators/Windows/WindowedAggregationLogicalOperator.hpp>
 #include <RewriteRules/AbstractRewriteRule.hpp>
 #include <Runtime/Execution/OperatorHandler.hpp>
 #include <SliceStore/DefaultTimeBasedSliceStore.hpp>
@@ -161,8 +160,10 @@ getAggregationPhysicalFunctions(const StatisticBuildLogicalOperator& logicalOper
         {
             const auto logicalCountMinSketch = std::dynamic_pointer_cast<CountMinSketchLogicalFunction>(descriptor);
             aggregationArguments.numberOfSeenTuplesFieldName = logicalOperator.getNumberOfSeenTuplesFieldName();
+            aggregationArguments.counterType = logicalCountMinSketch->counterType;
             aggregationArguments.columns = logicalCountMinSketch->columns;
             aggregationArguments.rows = logicalCountMinSketch->rows;
+            aggregationArguments.seed = logicalCountMinSketch->seed;
         }
 
         if (auto aggregationPhysicalFunction
@@ -227,7 +228,10 @@ RewriteRuleResultSubgraph LowerToPhysicalStatisticBuild::apply(LogicalOperator l
     }
     const auto entrySize = sizeof(ChainedHashMapEntry) + keySize + valueSize;
     const auto numberOfBuckets = conf.numberOfPartitions.getValue();
-    const auto pageSize = conf.pageSize.getValue();
+    const bool hasCountMinSketch = std::ranges::any_of(
+        aggregation->getWindowAggregation(), [](const auto& function) { return function && function->getName() == "CountMinSketch"; });
+
+    const auto pageSize = hasCountMinSketch ? conf.countMinAggregationHashMapPageSize.getValue() : conf.pageSize.getValue();
     const auto entriesPerPage = pageSize / entrySize;
 
     const auto& [fieldKeyNames, fieldValueNames] = getKeyAndValueFields(*aggregation);

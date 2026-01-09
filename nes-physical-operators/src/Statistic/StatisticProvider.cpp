@@ -15,7 +15,7 @@
 
 #include <Statistic/Histogram/EquiWidthHistogramIteratorImpl.hpp>
 #include <Statistic/Sample/ReservoirSampleIteratorImpl.hpp>
-#include <Statistic/Sketch/CountMinIteratorImpl.hpp>
+#include <Statistic/Sketch/CountMinSketchIteratorImpl.hpp>
 
 namespace NES
 {
@@ -110,9 +110,9 @@ StatisticProvider::StatisticProviderIterator StatisticProvider::begin(const naut
             return iterator;
         }
         case Statistic::StatisticType::Count_Min_Sketch: {
-            const auto countMinArguments = dynamic_cast<CountMinProviderArguments*>(statisticProviderArguments.get());
-            INVARIANT(countMinArguments != nullptr, "CountMinProviderArguments is expected!");
-            StatisticProviderIterator iterator{std::make_unique<CountMinIteratorImpl>(statisticMemArea, *countMinArguments)};
+            const auto countMinArguments = dynamic_cast<CountMinSketchProviderArguments*>(statisticProviderArguments.get());
+            INVARIANT(countMinArguments != nullptr, "CountMinSketchProviderArguments is expected!");
+            StatisticProviderIterator iterator{std::make_unique<CountMinSketchIteratorImpl>(statisticMemArea, *countMinArguments)};
             iterator.advanceToBegin();
             return iterator;
         }
@@ -141,9 +141,9 @@ StatisticProvider::StatisticProviderIterator StatisticProvider::end(const nautil
             return iterator;
         }
         case Statistic::StatisticType::Count_Min_Sketch: {
-            const auto countMinArguments = dynamic_cast<CountMinProviderArguments*>(statisticProviderArguments.get());
-            INVARIANT(countMinArguments != nullptr, "CountMinProviderArguments is expected!");
-            StatisticProviderIterator iterator{std::make_unique<CountMinIteratorImpl>(statisticMemArea, *countMinArguments)};
+            const auto countMinArguments = dynamic_cast<CountMinSketchProviderArguments*>(statisticProviderArguments.get());
+            INVARIANT(countMinArguments != nullptr, "CountMinSketchProviderArguments is expected!");
+            StatisticProviderIterator iterator{std::make_unique<CountMinSketchIteratorImpl>(statisticMemArea, *countMinArguments)};
             iterator.advanceToEnd();
             return iterator;
         }

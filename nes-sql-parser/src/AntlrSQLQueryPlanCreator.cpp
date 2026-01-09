@@ -61,6 +61,7 @@
 #include <Operators/Windows/Aggregations/Sample/ReservoirProbeLogicalOperator.hpp>
 #include <Operators/Windows/Aggregations/Sample/ReservoirSampleLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/Sketch/CountMinSketchLogicalFunction.hpp>
+#include <Operators/Windows/Aggregations/Sketch/CountMinSketchProbeLogicalOperator.hpp>
 #include <Operators/Windows/Aggregations/SumAggregationLogicalFunction.hpp>
 #include <Operators/Windows/JoinLogicalOperator.hpp>
 #include <Plans/LogicalPlan.hpp>
@@ -515,6 +516,11 @@ void AntlrSQLQueryPlanCreator::exitPrimaryQuery(AntlrSQLParser::PrimaryQueryCont
             queryPlan = LogicalPlanBuilder::addStatisticStoreWriter(
                 queryPlan, logicalStatisticFields, helpers.top().statisticHash.value(), Statistic::StatisticType::Equi_Width_Histogram);
         }
+        if (windowAggName == "CountMinSketch")
+        {
+            queryPlan = LogicalPlanBuilder::addStatisticStoreWriter(
+                queryPlan, logicalStatisticFields, helpers.top().statisticHash.value(), Statistic::StatisticType::Count_Min_Sketch);
+        }
     }
     else if (helpers.top().isInAggFunction())
     {
@@ -536,12 +542,13 @@ void AntlrSQLQueryPlanCreator::exitPrimaryQuery(AntlrSQLParser::PrimaryQueryCont
         if (auto probeOpt = op.tryGetAs<ReservoirProbeLogicalOperator>())
         {
             const auto probe = probeOpt.value().get();
-            for (auto schemaField: probe.sampleSchema.getFields())
+            for (auto schemaField : probe.sampleSchema.getFields())
             {
                 const auto field = FieldAccessLogicalFunction{schemaField.dataType, schemaField.name};
                 helpers.top().addProjection(std::nullopt, field);
             }
-        } else if (auto probeOpt = op.tryGetAs<EquiWidthHistogramProbeLogicalOperator>())
+        }
+        else if (auto probeOpt = op.tryGetAs<EquiWidthHistogramProbeLogicalOperator>())
         {
             const auto probe = probeOpt.value().get();
             const auto start = FieldAccessLogicalFunction{probe.startEndType, probe.binStartFieldName};
@@ -550,6 +557,17 @@ void AntlrSQLQueryPlanCreator::exitPrimaryQuery(AntlrSQLParser::PrimaryQueryCont
 
             helpers.top().addProjection(std::nullopt, start);
             helpers.top().addProjection(std::nullopt, end);
+            helpers.top().addProjection(std::nullopt, counter);
+        }
+        else if (auto probeOpt = op.tryGetAs<CountMinSketchProbeLogicalOperator>())
+        {
+            const auto probe = probeOpt.value().get();
+            const auto rowIndex = FieldAccessLogicalFunction{probe.indexType, probe.rowIndexFieldName};
+            const auto columnIndex = FieldAccessLogicalFunction{probe.indexType, probe.columnIndexFieldName};
+            const auto counter = FieldAccessLogicalFunction{probe.counterType, probe.counterFieldName};
+
+            helpers.top().addProjection(std::nullopt, rowIndex);
+            helpers.top().addProjection(std::nullopt, columnIndex);
             helpers.top().addProjection(std::nullopt, counter);
         }
     }
@@ -1127,23 +1145,65 @@ void AntlrSQLQueryPlanCreator::exitFunctionCall(AntlrSQLParser::FunctionCallCont
                 INVARIANT(
                     counterDatatype.has_value() and startEndDatatype.has_value(),
                     "counter datatype or start/end datatype was not a datatype");
-                helpers.top().statProbe = EquiWidthHistogramProbeLogicalOperator(statisticHash, counterDatatype.value(), startEndDatatype.value());
+                helpers.top().statProbe
+                    = EquiWidthHistogramProbeLogicalOperator(statisticHash, counterDatatype.value(), startEndDatatype.value());
                 break;
             }
             else if (funcName == "COUNTMINSKETCH")
             {
-                if (helpers.top().functionBuilder.size() != 1
+                if (helpers.top().constantBuilder.empty())
+                {
+                    throw InvalidQuerySyntax(
+                        "Expected constant (statistic hash) as first argument of COUNTMINSKETCH function call, got nothing at {}",
+                        context->getText());
+                }
+                if (helpers.top().functionBuilder.size() != 2
                     && helpers.top().functionBuilder.back().tryGetAs<FieldAccessLogicalFunction>())
                 {
-                    throw InvalidQuerySyntax("COUNTMINSKETCH requires the first argument to be a fieldname");
+                    throw InvalidQuerySyntax("COUNTMINSKETCH requires the second argument to be a fieldname, and a datatype for the counter"
+                                             "");
                 }
-                const auto fieldName = helpers.top().functionBuilder.back().getAs<FieldAccessLogicalFunction>().get();
+                const auto counterTypeFn = helpers.top().functionBuilder.back().tryGetAs<FieldAccessLogicalFunction>().value().get();
+                auto counterDatatype = DataTypeProvider::tryProvideDataType(counterTypeFn.getFieldName()).value();
                 helpers.top().functionBuilder.pop_back();
+                const auto fieldName = helpers.top().functionBuilder.back().tryGetAs<FieldAccessLogicalFunction>().value().get();
+                helpers.top().functionBuilder.pop_back();
+                const auto seed = parseConstant(helpers.top().constantBuilder.back(), "seed");
+                helpers.top().constantBuilder.pop_back();
                 const auto rows = parseConstant(helpers.top().constantBuilder.back(), "rows");
                 helpers.top().constantBuilder.pop_back();
                 const auto columns = parseConstant(helpers.top().constantBuilder.back(), "columns");
                 helpers.top().constantBuilder.pop_back();
-                helpers.top().windowAggs.push_back(std::make_shared<CountMinSketchLogicalFunction>(fieldName, columns, rows));
+                const Statistic::StatisticHash statisticHash = parseConstant(helpers.top().constantBuilder.back(), "statisticHash");
+                helpers.top().constantBuilder.pop_back();
+                helpers.top().statisticHash = statisticHash;
+                helpers.top().windowAggs.push_back(
+                    std::make_shared<CountMinSketchLogicalFunction>(fieldName, columns, rows, seed, counterDatatype, statisticHash));
+                break;
+            }
+            else if (funcName == "COUNTMIN_PROBE")
+            {
+                if (helpers.top().constantBuilder.empty())
+                {
+                    throw InvalidQuerySyntax(
+                        "Expected constant (sample hash) as first argument of COUNTMIN_PROBE function call, got nothing at {}",
+                        context->getText());
+                }
+                const uint64_t statisticHash = parseConstant(helpers.top().constantBuilder.back(), "statisticHash");
+                helpers.top().constantBuilder.pop_back();
+                if (helpers.top().functionBuilder.empty())
+                {
+                    throw InvalidQuerySyntax("Expected counter datatype as lowercase argument, got {}", context->getText());
+                }
+                auto counterDatatypeOption = helpers.top().functionBuilder.back();
+                helpers.top().functionBuilder.pop_back();
+                INVARIANT(
+                    counterDatatypeOption.tryGetAs<FieldAccessLogicalFunction>().has_value(),
+                    "counter datatype was not a FieldAccessLogicalFunction");
+                auto counterDatatypeFn = counterDatatypeOption.getAs<FieldAccessLogicalFunction>().get();
+                auto counterDatatype = DataTypeProvider::tryProvideDataType(counterDatatypeFn.getFieldName());
+                INVARIANT(counterDatatype.has_value(), "counter datatype was not a datatype");
+                helpers.top().statProbe = CountMinSketchProbeLogicalOperator(statisticHash, counterDatatype.value());
                 break;
             }
             else

@@ -34,7 +34,12 @@ namespace NES
 {
 
 CountMinSketchLogicalFunction::CountMinSketchLogicalFunction(
-    const FieldAccessLogicalFunction& onField, const uint64_t columns, const uint64_t rows)
+    const FieldAccessLogicalFunction& onField,
+    const uint64_t columns,
+    const uint64_t rows,
+    const uint64_t seed,
+    const DataType counterType,
+    const Statistic::StatisticHash statisticHash)
     : WindowAggregationLogicalFunction(
           onField.getDataType(),
           DataTypeProvider::provideDataType(partialAggregateStampType),
@@ -42,11 +47,20 @@ CountMinSketchLogicalFunction::CountMinSketchLogicalFunction(
           onField)
     , columns(columns)
     , rows(rows)
+    , seed(seed)
+    , counterType(counterType)
+    , statisticHash(statisticHash)
 {
 }
 
 CountMinSketchLogicalFunction::CountMinSketchLogicalFunction(
-    const FieldAccessLogicalFunction& onField, const FieldAccessLogicalFunction& asField, const uint64_t columns, const uint64_t rows)
+    const FieldAccessLogicalFunction& onField,
+    const FieldAccessLogicalFunction& asField,
+    const uint64_t columns,
+    const uint64_t rows,
+    const uint64_t seed,
+    const DataType counterType,
+    const Statistic::StatisticHash statisticHash)
     : WindowAggregationLogicalFunction(
           onField.getDataType(),
           DataTypeProvider::provideDataType(partialAggregateStampType),
@@ -55,6 +69,9 @@ CountMinSketchLogicalFunction::CountMinSketchLogicalFunction(
           asField)
     , columns(columns)
     , rows(rows)
+    , seed(seed)
+    , counterType(counterType)
+    , statisticHash(statisticHash)
 {
 }
 
@@ -112,22 +129,34 @@ NES::SerializableAggregationFunction CountMinSketchLogicalFunction::serialize() 
 
     serializedAggregationFunction.mutable_as_field()->CopyFrom(asFieldFuc);
     serializedAggregationFunction.mutable_on_field()->CopyFrom(onFieldFuc);
+
     serializedAggregationFunction.set_count_min_num_columns(columns);
     serializedAggregationFunction.set_count_min_num_rows(rows);
+    serializedAggregationFunction.set_seed(seed);
+    DataTypeSerializationUtil::serializeDataType(counterType, serializedAggregationFunction.mutable_histogram_counter_type());
+    serializedAggregationFunction.set_sample_hash(statisticHash);
+
     return serializedAggregationFunction;
 }
 
 AggregationLogicalFunctionRegistryReturnType AggregationLogicalFunctionGeneratedRegistrar::RegisterCountMinSketchAggregationLogicalFunction(
     AggregationLogicalFunctionRegistryArguments arguments)
 {
-    /// We assume the fields vector starts with onField, asField
-    PRECONDITION(arguments.fields.size() >= 2, "CountMinSketchLogicalFunction requires onField and asField");
-    PRECONDITION(arguments.countMinNumColumns.has_value(), "CountMinSketchLogicalFunction requires number of columns to be set!");
-    PRECONDITION(arguments.countMinNumRows.has_value(), "CountMinSketchLogicalFunction requires number of rows to be set!");
-    PRECONDITION(arguments.numberOfSeenTuplesField.has_value(), "CountMinSketchLogicalFunction requires number of seen tuples be set!");
+    PRECONDITION(arguments.fields.size() == 2, "CountMinSketchLogicalFunction requires onField and asField");
+    PRECONDITION(arguments.countMinNumColumns.has_value(), "CountMinSketchLogicalFunction requires number of columns to be set");
+    PRECONDITION(arguments.countMinNumRows.has_value(), "CountMinSketchLogicalFunction requires number of rows to be set");
+    PRECONDITION(arguments.seed.has_value(), "CountMinSketchLogicalFunction requires seed to be set");
+    PRECONDITION(arguments.histogramCounterType.has_value(), "CountMinSketchLogicalFunction requires counter type to be set");
+    PRECONDITION(arguments.sampleHash.has_value(), "CountMinSketchLogicalFunction requires sampleHash to be set");
 
     const auto countMin = std::make_shared<CountMinSketchLogicalFunction>(
-        arguments.fields[0], arguments.fields[1], arguments.countMinNumColumns.value(), arguments.countMinNumRows.value());
+        arguments.fields[0],
+        arguments.fields[1],
+        arguments.countMinNumColumns.value(),
+        arguments.countMinNumRows.value(),
+        arguments.seed.value(),
+        arguments.histogramCounterType.value(),
+        arguments.sampleHash.value());
     return countMin;
 }
 

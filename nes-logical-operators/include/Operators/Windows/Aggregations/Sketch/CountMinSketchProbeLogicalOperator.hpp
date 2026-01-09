@@ -19,7 +19,6 @@
 #include <string_view>
 #include <unordered_map>
 #include <vector>
-
 #include <Configurations/Descriptor.hpp>
 #include <DataTypes/Schema.hpp>
 #include <Functions/FieldAssignmentLogicalFunction.hpp>
@@ -29,35 +28,33 @@
 #include <Operators/Statistic/LogicalStatisticFields.hpp>
 #include <Traits/Trait.hpp>
 #include <Util/PlanRenderer.hpp>
-#include <fmt/ranges.h>
 #include <SerializableOperator.pb.h>
-#include "rust/cxx.h"
+#include <Statistic.hpp>
 
 namespace NES
 {
 class SerializableOperator;
 
-/// Builds a new stream by reading out the buckets/bins of the histogram.
-class EquiWidthHistogramProbeLogicalOperator final : public LogicalStatisticFields, public OriginIdAssigner
+/// Builds a new stream by reading out all the counters of the Count Min sketch.
+class CountMinSketchProbeLogicalOperator final : public LogicalStatisticFields, public OriginIdAssigner
 {
 public:
-    explicit EquiWidthHistogramProbeLogicalOperator(uint64_t statisticHash, DataType counterType, DataType startEndType);
-    explicit EquiWidthHistogramProbeLogicalOperator(
-        uint64_t statisticHash,
+    explicit CountMinSketchProbeLogicalOperator(Statistic::StatisticHash statisticHash, DataType counterType);
+    explicit CountMinSketchProbeLogicalOperator(
+        Statistic::StatisticHash statisticHash,
         DataType counterType,
-        DataType startEndType,
-        std::string binStartFieldName,
-        std::string binEndFieldName,
-        std::string binCounterFieldName,
+        std::string rowIndexFieldName,
+        std::string columnIndexFieldName,
+        std::string counterFieldName,
         LogicalStatisticFields logicalStatisticFields);
 
-    [[nodiscard]] bool operator==(const EquiWidthHistogramProbeLogicalOperator& rhs) const;
+    [[nodiscard]] bool operator==(const CountMinSketchProbeLogicalOperator& rhs) const;
     void serialize(SerializableOperator&) const;
 
-    [[nodiscard]] EquiWidthHistogramProbeLogicalOperator withTraitSet(TraitSet) const;
+    [[nodiscard]] CountMinSketchProbeLogicalOperator withTraitSet(TraitSet) const;
     [[nodiscard]] TraitSet getTraitSet() const;
 
-    [[nodiscard]] EquiWidthHistogramProbeLogicalOperator withChildren(std::vector<LogicalOperator> children) const;
+    [[nodiscard]] CountMinSketchProbeLogicalOperator withChildren(std::vector<LogicalOperator> children) const;
     [[nodiscard]] std::vector<LogicalOperator> getChildren() const;
 
     [[nodiscard]] std::vector<Schema> getInputSchemas() const;
@@ -66,7 +63,7 @@ public:
     [[nodiscard]] std::string explain(ExplainVerbosity verbosity, OperatorId id) const;
     [[nodiscard]] std::string_view getName() const noexcept;
 
-    [[nodiscard]] EquiWidthHistogramProbeLogicalOperator withInferredSchema(const std::vector<Schema>& inputSchemas) const;
+    [[nodiscard]] CountMinSketchProbeLogicalOperator withInferredSchema(const std::vector<Schema>& inputSchemas) const;
 
     struct ConfigParameters
     {
@@ -80,46 +77,44 @@ public:
             std::nullopt,
             [](const std::unordered_map<std::string, std::string>& config) { return DescriptorConfig::tryGet(COUNTER_TYPE, config); }};
 
-        static inline const DescriptorConfig::ConfigParameter<std::string> START_END_TYPE{
-            "startEndType",
+        static inline const DescriptorConfig::ConfigParameter<std::string> ROW_INDEX_FIELD_NAME{
+            "rowIndexFieldName",
             std::nullopt,
-            [](const std::unordered_map<std::string, std::string>& config) { return DescriptorConfig::tryGet(START_END_TYPE, config); }};
+            [](const std::unordered_map<std::string, std::string>& config)
+            { return DescriptorConfig::tryGet(ROW_INDEX_FIELD_NAME, config); }};
 
-        static inline const DescriptorConfig::ConfigParameter<std::string> BIN_START_FIELD_NAME{
-            "binStartFieldName",
+        static inline const DescriptorConfig::ConfigParameter<std::string> COLUMN_INDEX_FIELD_NAME{
+            "columnIndexFieldName",
             std::nullopt,
             [](const std::unordered_map<std::string, std::string>& config)
-            { return DescriptorConfig::tryGet(BIN_START_FIELD_NAME, config); }};
-        static inline const DescriptorConfig::ConfigParameter<std::string> BIN_END_FIELD_NAME{
-            "binEndFieldName",
+            { return DescriptorConfig::tryGet(COLUMN_INDEX_FIELD_NAME, config); }};
+
+        static inline const DescriptorConfig::ConfigParameter<std::string> COUNTER_FIELD_NAME{
+            "counterFieldName",
             std::nullopt,
             [](const std::unordered_map<std::string, std::string>& config)
-            { return DescriptorConfig::tryGet(BIN_END_FIELD_NAME, config); }};
-        static inline const DescriptorConfig::ConfigParameter<std::string> BIN_COUNTER_FIELD_NAME{
-            "binCounterFieldName",
-            std::nullopt,
-            [](const std::unordered_map<std::string, std::string>& config)
-            { return DescriptorConfig::tryGet(BIN_COUNTER_FIELD_NAME, config); }};
+            { return DescriptorConfig::tryGet(COUNTER_FIELD_NAME, config); }};
 
         static inline std::unordered_map<std::string, DescriptorConfig::ConfigParameterContainer> parameterMap
             = DescriptorConfig::createConfigParameterContainerMap(
-                STATISTIC_HASH, COUNTER_TYPE, START_END_TYPE, BIN_START_FIELD_NAME, BIN_END_FIELD_NAME, BIN_COUNTER_FIELD_NAME);
+                STATISTIC_HASH, COUNTER_TYPE, ROW_INDEX_FIELD_NAME, COLUMN_INDEX_FIELD_NAME, COUNTER_FIELD_NAME);
     };
 
-    uint64_t statisticHash;
+    Statistic::StatisticHash statisticHash;
     DataType counterType;
-    DataType startEndType;
 
-    std::string binStartFieldName = BIN_START_FIELD_NAME_DEFAULT;
-    std::string binEndFieldName = BIN_END_FIELD_NAME_DEFAULT;
-    std::string binCounterFieldName = BIN_COUNTER_FIELD_NAME_DEFAULT;
+    std::string rowIndexFieldName = ROW_INDEX_FIELD_NAME_DEFAULT;
+    std::string columnIndexFieldName = COLUMN_INDEX_FIELD_NAME_DEFAULT;
+    std::string counterFieldName = COUNTER_FIELD_NAME_DEFAULT;
+
+    static constexpr DataType indexType = DataType{DataType::Type::UINT64};
 
 private:
-    static constexpr std::string_view NAME = "EquiWidthHistogramProbe";
+    static constexpr std::string_view NAME = "CountMinProbe";
 
-    static constexpr std::string BIN_START_FIELD_NAME_DEFAULT = "BINSTART";
-    static constexpr std::string BIN_END_FIELD_NAME_DEFAULT = "BINEND";
-    static constexpr std::string BIN_COUNTER_FIELD_NAME_DEFAULT = "BINCOUNTER";
+    static constexpr std::string ROW_INDEX_FIELD_NAME_DEFAULT = "ROWINDEX";
+    static constexpr std::string COLUMN_INDEX_FIELD_NAME_DEFAULT = "COLUMNINDEX";
+    static constexpr std::string COUNTER_FIELD_NAME_DEFAULT = "COUNTER";
 
     std::vector<LogicalOperator> children;
     TraitSet traitSet;

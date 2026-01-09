@@ -24,3 +24,4 @@ add_plugin(StatisticBuild RewriteRule nes-query-optimizer LowerToPhysicalStatist
 add_plugin(StatisticStoreWriter RewriteRule nes-query-optimizer LowerToPhysicalStatisticStoreWriter.cpp)
 add_plugin(ReservoirProbe RewriteRule nes-query-optimizer LowerToPhysicalReservoirProbe.cpp)
 add_plugin(EquiWidthHistogramProbe RewriteRule nes-query-optimizer LowerToPhysicalEquiWidthHistogramProbe.cpp)
+add_plugin(CountMinProbe RewriteRule nes-query-optimizer LowerToPhysicalCountMinSketchProbe.cpp)

@@ -20,6 +20,7 @@
 #include <Functions/FieldAccessLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/WindowAggregationLogicalFunction.hpp>
 #include <Util/Registry.hpp>
+#include <Statistic.hpp>
 
 namespace NES
 {
@@ -30,8 +31,11 @@ struct AggregationLogicalFunctionRegistryArguments
 {
     std::vector<FieldAccessLogicalFunction> fields;
     /// Additional arguments for statistics (TODO Store them differently):
-    std::optional<uint64_t> sampleHash;
+    std::optional<Statistic::StatisticHash> sampleHash;
+    /// TODO This field is unused.
     std::optional<Schema::Field> numberOfSeenTuplesField{};
+    /// Reservoir Sample and Count Min Sketch:
+    std::optional<uint64_t> seed;
     /// Reservoir Sample:
     std::optional<uint64_t> reservoirSize;
     /// Equi Width Histogram:

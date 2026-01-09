@@ -57,6 +57,12 @@ public:
            std::to_string(DEFAULT_PAGED_VECTOR_SIZE),
            "Page size of any other paged data structure",
            {std::make_shared<NumberValidation>()}};
+    UIntOption countMinAggregationHashMapPageSize
+        = {"count_min_aggregation_hash_map_page_size",
+           std::to_string(3000),
+           "page size for count min sketch in bytes (will replace the page size of the physical window aggregation's state hash map if any "
+           "of the aggregations are actually count min sketches",
+           {std::make_shared<NumberValidation>()}};
     UIntOption numberOfRecordsPerKey
         = {"number_of_records_per_key",
            std::to_string(DEFAULT_NUMBER_OF_RECORDS_PER_KEY),

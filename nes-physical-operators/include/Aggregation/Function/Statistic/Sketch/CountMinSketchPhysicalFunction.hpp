@@ -21,15 +21,17 @@ namespace NES
 {
 
 /// Creates a count-min sketch via our aggregation function. It stores the count-min sketch as a 2-D array.
-class CountMinPhysicalFunction final : public AggregationPhysicalFunction
+/// While computing, it also stores an array of seed values for each row that is derived from the seed.
+class CountMinSketchPhysicalFunction final : public AggregationPhysicalFunction
 {
 public:
-    CountMinPhysicalFunction(
+    CountMinSketchPhysicalFunction(
         DataType inputType,
         DataType resultType,
         PhysicalFunction inputFunction,
         Record::RecordFieldIdentifier resultFieldIdentifier,
-        const std::string_view numberOfSeenTuplesFieldName,
+        std::string_view numberOfSeenTuplesFieldName,
+        DataType counterType,
         uint64_t numberOfCols,
         uint64_t numberOfRows,
         uint64_t seed);
@@ -45,18 +47,20 @@ public:
     void reset(nautilus::val<AggregationState*> aggregationState, PipelineMemoryProvider& pipelineMemoryProvider) override;
     void cleanup(nautilus::val<AggregationState*> aggregationState) override;
     [[nodiscard]] size_t getSizeOfStateInBytes() const override;
-    ~CountMinPhysicalFunction() override = default;
+    ~CountMinSketchPhysicalFunction() override = default;
 
 private:
     std::string numberOfSeenTuplesFieldName;
     DataType counterType;
     uint64_t numberOfCols;
     uint64_t numberOfRows;
+    /// Just the sketch, does not include seeds size!
     uint64_t totalSizeOfSketchInBytes;
     uint64_t numberOfBitsInKey;
     uint64_t sizeOfSingleSeed;
-    uint64_t sizeOfSeedsForOneCol;
+    uint64_t totalSizeOfSeeds;
     uint64_t seed;
+    uint32_t loweredMetaDataSize{sizeof(numberOfCols) + sizeof(numberOfRows)};
 };
 
 }

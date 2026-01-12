@@ -80,12 +80,14 @@ NodeEngine::~NodeEngine()
 NodeEngine::NodeEngine(
     std::shared_ptr<BufferManager> bufferManager,
     std::shared_ptr<SystemEventListener> systemEventListener,
+    std::shared_ptr<BackpressureStatisticListener> backpressureStatListener,
     std::shared_ptr<QueryLog> queryLog,
     std::unique_ptr<QueryEngine> queryEngine,
     std::unique_ptr<SourceProvider> sourceProvider)
     : bufferManager(std::move(bufferManager))
     , queryLog(std::move(queryLog))
     , systemEventListener(std::move(systemEventListener))
+    , backpressureStatListener(std::move(backpressureStatListener))
     , queryEngine(std::move(queryEngine))
     , queryTracker(std::make_unique<QueryTracker>())
     , sourceProvider(std::move(sourceProvider))
@@ -105,7 +107,7 @@ void NodeEngine::startQuery(LocalQueryId queryId)
     if (auto qep = queryTracker->moveToExecuting(queryId))
     {
         systemEventListener->onEvent(StartQuerySystemEvent(queryId));
-        queryEngine->start(std::move(queryId), ExecutableQueryPlan::instantiate(*qep, *sourceProvider));
+        queryEngine->start(std::move(queryId), ExecutableQueryPlan::instantiate(*qep, *sourceProvider, backpressureStatListener));
     }
     else
     {

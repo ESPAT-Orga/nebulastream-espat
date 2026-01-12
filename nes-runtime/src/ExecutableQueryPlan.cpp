@@ -62,14 +62,20 @@ std::ostream& operator<<(std::ostream& os, const ExecutableQueryPlan& instantiat
     return os;
 }
 
-std::unique_ptr<ExecutableQueryPlan>
-ExecutableQueryPlan::instantiate(CompiledQueryPlan& compiledQueryPlan, const SourceProvider& sourceProvider)
+std::unique_ptr<ExecutableQueryPlan> ExecutableQueryPlan::instantiate(
+    CompiledQueryPlan& compiledQueryPlan,
+    const SourceProvider& sourceProvider,
+    std::shared_ptr<BackpressureStatisticListener> backpressureStatisticListener)
 {
     std::vector<SourceWithSuccessor> instantiatedSources;
 
     std::unordered_map<OperatorId, std::vector<std::shared_ptr<ExecutablePipeline>>> instantiatedSinksWithSourcePredecessor;
 
     auto [backpressureController, backpressureListener] = createBackpressureChannel();
+    if (backpressureStatisticListener)
+    {
+        backpressureController.setStatisticListener(backpressureStatisticListener);
+    }
 
     if (compiledQueryPlan.sinks.size() != 1)
     {

@@ -410,6 +410,8 @@ EOF
   run DOCKER_NES_CLI start
   [ $status -eq 0 ]
   query_id=$output
+  (gnome-terminal -- tail -F "$TMP_DIR"/worker-1/singleNodeWorker.log)&
+  (gnome-terminal -- tail -F "$TMP_DIR"/worker-2/singleNodeWorker.log)&
 
   sleep 5
 

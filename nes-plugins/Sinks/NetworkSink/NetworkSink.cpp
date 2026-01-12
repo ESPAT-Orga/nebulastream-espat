@@ -85,6 +85,7 @@ std::optional<TupleBuffer> BackpressureHandler::onSuccess(BackpressureController
     if (state->hasBackpressure)
     {
         backpressureController.releasePressure();
+        NES_DEBUG("Release pressure");
         state->hasBackpressure = false;
         state->pendingChunkNumber = INVALID<ChunkNumber>;
         state->pendingSequenceNumber = INVALID<SequenceNumber>;

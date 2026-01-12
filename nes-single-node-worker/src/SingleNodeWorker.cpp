@@ -37,6 +37,7 @@
 #include <Util/Pointers.hpp>
 #include <Util/UUID.hpp>
 #include <cpptrace/from_current.hpp>
+#include <BackpressureStatisticTcpEmitter.hpp>
 #include <CompositeStatisticListener.hpp>
 #include <ErrorHandling.hpp>
 #include <GoogleEventTracePrinter.hpp>
@@ -64,6 +65,14 @@ SingleNodeWorker::SingleNodeWorker(const SingleNodeWorkerConfiguration& configur
             fmt::format("trace_{}_{:%Y-%m-%d_%H-%M-%S}_{:d}.json", workerId.getRawValue(), std::chrono::system_clock::now(), ::getpid()));
         googleTracePrinter->start();
         listener->addListener(googleTracePrinter);
+    }
+
+    if (configuration.enableBackpressureStatisticsTCPEmission.getValue())
+    {
+        auto backpressureStatisticListener = std::make_shared<BackpressureStatisticTcpEmitter>(
+            configuration.backpressureStatisticsTCPEmissionHost.getValue(), configuration.backpressureStatisticsTCPEmissionPort.getValue());
+        backpressureStatisticListener->start();
+        listener->addBackpressureListener(backpressureStatisticListener);
     }
 
     nodeEngine = NodeEngineBuilder(configuration.workerConfiguration, copyPtr(listener)).build(workerId);

@@ -42,6 +42,16 @@ connections.  Valid values include dns:///localhost:1234,
            "false",
            "Enable Google Event Trace logging that generates Chrome tracing compatible JSON files for performance analysis."};
 
+    /// Enable backpressure event logging and emission via tcp
+    BoolOption enableBackpressureStatisticsTCPEmission
+        = {"enable_backpressure_statistics_tcp_emission",
+           "false",
+           "Enable the collection of statistics about backpressure encountered at network sinks and expose this data via tcp"};
+    StringOption backpressureStatisticsTCPEmissionHost
+        = {"backpressure_statistics_tcp_emission_host", "127.0.0.1", "The host for exposing backpressure statistics via tcp"};
+    UIntOption backpressureStatisticsTCPEmissionPort
+        = {"backpressure_statistics_tcp_emission_port", "9000", "The port for exposing backpressure statistics via tcp"};
+
 protected:
     std::vector<BaseOption*> getOptions() override;
 

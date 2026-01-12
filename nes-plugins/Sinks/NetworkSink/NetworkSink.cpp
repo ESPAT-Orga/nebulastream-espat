@@ -47,7 +47,8 @@
 namespace NES
 {
 
-std::optional<TupleBuffer> BackpressureHandler::onFull(TupleBuffer buffer, BackpressureController& backpressureController)
+std::optional<TupleBuffer>
+BackpressureHandler::onFull(TupleBuffer buffer, BackpressureController& backpressureController, const std::string& channelId)
 {
     auto rstate = stateLock.ulock();
     if (rstate->hasBackpressure)
@@ -68,7 +69,7 @@ std::optional<TupleBuffer> BackpressureHandler::onFull(TupleBuffer buffer, Backp
 
     /// Apply backpressure now on the backpressureController, leading to blocked ingestion threads until pressure is released again onSuccess.
     const auto wstate = rstate.moveFromUpgradeToWrite();
-    backpressureController.applyPressure();
+    backpressureController.applyPressure(channelId);
     NES_DEBUG("Backpressure: {}", wstate->buffered.size());
     wstate->hasBackpressure = true;
     wstate->pendingSequenceNumber = buffer.getSequenceNumber();
@@ -79,12 +80,12 @@ std::optional<TupleBuffer> BackpressureHandler::onFull(TupleBuffer buffer, Backp
 /// Called on a successful send of a buffer to the network channel.
 /// 1. If we currently have backpressure, release pressure on the backpressureController, causing ingestion to proceed.
 /// 2. In case of buffers remaining in the state, pop the oldest from the deque and return to try to send. Otherwise, return an empty optional.
-std::optional<TupleBuffer> BackpressureHandler::onSuccess(BackpressureController& backpressureController)
+std::optional<TupleBuffer> BackpressureHandler::onSuccess(BackpressureController& backpressureController, const std::string& channelId)
 {
     const auto state = stateLock.wlock();
     if (state->hasBackpressure)
     {
-        backpressureController.releasePressure();
+        backpressureController.releasePressure(channelId);
         state->hasBackpressure = false;
         state->pendingChunkNumber = INVALID<ChunkNumber>;
         state->pendingSequenceNumber = INVALID<SequenceNumber>;
@@ -180,7 +181,7 @@ void NetworkSink::execute(const TupleBuffer& inputBuffer, PipelineExecutionConte
         case SendResult::Closed: {
             /// Future buffers are voided.
             this->closed = true;
-            auto _ = backpressureHandler.onFull(inputBuffer, backpressureController);
+            auto _ = backpressureHandler.onFull(inputBuffer, backpressureController, channelId);
             /// Currently there is no way to propagate a query stop without a failure from a sink.
             /// There is not any operator that would propagate a query stop in the upstream direction, so receiving a query stop
             /// from the downstream operator is unexpected, thus failing the query is reasonable.
@@ -189,14 +190,14 @@ void NetworkSink::execute(const TupleBuffer& inputBuffer, PipelineExecutionConte
         case SendResult::Ok: {
             NES_TRACE("Sending buffer {}", inputBuffer.getSequenceNumber());
             /// Sent a buffer, check the backpressure handler to send another one
-            if (const auto nextBuffer = backpressureHandler.onSuccess(backpressureController))
+            if (const auto nextBuffer = backpressureHandler.onSuccess(backpressureController, channelId))
             {
                 execute(*nextBuffer, pec);
             }
             break;
         }
         case SendResult::Full: {
-            if (const auto emit = backpressureHandler.onFull(inputBuffer, backpressureController))
+            if (const auto emit = backpressureHandler.onFull(inputBuffer, backpressureController, channelId))
             {
                 pec.repeatTask(*emit, BACKPRESSURE_RETRY_INTERVAL);
             }

@@ -45,6 +45,13 @@ BackpressureController::BackpressureController(std::shared_ptr<Channel> channel)
 {
 }
 
+BackpressureController::BackpressureController(
+    std::shared_ptr<Channel> channel, std::shared_ptr<NES::BackpressureStatisticListener> backpressureStatisticListener)
+    : BackpressureController(std::move(channel))
+{
+    this->backpressureStatisticListener = std::move(backpressureStatisticListener);
+}
+
 BackpressureController::~BackpressureController()
 {
     if (channel)
@@ -54,14 +61,20 @@ BackpressureController::~BackpressureController()
     }
 }
 
-bool BackpressureController::applyPressure()
+bool BackpressureController::applyPressure(const std::string& channelId)
 {
     const auto old = std::exchange(*channel->stateMtx.lock(), Channel::CLOSED);
     INVARIANT(old != Channel::DESTROYED, "The backpressureController is still alive thus the channel should not have been destroyed");
-    return old == Channel::OPEN;
+
+    bool newPressure = old == Channel::OPEN;
+    if (backpressureStatisticListener && newPressure)
+    {
+        backpressureStatisticListener->onEvent(NES::ApplyPressureEvent(channelId));
+    }
+    return newPressure;
 }
 
-bool BackpressureController::releasePressure()
+bool BackpressureController::releasePressure(const std::string& channelId)
 {
     const auto old = std::exchange(*channel->stateMtx.lock(), Channel::OPEN);
     INVARIANT(old != Channel::DESTROYED, "The Backpressure Controller is still alive thus the channel should not have been destroyed");
@@ -69,9 +82,19 @@ bool BackpressureController::releasePressure()
     {
         /// The Backpressure Controller was opened, wake up all waiting BackpressureListeners
         channel->change.notify_all();
+
+        if (backpressureStatisticListener)
+        {
+            backpressureStatisticListener->onEvent(NES::ReleasePressureEvent(channelId));
+        }
         return true;
     }
     return false;
+}
+
+void BackpressureController::setStatisticListener(std::shared_ptr<NES::BackpressureStatisticListener> listener)
+{
+    this->backpressureStatisticListener = listener;
 }
 
 void BackpressureListener::wait(const std::stop_token& stopToken) const

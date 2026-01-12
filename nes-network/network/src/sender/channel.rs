@@ -96,7 +96,7 @@ async fn create_channel<C: Communication>(
 /// is reached, the channel handler will stop sending new buffers and wait for
 /// acknowledgments from the receiver. This prevents unbounded memory growth and
 /// provides backpressure at the network level.
-const MAX_PENDING_ACKS: usize = 64;
+const MAX_PENDING_ACKS: usize = 2;
 
 /// Commands sent from `SenderChannel` to the channel handler task.
 pub(super) enum ChannelCommand {

@@ -26,6 +26,7 @@
 #include <tuple>
 #include <utility>
 #include <variant>
+#include <unistd.h>
 #include <Identifiers/Identifiers.hpp>
 #include <Listeners/SystemEventListener.hpp>
 #include <Runtime/BufferManager.hpp>
@@ -197,6 +198,7 @@ void GoogleEventTracePrinter::emitBufferUsagePeriods(
 
 void GoogleEventTracePrinter::threadRoutine(const std::stop_token& token)
 {
+    const auto pid = getpid();
     std::ofstream file(outputPath, std::ios::out | std::ios::trunc);
     if (!file.is_open())
     {
@@ -302,9 +304,11 @@ void GoogleEventTracePrinter::threadRoutine(const std::stop_token& token)
                     printComma();
                     fmt::print(
                         file,
-                        R"(    {{"args":{{"query":"{}"}},"cat":"system","name":"Submit Query {}","ph":"i","pid":1,"tid":0,"ts":{}}})",
+                        R"(    {{"args":{{"query":"{}"}},"cat":"system","name":"Submit Query {}","ph":"i","pid":{},"tid":{},"ts":{}}})",
                         escapeForJson(submitEvent.query),
                         submitEvent.queryId,
+                        pid,
+                        SYSTEM_THREAD,
                         timestampToMicroseconds(submitEvent.timestamp));
                 },
                 [&](const StartQuerySystemEvent& startEvent)
@@ -312,8 +316,10 @@ void GoogleEventTracePrinter::threadRoutine(const std::stop_token& token)
                     printComma();
                     fmt::print(
                         file,
-                        R"(    {{"cat":"system","name":"Start Query {}","ph":"i","pid":1,"tid":0,"ts":{}}})",
+                        R"(    {{"cat":"system","name":"Start Query {}","ph":"i","pid":{},"tid":{},"ts":{}}})",
                         startEvent.queryId,
+                        pid,
+                        SYSTEM_THREAD,
                         timestampToMicroseconds(startEvent.timestamp));
                 },
                 [&](const StopQuerySystemEvent& stopEvent)
@@ -321,8 +327,10 @@ void GoogleEventTracePrinter::threadRoutine(const std::stop_token& token)
                     printComma();
                     fmt::print(
                         file,
-                        R"(    {{"cat":"system","name":"Stop Query {}","ph":"i","pid":1,"tid":0,"ts":{}}})",
+                        R"(    {{"cat":"system","name":"Stop Query {}","ph":"i","pid":{},"tid":{},"ts":{}}})",
                         stopEvent.queryId,
+                        pid,
+                        SYSTEM_THREAD,
                         timestampToMicroseconds(stopEvent.timestamp));
                 },
                 [&](const QueryStart& queryStart)
@@ -330,8 +338,9 @@ void GoogleEventTracePrinter::threadRoutine(const std::stop_token& token)
                     printComma();
                     fmt::print(
                         file,
-                        R"(    {{"cat":"query","name":"Query {}","ph":"B","pid":1,"tid":{},"ts":{}}})",
+                        R"(    {{"cat":"query","name":"Query {}","ph":"B","pid":{},"tid":{},"ts":{}}})",
                         queryStart.queryId,
+                        pid,
                         queryStart.threadId.getRawValue(),
                         timestampToMicroseconds(queryStart.timestamp));
 
@@ -348,8 +357,9 @@ void GoogleEventTracePrinter::threadRoutine(const std::stop_token& token)
                     printComma();
                     fmt::print(
                         file,
-                        R"(    {{"cat":"query","name":"Query {}","ph":"E","pid":1,"tid":{},"ts":{}}})",
+                        R"(    {{"cat":"query","name":"Query {}","ph":"E","pid":{},"tid":{},"ts":{}}})",
                         queryFail.queryId,
+                        pid,
                         originalTid,
                         timestampToMicroseconds(queryFail.timestamp));
 
@@ -361,8 +371,9 @@ void GoogleEventTracePrinter::threadRoutine(const std::stop_token& token)
                     printComma();
                     fmt::print(
                         file,
-                        R"(    {{"cat":"query","name":"QueryStopRequest {}","ph":"i","pid":1,"tid":{},"ts":{}}})",
+                        R"(    {{"cat":"query","name":"QueryStopRequest {}","ph":"i","pid":{},"tid":{},"ts":{}}})",
                         queryStopRequest.queryId,
+                        pid,
                         queryStopRequest.threadId.getRawValue(),
                         timestampToMicroseconds(queryStopRequest.timestamp));
                 },
@@ -376,8 +387,9 @@ void GoogleEventTracePrinter::threadRoutine(const std::stop_token& token)
                     printComma();
                     fmt::print(
                         file,
-                        R"(    {{"cat":"query","name":"Query {}","ph":"E","pid":1,"tid":{},"ts":{}}})",
+                        R"(    {{"cat":"query","name":"Query {}","ph":"E","pid":{},"tid":{},"ts":{}}})",
                         queryStop.queryId,
+                        pid,
                         originalTid,
                         timestampToMicroseconds(queryStop.timestamp));
 
@@ -389,10 +401,11 @@ void GoogleEventTracePrinter::threadRoutine(const std::stop_token& token)
                     printComma();
                     fmt::print(
                         file,
-                        R"x(    {{"args":{{"pipeline_id":{}}},"cat":"pipeline","name":"Pipeline {} (Query {})","ph":"B","pid":1,"tid":{},"ts":{}}})x",
+                        R"x(    {{"args":{{"pipeline_id":{}}},"cat":"pipeline","name":"Pipeline {} (Query {})","ph":"B","pid":{},"tid":{},"ts":{}}})x",
                         pipelineStart.pipelineId.getRawValue(),
                         pipelineStart.pipelineId,
                         pipelineStart.queryId,
+                        pid,
                         pipelineStart.threadId.getRawValue(),
                         timestampToMicroseconds(pipelineStart.timestamp));
 
@@ -410,10 +423,11 @@ void GoogleEventTracePrinter::threadRoutine(const std::stop_token& token)
                     printComma();
                     fmt::print(
                         file,
-                        R"x(    {{"args":{{"pipeline_id":{}}},"cat":"pipeline","name":"Pipeline {} (Query {})","ph":"E","pid":1,"tid":{},"ts":{}}})x",
+                        R"x(    {{"args":{{"pipeline_id":{}}},"cat":"pipeline","name":"Pipeline {} (Query {})","ph":"E","pid":{},"tid":{},"ts":{}}})x",
                         pipelineStop.pipelineId.getRawValue(),
                         pipelineStop.pipelineId,
                         pipelineStop.queryId,
+                        pid,
                         originalTid,
                         timestampToMicroseconds(pipelineStop.timestamp));
 
@@ -425,13 +439,14 @@ void GoogleEventTracePrinter::threadRoutine(const std::stop_token& token)
                     printComma();
                     fmt::print(
                         file,
-                        R"x(    {{"args":{{"pipeline_id":{},"task_id":{},"tuples":{}}},"cat":"task","name":"Task {} (Pipeline {}, Query {})","ph":"B","pid":1,"tid":{},"ts":{}}})x",
+                        R"x(    {{"args":{{"pipeline_id":{},"task_id":{},"tuples":{}}},"cat":"task","name":"Task {} (Pipeline {}, Query {})","ph":"B","pid":{},"tid":{},"ts":{}}})x",
                         taskStart.pipelineId.getRawValue(),
                         taskStart.taskId.getRawValue(),
                         taskStart.numberOfTuples,
                         taskStart.taskId,
                         taskStart.pipelineId,
                         taskStart.queryId,
+                        pid,
                         taskStart.threadId.getRawValue(),
                         timestampToMicroseconds(taskStart.timestamp));
 
@@ -451,13 +466,14 @@ void GoogleEventTracePrinter::threadRoutine(const std::stop_token& token)
                     printComma();
                     fmt::print(
                         file,
-                        R"x(    {{"args":{{"pipeline_id":{},"task_id":{}}},"cat":"task","dur":{},"name":"Task {} (Pipeline {}, Query {})","ph":"E","pid":1,"tid":{},"ts":{}}})x",
+                        R"x(    {{"args":{{"pipeline_id":{},"task_id":{}}},"cat":"task","dur":{},"name":"Task {} (Pipeline {}, Query {})","ph":"E","pid":{},"tid":{},"ts":{}}})x",
                         taskComplete.pipelineId.getRawValue(),
                         taskComplete.taskId.getRawValue(),
                         duration,
                         taskComplete.taskId,
                         taskComplete.pipelineId,
                         taskComplete.queryId,
+                        pid,
                         taskComplete.threadId.getRawValue(),
                         timestampToMicroseconds(taskComplete.timestamp));
                 },
@@ -466,7 +482,7 @@ void GoogleEventTracePrinter::threadRoutine(const std::stop_token& token)
                     printComma();
                     fmt::print(
                         file,
-                        R"x(    {{"args":{{"from_pipeline":{},"task_id":{},"to_pipeline":{},"tuples":{}}},"cat":"task","name":"Emit {}->{} (Task {}, Query {})","ph":"i","pid":1,"tid":{},"ts":{}}})x",
+                        R"x(    {{"args":{{"from_pipeline":{},"task_id":{},"to_pipeline":{},"tuples":{}}},"cat":"task","name":"Emit {}->{} (Task {}, Query {})","ph":"i","pid":{},"tid":{},"ts":{}}})x",
                         taskEmit.fromPipeline.getRawValue(),
                         taskEmit.taskId.getRawValue(),
                         taskEmit.toPipeline.getRawValue(),
@@ -475,6 +491,7 @@ void GoogleEventTracePrinter::threadRoutine(const std::stop_token& token)
                         taskEmit.toPipeline,
                         taskEmit.taskId,
                         taskEmit.queryId,
+                        pid,
                         taskEmit.threadId.getRawValue(),
                         timestampToMicroseconds(taskEmit.timestamp));
                 },
@@ -483,12 +500,13 @@ void GoogleEventTracePrinter::threadRoutine(const std::stop_token& token)
                     printComma();
                     fmt::print(
                         file,
-                        R"x(    {{"args":{{"pipeline_id":{},"task_id":{}}},"cat":"task","name":"Task Expired {} (Pipeline {}, Query {})","ph":"i","pid":1,"tid":{},"ts":{}}})x",
+                        R"x(    {{"args":{{"pipeline_id":{},"task_id":{}}},"cat":"task","name":"Task Expired {} (Pipeline {}, Query {})","ph":"i","pid":{},"tid":{},"ts":{}}})x",
                         taskExpired.pipelineId.getRawValue(),
                         taskExpired.taskId.getRawValue(),
                         taskExpired.taskId,
                         taskExpired.pipelineId,
                         taskExpired.queryId,
+                        pid,
                         taskExpired.threadId.getRawValue(),
                         timestampToMicroseconds(taskExpired.timestamp));
 

@@ -30,10 +30,12 @@
 
 
 # Where the platform sources were copied
-set(PLATFORM_DIR ${CMAKE_SOURCE_DIR}/src/platform)
+set(PLATFORM_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR})
+set(PLATFORM_DIR ${PLATFORM_SOURCE_DIR}/src/platform)
 set(USER_INCLUDE_DIRECTORIES
 )
 set(USER_COMPILE_SOURCES
+        xaxidma.c
 )
 #include(${PLATFORM_DIR}/UserConfig.cmake) # imports USER_COMPILE_SOURCES, USER_INCLUDE_DIRECTORIES, etc.
 
@@ -45,7 +47,7 @@ foreach(_s IN LISTS USER_COMPILE_SOURCES)
 endforeach()
 
 # Add Xilinx driver source files if you copied them separately
-# list(APPEND _platform_srcs ${CMAKE_SOURCE_DIR}/third_party/vitis_axidma/src/xaxidma.c)
+# list(APPEND _platform_srcs ${PLATFORM_SOURCE_DIR}/third_party/vitis_axidma/src/xaxidma.c)
 
 # Create library target
 add_library(platform_app STATIC ${_platform_srcs})
@@ -61,7 +63,7 @@ foreach(_inc IN LISTS USER_INCLUDE_DIRECTORIES)
     endif()
 endforeach()
 # Also add your platform headers (xparameters.h etc.)
-list(APPEND _platform_includes ${CMAKE_SOURCE_DIR}/include/platform)
+list(APPEND _platform_includes ${PLATFORM_SOURCE_DIR}/include/platform)
 target_include_directories(platform_app PUBLIC ${_platform_includes})
 
 # IMPORTANT: remove any bare-metal link libraries from USER_LINK_LIBRARIES
@@ -72,11 +74,11 @@ target_include_directories(platform_app PUBLIC ${_platform_includes})
 
 # Add compat layer files (you must create these)
 #target_sources(platform_app PRIVATE
-#        ${CMAKE_SOURCE_DIR}/src/xil_compat.c
-#        ${CMAKE_SOURCE_DIR}/src/uio_map.c
+#        ${PLATFORM_SOURCE_DIR}/src/xil_compat.c
+#        ${PLATFORM_SOURCE_DIR}/src/uio_map.c
 #)
 
-target_include_directories(platform_app PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_include_directories(platform_app PRIVATE ${PLATFORM_SOURCE_DIR}/src)
 
 # Build your main application and link to the platform_app library:
 add_executable(nes-fpga-main src/main.cpp)

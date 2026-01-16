@@ -137,19 +137,6 @@ function throttle_network() {
   local container=$1
   local rate=$2 # e.g., 10kbit
   docker compose exec -t "$container" tc qdisc add dev eth0 root tbf rate "$rate" burst 32kbit latency 400ms
-
-  # Reduce TCP send buffer to provoke backpressure faster
-  # wmem_max: maximum send buffer size
-  # wmem_default: default send buffer size
-  # Values in bytes (e.g., 16384 = 16KB)
-  docker compose exec -t "$container" sysctl -w net.ipv4.tcp_wmem="4096 16384 32768"
-  docker compose exec -t "$container" sysctl -w net.core.wmem_max=32768
-  docker compose exec -t "$container" sysctl -w net.core.wmem_default=16384
-
-  # Also reduce receive buffer on the same node
-  docker compose exec -t "$container" sysctl -w net.ipv4.tcp_rmem="4096 16384 32768"
-  docker compose exec -t "$container" sysctl -w net.core.rmem_max=32768
-  docker compose exec -t "$container" sysctl -w net.core.rmem_default=16384
 }
 
 function reset_network() {
@@ -193,12 +180,13 @@ assert_json_contains() {
   (gnome-terminal -- python3 "$TMP_DIR"/tests/util/print_output.py "$TMP_DIR"/worker-2/out.csv --plot)&
 
   (gnome-terminal -- tail -F "$TMP_DIR"/worker-1/singleNodeWorker.log)&
+  (gnome-terminal -- tail -F "$TMP_DIR"/worker-2/singleNodeWorker.log)&
 
   # Apply heavy throttling to the downstream worker (worker-2) to trigger backpressure
-  echo "# Throttling worker-2 to 1kbit" >&3
-  throttle_network worker-2 "1kbit"
-  echo "# Throttling worker-1 to 1kbit" >&3
-  throttle_network worker-1 "1kbit"
+  echo "# Throttling worker-2 to 10kbit" >&3
+  throttle_network worker-2 "10kbit"
+  echo "# Throttling worker-1 to 10kbit" >&3
+  throttle_network worker-1 "10kbit"
 
   run DOCKER_NES_CLI -t tests/good/adaptive.yaml start 'select DOUBLE from GENERATOR_SOURCE INTO VOID_SINK'
   [ "$status" -eq 0 ]

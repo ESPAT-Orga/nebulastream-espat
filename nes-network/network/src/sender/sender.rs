@@ -21,7 +21,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::runtime::Runtime;
 use tokio::sync::oneshot;
-use tracing::{Instrument, debug, info_span, info};
+use tracing::{Instrument, debug, info_span};
 
 /// A handle to a registered network channel for sending tuple buffers.
 ///
@@ -84,12 +84,6 @@ impl SenderChannel {
     /// unbounded memory growth. The buffer is returned so it can be retried later
     /// or handled appropriately.
     pub fn try_send_data(&self, buffer: TupleBuffer) -> TrySendDataResult {
-        let len = self.queue.len();
-        if let Some(cap) = self.queue.capacity() {
-            info!("queue len {len}/{cap}");
-        } else {
-            info!("queue len {len}/???");
-        }
         let result = self.queue.try_send(ChannelCommand::Data(buffer));
         match result {
             Ok(()) => TrySendDataResult::Ok,

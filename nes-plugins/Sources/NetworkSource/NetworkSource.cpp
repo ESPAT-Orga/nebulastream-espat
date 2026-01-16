@@ -60,6 +60,7 @@ Source::FillTupleBufferResult NetworkSource::fillTupleBuffer(TupleBuffer& tupleB
     PRECONDITION(bufferProvider, "Network Source was opened without a buffer provider");
     TupleBufferBuilder builder(tupleBuffer, *bufferProvider);
 
+    // NES_DEBUG("Receiving buffer from channel: {}", channelId);
     /// If the source is requested to shutdown the network channel is closed, which will interrupt the call to receive_buffer.
     const std::stop_callback callback(stopToken, [this] { interrupt_receive(**channel); });
 

@@ -5,9 +5,9 @@
 #ifndef BSPCONFIG_H
 #define BSPCONFIG_H
 
-#include "xmem_config.h"
+#include <platform/xmem_config.h>
 #define XPAR_XILTIMER_ENABLED
-#include "xparameters_ps.h"
+#include <platform/xparameters_ps.h>
 
 
 #if (defined (__aarch64__) || defined (ARMA53_32)) && !defined (FREERTOS_BSP)

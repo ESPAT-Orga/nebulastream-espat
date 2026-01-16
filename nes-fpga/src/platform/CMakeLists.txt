@@ -10,6 +10,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-add_subdirectory(avbuf)
-add_subdirectory(axidma)
-add_subdirectory(axipmon)
+#add_subdirectory(avbuf)
+#add_subdirectory(axidma)
+#add_subdirectory(axipmon)
+
+add_source_files(nes-fpga
+        outbyte.c
+        xaxidma.c
+        xcoresightpsdcc.c
+        xil_printf.c
+        xuartps_hw.c)

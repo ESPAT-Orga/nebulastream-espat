@@ -49,7 +49,7 @@ extern "C" {
 #endif
 
 #if ! defined(__MICROBLAZE__) && ! defined(__riscv)
-#include <xil_types.h>
+#include <platform/xil_types.h>
 
 void XCoresightPs_DccSendByte(u32 BaseAddress, u8 Data);
 

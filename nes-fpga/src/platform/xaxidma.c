@@ -67,7 +67,7 @@
 
 /***************************** Include Files *********************************/
 
-#include "xaxidma.h"
+#include <platform/xaxidma.h>
 
 /************************** Constant Definitions *****************************/
 

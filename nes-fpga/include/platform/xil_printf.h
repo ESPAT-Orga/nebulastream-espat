@@ -13,10 +13,10 @@ extern "C" {
 #include <ctype.h>
 #include <string.h>
 #include <stdarg.h>
-#include "xil_types.h"
-#include "bspconfig.h"
+#include <platform/xil_types.h>
+#include <platform/bspconfig.h>
 #ifndef SDT
-#include "xparameters.h"
+#include <platform/xparameters.h>
 #endif
 #if defined (__aarch64__) && HYP_GUEST && EL1_NONSECURE && XEN_USE_PV_CONSOLE
 #include "xen_console.h"

@@ -49,8 +49,8 @@ extern "C" {
 
 #include <stdint.h>
 #include <stddef.h>
-#include "bspconfig.h"
-#include "xparameters.h"
+#include <platform/bspconfig.h>
+#include <platform/xparameters.h>
 
 /************************** Constant Definitions *****************************/
 

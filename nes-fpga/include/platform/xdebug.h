@@ -12,7 +12,7 @@
 extern "C" {
 #endif
 
-#include "xil_printf.h"
+#include <platform/xil_printf.h>
 
 #if defined(DEBUG) && !defined(NDEBUG)
 

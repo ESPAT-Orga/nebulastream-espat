@@ -173,14 +173,20 @@ assert_json_contains() {
 @test "adaptive sending" {
   setup_distributed tests/good/adaptive.yaml
 
-  # open terminal and print live output
-  #(gnome-terminal -- tail -F "$TMP_DIR"/worker-2/out.csv)&
-  (gnome-terminal -- python3 "$TMP_DIR"/tests/util/print_output.py "$TMP_DIR"/worker-2/out.csv)&
-  (gnome-terminal -- python3 "$TMP_DIR"/tests/util/print_output.py "$TMP_DIR"/worker-2/out.csv --freq)&
-  (gnome-terminal -- python3 "$TMP_DIR"/tests/util/print_output.py "$TMP_DIR"/worker-2/out.csv --plot)&
+  # Set SHOW_OUTPUT to 0 by default if not set
+  : "${SHOW_OUTPUT:=0}"
 
-  (gnome-terminal -- tail -F "$TMP_DIR"/worker-1/singleNodeWorker.log)&
-  (gnome-terminal -- tail -F "$TMP_DIR"/worker-2/singleNodeWorker.log)&
+  # Only open terminals if SHOW_OUTPUT is set to 1
+  if [ "$SHOW_OUTPUT" -eq 1 ]; then
+      # open terminal and print live output
+      (gnome-terminal -- python3 "$TMP_DIR"/tests/util/print_output.py "$TMP_DIR"/worker-2/out.csv)&
+      (gnome-terminal -- python3 "$TMP_DIR"/tests/util/print_output.py "$TMP_DIR"/worker-2/out.csv --freq)&
+      (gnome-terminal -- python3 "$TMP_DIR"/tests/util/print_output.py "$TMP_DIR"/worker-2/out.csv --plot)&
+
+      # open terminal and print live logs
+      (gnome-terminal -- tail -F "$TMP_DIR"/worker-1/singleNodeWorker.log)&
+      (gnome-terminal -- tail -F "$TMP_DIR"/worker-2/singleNodeWorker.log)&
+  fi
 
   # Apply heavy throttling to the downstream worker (worker-2) to trigger backpressure
   echo "# Throttling worker-2 to 10kbit" >&3

@@ -49,6 +49,7 @@ struct GoogleEventTracePrinter final : StatisticListener
 {
     using CombinedEventType = FlattenVariant<SystemEvent, Event>::type;
     void onEvent(Event event) override;
+    void onEvent(BackpressureEvent event) override;
     void onEvent(SystemEvent event) override;
 
     /// Constructs a GoogleEventTracePrinter that writes to the specified file path

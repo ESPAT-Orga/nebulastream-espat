@@ -357,6 +357,12 @@ void GoogleEventTracePrinter::onEvent(Event event)
         !events.writeIfNotFull(std::visit([]<typename T>(T&& arg) { return CombinedEventType(std::forward<T>(arg)); }, std::move(event))));
 }
 
+void GoogleEventTracePrinter::onEvent(BackpressureEvent event)
+{
+    (void) event;
+    //TODO
+}
+
 void GoogleEventTracePrinter::onEvent(SystemEvent event)
 {
     warnOnOverflow(

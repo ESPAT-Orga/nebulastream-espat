@@ -33,6 +33,14 @@ void CompositeStatisticListener::onEvent(SystemEvent event)
     }
 }
 
+void CompositeStatisticListener::onEvent(BackpressureEvent event)
+{
+    for (auto& listener : backpressureListeners)
+    {
+        listener->onEvent(event);
+    }
+}
+
 void CompositeStatisticListener::addQueryEngineListener(std::shared_ptr<QueryEngineStatisticListener> listener)
 {
     queryEngineListeners.push_back(std::move(listener));

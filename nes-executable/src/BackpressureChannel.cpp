@@ -45,6 +45,13 @@ BackpressureController::BackpressureController(std::shared_ptr<Channel> channel)
 {
 }
 
+BackpressureController::BackpressureController(
+    std::shared_ptr<Channel> channel,
+    std::shared_ptr<NES::BackpressureStatisticListener> backpressureStatisticListener) : BackpressureController(std::move(channel))
+{
+    this->backpressureStatisticListener = std::move(backpressureStatisticListener);
+}
+
 BackpressureController::~BackpressureController()
 {
     if (channel)
@@ -58,7 +65,14 @@ bool BackpressureController::applyPressure()
 {
     const auto old = std::exchange(*channel->stateMtx.lock(), Channel::CLOSED);
     INVARIANT(old != Channel::DESTROYED, "The backpressureController is still alive thus the channel should not have been destroyed");
-    return old == Channel::OPEN;
+
+    bool newPressure = old == Channel::OPEN;
+    if (backpressureStatisticListener && newPressure)
+    {
+        //TODO: insert actual values
+        backpressureStatisticListener->onEvent(NES::ApplyPressureEvent(NES::WorkerThreadId(0), NES::INVALID_LOCAL_QUERY_ID));
+    }
+    return newPressure;
 }
 
 bool BackpressureController::releasePressure()
@@ -69,6 +83,12 @@ bool BackpressureController::releasePressure()
     {
         /// The Backpressure Controller was opened, wake up all waiting BackpressureListeners
         channel->change.notify_all();
+
+        if (backpressureStatisticListener)
+        {
+            //TODO: insert actual values
+            backpressureStatisticListener->onEvent(NES::ReleasePressureEvent(NES::WorkerThreadId(0), NES::INVALID_LOCAL_QUERY_ID));
+        }
         return true;
     }
     return false;

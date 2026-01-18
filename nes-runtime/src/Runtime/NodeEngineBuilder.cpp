@@ -45,7 +45,7 @@ std::unique_ptr<NodeEngine> NodeEngineBuilder::build(WorkerId workerId)
     auto sourceProvider = std::make_unique<SourceProvider>(workerConfiguration.defaultMaxInflightBuffers.getValue(), bufferManager);
 
     return std::make_unique<NodeEngine>(
-        std::move(bufferManager), statisticsListener, std::move(queryLog), std::move(queryEngine), std::move(sourceProvider));
+        std::move(bufferManager), statisticsListener, statisticsListener, std::move(queryLog), std::move(queryEngine), std::move(sourceProvider));
 }
 
 }

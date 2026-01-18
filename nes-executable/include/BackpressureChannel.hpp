@@ -18,6 +18,8 @@
 #include <stop_token>
 #include <utility>
 
+#include <BackpressureStatisticsListener.hpp>
+
 struct Channel;
 class BackpressureListener;
 class BackpressureController;
@@ -34,6 +36,7 @@ std::pair<BackpressureController, BackpressureListener> createBackpressureChanne
 class BackpressureController
 {
     explicit BackpressureController(std::shared_ptr<Channel> channel);
+    explicit BackpressureController(std::shared_ptr<Channel> channel, std::shared_ptr<NES::BackpressureStatisticListener> backpressureStatisticListener);
 
     std::shared_ptr<Channel> channel;
     friend std::pair<BackpressureController, BackpressureListener> createBackpressureChannel();
@@ -51,6 +54,7 @@ public:
 
     bool applyPressure();
     bool releasePressure();
+    std::shared_ptr<NES::BackpressureStatisticListener> backpressureStatisticListener;
 };
 
 /// Listener of the backpressure channel is the Ingestion type that is used by sources.

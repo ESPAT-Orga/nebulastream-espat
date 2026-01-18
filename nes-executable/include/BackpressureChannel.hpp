@@ -52,8 +52,8 @@ public:
     BackpressureController(BackpressureController&& other) noexcept = default;
     BackpressureController& operator=(BackpressureController&& other) noexcept = default;
 
-    bool applyPressure();
-    bool releasePressure();
+    bool applyPressure(const std::string& channelId);
+    bool releasePressure(const std::string& channelId);
     void setStatisticListener(std::shared_ptr<NES::BackpressureStatisticListener> listener);
 private:
     std::shared_ptr<NES::BackpressureStatisticListener> backpressureStatisticListener;

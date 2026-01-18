@@ -24,19 +24,18 @@ using ChronoClock = std::chrono::system_clock;
 
 struct BaseBackpressureEvent
 {
-    BaseBackpressureEvent(WorkerThreadId threadId, LocalQueryId queryId) : threadId(threadId), queryId(queryId) { }
+    BaseBackpressureEvent(const std::string& channelId) : channelId(channelId) { }
 
     BaseBackpressureEvent() = default;
 
     ChronoClock::time_point timestamp = ChronoClock::now();
-    WorkerThreadId threadId = INVALID<WorkerThreadId>;
-    LocalQueryId queryId = INVALID_LOCAL_QUERY_ID;
+    std::string channelId = "INVALID";
 };
 
 struct ApplyPressureEvent : BaseBackpressureEvent
 {
-    ApplyPressureEvent(WorkerThreadId threadId, LocalQueryId queryId)
-        : BaseBackpressureEvent(threadId, queryId)
+    ApplyPressureEvent(const std::string& channelId)
+        : BaseBackpressureEvent(channelId)
     {
     }
 
@@ -45,8 +44,8 @@ struct ApplyPressureEvent : BaseBackpressureEvent
 
 struct ReleasePressureEvent : BaseBackpressureEvent
 {
-    ReleasePressureEvent(WorkerThreadId threadId, LocalQueryId queryId)
-        : BaseBackpressureEvent(threadId, queryId)
+    ReleasePressureEvent(const std::string& channelId)
+        : BaseBackpressureEvent(channelId)
     {
     }
 

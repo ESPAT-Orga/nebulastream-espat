@@ -54,11 +54,11 @@ void BackpressureStatisticSource::onEvent(const BackpressureEvent event)
             Overloaded{
                 [&](const ApplyPressureEvent& applyEvent)
                 {
-                    NES_INFO("Apply Backpressure {}, {}", applyEvent.queryId, applyEvent.timestamp);
+                    NES_INFO("Apply Backpressure {}, {}", applyEvent.channelId, applyEvent.timestamp);
                 },
                 [&](const ReleasePressureEvent& releaseEvent)
                 {
-                    NES_INFO("Release Backpressure {}, {}", releaseEvent.queryId, releaseEvent.timestamp);
+                    NES_INFO("Release Backpressure {}, {}", releaseEvent.channelId, releaseEvent.timestamp);
                 }},
             event);
 }

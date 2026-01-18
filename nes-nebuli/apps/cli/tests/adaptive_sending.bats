@@ -193,11 +193,15 @@ assert_json_contains() {
   [ -f "$output" ]
   QUERY_ID=$output
 
-  sleep 100
+  sleep 20
 
   run DOCKER_NES_CLI -t tests/good/adaptive.yaml status "$QUERY_ID"
   [ "$status" -eq 0 ]
   echo "${output}" | jq -e '(. | length) == 3' # 1 global + 2 local
   QUERY_STATUS=$(echo "$output" | jq -r --arg query_id "$QUERY_ID" '.[] | select(.query_id == $query_id and (has("local_query_id") | not)) | .query_status')
   [ "$QUERY_STATUS" = "Running" ]
+
+    # Check that worker-1 log contains "Backpressure" at least 4 times
+    backpressure_count=$(grep -c "Backpressure" "$TMP_DIR"/worker-1/singleNodeWorker.log || true)
+    [ "$backpressure_count" -ge 4 ]
 }

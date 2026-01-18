@@ -404,7 +404,6 @@ EOF
   assert_json_contains "[{\"local_query_id\":\"$local_query_id\", \"query_status\":\"Running\", \"started\": {}}]" "$output"
 }
 
-# bats test_tags=bats:focus
 @test "back pressure" {
   setup_distributed tests/good/backpressure.yaml
 

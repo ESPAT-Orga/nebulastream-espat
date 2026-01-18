@@ -54,6 +54,8 @@ public:
 
     bool applyPressure();
     bool releasePressure();
+    void setStatisticListener(std::shared_ptr<NES::BackpressureStatisticListener> listener);
+private:
     std::shared_ptr<NES::BackpressureStatisticListener> backpressureStatisticListener;
 };
 

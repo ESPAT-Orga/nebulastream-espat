@@ -45,6 +45,8 @@
 #include <SingleNodeWorkerConfiguration.hpp>
 #include <WorkerStatus.hpp>
 
+#include "BackpressureStatisticSource.hpp"
+
 extern void initReceiverService(const std::string& connectionAddr, const NES::WorkerId& workerId);
 extern void initSenderService(const std::string& connectionAddr, const NES::WorkerId& workerId);
 
@@ -65,6 +67,10 @@ SingleNodeWorker::SingleNodeWorker(const SingleNodeWorkerConfiguration& configur
         googleTracePrinter->start();
         listener->addListener(googleTracePrinter);
     }
+
+    //TODO: make this configurable
+    auto backpressureStatisticListener = std::make_shared<BackpressureStatisticSource>();
+    listener->addBackpressureListener(backpressureStatisticListener);
 
     nodeEngine = NodeEngineBuilder(configuration.workerConfiguration, copyPtr(listener)).build(workerId);
 

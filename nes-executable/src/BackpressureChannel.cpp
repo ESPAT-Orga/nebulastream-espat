@@ -94,6 +94,11 @@ bool BackpressureController::releasePressure()
     return false;
 }
 
+void BackpressureController::setStatisticListener(std::shared_ptr<NES::BackpressureStatisticListener> listener)
+{
+    this->backpressureStatisticListener = listener;
+}
+
 void BackpressureListener::wait(const std::stop_token& stopToken) const
 {
     auto state = channel->stateMtx.lock();

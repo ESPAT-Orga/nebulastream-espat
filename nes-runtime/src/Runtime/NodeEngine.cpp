@@ -107,7 +107,7 @@ void NodeEngine::startQuery(LocalQueryId queryId)
     if (auto qep = queryTracker->moveToExecuting(queryId))
     {
         systemEventListener->onEvent(StartQuerySystemEvent(queryId));
-        queryEngine->start(std::move(queryId), ExecutableQueryPlan::instantiate(*qep, *sourceProvider));
+        queryEngine->start(std::move(queryId), ExecutableQueryPlan::instantiate(*qep, *sourceProvider, backpressureStatListener));
     }
     else
     {

@@ -207,7 +207,9 @@ assert_json_contains() {
   QUERY_STATUS=$(echo "$output" | jq -r --arg query_id "$QUERY_ID" '.[] | select(.query_id == $query_id and (has("local_query_id") | not)) | .query_status')
   [ "$QUERY_STATUS" = "Running" ]
 
-    # Check that worker-1 log contains "Backpressure" at least 4 times
-    backpressure_count=$(grep -c "Backpressure" "$TMP_DIR"/worker-1/singleNodeWorker.log || true)
-    [ "$backpressure_count" -ge 4 ]
+    # Check that worker-1 log contains the expected events at least 4 times
+    apply_backpressure_count=$(grep -c "Apply Backpressure" "$TMP_DIR"/worker-1/singleNodeWorker.log || true)
+    [ "$apply_backpressure_count" -ge 4 ]
+    release_backpressure_count=$(grep -c "Release Backpressure" "$TMP_DIR"/worker-1/singleNodeWorker.log || true)
+    [ "$release_backpressure_count" -ge 4 ]
 }

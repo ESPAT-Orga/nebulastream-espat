@@ -56,29 +56,10 @@
 #include <PhysicalOperator.hpp>
 #include <QueryExecutionConfiguration.hpp>
 #include <RewriteRuleRegistry.hpp>
+#include <RewriteRules/LowerToPhysical/LowerToPhysicalUtil.hpp>
 
 namespace NES
 {
-
-static std::pair<std::vector<Record::RecordFieldIdentifier>, std::vector<Record::RecordFieldIdentifier>>
-getKeyAndValueFields(const StatisticBuildLogicalOperator& logicalOperator)
-{
-    std::vector<Record::RecordFieldIdentifier> fieldKeyNames;
-    std::vector<Record::RecordFieldIdentifier> fieldValueNames;
-
-    /// Getting the key and value field names
-    for (const auto& nodeAccess : logicalOperator.getGroupingKeys())
-    {
-        fieldKeyNames.emplace_back(nodeAccess.getFieldName());
-    }
-    for (const auto& descriptor : logicalOperator.getWindowAggregation())
-    {
-        const auto aggregationResultFieldIdentifier = descriptor->getOnField().getFieldName();
-        fieldValueNames.emplace_back(aggregationResultFieldIdentifier);
-    }
-    return {fieldKeyNames, fieldValueNames};
-}
-
 /// This function (and all statics) should go to some util file so it's shared with LowerToPhysicalWindowedAggregation, can take WindowType
 /// instead of logicalOperator. Otherwise, we need to keep it up to date with LowerToPhysicalWindowedAggregation.
 static std::unique_ptr<TimeFunction> getTimeFunction(const StatisticBuildLogicalOperator& logicalOperator)

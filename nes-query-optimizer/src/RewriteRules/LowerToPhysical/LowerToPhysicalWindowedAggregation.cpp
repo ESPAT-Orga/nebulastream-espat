@@ -13,6 +13,7 @@
 */
 
 #include <RewriteRules/LowerToPhysical/LowerToPhysicalWindowedAggregation.hpp>
+#include <RewriteRules/LowerToPhysical/LowerToPhysicalUtil.hpp>
 
 #include <cstdint>
 #include <memory>
@@ -56,24 +57,6 @@
 namespace NES
 {
 
-static std::pair<std::vector<Record::RecordFieldIdentifier>, std::vector<Record::RecordFieldIdentifier>>
-getKeyAndValueFields(const WindowedAggregationLogicalOperator& logicalOperator)
-{
-    std::vector<Record::RecordFieldIdentifier> fieldKeyNames;
-    std::vector<Record::RecordFieldIdentifier> fieldValueNames;
-
-    /// Getting the key and value field names
-    for (const auto& nodeAccess : logicalOperator.getGroupingKeys())
-    {
-        fieldKeyNames.emplace_back(nodeAccess.getFieldName());
-    }
-    for (const auto& descriptor : logicalOperator.getWindowAggregation())
-    {
-        const auto aggregationResultFieldIdentifier = descriptor->getOnField().getFieldName();
-        fieldValueNames.emplace_back(aggregationResultFieldIdentifier);
-    }
-    return {fieldKeyNames, fieldValueNames};
-}
 
 static std::unique_ptr<TimeFunction> getTimeFunction(const WindowedAggregationLogicalOperator& logicalOperator)
 {

@@ -14,8 +14,6 @@
 
 #include <RewriteRules/LowerToPhysical/LowerToPhysicalReservoirProbe.hpp>
 
-#include <MemoryLayout/ColumnLayout.hpp>
-#include <MemoryLayout/RowLayout.hpp>
 #include <Operators/Windows/Aggregations/Sample/ReservoirProbeLogicalOperator.hpp>
 #include <Runtime/NodeEngine.hpp>
 #include <Statistic/Sample/ReservoirSampleIteratorImpl.hpp>

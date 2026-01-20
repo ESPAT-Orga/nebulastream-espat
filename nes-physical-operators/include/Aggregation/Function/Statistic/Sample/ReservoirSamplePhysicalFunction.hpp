@@ -45,7 +45,6 @@ public:
     ~ReservoirSamplePhysicalFunction() override;
 
 private:
-    Schema sampleSchema;
     std::shared_ptr<TupleBufferRef> bufferRef;
     std::string numberOfSeenTuplesFieldName;
     uint64_t seed;

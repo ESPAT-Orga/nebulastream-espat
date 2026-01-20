@@ -30,20 +30,21 @@ namespace NES
 namespace
 {
 /// @brief Calculates the record size for a sample.
-nautilus::val<uint64_t> getRecordDataSizeForSample(const Record& record, const Schema& schema)
+nautilus::val<uint64_t> getRecordDataSizeForSample(const Record& record, const TupleBufferRef& buffRef)
 {
-    /// For each var sized data, we need to add the size of it. We take the total size of the var sized into account.
-    auto recordDataSize = nautilus::val<uint64_t>(schema.getSizeOfSchemaInBytes());
-    for (const auto& field : nautilus::static_iterable(schema))
-    {
-        if (field.dataType.isSameDataType<VariableSizedData>())
-        {
-            const auto textValue = record.read(field.name).cast<VariableSizedData>();
-            recordDataSize += textValue.getTotalSize();
-        }
-    }
-
-    return recordDataSize;
+    // /// For each var sized data, we need to add the size of it. We take the total size of the var sized into account.
+    // auto recordDataSize = nautilus::val<uint64_t>(schema.getSizeOfSchemaInBytes());
+    // for (const auto& field : nautilus::static_iterable(schema))
+    // {
+    //     if (field.dataType.isSameDataType<VariableSizedData>())
+    //     {
+    //         const auto textValue = record.read(field.name).cast<VariableSizedData>();
+    //         recordDataSize += textValue.getTotalSize();
+    //     }
+    // }
+    //
+    // return recordDataSize;
+    buffRef.getAllFieldNames();
 }
 
 uint64_t getRandomNumberProxy(const uint64_t upperBound, const uint64_t seed)

@@ -14,8 +14,8 @@
 
 #pragma once
 
-#include <MemoryLayout/RowLayout.hpp>
 #include <Nautilus/Interface/BufferRef/TupleBufferRef.hpp>
+#include <Nautilus/Interface/HashMap/ChainedHashMap/ChainedEntryMemoryProvider.hpp>
 #include <Statistic/StatisticProvider.hpp>
 
 namespace NES
@@ -23,28 +23,15 @@ namespace NES
 
 struct ReservoirSampleProviderArguments final : StatisticProviderArguments
 {
-    std::shared_ptr<MemoryLayout> memoryLayout;
+    std::vector<FieldOffsets> sampleFields;
 
-    explicit ReservoirSampleProviderArguments(std::shared_ptr<MemoryLayout> memoryLayout) : memoryLayout(std::move(memoryLayout)) { }
+    explicit ReservoirSampleProviderArguments(std::vector<FieldOffsets> sampleFields): sampleFields(std::move(sampleFields)) {}
 
     ~ReservoirSampleProviderArguments() override = default;
 
     std::unique_ptr<StatisticProviderArguments> clone() override
     {
-        /// This is copied from LowerToPhysicalReservoirProbe. We need the clone method as we need StatisticProvider to be copyable.
-        switch (memoryLayout->getSchema().memoryLayoutType)
-        {
-            case Schema::MemoryLayoutType::ROW_LAYOUT: {
-                /// For a row layout, we do not care about the overall memory area size
-                std::unique_ptr<MemoryLayout> newMemoryLayout = std::make_unique<RowLayout>(0, memoryLayout->getSchema());
-                return std::make_unique<ReservoirSampleProviderArguments>(std::move(newMemoryLayout));
-                break;
-            }
-            case Schema::MemoryLayoutType::COLUMNAR_LAYOUT:
-                throw NotImplemented(
-                    "Not possible currently to use a columnar layout, as we do not know the size of the sample at this moment.");
-        }
-        std::unreachable();
+        return std::make_unique<ReservoirSampleProviderArguments>(sampleFields);
     }
 };
 
@@ -56,7 +43,9 @@ public:
     explicit ReservoirSampleIteratorImpl(
         const nautilus::val<int8_t*>& statisticMemArea, const ReservoirSampleProviderArguments& reservoirSampleArguments);
     ~ReservoirSampleIteratorImpl() override = default;
+    /// Returns the sample row at the current iterator position.
     Record operator*() override;
+    /// Increases current iterator position to next sample row.
     StatisticProviderIteratorImpl& operator++() override;
     nautilus::val<bool> operator==(const StatisticProviderIteratorImpl& other) const override;
 
@@ -66,7 +55,7 @@ protected:
 
 private:
     /// Provided via the constructor. Needs to be a shared_ptr as we call StatisticProvider::begin() multiple times and StatisticProvider::begin()
-    std::shared_ptr<MemoryLayout> memoryLayout;
+    std::vector<FieldOffsets> sampleFields;
 
     /// Set by each statistic
     nautilus::val<uint64_t> sampleSize;

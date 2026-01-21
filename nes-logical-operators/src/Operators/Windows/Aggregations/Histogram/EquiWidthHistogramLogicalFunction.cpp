@@ -72,35 +72,39 @@ std::string_view EquiWidthHistogramLogicalFunction::getName() const noexcept
 }
 
 ///  Remove when not necessary anymore in upstream NES.
-void EquiWidthHistogramLogicalFunction::inferStamp(const Schema&)
+void EquiWidthHistogramLogicalFunction::inferStamp(const Schema& schema)
 {
-    /// We first infer the dataType of the input field and set the output dataType as the same.
-    ///Set fully qualified name for the as Field
-    const auto onFieldName = getOnField().getFieldName();
-    const auto asFieldName = getAsField().getFieldName();
+    if (const auto sourceNameQualifier = schema.getSourceNameQualifier())
+    {
+        /// We first infer the dataType of the input field and set the output dataType as the same.
+        this->setOnField(this->getOnField().withInferredDataType(schema).getAs<FieldAccessLogicalFunction>().get());
+        if (not this->getOnField().getDataType().isNumeric())
+        {
+            throw CannotDeserialize("equi width histogram on non numeric fields is not supported, but got {}", this->getOnField().getDataType());
+        }
 
-    const auto attributeNameResolver = "stream$";
-    if (onFieldName.find(Schema::ATTRIBUTE_NAME_SEPARATOR) == std::string::npos)
-    {
-        this->setOnField(getOnField().withFieldName(attributeNameResolver + onFieldName).get<FieldAccessLogicalFunction>());
+        const auto attributeNameResolver = sourceNameQualifier.value() + std::string(Schema::ATTRIBUTE_NAME_SEPARATOR);
+        const auto asFieldName = this->getAsField().getFieldName();
+
+        ///If on and as field name are different then append the attribute name resolver from on field to the as field
+        if (asFieldName.find(Schema::ATTRIBUTE_NAME_SEPARATOR) == std::string::npos)
+        {
+            this->setAsField(this->getAsField().withFieldName(attributeNameResolver + asFieldName));
+        }
+        else
+        {
+            const auto fieldName = asFieldName.substr(asFieldName.find_last_of(Schema::ATTRIBUTE_NAME_SEPARATOR) + 1);
+            this->setAsField(this->getAsField().withFieldName(attributeNameResolver + fieldName));
+        }
+
+        this->setInputStamp(this->getOnField().getDataType());
+        this->setFinalAggregateStamp(this->getOnField().getDataType());
+        this->setAsField(this->getAsField().withDataType(getFinalAggregateStamp()));
     }
     else
     {
-        const auto fieldName = onFieldName.substr(onFieldName.find_last_of(Schema::ATTRIBUTE_NAME_SEPARATOR) + 1);
-        this->setOnField(getOnField().withFieldName(attributeNameResolver + fieldName).get<FieldAccessLogicalFunction>());
+        throw CannotInferSchema("Schema lacked source name qualifier: {}", schema);
     }
-    if (asFieldName.find(Schema::ATTRIBUTE_NAME_SEPARATOR) == std::string::npos)
-    {
-        this->setAsField(getAsField().withFieldName(attributeNameResolver + asFieldName).get<FieldAccessLogicalFunction>());
-    }
-    else
-    {
-        const auto fieldName = asFieldName.substr(asFieldName.find_last_of(Schema::ATTRIBUTE_NAME_SEPARATOR) + 1);
-        this->setAsField(getAsField().withFieldName(attributeNameResolver + fieldName).get<FieldAccessLogicalFunction>());
-    }
-    this->setInputStamp(this->getOnField().getDataType());
-    this->setFinalAggregateStamp(DataTypeProvider::provideDataType(DataType::Type::VARSIZED));
-    this->setAsField(this->getAsField().withDataType(getFinalAggregateStamp()).get<FieldAccessLogicalFunction>());
 }
 
 NES::SerializableAggregationFunction EquiWidthHistogramLogicalFunction::serialize() const

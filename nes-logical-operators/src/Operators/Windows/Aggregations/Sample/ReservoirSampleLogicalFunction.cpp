@@ -75,27 +75,31 @@ std::string_view ReservoirSampleLogicalFunction::getName() const noexcept
 /// Remove this function when upstream removes it.
 void ReservoirSampleLogicalFunction::inferStamp(const Schema& schema)
 {
-    /// We first infer the dataType of the input field and set the output dataType as the same.
-    this->setOnField(getOnField().withInferredDataType(schema).get<FieldAccessLogicalFunction>());
-    ///Set fully qualified name for the as Field
-    const auto onFieldName = getOnField().getFieldName();
-    const auto asFieldName = getAsField().getFieldName();
-
-    const auto attributeNameResolver = onFieldName.substr(0, onFieldName.find(Schema::ATTRIBUTE_NAME_SEPARATOR) + 1);
-
-    ///If on and as field name are different then append the attribute name resolver from on field to the as field
-    if (asFieldName.find(Schema::ATTRIBUTE_NAME_SEPARATOR) == std::string::npos)
+    if (const auto sourceNameQualifier = schema.getSourceNameQualifier())
     {
-        this->setAsField(getAsField().withFieldName(attributeNameResolver + asFieldName).get<FieldAccessLogicalFunction>());
+        this->setOnField(this->getOnField().withInferredDataType(schema).getAs<FieldAccessLogicalFunction>().get());
+
+        const auto attributeNameResolver = sourceNameQualifier.value() + std::string(Schema::ATTRIBUTE_NAME_SEPARATOR);
+        const auto asFieldName = this->getAsField().getFieldName();
+
+        ///If on and as field name are different then append the attribute name resolver from on field to the as field
+        if (asFieldName.find(Schema::ATTRIBUTE_NAME_SEPARATOR) == std::string::npos)
+        {
+            this->setAsField(this->getAsField().withFieldName(attributeNameResolver + asFieldName));
+        }
+        else
+        {
+            const auto fieldName = asFieldName.substr(asFieldName.find_last_of(Schema::ATTRIBUTE_NAME_SEPARATOR) + 1);
+            this->setAsField(this->getAsField().withFieldName(attributeNameResolver + fieldName));
+        }
+        this->setInputStamp(this->getOnField().getDataType());
+        this->setFinalAggregateStamp(this->getOnField().getDataType());
+        this->setAsField(this->getAsField().withDataType(getFinalAggregateStamp()));
     }
     else
     {
-        const auto fieldName = asFieldName.substr(asFieldName.find_last_of(Schema::ATTRIBUTE_NAME_SEPARATOR) + 1);
-        this->setAsField(getAsField().withFieldName(attributeNameResolver + fieldName).get<FieldAccessLogicalFunction>());
+        throw CannotInferSchema("Schema lacked source name qualifier: {}", schema);
     }
-    this->setInputStamp(this->getOnField().getDataType());
-    this->setFinalAggregateStamp(DataTypeProvider::provideDataType(DataType::Type::VARSIZED));
-    this->setAsField(this->getAsField().withDataType(getFinalAggregateStamp()).get<FieldAccessLogicalFunction>());
 }
 
 NES::SerializableAggregationFunction ReservoirSampleLogicalFunction::serialize() const

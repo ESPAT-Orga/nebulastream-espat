@@ -45,7 +45,7 @@
 #include <SingleNodeWorkerConfiguration.hpp>
 #include <WorkerStatus.hpp>
 
-#include "BackpressureStatisticSource.hpp"
+#include "BackpressureStatisticTcpEmitter.hpp"
 
 extern void initReceiverService(const std::string& connectionAddr, const NES::WorkerId& workerId);
 extern void initSenderService(const std::string& connectionAddr, const NES::WorkerId& workerId);
@@ -69,7 +69,8 @@ SingleNodeWorker::SingleNodeWorker(const SingleNodeWorkerConfiguration& configur
     }
 
     //TODO: make this configurable
-    auto backpressureStatisticListener = std::make_shared<BackpressureStatisticSource>();
+    auto backpressureStatisticListener = std::make_shared<BackpressureStatisticTcpEmitter>();
+    backpressureStatisticListener->start();
     listener->addBackpressureListener(backpressureStatisticListener);
 
     nodeEngine = NodeEngineBuilder(configuration.workerConfiguration, copyPtr(listener)).build(workerId);

@@ -12,7 +12,7 @@
     limitations under the License.
 */
 
-#include <BackpressureStatisticSource.hpp>
+#include <BackpressureStatisticTcpEmitter.hpp>
 #include <BackpressureStatisticsListener.hpp>
 
 #include <GoogleEventTracePrinter.hpp>
@@ -48,8 +48,49 @@ constexpr uint64_t SYSTEM_THREAD = 0;
 /// Log every nth dropped event to avoid clogging the log when the queue is full
 constexpr uint64_t DROP_LOG_INTERVAL = 100;
 
-void BackpressureStatisticSource::onEvent(const BackpressureEvent event)
+namespace
 {
+void warnOnOverflow(bool writeFailed)
+{
+    if (writeFailed) [[unlikely]]
+    {
+        static std::atomic<uint64_t> droppedCount{0};
+        /// Log first drop immediately, then every DROP_LOG_INTERVAL
+        if (uint64_t dropped = droppedCount.fetch_add(1, std::memory_order_relaxed) + 1; dropped == 1 || dropped % DROP_LOG_INTERVAL == 0)
+        {
+            NES_WARNING("Event queue full, {} events dropped so far", dropped);
+        }
+    }
+}
+}
+
+void BackpressureStatisticTcpEmitter::onEvent(const BackpressureEvent event)
+{
+    warnOnOverflow(
+        !events.writeIfNotFull(std::visit([]<typename T>(T&& arg) { return BackpressureEvent(std::forward<T>(arg)); }, std::move(event))));
+}
+
+BackpressureStatisticTcpEmitter::BackpressureStatisticTcpEmitter()
+{
+    NES_INFO("Creating backpressure statistics source");
+}
+
+void BackpressureStatisticTcpEmitter::start()
+{
+    tcpWriterThread = Thread("backpressure-tcp-writer", [this](const std::stop_token& stopToken) { threadRoutine(stopToken); });
+}
+
+void BackpressureStatisticTcpEmitter::threadRoutine(const std::stop_token& token)
+{
+    while (!token.stop_requested())
+    {
+        BackpressureEvent event = ApplyPressureEvent{"INVALID"}; /// Will be overwritten
+
+        if (!events.tryReadUntil(std::chrono::high_resolution_clock::now() + std::chrono::milliseconds(READ_RETRY_MS), event))
+        {
+            continue;
+        }
+
         std::visit(
             Overloaded{
                 [&](const ApplyPressureEvent& applyEvent)
@@ -61,10 +102,7 @@ void BackpressureStatisticSource::onEvent(const BackpressureEvent event)
                     NES_INFO("Release Backpressure {}, {}", releaseEvent.channelId, releaseEvent.timestamp);
                 }},
             event);
+    }
 }
 
-BackpressureStatisticSource::BackpressureStatisticSource()
-{
-    NES_INFO("Creating backpressure statistics source");
-}
 }

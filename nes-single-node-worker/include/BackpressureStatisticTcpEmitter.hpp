@@ -38,12 +38,18 @@
 namespace NES
 {
 /// This printer generates Chrome DevTools trace files that can be opened in Chrome's
-/// chrome://tracing/ interface for performance analysis (or any other event trace visualizer)
-struct BackpressureStatisticSource final : BackpressureStatisticListener
+struct BackpressureStatisticTcpEmitter final : BackpressureStatisticListener
 {
     void onEvent(BackpressureEvent event) override;
 
-    explicit BackpressureStatisticSource();
-    ~BackpressureStatisticSource() override = default;
+    explicit BackpressureStatisticTcpEmitter();
+    void start();
+    void threadRoutine(const std::stop_token& token);
+    ~BackpressureStatisticTcpEmitter() override = default;
+
+private:
+    static constexpr size_t QUEUE_LENGTH = 1000;
+    Thread tcpWriterThread;
+    folly::MPMCQueue<BackpressureEvent> events{QUEUE_LENGTH};
 };
 }

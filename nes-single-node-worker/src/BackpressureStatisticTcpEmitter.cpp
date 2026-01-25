@@ -35,11 +35,11 @@
 #include <Util/Logger/Logger.hpp>
 #include <Util/Overloaded.hpp>
 #include <Util/Strings.hpp>
+#include <boost/asio.hpp>
 #include <fmt/ostream.h>
 #include <folly/MPMCQueue.h>
 #include <QueryEngineStatisticListener.hpp>
 #include <scope_guard.hpp>
-#include <boost/asio.hpp>
 
 namespace NES
 {
@@ -86,69 +86,67 @@ void BackpressureStatisticTcpEmitter::threadRoutine(const std::stop_token& token
     namespace asio = boost::asio;
     using asio::ip::tcp;
 
-    //TODO: get from config
-    const std::string host = "127.0.0.1";
-    // const std::string host = "host.docker.internal";
-    const std::string port = "9000";
-
-    asio::io_context io;
-    tcp::resolver resolver(io);
-
-    // Resolve once; for localhost this is fine. If you want to handle DNS changes,
-    // move resolve() inside the loop.
-    auto endpoints = resolver.resolve(host, port);
-
-    tcp::socket socket(io);
-
-    for (;;) {
-        boost::system::error_code ec;
-
-        socket.close(ec); // ignore close errors
-        socket = tcp::socket(io);
-
-        asio::connect(socket, endpoints, ec);
-        if (!ec) {
-            NES_INFO("Backpressure statistics tcp emitter connected to {}:{}", host, port);
-            break;
-        }
-
-        NES_INFO("Connection to {}:{} failed, with {} retrying in {}", host, port, ec.message(), CONNECT_RETRY_INTERVAL);
-        std::this_thread::sleep_for(CONNECT_RETRY_INTERVAL);
-    }
-
-
-    boost::system::error_code ec;
-    while (!token.stop_requested())
+    const std::string bind_host = "0.0.0.0";
+    const unsigned short bind_port = 9000;
+    try
     {
-        BackpressureEvent event = ApplyPressureEvent{"INVALID"}; /// Will be overwritten
+        asio::io_context io;
 
-        if (!events.tryReadUntil(std::chrono::high_resolution_clock::now() + std::chrono::milliseconds(READ_RETRY_MS), event))
+        tcp::endpoint endpoint(asio::ip::make_address(bind_host), bind_port);
+        tcp::acceptor acceptor(io);
+        acceptor.open(endpoint.protocol());
+        acceptor.set_option(tcp::acceptor::reuse_address(true));
+        acceptor.bind(endpoint);
+        acceptor.listen();
+
+        NES_INFO("Listening on {}:{}", bind_host, bind_port);
+
+        tcp::socket socket(io);
+        //this will accept exactly one client. If another one comes afterwards it will never connect
+        acceptor.accept(socket); // blocks until a client connects
+        // NES_INFO("Client connected from ", socket.remote_endpoint());
+
+
+        boost::system::error_code ec;
+        while (!token.stop_requested())
         {
-            continue;
-        }
-        std::string msg;
+            BackpressureEvent event = ApplyPressureEvent{"INVALID"}; /// Will be overwritten
 
-        std::visit(
-            Overloaded{
-                [&](const ApplyPressureEvent& applyEvent)
-                {
-                    NES_INFO("Apply Backpressure {}, {}", applyEvent.channelId, applyEvent.timestamp);
-                    msg = std::string{"APPLY"};
-                },
-                [&](const ReleasePressureEvent& releaseEvent)
-                {
-                    NES_INFO("Release Backpressure {}, {}", releaseEvent.channelId, releaseEvent.timestamp);
-                    msg = std::string{"RELEASE"};
-                }},
-            event);
+            if (!events.tryReadUntil(std::chrono::high_resolution_clock::now() + std::chrono::milliseconds(READ_RETRY_MS), event))
+            {
+                continue;
+            }
+            std::string msg;
 
-        asio::write(socket, asio::buffer(msg), ec);
-        if (ec) {
-            NES_ERROR("Error sending message: {}", ec.message());
+            std::visit(
+                Overloaded{
+                    [&](const ApplyPressureEvent& applyEvent)
+                    {
+                        NES_INFO("Apply Backpressure {}, {}", applyEvent.channelId, applyEvent.timestamp);
+                        msg = std::string{"1\n"};
+                    },
+                    [&](const ReleasePressureEvent& releaseEvent)
+                    {
+                        NES_INFO("Release Backpressure {}, {}", releaseEvent.channelId, releaseEvent.timestamp);
+                        msg = std::string{"0\n"};
+                    }},
+                event);
+
+            asio::write(socket, asio::buffer(msg), ec);
+            if (ec)
+            {
+                NES_ERROR("Error sending message: {}", ec.message());
+            }
         }
+
+        boost::system::error_code ignored;
+        socket.shutdown(tcp::socket::shutdown_both, ignored);
+        socket.close(ignored);
     }
-
-    socket.close(ec);
+    catch (const std::exception& e)
+    {
+        NES_ERROR("server error: {}", e.what());
+    }
 }
 
 }

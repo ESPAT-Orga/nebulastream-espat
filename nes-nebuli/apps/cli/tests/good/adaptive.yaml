@@ -78,6 +78,9 @@ physical:
     source_config:
       socket_host: 0.0.0.0
       socket_port: 9000
+      connect_timeout_seconds: 100
+      flush_interval_ms: 100
+
 #      generator_rate_config: amplitude 100000, frequency 2
 #      stop_generator_when_sequence_finishes: NONE
 #      seed: 1

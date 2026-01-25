@@ -199,7 +199,7 @@ void TCPSource::open(std::shared_ptr<AbstractBufferProvider>)
     /// Set connection to non-blocking again to enable a timeout in the 'read()' call
     fcntl(sockfd, F_SETFL, flags);
 
-    NES_TRACE("TCPSource::open: Connected to server.");
+    NES_DEBUG("TCPSource::open: Connected to server.");
 }
 
 Source::FillTupleBufferResult TCPSource::fillTupleBuffer(TupleBuffer& tupleBuffer, const std::stop_token&)

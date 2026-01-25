@@ -109,7 +109,7 @@ function setup_distributed() {
 }
 
 DOCKER_NES_CLI() {
-  docker compose run --rm nes-cli nes-cli "$@"
+  COMPOSE_PROGRESS=quiet docker compose run --rm nes-cli nes-cli "$@"
 }
 
 assert_json_equal() {

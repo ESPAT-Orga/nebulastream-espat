@@ -87,8 +87,8 @@ void BackpressureStatisticTcpEmitter::threadRoutine(const std::stop_token& token
     using asio::ip::tcp;
 
     //TODO: get from config
-    // const std::string host = "127.0.0.1";
-    const std::string host = "host.docker.internal";
+    const std::string host = "127.0.0.1";
+    // const std::string host = "host.docker.internal";
     const std::string port = "9000";
 
     asio::io_context io;

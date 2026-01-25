@@ -10,13 +10,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-query: |
-  SELECT 
-    *
-  FROM 
-    GENERATOR_SOURCE 
-  INTO 
-    VOID_SINK
+query:
+  - |
+    SELECT 
+      *
+    FROM 
+      GENERATOR_SOURCE 
+    INTO 
+      VOID_SINK
+  - |
+    SELECT 
+      *
+    FROM 
+      TCP_STAT_SOURCE
+    INTO 
+      STAT_SINK
 sinks:
   - name: VOID_SINK
     host: worker-2:9090
@@ -27,9 +35,22 @@ sinks:
     config:
       file_path: out.csv
       input_format: CSV
+  - name: STAT_SINK
+    host: worker-1:9090
+    schema:
+      - name: TCP_STAT_SOURCE$DOUBLE
+        type: FLOAT64
+    type: File
+    config:
+      file_path: out_stat.csv
+      input_format: CSV
 
 logical:
   - name: GENERATOR_SOURCE
+    schema:
+      - name: DOUBLE
+        type: FLOAT64
+  - name: TCP_STAT_SOURCE
     schema:
       - name: DOUBLE
         type: FLOAT64
@@ -48,6 +69,20 @@ physical:
       seed: 1
       generator_schema: |
         NORMAL_DISTRIBUTION FLOAT64 0 1
+  - logical: TCP_STAT_SOURCE
+    host: worker-1:9090
+    parser_config:
+      type: CSV
+      fieldDelimiter: ","
+    type: TCP
+    source_config:
+      socket_host: 0.0.0.0
+      socket_port: 9000
+#      generator_rate_config: amplitude 100000, frequency 2
+#      stop_generator_when_sequence_finishes: NONE
+#      seed: 1
+#      generator_schema: |
+#        NORMAL_DISTRIBUTION FLOAT64 0 1
 
 workers:
   - host: worker-1:9090

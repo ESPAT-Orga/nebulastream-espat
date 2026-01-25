@@ -234,10 +234,20 @@ extract_last_line() {
   [ -f "$result" ]
   QUERY_ID=$result
 
-  #[ -f "$output" ]
-  #QUERY_ID=$output
+  echo "started first query successfully"
+  run DOCKER_NES_CLI -t tests/good/adaptive.yaml start 'select DOUBLE from TCP_STAT_SOURCE INTO STAT_SINK'
+  echo "started statistics query"
 
+  [ "$status" -eq 0 ]
+  result="$(extract_last_line "$output")"
+  [ -n "$result" ]
+  [ -f "$result" ]
+  QUERY_ID=$result
+  echo "starting of statistics query succeeded"
+
+  echo "sleeping for 20 seconds"
   sleep 20
+  echo "wake up"
 
   run DOCKER_NES_CLI -t tests/good/adaptive.yaml status "$QUERY_ID"
   [ "$status" -eq 0 ]

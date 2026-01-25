@@ -281,7 +281,7 @@ void TCPSource::close()
     if (connection >= 0)
     {
         ::close(sockfd);
-        NES_TRACE("Connection closed.");
+        NES_DEBUG("Connection closed.");
     }
 }
 

@@ -145,7 +145,7 @@ function reset_network() {
 }
 
 DOCKER_NES_CLI() {
-  docker compose run --rm nes-cli nes-cli "$@"
+  COMPOSE_PROGRESS=quiet docker compose run --rm nes-cli nes-cli "$@"
 }
 
 assert_json_equal() {
@@ -168,6 +168,11 @@ assert_json_contains() {
     echo "Actual: $actual"
     return 1
   fi
+}
+
+extract_last_line() {
+  # Use the last line of stdout as the actual CLI result and strip CR if present.
+  printf '%s\n' "$1" | tail -n 1 | tr -d '\r'
 }
 
 @test "adaptive sending" {
@@ -195,9 +200,21 @@ assert_json_contains() {
   throttle_network worker-1 "10kbit"
 
   run DOCKER_NES_CLI -t tests/good/adaptive.yaml start 'select DOUBLE from GENERATOR_SOURCE INTO VOID_SINK'
+
+  #echo "# status=$status" >&3
+  #echo "# raw output follows:" >&3
+  #printf '%s\n' "$output" >&3
+  #echo "# output bytes (reveals \r etc):" >&3
+  #printf '%s' "$output" | od -An -t x1 >&3
+
   [ "$status" -eq 0 ]
-  [ -f "$output" ]
-  QUERY_ID=$output
+  result="$(extract_last_line "$output")"
+  [ -n "$result" ]
+  [ -f "$result" ]
+  QUERY_ID=$result
+
+  #[ -f "$output" ]
+  #QUERY_ID=$output
 
   sleep 20
 

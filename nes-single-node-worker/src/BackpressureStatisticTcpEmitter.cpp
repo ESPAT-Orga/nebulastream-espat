@@ -39,6 +39,7 @@
 #include <folly/MPMCQueue.h>
 #include <QueryEngineStatisticListener.hpp>
 #include <scope_guard.hpp>
+#include <boost/asio.hpp>
 
 namespace NES
 {
@@ -82,6 +83,47 @@ void BackpressureStatisticTcpEmitter::start()
 
 void BackpressureStatisticTcpEmitter::threadRoutine(const std::stop_token& token)
 {
+    namespace asio = boost::asio;
+    using asio::ip::tcp;
+
+    const std::string host = "127.0.0.1";
+    const std::string port = "9000";
+
+    asio::io_context io;
+    tcp::resolver resolver(io);
+
+    // Resolve once; for localhost this is fine. If you want to handle DNS changes,
+    // move resolve() inside the loop.
+    auto endpoints = resolver.resolve(host, port);
+
+    tcp::socket socket(io);
+
+    for (;;) {
+        boost::system::error_code ec;
+
+        socket.close(ec); // ignore close errors
+        socket = tcp::socket(io);
+
+        asio::connect(socket, endpoints, ec);
+        if (!ec) {
+            std::cerr << "[+] Connected to " << host << ":" << port << "\n";
+            break;
+        }
+
+        std::cerr << "[-] Connect failed: " << ec.message()
+                  << " (retrying in 500ms)\n";
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    }
+
+    // Send something once connected
+    std::string msg = "hello from cpp\n";
+    boost::system::error_code ec;
+    asio::write(socket, asio::buffer(msg), ec);
+    if (ec) {
+        std::cerr << "send failed: " << ec.message() << "\n";
+    }
+
+    socket.close(ec);
     while (!token.stop_requested())
     {
         BackpressureEvent event = ApplyPressureEvent{"INVALID"}; /// Will be overwritten

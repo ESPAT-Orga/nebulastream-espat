@@ -100,6 +100,15 @@ setup() {
 }
 
 teardown() {
+  # Close any tmux panes we spawned for this test
+  if [ -n "${TMUX:-}" ] && command -v tmux >/dev/null 2>&1; then
+    if [ "${#TMUX_PANES[@]}" -gt 0 ]; then
+      for pane_id in "${TMUX_PANES[@]}"; do
+        tmux kill-pane -t "$pane_id" 2>/dev/null || true
+      done
+    fi
+  fi
+
   docker compose down -v || true
 }
 
@@ -181,17 +190,29 @@ extract_last_line() {
   # Set SHOW_OUTPUT to 0 by default if not set
   : "${SHOW_OUTPUT:=0}"
 
-  # Only open terminals if SHOW_OUTPUT is set to 1
-  if [ "$SHOW_OUTPUT" -eq 1 ]; then
-      # open terminal and print live output
-      (gnome-terminal -- python3 "$TMP_DIR"/tests/util/print_output.py "$TMP_DIR"/worker-2/out.csv)&
-      (gnome-terminal -- python3 "$TMP_DIR"/tests/util/print_output.py "$TMP_DIR"/worker-2/out.csv --freq)&
-      (gnome-terminal -- python3 "$TMP_DIR"/tests/util/print_output.py "$TMP_DIR"/worker-2/out.csv --plot)&
+    # Only open terminals if SHOW_OUTPUT is set to 1
+    if [ "$SHOW_OUTPUT" -eq 1 ]; then
+        open_viewer() {
+          # Usage: open_viewer <command...>
+          if [ -n "${TMUX:-}" ] && command -v tmux >/dev/null 2>&1; then
+            # Split the current tmux pane and run the command in the new pane.
+            # -d: don't switch focus, -P: print pane id (useful for debugging), -F: format
+            tmux split-window -d -v -P -F "#{pane_id}" "$@"
+          else
+            # Fallback: spawn a new gnome-terminal window
+            gnome-terminal -- "$@" &
+          fi
+        }
 
-      # open terminal and print live logs
-      (gnome-terminal -- tail -F "$TMP_DIR"/worker-1/singleNodeWorker.log)&
-      (gnome-terminal -- tail -F "$TMP_DIR"/worker-2/singleNodeWorker.log)&
-  fi
+        # open terminal/pane and print live output
+        open_viewer python3 "$TMP_DIR"/tests/util/print_output.py "$TMP_DIR"/worker-2/out.csv
+        open_viewer python3 "$TMP_DIR"/tests/util/print_output.py "$TMP_DIR"/worker-2/out.csv --freq
+        open_viewer python3 "$TMP_DIR"/tests/util/print_output.py "$TMP_DIR"/worker-2/out.csv --plot
+
+        # open terminal/pane and print live logs
+        open_viewer tail -F "$TMP_DIR"/worker-1/singleNodeWorker.log
+        open_viewer tail -F "$TMP_DIR"/worker-2/singleNodeWorker.log
+    fi
 
   # Apply heavy throttling to the downstream worker (worker-2) to trigger backpressure
   echo "# Throttling worker-2 to 10kbit" >&3

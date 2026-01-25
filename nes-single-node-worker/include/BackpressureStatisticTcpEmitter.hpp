@@ -49,6 +49,7 @@ struct BackpressureStatisticTcpEmitter final : BackpressureStatisticListener
 
 private:
     static constexpr size_t QUEUE_LENGTH = 1000;
+    static constexpr std::chrono::milliseconds CONNECT_RETRY_INTERVAL = std::chrono::milliseconds{500};
     Thread tcpWriterThread;
     folly::MPMCQueue<BackpressureEvent> events{QUEUE_LENGTH};
 };

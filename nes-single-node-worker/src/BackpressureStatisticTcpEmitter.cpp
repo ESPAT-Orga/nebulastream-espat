@@ -86,7 +86,9 @@ void BackpressureStatisticTcpEmitter::threadRoutine(const std::stop_token& token
     namespace asio = boost::asio;
     using asio::ip::tcp;
 
-    const std::string host = "127.0.0.1";
+    //TODO: get from config
+    // const std::string host = "127.0.0.1";
+    const std::string host = "host.docker.internal";
     const std::string port = "9000";
 
     asio::io_context io;
@@ -106,24 +108,16 @@ void BackpressureStatisticTcpEmitter::threadRoutine(const std::stop_token& token
 
         asio::connect(socket, endpoints, ec);
         if (!ec) {
-            std::cerr << "[+] Connected to " << host << ":" << port << "\n";
+            NES_INFO("Backpressure statistics tcp emitter connected to {}:{}", host, port);
             break;
         }
 
-        std::cerr << "[-] Connect failed: " << ec.message()
-                  << " (retrying in 500ms)\n";
-        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        NES_INFO("Connection to {}:{} failed, with {} retrying in {}", host, port, ec.message(), CONNECT_RETRY_INTERVAL);
+        std::this_thread::sleep_for(CONNECT_RETRY_INTERVAL);
     }
 
-    // Send something once connected
-    std::string msg = "hello from cpp\n";
+
     boost::system::error_code ec;
-    asio::write(socket, asio::buffer(msg), ec);
-    if (ec) {
-        std::cerr << "send failed: " << ec.message() << "\n";
-    }
-
-    socket.close(ec);
     while (!token.stop_requested())
     {
         BackpressureEvent event = ApplyPressureEvent{"INVALID"}; /// Will be overwritten
@@ -132,19 +126,29 @@ void BackpressureStatisticTcpEmitter::threadRoutine(const std::stop_token& token
         {
             continue;
         }
+        std::string msg;
 
         std::visit(
             Overloaded{
                 [&](const ApplyPressureEvent& applyEvent)
                 {
                     NES_INFO("Apply Backpressure {}, {}", applyEvent.channelId, applyEvent.timestamp);
+                    msg = std::string{"APPLY"};
                 },
                 [&](const ReleasePressureEvent& releaseEvent)
                 {
                     NES_INFO("Release Backpressure {}, {}", releaseEvent.channelId, releaseEvent.timestamp);
+                    msg = std::string{"RELEASE"};
                 }},
             event);
+
+        asio::write(socket, asio::buffer(msg), ec);
+        if (ec) {
+            NES_ERROR("Error sending message: {}", ec.message());
+        }
     }
+
+    socket.close(ec);
 }
 
 }

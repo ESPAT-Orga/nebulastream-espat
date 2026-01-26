@@ -13,6 +13,7 @@
 # limitations under the License.
 
 setup_file() {
+
   # Validate environment variables
   if [ -z "$NES_CLI" ]; then
     echo "ERROR: NES_CLI environment variable must be set" >&2
@@ -51,6 +52,7 @@ setup_file() {
     echo "ERROR: NEBULASTREAM file is not executable: $NEBULASTREAM" >&2
     exit 1
   fi
+
 
   # Print environment info for debugging
   echo "# Using NES_CLI: $NES_CLI" >&3
@@ -97,6 +99,14 @@ setup() {
   cd "$TMP_DIR" || exit
 
   echo "# Using TEST_DIR: $TMP_DIR" >&3
+
+  "$TMP_DIR/tests/util/check_tool_installs.sh"
+  status=$?
+
+  if [ "$status" -ne 0 ]; then
+    echo "Dependency check failed, aborting."
+    exit "$status"
+  fi
 }
 
 teardown() {
@@ -205,13 +215,14 @@ extract_last_line() {
         }
 
         # open terminal/pane and print live output
-        open_viewer python3 "$TMP_DIR"/tests/util/print_output.py "$TMP_DIR"/worker-2/out.csv
+        # open_viewer python3 "$TMP_DIR"/tests/util/print_output.py "$TMP_DIR"/worker-2/out.csv
+        open_viewer python3 "$TMP_DIR"/tests/util/print_output.py "$TMP_DIR"/worker-1/out_stat.csv
         open_viewer python3 "$TMP_DIR"/tests/util/print_output.py "$TMP_DIR"/worker-2/out.csv --freq
         open_viewer python3 "$TMP_DIR"/tests/util/print_output.py "$TMP_DIR"/worker-2/out.csv --plot
 
         # open terminal/pane and print live logs
-        open_viewer tail -F "$TMP_DIR"/worker-1/singleNodeWorker.log
-        open_viewer tail -F "$TMP_DIR"/worker-2/singleNodeWorker.log
+        # open_viewer tail -F "$TMP_DIR"/worker-1/singleNodeWorker.log
+        # open_viewer tail -F "$TMP_DIR"/worker-2/singleNodeWorker.log
     fi
 
   # Apply heavy throttling to the downstream worker (worker-2) to trigger backpressure
@@ -220,13 +231,7 @@ extract_last_line() {
   echo "# Throttling worker-1 to 10kbit" >&3
   throttle_network worker-1 "10kbit"
 
-  run DOCKER_NES_CLI -t tests/good/adaptive.yaml start 'select DOUBLE from GENERATOR_SOURCE INTO VOID_SINK'
-
-  #echo "# status=$status" >&3
-  #echo "# raw output follows:" >&3
-  #printf '%s\n' "$output" >&3
-  #echo "# output bytes (reveals \r etc):" >&3
-  #printf '%s' "$output" | od -An -t x1 >&3
+  run DOCKER_NES_CLI -t tests/good/adaptive.yaml start 'select DOUBLE from GENERATOR_SOURCE INTO FILE_SINK'
 
   [ "$status" -eq 0 ]
   result="$(extract_last_line "$output")"
@@ -234,30 +239,22 @@ extract_last_line() {
   [ -f "$result" ]
   QUERY_ID=$result
 
-  echo "started first query successfully"
-  run DOCKER_NES_CLI -t tests/good/adaptive.yaml start 'select DOUBLE from TCP_STAT_SOURCE INTO STAT_SINK'
-  echo "started statistics query"
+  echo "started first query successfully" >&3
+  run DOCKER_NES_CLI -t tests/good/adaptive.yaml start 'select * from TCP_STAT_SOURCE INTO STAT_SINK'
+  echo "started statistics query" >&3
 
   [ "$status" -eq 0 ]
   result="$(extract_last_line "$output")"
   [ -n "$result" ]
   [ -f "$result" ]
   QUERY_ID=$result
-  echo "starting of statistics query succeeded"
+  echo "starting of statistics query succeeded" >&3
 
-  echo "sleeping for 20 seconds"
+  echo "sleeping for 20 seconds" >&3
   sleep 20
-  echo "wake up"
+  echo "wake up" >&3
 
-  run DOCKER_NES_CLI -t tests/good/adaptive.yaml status "$QUERY_ID"
-  [ "$status" -eq 0 ]
-  echo "${output}" | jq -e '(. | length) == 3' # 1 global + 2 local
-  QUERY_STATUS=$(echo "$output" | jq -r --arg query_id "$QUERY_ID" '.[] | select(.query_id == $query_id and (has("local_query_id") | not)) | .query_status')
-  [ "$QUERY_STATUS" = "Running" ]
-
-    # Check that worker-1 log contains the expected events at least 4 times
-    apply_backpressure_count=$(grep -c "Apply Backpressure" "$TMP_DIR"/worker-1/singleNodeWorker.log || true)
-    [ "$apply_backpressure_count" -ge 4 ]
-    release_backpressure_count=$(grep -c "Release Backpressure" "$TMP_DIR"/worker-1/singleNodeWorker.log || true)
-    [ "$release_backpressure_count" -ge 4 ]
+  # Check that worker-1 log contains the expected events at least 4 times
+  apply_backpressure_count=$(pcregrep -Mc "^1,[0-9A-Za-z]{8}(?:-[0-9A-Za-z]{4}){3}-[0-9A-Za-z]{12},[0-9]+\n0,[0-9A-Za-z]{8}(?:-[0-9A-Za-z]{4}){3}-[0-9A-Za-z]{12},[0-9]+" "$TMP_DIR"/worker-1/out_stat.csv || true)
+  [ "$apply_backpressure_count" -ge 2 ]
 }

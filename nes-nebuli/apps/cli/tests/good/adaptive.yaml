@@ -17,7 +17,7 @@ query:
     FROM 
       GENERATOR_SOURCE 
     INTO 
-      VOID_SINK
+      FILE_SINK
   - |
     SELECT 
       *
@@ -26,7 +26,7 @@ query:
     INTO 
       STAT_SINK
 sinks:
-  - name: VOID_SINK
+  - name: FILE_SINK
     host: worker-2:9090
     schema:
       - name: GENERATOR_SOURCE$DOUBLE
@@ -38,8 +38,12 @@ sinks:
   - name: STAT_SINK
     host: worker-1:9090
     schema:
-      - name: TCP_STAT_SOURCE$DOUBLE
-        type: FLOAT64
+      - name: TCP_STAT_SOURCE$BACKPRESSURE
+        type: BOOLEAN
+      - name: TCP_STAT_SOURCE$CHANNEL_NAME
+        type: VARSIZED
+      - name: TCP_STAT_SOURCE$TIME_NS
+        type: INT64
     type: File
     config:
       file_path: out_stat.csv
@@ -52,8 +56,12 @@ logical:
         type: FLOAT64
   - name: TCP_STAT_SOURCE
     schema:
-      - name: DOUBLE
-        type: FLOAT64
+      - name: BACKPRESSURE
+        type: BOOLEAN
+      - name: CHANNEL_NAME
+        type: VARSIZED
+      - name: TIME_NS
+        type: INT64
 
 physical:
   - logical: GENERATOR_SOURCE

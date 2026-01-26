@@ -122,13 +122,15 @@ void BackpressureStatisticTcpEmitter::threadRoutine(const std::stop_token& token
                 Overloaded{
                     [&](const ApplyPressureEvent& applyEvent)
                     {
-                        NES_INFO("Apply Backpressure {}, {}", applyEvent.channelId, applyEvent.timestamp);
-                        msg = std::string{"1\n"};
+                        auto nanosec = std::chrono::duration_cast<std::chrono::nanoseconds>(applyEvent.timestamp.time_since_epoch()).count();
+                        NES_TRACE("Apply Backpressure {}, {}", applyEvent.channelId, applyEvent.timestamp);
+                        msg = std::format("true,{},{}\n", applyEvent.channelId, nanosec);
                     },
                     [&](const ReleasePressureEvent& releaseEvent)
                     {
-                        NES_INFO("Release Backpressure {}, {}", releaseEvent.channelId, releaseEvent.timestamp);
-                        msg = std::string{"0\n"};
+                        auto nanosec = std::chrono::duration_cast<std::chrono::nanoseconds>(releaseEvent.timestamp.time_since_epoch()).count();
+                        NES_TRACE("Release Backpressure {}, {}", releaseEvent.channelId, releaseEvent.timestamp);
+                        msg = std::format("false,{},{}\n", releaseEvent.channelId, nanosec);
                     }},
                 event);
 

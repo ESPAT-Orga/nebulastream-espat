@@ -91,6 +91,9 @@ struct ReflectedZstdCompressLogicalFunction
     std::optional<LogicalFunction> child;
     std::optional<uint8_t> compressionLevel;
 };
+
+static_assert(LogicalFunctionConcept<ZstdCompressLogicalFunction>);
+
 }
 
 FMT_OSTREAM(NES::ZstdCompressLogicalFunction);

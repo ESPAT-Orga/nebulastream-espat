@@ -12,40 +12,37 @@
     limitations under the License.
 */
 
-#include <LoweringRules/LowerToPhysical/LowerToPhysicalWindowedAggregation.hpp>
+#include <LoweringRules/LowerToPhysical/LowerToPhysicalStatisticBuild.hpp>
 
-#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <numeric>
 #include <ranges>
-#include <span>
 #include <utility>
 #include <vector>
 
 #include <Aggregation/AggregationBuildPhysicalOperator.hpp>
 #include <Aggregation/AggregationOperatorHandler.hpp>
 #include <Aggregation/AggregationProbePhysicalOperator.hpp>
-#include <Aggregation/AggregationSlice.hpp>
 #include <Aggregation/Function/AggregationPhysicalFunction.hpp>
 #include <DataTypes/DataTypeProvider.hpp>
 #include <Functions/FieldAccessPhysicalFunction.hpp>
 #include <Functions/FunctionProvider.hpp>
 #include <Functions/PhysicalFunction.hpp>
-#include <Identifiers/Identifiers.hpp>
 #include <LoweringRules/AbstractLoweringRule.hpp>
 #include <Nautilus/Interface/BufferRef/LowerSchemaProvider.hpp>
-#include <Nautilus/Interface/BufferRef/ColumnTupleBufferRef.hpp>
 #include <Nautilus/Interface/Hash/MurMur3HashFunction.hpp>
 #include <Nautilus/Interface/HashMap/ChainedHashMap/ChainedEntryMemoryProvider.hpp>
 #include <Nautilus/Interface/HashMap/ChainedHashMap/ChainedHashMap.hpp>
-#include <Nautilus/Interface/HashMap/HashMap.hpp>
 #include <Nautilus/Interface/Record.hpp>
 #include <Operators/LogicalOperator.hpp>
+#include <Operators/Windows/Aggregations/Histogram/EquiWidthHistogramLogicalFunction.hpp>
+#include <Operators/Windows/Aggregations/Sample/ReservoirSampleLogicalFunction.hpp>
+#include <Operators/Windows/Aggregations/Sketch/CountMinSketchLogicalFunction.hpp>
+#include <Operators/Windows/StatisticBuildLogicalOperator.hpp>
 #include <Operators/Windows/WindowedAggregationLogicalOperator.hpp>
 #include <Runtime/Execution/OperatorHandler.hpp>
 #include <SliceStore/DefaultTimeBasedSliceStore.hpp>
-#include <SliceStore/Slice.hpp>
 #include <Traits/MemoryLayoutTypeTrait.hpp>
 #include <Traits/OutputOriginIdsTrait.hpp>
 #include <Traits/TraitSet.hpp>
@@ -56,17 +53,15 @@
 #include <AggregationPhysicalFunctionRegistry.hpp>
 #include <ErrorHandling.hpp>
 #include <HashMapOptions.hpp>
-#include <HashMapSlice.hpp>
 #include <LoweringRuleRegistry.hpp>
 #include <PhysicalOperator.hpp>
 #include <QueryExecutionConfiguration.hpp>
-#include <WindowBasedOperatorHandler.hpp>
 
 namespace NES
 {
 
 static std::pair<std::vector<Record::RecordFieldIdentifier>, std::vector<Record::RecordFieldIdentifier>>
-getKeyAndValueFields(const WindowedAggregationLogicalOperator& logicalOperator)
+getKeyAndValueFields(const StatisticBuildLogicalOperator& logicalOperator)
 {
     std::vector<Record::RecordFieldIdentifier> fieldKeyNames;
     std::vector<Record::RecordFieldIdentifier> fieldValueNames;
@@ -84,7 +79,7 @@ getKeyAndValueFields(const WindowedAggregationLogicalOperator& logicalOperator)
     return {fieldKeyNames, fieldValueNames};
 }
 
-static std::unique_ptr<TimeFunction> getTimeFunction(const WindowedAggregationLogicalOperator& logicalOperator)
+static std::unique_ptr<TimeFunction> getTimeFunction(const StatisticBuildLogicalOperator& logicalOperator)
 {
     auto* const timeWindow = dynamic_cast<Windowing::TimeBasedWindowType*>(logicalOperator.getWindowType().get());
     if (timeWindow == nullptr)
@@ -103,7 +98,6 @@ static std::unique_ptr<TimeFunction> getTimeFunction(const WindowedAggregationLo
                 "The ingestion time field of a window must be: {}", Windowing::TimeCharacteristic::RECORD_CREATION_TS_FIELD_NAME);
         }
         case Windowing::TimeCharacteristic::Type::EventTime: {
-            /// For event time fields, we look up the reference field name and create an expression to read the field.
             auto timeCharacteristicField = timeWindow->getTimeCharacteristic().field.name;
             auto timeStampField = FieldAccessPhysicalFunction(timeCharacteristicField);
             return std::make_unique<EventTimeFunction>(timeStampField, timeWindow->getTimeCharacteristic().getTimeUnit());
@@ -116,33 +110,66 @@ static std::unique_ptr<TimeFunction> getTimeFunction(const WindowedAggregationLo
 
 namespace
 {
-std::vector<std::shared_ptr<AggregationPhysicalFunction>>
-getAggregationPhysicalFunctions(const WindowedAggregationLogicalOperator& logicalOperator, const QueryExecutionConfiguration& configuration)
+std::vector<std::shared_ptr<AggregationPhysicalFunction>> getAggregationPhysicalFunctions(
+    const StatisticBuildLogicalOperator& logicalOperator,
+    const QueryExecutionConfiguration& configuration,
+    MemoryLayoutType memoryLayoutType)
 {
     std::vector<std::shared_ptr<AggregationPhysicalFunction>> aggregationPhysicalFunctions;
     const auto& aggregationDescriptors = logicalOperator.getWindowAggregation();
     for (const auto& descriptor : aggregationDescriptors)
     {
-        auto physicalInputType = descriptor->getOnField().getDataType();
-        auto physicalFinalType = descriptor->getAsField().getDataType();
+        auto physicalInputType = DataTypeProvider::provideDataType(descriptor->getInputStamp().type);
+        auto physicalFinalType = DataTypeProvider::provideDataType(descriptor->getFinalAggregateStamp().type);
 
         auto aggregationInputFunction = QueryCompilation::FunctionProvider::lowerFunction(descriptor->getOnField());
         const auto resultFieldIdentifier = descriptor->getAsField().getFieldName();
-        const auto memoryLayoutTypeTrait = logicalOperator.getTraitSet().tryGet<MemoryLayoutTypeTrait>();
-        PRECONDITION(memoryLayoutTypeTrait.has_value(), "Expected a memory layout type trait");
-        const auto memoryLayoutType = memoryLayoutTypeTrait.value()->memoryLayout;
         auto bufferRef
             = LowerSchemaProvider::lowerSchema(configuration.pageSize.getValue(), logicalOperator.getInputSchemas()[0], memoryLayoutType);
 
         auto name = descriptor->getName();
-        auto aggregationArguments = AggregationPhysicalFunctionRegistryArguments(
+        AggregationPhysicalFunctionRegistryArguments aggregationArguments{
             std::move(physicalInputType),
             std::move(physicalFinalType),
             std::move(aggregationInputFunction),
             resultFieldIdentifier,
-            bufferRef,
-            descriptor->shallIncludeNullValues());
-            bufferRef);
+            bufferRef};
+
+        /// We should think about another way to store the additional arguments for each statistic physical function.
+        /// The current approach requries us to add here an if block for every new statistic build physical function.
+        /// One idea could be to use a similar approach as with the logical operators, storing all configs in a hashmap.
+        if (name.contains("ReservoirSample"))
+        {
+            const auto logicalReservoirSample = descriptor->tryGetAs<ReservoirSampleLogicalFunction>();
+            if (logicalReservoirSample.has_value())
+            {
+                aggregationArguments.numberOfSeenTuplesFieldName = logicalOperator.getNumberOfSeenTuplesFieldName();
+                aggregationArguments.sampleSize = logicalReservoirSample->get().reservoirSize;
+                aggregationArguments.seed = logicalReservoirSample->get().seed;
+            }
+        }
+        else if (name.contains("EquiWidthHistogram"))
+        {
+            const auto logicalEquiWidthHistogram = descriptor->tryGetAs<EquiWidthHistogramLogicalFunction>();
+            if (logicalEquiWidthHistogram.has_value())
+            {
+                aggregationArguments.numberOfSeenTuplesFieldName = logicalOperator.getNumberOfSeenTuplesFieldName();
+                aggregationArguments.minValue = logicalEquiWidthHistogram->get().minValue;
+                aggregationArguments.maxValue = logicalEquiWidthHistogram->get().maxValue;
+                aggregationArguments.numberOfBins = logicalEquiWidthHistogram->get().numBuckets;
+            }
+        }
+        else if (name.contains("CountMinSketch"))
+        {
+            const auto logicalCountMinSketch = descriptor->tryGetAs<CountMinSketchLogicalFunction>();
+            if (logicalCountMinSketch.has_value())
+            {
+                aggregationArguments.numberOfSeenTuplesFieldName = logicalOperator.getNumberOfSeenTuplesFieldName();
+                aggregationArguments.columns = logicalCountMinSketch->get().columns;
+                aggregationArguments.rows = logicalCountMinSketch->get().rows;
+            }
+        }
+
         if (auto aggregationPhysicalFunction
             = AggregationPhysicalFunctionRegistry::instance().create(std::string(name), std::move(aggregationArguments)))
         {
@@ -150,16 +177,16 @@ getAggregationPhysicalFunctions(const WindowedAggregationLogicalOperator& logica
         }
         else
         {
-            throw UnknownAggregationType("unknown aggregation type: {}", name);
+            throw UnknownAggregationType("unknown statistic type: {}", name);
         }
     }
     return aggregationPhysicalFunctions;
 }
 }
 
-LoweringRuleResultSubgraph LowerToPhysicalWindowedAggregation::apply(LogicalOperator logicalOperator)
+LoweringRuleResultSubgraph LowerToPhysicalStatisticBuild::apply(LogicalOperator logicalOperator)
 {
-    PRECONDITION(logicalOperator.tryGetAs<WindowedAggregationLogicalOperator>(), "Expected a WindowedAggregationLogicalOperator");
+    PRECONDITION(logicalOperator.tryGetAs<StatisticBuildLogicalOperator>(), "Expected a StatisticBuildLogicalOperator");
     PRECONDITION(std::ranges::size(logicalOperator.getChildren()) == 1, "Expected one child");
     auto outputOriginIdsOpt = getTrait<OutputOriginIdsTrait>(logicalOperator.getTraitSet());
     auto inputOriginIdsOpt = getTrait<OutputOriginIdsTrait>(logicalOperator.getChildren().at(0).getTraitSet());
@@ -172,16 +199,15 @@ LoweringRuleResultSubgraph LowerToPhysicalWindowedAggregation::apply(LogicalOper
     PRECONDITION(memoryLayoutTypeTrait.has_value(), "Expected a memory layout type trait");
     const auto memoryLayoutType = memoryLayoutTypeTrait.value()->memoryLayout;
 
-
-    auto aggregation = logicalOperator.getAs<WindowedAggregationLogicalOperator>();
+    auto aggregation = logicalOperator.getAs<StatisticBuildLogicalOperator>();
     auto handlerId = getNextOperatorHandlerId();
     auto outputSchema = aggregation.getOutputSchema();
     auto outputOriginId = outputOriginIds[0];
     auto inputOriginIds = inputOriginIdsOpt.value().get();
-    auto timeFunction = getTimeFunction(*aggregation);
     auto windowType = std::dynamic_pointer_cast<Windowing::TimeBasedWindowType>(aggregation->getWindowType());
-    INVARIANT(windowType != nullptr, "Window type must be a time-based window type");
-    auto aggregationPhysicalFunctions = getAggregationPhysicalFunctions(*aggregation, conf);
+    auto timeFunction = getTimeFunction(*aggregation);
+
+    auto aggregationPhysicalFunctions = getAggregationPhysicalFunctions(*aggregation, conf, memoryLayoutType);
 
     const auto valueSize = std::accumulate(
         aggregationPhysicalFunctions.begin(),
@@ -201,7 +227,7 @@ LoweringRuleResultSubgraph LowerToPhysicalWindowedAggregation::apply(LogicalOper
             INVARIANT(fieldReplaceSuccess, "Expect to change the type of {} for {}", nodeFunctionKey.getFieldName(), newInputSchema);
         }
         keyFunctions.emplace_back(QueryCompilation::FunctionProvider::lowerFunction(nodeFunctionKey));
-        keySize += loweredFunctionType.getSizeInBytesWithNull();
+        keySize += DataTypeProvider::provideDataType(loweredFunctionType.type).getSizeInBytes();
     }
     const auto entrySize = sizeof(ChainedHashMapEntry) + keySize + valueSize;
     const auto numberOfBuckets = conf.numberOfPartitions.getValue();
@@ -225,31 +251,12 @@ LoweringRuleResultSubgraph LowerToPhysicalWindowedAggregation::apply(LogicalOper
         pageSize,
         numberOfBuckets);
 
-    auto sliceAndWindowStore = std::make_unique<DefaultTimeBasedSliceStore>(
-        windowType->getSize().getTime(), windowType->getSlide().getTime(), conf.sliceCacheConfiguration);
-    auto sliceStoreRef = sliceAndWindowStore->createSliceStoreRef(
-        [](Slice& slice, const WorkerThreadId workerThreadId) -> std::span<const std::byte>
-        {
-            auto& aggregationSlice = dynamic_cast<AggregationSlice&>(slice);
-            auto* ptr = aggregationSlice.getHashMapPtrOrCreate(workerThreadId);
-            return {reinterpret_cast<const std::byte*>(ptr), sizeof(ChainedHashMap)};
-        },
-        [hashMapOptions](WindowBasedOperatorHandler& handler)
-        {
-            auto& aggHandler = dynamic_cast<AggregationOperatorHandler&>(handler);
-            const CreateNewHashMapSliceArgs hashMapSliceArgs{
-                {aggHandler.cleanupStateNautilusFunction},
-                hashMapOptions.keySize,
-                hashMapOptions.valueSize,
-                hashMapOptions.pageSize,
-                hashMapOptions.numberOfBuckets};
-            return handler.getCreateNewSlicesFunction(hashMapSliceArgs);
-        });
+    auto sliceAndWindowStore
+        = std::make_unique<DefaultTimeBasedSliceStore>(windowType->getSize().getTime(), windowType->getSlide().getTime());
     auto handler = std::make_shared<AggregationOperatorHandler>(
         inputOriginIds | std::ranges::to<std::vector>(), outputOriginId, std::move(sliceAndWindowStore), conf.maxNumberOfBuckets);
-    const AggregationBuildPhysicalOperator build{
-        handlerId, std::move(timeFunction), std::move(sliceStoreRef), aggregationPhysicalFunctions, hashMapOptions};
-    const AggregationProbePhysicalOperator probe{hashMapOptions, aggregationPhysicalFunctions, handlerId, windowMetaData};
+    auto build = AggregationBuildPhysicalOperator(handlerId, std::move(timeFunction), aggregationPhysicalFunctions, hashMapOptions);
+    auto probe = AggregationProbePhysicalOperator(hashMapOptions, aggregationPhysicalFunctions, handlerId, windowMetaData);
 
     auto buildWrapper = std::make_shared<PhysicalOperatorWrapper>(
         build,
@@ -273,13 +280,13 @@ LoweringRuleResultSubgraph LowerToPhysicalWindowedAggregation::apply(LogicalOper
         std::vector{buildWrapper});
 
     /// Creates a physical leaf for each logical leaf. Required, as this operator can have any number of sources.
-    std::vector leafes(logicalOperator.getChildren().size(), buildWrapper);
-    return {.root = probeWrapper, .leafs = {leafes}};
+    std::vector leaves(logicalOperator.getChildren().size(), buildWrapper);
+    return {.root = probeWrapper, .leafs = {leaves}};
 }
 
 std::unique_ptr<AbstractLoweringRule>
-LoweringRuleGeneratedRegistrar::RegisterWindowedAggregationLoweringRule(LoweringRuleRegistryArguments argument) /// NOLINT
+LoweringRuleGeneratedRegistrar::RegisterStatisticBuildLoweringRule(LoweringRuleRegistryArguments argument) /// NOLINT
 {
-    return std::make_unique<LowerToPhysicalWindowedAggregation>(argument.conf);
+    return std::make_unique<LowerToPhysicalStatisticBuild>(argument.conf);
 }
 }

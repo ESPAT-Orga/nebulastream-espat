@@ -76,6 +76,9 @@ struct ReflectedZstdDecompressLogicalFunction
 {
     std::optional<LogicalFunction> child;
 };
+
+static_assert(LogicalFunctionConcept<ZstdDecompressLogicalFunction>);
+
 }
 
 FMT_OSTREAM(NES::ZstdDecompressLogicalFunction);

@@ -967,6 +967,121 @@ void AntlrSQLQueryPlanCreator::exitFunctionCall(AntlrSQLParser::FunctionCallCont
                 auto constFunctionItem = ConstantValueLogicalFunction(*dataType, std::move(value));
                 helpers.top().functionBuilder.emplace_back(constFunctionItem);
             }
+            /// These special functions mix constants and field references, so they must be handled
+            /// before the general argument count check (which only counts functionBuilder entries).
+            else if (funcName == "RESERVOIR")
+            {
+                if (helpers.top().constantBuilder.empty())
+                {
+                    throw InvalidQuerySyntax(
+                        "Expected constant (sample hash) as first argument of Reservoir_Probe function call, got nothing at {}",
+                        context->getText());
+                }
+                const uint64_t sampleHash = parseConstant(helpers.top().constantBuilder.front(), "sampleHash");
+                helpers.top().statisticHash = sampleHash;
+                if (helpers.top().functionBuilder.empty())
+                {
+                    throw InvalidQuerySyntax("Sample requires sample fields as arguments at {}", context->getText());
+                }
+                std::vector<FieldAccessLogicalFunction> sampleFields;
+                for (auto& field : helpers.top().functionBuilder)
+                {
+                    PRECONDITION(
+                        field.tryGetAs<FieldAccessLogicalFunction>().has_value(), "sample field was not a FieldAccessLogicalFunction");
+                    sampleFields.emplace_back(field.getAs<FieldAccessLogicalFunction>().get());
+                }
+                helpers.top().functionBuilder.clear();
+
+                if (helpers.top().constantBuilder.empty())
+                {
+                    throw InvalidQuerySyntax(
+                        "Expected constant at the end of ReservoirSample function call, got nothing at {}", context->getText());
+                }
+                uint64_t reservoirSize = parseConstant(helpers.top().constantBuilder.back(), "reservoirSize");
+                helpers.top().constantBuilder.pop_back();
+                /// We need to pass a field that exists in the schema. But we do not care of the actual value, as the sample gets built
+                /// across all fields for now.
+                const auto uselessOnField = FieldAccessLogicalFunction(sampleFields[0]);
+                const auto asFieldIfNotOverwritten = FieldAccessLogicalFunction{
+                    LogicalStatisticFields().statisticDataField.dataType, LogicalStatisticFields().statisticDataField.name};
+                helpers.top().windowAggs.push_back(std::make_shared<WindowAggregationLogicalFunction>(
+                    ReservoirSampleLogicalFunction{uselessOnField, asFieldIfNotOverwritten, sampleFields, reservoirSize, sampleHash}));
+                break;
+            }
+            else if (funcName == "RESERVOIR_PROBE")
+            {
+                if (helpers.top().constantBuilder.empty())
+                {
+                    throw InvalidQuerySyntax(
+                        "Expected constant (sample hash) as first argument of Reservoir_Probe function call, got nothing at {}",
+                        context->getText());
+                }
+                const uint64_t sampleHash = parseConstant(helpers.top().constantBuilder.back(), "sampleHash");
+                helpers.top().constantBuilder.pop_back();
+                if (helpers.top().functionBuilder.empty())
+                {
+                    throw InvalidQuerySyntax("Sample probe requires sample fields and data types as arguments at {}", context->getText());
+                }
+                Schema sampleSchema;
+                std::ranges::reverse_view functionBuilderReversed{helpers.top().functionBuilder};
+                for (size_t i = 0; i < functionBuilderReversed.size(); i += 2)
+                {
+                    auto nameFn = helpers.top().functionBuilder.at(i);
+                    auto datatypeFn = helpers.top().functionBuilder.at(i + 1);
+                    INVARIANT(
+                        nameFn.tryGetAs<FieldAccessLogicalFunction>().has_value()
+                            and datatypeFn.tryGetAs<FieldAccessLogicalFunction>().has_value(),
+                        "sample field/datatype was not a FieldAccessLogicalFunction");
+                    auto nameFieldAccFn = nameFn.getAs<FieldAccessLogicalFunction>().get();
+                    auto datatypeFieldAccFn = datatypeFn.getAs<FieldAccessLogicalFunction>().get();
+                    auto datatype = DataTypeProvider::tryProvideDataType(datatypeFieldAccFn.getFieldName());
+                    INVARIANT(datatype.has_value(), "Provided datatype {} was not a valid datatype!", datatypeFieldAccFn.getFieldName());
+                    sampleSchema.addField(nameFieldAccFn.getFieldName(), datatype.value());
+                }
+                helpers.top().functionBuilder.clear();
+                helpers.top().statProbe = ReservoirProbeLogicalOperator(sampleHash, sampleSchema);
+                break;
+            }
+            else if (funcName == "EQUIWIDTHHISTOGRAM")
+            {
+                if (helpers.top().functionBuilder.size() != 1
+                    && helpers.top().functionBuilder.back().tryGetAs<FieldAccessLogicalFunction>())
+                {
+                    throw InvalidQuerySyntax("EQUIWIDTHHISTOGRAM requires the first argument to be a fieldname");
+                }
+                const auto fieldName = helpers.top().functionBuilder.back().getAs<FieldAccessLogicalFunction>().get();
+                helpers.top().functionBuilder.pop_back();
+                if (helpers.top().constantBuilder.size() != 3)
+                {
+                    throw InvalidQuerySyntax("EQUIWIDTHHISTOGRAM requires the arguments numBuckets, minValue, maxValue to be constants");
+                }
+                const auto maxValue = parseConstant(helpers.top().constantBuilder.back(), "maxValue");
+                helpers.top().constantBuilder.pop_back();
+                const auto minValue = parseConstant(helpers.top().constantBuilder.back(), "minValue");
+                helpers.top().constantBuilder.pop_back();
+                const auto numBuckets = parseConstant(helpers.top().constantBuilder.back(), "numBuckets");
+                helpers.top().constantBuilder.pop_back();
+                helpers.top().windowAggs.push_back(std::make_shared<WindowAggregationLogicalFunction>(
+                    EquiWidthHistogramLogicalFunction{fieldName, numBuckets, minValue, maxValue}));
+                break;
+            }
+            else if (funcName == "COUNTMINSKETCH")
+            {
+                if (helpers.top().functionBuilder.size() != 1
+                    && helpers.top().functionBuilder.back().tryGetAs<FieldAccessLogicalFunction>())
+                {
+                    throw InvalidQuerySyntax("COUNTMINSKETCH requires the first argument to be a fieldname");
+                }
+                const auto fieldName = helpers.top().functionBuilder.back().getAs<FieldAccessLogicalFunction>().get();
+                helpers.top().functionBuilder.pop_back();
+                const auto rows = parseConstant(helpers.top().constantBuilder.back(), "rows");
+                helpers.top().constantBuilder.pop_back();
+                const auto columns = parseConstant(helpers.top().constantBuilder.back(), "columns");
+                helpers.top().constantBuilder.pop_back();
+                helpers.top().windowAggs.push_back(
+                    std::make_shared<WindowAggregationLogicalFunction>(CountMinSketchLogicalFunction{fieldName, columns, rows}));
+                break;
+            }
             else
             {
                 const auto numArgs = context->argument.size();
@@ -984,123 +1099,6 @@ void AntlrSQLQueryPlanCreator::exitFunctionCall(AntlrSQLParser::FunctionCallCont
                 {
                     helpers.top().functionBuilder.resize(helpers.top().functionBuilder.size() - numArgs);
                     helpers.top().functionBuilder.push_back(*logicalFunction);
-                }
-                /// Would be better to use the LogicalFunctionProvider for reservoir, but then it would also need to take constantBuilder
-                /// as argument and not just the functionBuilder (see above).
-                else if (funcName == "RESERVOIR")
-                {
-                    if (helpers.top().constantBuilder.empty())
-                    {
-                        throw InvalidQuerySyntax(
-                            "Expected constant (sample hash) as first argument of Reservoir_Probe function call, got nothing at {}",
-                            context->getText());
-                    }
-                    const uint64_t sampleHash = parseConstant(helpers.top().constantBuilder.front(), "sampleHash");
-                    helpers.top().statisticHash = sampleHash;
-                    if (helpers.top().functionBuilder.empty())
-                    {
-                        throw InvalidQuerySyntax("Sample requires sample fields as arguments at {}", context->getText());
-                    }
-                    std::vector<FieldAccessLogicalFunction> sampleFields;
-                    for (auto& field : helpers.top().functionBuilder)
-                    {
-                        PRECONDITION(
-                            field.tryGet<FieldAccessLogicalFunction>().has_value(), "sample field was not a FieldAccessLogicalFunction");
-                        sampleFields.emplace_back(field.get<FieldAccessLogicalFunction>());
-                    }
-                    helpers.top().functionBuilder.clear();
-
-                    if (helpers.top().constantBuilder.empty())
-                    {
-                        throw InvalidQuerySyntax(
-                            "Expected constant at the end of ReservoirSample function call, got nothing at {}", context->getText());
-                    }
-                    uint64_t reservoirSize = parseConstant(helpers.top().constantBuilder.back(), "reservoirSize");
-                    helpers.top().constantBuilder.pop_back();
-                    /// We need to pass a field that exists in the schema. But we do not care of the actual value, as the sample gets built
-                    /// across all fields for now.
-                    const auto uselessOnField = FieldAccessLogicalFunction(sampleFields[0]);
-                    const auto asFieldIfNotOverwritten = FieldAccessLogicalFunction{
-                        LogicalStatisticFields().statisticDataField.dataType, LogicalStatisticFields().statisticDataField.name};
-                    helpers.top().windowAggs.push_back(std::make_shared<ReservoirSampleLogicalFunction>(
-                        uselessOnField, asFieldIfNotOverwritten, sampleFields, reservoirSize, sampleHash));
-                    break;
-                }
-                else if (funcName == "RESERVOIR_PROBE")
-                {
-                    if (helpers.top().constantBuilder.empty())
-                    {
-                        throw InvalidQuerySyntax(
-                            "Expected constant (sample hash) as first argument of Reservoir_Probe function call, got nothing at {}",
-                            context->getText());
-                    }
-                    const uint64_t sampleHash = parseConstant(helpers.top().constantBuilder.back(), "sampleHash");
-                    helpers.top().constantBuilder.pop_back();
-                    if (helpers.top().functionBuilder.empty())
-                    {
-                        throw InvalidQuerySyntax(
-                            "Sample probe requires sample fields and data types as arguments at {}", context->getText());
-                    }
-                    Schema sampleSchema;
-                    std::ranges::reverse_view functionBuilderReversed{helpers.top().functionBuilder};
-                    for (size_t i = 0; i < functionBuilderReversed.size(); i += 2)
-                    {
-                        auto nameFn = helpers.top().functionBuilder.at(i);
-                        auto datatypeFn = helpers.top().functionBuilder.at(i + 1);
-                        INVARIANT(
-                            nameFn.tryGet<FieldAccessLogicalFunction>().has_value()
-                                and datatypeFn.tryGet<FieldAccessLogicalFunction>().has_value(),
-                            "sample field/datatype was not a FieldAccessLogicalFunction");
-                        auto nameFieldAccFn = nameFn.get<FieldAccessLogicalFunction>();
-                        auto datatypeFieldAccFn = datatypeFn.get<FieldAccessLogicalFunction>();
-                        auto datatype = DataTypeProvider::tryProvideDataType(datatypeFieldAccFn.getFieldName());
-                        INVARIANT(
-                            datatype.has_value(), "Provided datatype {} was not a valid datatype!", datatypeFieldAccFn.getFieldName());
-                        sampleSchema.addField(nameFieldAccFn.getFieldName(), datatype.value());
-                    }
-                    helpers.top().functionBuilder.clear();
-                    helpers.top().statProbe = ReservoirProbeLogicalOperator(sampleHash, sampleSchema);
-                    break;
-                }
-                else if (funcName == "EQUIWIDTHHISTOGRAM")
-                {
-                    if (helpers.top().functionBuilder.size() != 1
-                        && helpers.top().functionBuilder.back().tryGet<FieldAccessLogicalFunction>())
-                    {
-                        throw InvalidQuerySyntax("EQUIWIDTHHISTOGRAM requires the first argument to be a fieldname");
-                    }
-                    const auto fieldName = helpers.top().functionBuilder.back().tryGet<FieldAccessLogicalFunction>().value();
-                    helpers.top().functionBuilder.pop_back();
-                    if (helpers.top().constantBuilder.size() != 3)
-                    {
-                        throw InvalidQuerySyntax(
-                            "EQUIWIDTHHISTOGRAM requires the arguments numBuckets, minValue, maxValue to be constants");
-                    }
-                    const auto maxValue = parseConstant(helpers.top().constantBuilder.back(), "maxValue");
-                    helpers.top().constantBuilder.pop_back();
-                    const auto minValue = parseConstant(helpers.top().constantBuilder.back(), "minValue");
-                    helpers.top().constantBuilder.pop_back();
-                    const auto numBuckets = parseConstant(helpers.top().constantBuilder.back(), "numBuckets");
-                    helpers.top().constantBuilder.pop_back();
-                    helpers.top().windowAggs.push_back(
-                        std::make_shared<EquiWidthHistogramLogicalFunction>(fieldName, numBuckets, minValue, maxValue));
-                    break;
-                }
-                else if (funcName == "COUNTMINSKETCH")
-                {
-                    if (helpers.top().functionBuilder.size() != 1
-                        && helpers.top().functionBuilder.back().tryGet<FieldAccessLogicalFunction>())
-                    {
-                        throw InvalidQuerySyntax("COUNTMINSKETCH requires the first argument to be a fieldname");
-                    }
-                    const auto fieldName = helpers.top().functionBuilder.back().tryGet<FieldAccessLogicalFunction>().value();
-                    helpers.top().functionBuilder.pop_back();
-                    const auto rows = parseConstant(helpers.top().constantBuilder.back(), "rows");
-                    helpers.top().constantBuilder.pop_back();
-                    const auto columns = parseConstant(helpers.top().constantBuilder.back(), "columns");
-                    helpers.top().constantBuilder.pop_back();
-                    helpers.top().windowAggs.push_back(std::make_shared<CountMinSketchLogicalFunction>(fieldName, columns, rows));
-                    break;
                 }
                 else
                 {

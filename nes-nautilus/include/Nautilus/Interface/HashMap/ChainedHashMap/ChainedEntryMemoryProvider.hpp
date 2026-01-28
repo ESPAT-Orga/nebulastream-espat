@@ -34,6 +34,8 @@ struct FieldOffsets
     Record::RecordFieldIdentifier fieldIdentifier;
     DataType type;
     uint64_t fieldOffset;
+
+    bool operator==(const FieldOffsets&) const = default;
 };
 
 /// ChainedHashMapEntry uses for reading and writing either the keys or values.

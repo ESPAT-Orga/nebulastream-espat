@@ -30,15 +30,17 @@
 #include <Identifiers/Identifiers.hpp>
 #include <Listeners/StatisticListener.hpp>
 #include <folly/MPMCQueue.h>
+#include <nlohmann/json.hpp>
+#include <nlohmann/json_fwd.hpp>
 #include <Thread.hpp>
 
-template <typename Var1, typename Var2>
+template <typename Var1, typename Var2, typename... Ts3>
 struct FlattenVariant;
 
-template <typename... Ts1, typename... Ts2>
-struct FlattenVariant<std::variant<Ts1...>, std::variant<Ts2...>>
+template <typename... Ts1, typename... Ts2, typename... Ts3>
+struct FlattenVariant<std::variant<Ts1...>, std::variant<Ts2...>, std::variant<Ts3...>>
 {
-    using type = std::variant<Ts1..., Ts2...>;
+    using type = std::variant<Ts1..., Ts2..., Ts3...>;
 };
 
 namespace NES
@@ -47,14 +49,15 @@ namespace NES
 /// chrome://tracing/ interface for performance analysis (or any other event trace visualizer)
 struct GoogleEventTracePrinter final : StatisticListener
 {
-    using CombinedEventType = FlattenVariant<SystemEvent, Event>::type;
+    using CombinedEventType = FlattenVariant<SystemEvent, Event, BufferManagerEvent>::type;
     void onEvent(Event event) override;
     void onEvent(SystemEvent event) override;
+    void onEvent(BufferManagerEvent event) override;
 
     /// Constructs a GoogleEventTracePrinter that writes to the specified file path
     /// @param path The file path where the trace will be written
     explicit GoogleEventTracePrinter(const std::filesystem::path& path);
-    ~GoogleEventTracePrinter() override = default;
+    ~GoogleEventTracePrinter() = default;
 
     /// Start the event processing thread. Must be called after construction.
     void start();
@@ -67,7 +70,8 @@ private:
         Query,
         Pipeline,
         Task,
-        System
+        System,
+        BufferManager
     };
 
     enum class Phase : int8_t
@@ -77,10 +81,27 @@ private:
         Instant
     };
 
+    enum class BufferManagerAction
+    {
+        GetBuffer,
+        RecycleBuffer
+    };
+
+    struct BufferManagerChange
+    {
+        BufferManagerAction action;
+        PipelineId pipelineId;
+        size_t bufferSize;
+        ChronoClock::time_point timestamp;
+    };
+
     static uint64_t timestampToMicroseconds(const std::chrono::system_clock::time_point& timestamp);
 
     /// Thread routine that processes events and writes to the trace file
     void threadRoutine(const std::stop_token& token);
+
+    void emitBufferUsagePeriods(
+        std::vector<BufferManagerChange> bufferManagerChanges, std::function<void()> printComma, std::string label, std::ofstream& file);
 
     std::filesystem::path outputPath;
     folly::MPMCQueue<CombinedEventType> events{QUEUE_LENGTH};

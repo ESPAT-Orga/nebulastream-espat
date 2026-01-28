@@ -109,7 +109,7 @@ private:
     void writeTraceFooter();
 
     void emitBufferUsagePeriods(
-        std::vector<BufferManagerChange> bufferManagerChanges, std::function<void(const nlohmann::json& evt)> emit, std::string label);
+        std::vector<BufferManagerChange> bufferManagerChanges, std::function<void()> printComma, std::string label, std::ofstream& file);
 
     std::filesystem::path outputPath;
     folly::MPMCQueue<CombinedEventType> events{QUEUE_LENGTH};

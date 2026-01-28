@@ -141,7 +141,7 @@ std::string creatorToString(PipelineId id)
 }
 
 void GoogleEventTracePrinter::emitBufferUsagePeriods(
-    std::vector<BufferManagerChange> bufferManagerChanges, std::function<void(const nlohmann::json& evt)> emit, std::string label)
+    std::vector<BufferManagerChange> bufferManagerChanges, std::function<void()> printComma, std::string label, std::ofstream& file)
 {
     std::sort(
         bufferManagerChanges.begin(),
@@ -154,18 +154,15 @@ void GoogleEventTracePrinter::emitBufferUsagePeriods(
     {
         if (change > bufferManagerChanges.begin())
         {
-            auto args = nlohmann::json::object();
-            args["size"] = memoryInUse;
-            auto traceEvent = createTraceEvent(
-                fmt::format("Mem {}, {}: {} ({})", label, creatorToString(change->pipelineId), memoryInUse, memSliceCount),
-                Category::BufferManager,
-                Phase::End,
-                timestampToMicroseconds(change->timestamp),
-                0,
-                args);
-            traceEvent["tid"] = 0; /// System thread
-
-            emit(traceEvent);
+            printComma();
+            fmt::print(file,
+                R"JSON(    {{"args":{{"size":"{}"}},"cat":"buffermanager","name":"Mem {}, {}: {} ({})","ph":"E","pid":1,"tid":0,"ts":{}}})JSON",
+                memoryInUse,
+                label,
+                creatorToString,
+                (change->pipelineId),
+                memSliceCount,
+                timestampToMicroseconds(change->timestamp));
         }
 
         if (change->action == BufferManagerAction::RecycleBuffer)
@@ -180,18 +177,16 @@ void GoogleEventTracePrinter::emitBufferUsagePeriods(
         memSliceCount++;
         if (change < bufferManagerChanges.end() - 1)
         {
-            auto args = nlohmann::json::object();
-            args["size"] = memoryInUse;
-            auto traceEvent = createTraceEvent(
-                fmt::format(" Mem {}, {}: {} ({})", label, creatorToString(change->pipelineId), memoryInUse, memSliceCount),
-                Category::BufferManager,
-                Phase::Begin,
-                timestampToMicroseconds(change->timestamp),
-                0,
-                args);
-            traceEvent["tid"] = 0; /// System thread
+            printComma();
+            fmt::print(file,
+                R"JSON(    {{"args":{{"size":"{}"}},"cat":"buffermanager","name":"Mem {}, {}: {} ({})","ph":"B","pid":1,"tid":0,"ts":{}}})JSON",
+                memoryInUse,
+                label,
+                creatorToString,
+                (change->pipelineId),
+                memSliceCount,
+                timestampToMicroseconds(change->timestamp));
 
-            emit(traceEvent);
         }
     }
 }
@@ -248,7 +243,7 @@ void GoogleEventTracePrinter::threadRoutine(const std::stop_token& token)
 
                     unpooledBufferChanges.emplace_back(
                         BufferManagerAction::GetBuffer, getBufferEvent.pipelineId, getBufferEvent.bufferSize, getBufferEvent.timestamp);
-
+                    /// TODO Is the pid in this place and the other three where buffermanger category events are printed correct?
                     printComma();
                     fmt::print(file, R"(    {{"args":{{"size":"{}"}},"cat":"buffermanager","name":"Get unpooled buffer: {}, size {}","ph":"i","pid":1,"tid":0,"ts":{}}})",
                         getBufferEvent.bufferSize,
@@ -516,8 +511,8 @@ void GoogleEventTracePrinter::threadRoutine(const std::stop_token& token)
             event);
     }
 
-    emitBufferUsagePeriods(pooledBufferChanges, file, "pooled");
-    emitBufferUsagePeriods(unpooledBufferChanges, file, "unpooled");
+    emitBufferUsagePeriods(pooledBufferChanges, printComma, "pooled", file);
+    emitBufferUsagePeriods(unpooledBufferChanges, printComma, "unpooled", file);
 }
 
 namespace
@@ -533,6 +528,7 @@ void warnOnOverflow(bool writeFailed)
             NES_WARNING("Event queue full, {} events dropped so far", dropped);
         }
     }
+}
 }
 
 

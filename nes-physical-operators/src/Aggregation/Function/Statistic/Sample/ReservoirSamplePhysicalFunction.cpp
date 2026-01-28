@@ -30,19 +30,20 @@ namespace NES
 namespace
 {
 /// @brief Calculates the record size for a sample.
-nautilus::val<uint64_t> getRecordDataSizeForSample(const Record& record, const Schema& schema)
+nautilus::val<uint64_t> getRecordDataSizeForSample(const Record& record, const TupleBufferRef& buffRef)
 {
-    /// For each var sized data, we need to add the size of it. We take the total size of the var sized into account.
-    auto recordDataSize = nautilus::val<uint64_t>(schema.getSizeOfSchemaInBytes());
-    for (const auto& field : nautilus::static_iterable(schema))
+    auto recordDataSize = nautilus::val<uint64_t>(buffRef.getTupleSize());
+    auto names = buffRef.getAllFieldNames();
+    auto types = buffRef.getAllDataTypes();
+    for (nautilus::static_val<size_t> i = 0; i < names.size(); ++i)
     {
-        if (field.dataType.isSameDataType<VariableSizedData>())
+        auto type = types[i];
+        if (type.isSameDataType<VariableSizedData>())
         {
-            const auto textValue = record.read(field.name).cast<VariableSizedData>();
+            const auto textValue = record.read(names[i]).cast<VariableSizedData>();
             recordDataSize += textValue.getTotalSize();
         }
     }
-
     return recordDataSize;
 }
 
@@ -69,7 +70,7 @@ void ReservoirSamplePhysicalFunction::lift(
     if (numberOfSeenTuples < sampleSize)
     {
         pagedVectorRef.writeRecord(record, pipelineMemoryProvider.bufferProvider);
-        sampleDataSize = sampleDataSize + getRecordDataSizeForSample(record, bufferRef->getMemoryLayout()->getSchema());
+        sampleDataSize = sampleDataSize + getRecordDataSizeForSample(record, *bufferRef);
     }
     else
     {
@@ -78,8 +79,8 @@ void ReservoirSamplePhysicalFunction::lift(
         if (randomNumber < sampleSize)
         {
             const auto oldRecord = pagedVectorRef.replaceRecord(record, randomNumber, pipelineMemoryProvider.bufferProvider);
-            sampleDataSize = sampleDataSize + getRecordDataSizeForSample(record, bufferRef->getMemoryLayout()->getSchema())
-                - getRecordDataSizeForSample(oldRecord, bufferRef->getMemoryLayout()->getSchema());
+            sampleDataSize
+                = sampleDataSize + getRecordDataSizeForSample(record, *bufferRef) - getRecordDataSizeForSample(oldRecord, *bufferRef);
         }
     }
     numberOfSeenTuples = numberOfSeenTuples + nautilus::val<uint64_t>(1);
@@ -121,7 +122,6 @@ ReservoirSamplePhysicalFunction::lower(nautilus::val<AggregationState*> aggregat
 {
     const auto pagedVectorPtr = static_cast<nautilus::val<int8_t*>>(aggregationState);
     const PagedVectorRef pagedVectorRef(pagedVectorPtr, bufferRef);
-    const auto& schema = bufferRef->getMemoryLayout()->getSchema();
 
     const auto numberOfSeenTuplesRef = pagedVectorPtr + nautilus::val<uint64_t>{sizeof(PagedVector)};
     const auto sampleDataSizeRef = numberOfSeenTuplesRef + nautilus::val<uint64_t>{sizeof(uint64_t)};
@@ -139,16 +139,19 @@ ReservoirSamplePhysicalFunction::lower(nautilus::val<AggregationState*> aggregat
     /// Writing the tuples one after the other from the paged vector to the sample memory
     nautilus::val<uint64_t> tuplesInSample = 0;
     auto sampleTuplesMemArea = header.getSampleMemArea();
-    const auto fieldNames = schema.getFieldNames();
+    const auto fieldNames = bufferRef->getAllFieldNames();
     for (auto sampleIt = pagedVectorRef.begin(fieldNames); sampleIt != pagedVectorRef.end(fieldNames); ++sampleIt)
     {
         const auto sampleRecord = *sampleIt;
-        for (nautilus::static_val<size_t> i = 0; i < schema.getNumberOfFields(); ++i)
+        const auto names = bufferRef->getAllFieldNames();
+        const auto types = bufferRef->getAllDataTypes();
+        for (nautilus::static_val<size_t> i = 0; i < names.size(); ++i)
         {
-            const auto& field = schema.getFieldAt(i);
-            const auto& value = sampleRecord.read(field.name);
+            const auto name = names[i];
+            const auto type = types[i];
+            const auto& value = sampleRecord.read(name);
             /// As we store varsized data directly in the sample area, we need to handle it ourselves.
-            if (field.dataType.isSameDataType<VariableSizedData>())
+            if (type.isSameDataType<VariableSizedData>())
             {
                 const auto varSizedValue = value.cast<VariableSizedData>();
                 nautilus::memcpy(sampleTuplesMemArea, varSizedValue.getReference(), varSizedValue.getTotalSize());
@@ -157,15 +160,14 @@ ReservoirSamplePhysicalFunction::lower(nautilus::val<AggregationState*> aggregat
             else
             {
                 /// For all other data types, we can reuse the existing store value function map
-                if (const auto storeFunction = storeValueFunctionMap.find(field.dataType.type);
-                    storeFunction != storeValueFunctionMap.end())
+                if (const auto storeFunction = storeValueFunctionMap.find(type.type); storeFunction != storeValueFunctionMap.end())
                 {
                     auto _ = storeFunction->second(value, sampleTuplesMemArea);
-                    sampleTuplesMemArea += field.dataType.getSizeInBytes();
+                    sampleTuplesMemArea += type.getSizeInBytes();
                 }
                 else
                 {
-                    throw UnknownDataType("Physical Type: {} is currently not supported", field.dataType);
+                    throw UnknownDataType("Physical Type: {} is currently not supported", type);
                 }
             }
         }

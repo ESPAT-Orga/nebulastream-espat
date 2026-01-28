@@ -87,7 +87,7 @@ ReservoirProbeLogicalOperator ReservoirProbeLogicalOperator::withInferredSchema(
     }
 
     const auto& newQualifierForSystemField = firstSchema.getQualifierNameForSystemGeneratedFieldsWithSeparator();
-    copy.sampleSchema = Schema{sampleSchema.memoryLayoutType};
+    copy.sampleSchema = Schema();
     for (auto& field : sampleSchema)
     {
         const auto pos = field.name.find(Schema::ATTRIBUTE_NAME_SEPARATOR);
@@ -95,7 +95,7 @@ ReservoirProbeLogicalOperator ReservoirProbeLogicalOperator::withInferredSchema(
         copy.sampleSchema.addField(newFieldName, field.dataType);
     }
 
-    copy.outputSchema = Schema{firstSchema.memoryLayoutType};
+    copy.outputSchema = Schema();
     copy.statisticHashField.addQualifierIfNotExists(newQualifierForSystemField);
     copy.statisticStartTsField.addQualifierIfNotExists(newQualifierForSystemField);
     copy.statisticEndTsField.addQualifierIfNotExists(newQualifierForSystemField);

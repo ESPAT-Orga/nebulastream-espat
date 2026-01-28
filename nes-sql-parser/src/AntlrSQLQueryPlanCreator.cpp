@@ -971,8 +971,8 @@ void AntlrSQLQueryPlanCreator::exitFunctionCall(AntlrSQLParser::FunctionCallCont
                 for (auto& field : helpers.top().functionBuilder)
                 {
                     PRECONDITION(
-                        field.tryGet<FieldAccessLogicalFunction>().has_value(), "sample field was not a FieldAccessLogicalFunction");
-                    sampleFields.emplace_back(field.get<FieldAccessLogicalFunction>());
+                        field.tryGetAs<FieldAccessLogicalFunction>().has_value(), "sample field was not a FieldAccessLogicalFunction");
+                    sampleFields.emplace_back(field.getAs<FieldAccessLogicalFunction>().get());
                 }
                 helpers.top().functionBuilder.clear();
 
@@ -1013,11 +1013,11 @@ void AntlrSQLQueryPlanCreator::exitFunctionCall(AntlrSQLParser::FunctionCallCont
                     auto nameFn = helpers.top().functionBuilder.at(i);
                     auto datatypeFn = helpers.top().functionBuilder.at(i + 1);
                     INVARIANT(
-                        nameFn.tryGet<FieldAccessLogicalFunction>().has_value()
-                            and datatypeFn.tryGet<FieldAccessLogicalFunction>().has_value(),
+                        nameFn.tryGetAs<FieldAccessLogicalFunction>().has_value()
+                            and datatypeFn.tryGetAs<FieldAccessLogicalFunction>().has_value(),
                         "sample field/datatype was not a FieldAccessLogicalFunction");
-                    auto nameFieldAccFn = nameFn.get<FieldAccessLogicalFunction>();
-                    auto datatypeFieldAccFn = datatypeFn.get<FieldAccessLogicalFunction>();
+                    auto nameFieldAccFn = nameFn.getAs<FieldAccessLogicalFunction>().get();
+                    auto datatypeFieldAccFn = datatypeFn.getAs<FieldAccessLogicalFunction>().get();
                     auto datatype = DataTypeProvider::tryProvideDataType(datatypeFieldAccFn.getFieldName());
                     INVARIANT(datatype.has_value(), "Provided datatype {} was not a valid datatype!", datatypeFieldAccFn.getFieldName());
                     sampleSchema.addField(nameFieldAccFn.getFieldName(), datatype.value());
@@ -1028,11 +1028,12 @@ void AntlrSQLQueryPlanCreator::exitFunctionCall(AntlrSQLParser::FunctionCallCont
             }
             else if (funcName == "EQUIWIDTHHISTOGRAM")
             {
-                if (helpers.top().functionBuilder.size() != 1 && helpers.top().functionBuilder.back().tryGet<FieldAccessLogicalFunction>())
+                if (helpers.top().functionBuilder.size() != 1
+                    && helpers.top().functionBuilder.back().tryGetAs<FieldAccessLogicalFunction>())
                 {
                     throw InvalidQuerySyntax("EQUIWIDTHHISTOGRAM requires the first argument to be a fieldname");
                 }
-                const auto fieldName = helpers.top().functionBuilder.back().tryGet<FieldAccessLogicalFunction>().value();
+                const auto fieldName = helpers.top().functionBuilder.back().getAs<FieldAccessLogicalFunction>().get();
                 helpers.top().functionBuilder.pop_back();
                 if (helpers.top().constantBuilder.size() != 3)
                 {
@@ -1050,11 +1051,12 @@ void AntlrSQLQueryPlanCreator::exitFunctionCall(AntlrSQLParser::FunctionCallCont
             }
             else if (funcName == "COUNTMINSKETCH")
             {
-                if (helpers.top().functionBuilder.size() != 1 && helpers.top().functionBuilder.back().tryGet<FieldAccessLogicalFunction>())
+                if (helpers.top().functionBuilder.size() != 1
+                    && helpers.top().functionBuilder.back().tryGetAs<FieldAccessLogicalFunction>())
                 {
                     throw InvalidQuerySyntax("COUNTMINSKETCH requires the first argument to be a fieldname");
                 }
-                const auto fieldName = helpers.top().functionBuilder.back().tryGet<FieldAccessLogicalFunction>().value();
+                const auto fieldName = helpers.top().functionBuilder.back().getAs<FieldAccessLogicalFunction>().get();
                 helpers.top().functionBuilder.pop_back();
                 const auto rows = parseConstant(helpers.top().constantBuilder.back(), "rows");
                 helpers.top().constantBuilder.pop_back();

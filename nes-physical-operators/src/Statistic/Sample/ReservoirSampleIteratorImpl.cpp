@@ -14,37 +14,35 @@
 
 #include <Statistic/Sample/ReservoirSampleIteratorImpl.hpp>
 
+#include <Nautilus/Interface/HashMap/ChainedHashMap/ChainedEntryMemoryProvider.hpp>
+
 namespace NES
 {
 ReservoirSampleIteratorImpl::ReservoirSampleIteratorImpl(
     const nautilus::val<int8_t*>& statisticMemArea, const ReservoirSampleProviderArguments& reservoirSampleArguments)
-    : StatisticProviderIteratorImpl(std::move(statisticMemArea)), memoryLayout(reservoirSampleArguments.memoryLayout)
+    : StatisticProviderIteratorImpl(std::move(statisticMemArea)), sampleFields(reservoirSampleArguments.sampleFields)
 {
 }
 
 Record ReservoirSampleIteratorImpl::operator*()
 {
-    /// As we can not assume that the statistic data is backed by a tuple buffer, we need to manually take care
-    /// of variable sized data. For fixed data, we can use the TupleBufferMemoryProvider::read()
     Record record;
     auto fieldAddress = nextTupleMem;
-    for (nautilus::static_val<uint64_t> fieldIndex = 0; fieldIndex < memoryLayout->getSchema().getNumberOfFields(); ++fieldIndex)
+    for (const auto& [fieldIdentifier, type, fieldOffset] : nautilus::static_iterable(sampleFields))
     {
-        const auto fieldName = memoryLayout->getSchema().getFieldAt(fieldIndex).name;
-        const auto physicalType = memoryLayout->getPhysicalType(fieldIndex);
-        nautilus::val<uint64_t> fieldOffset = physicalType.getSizeInBytes();
-        if (physicalType.type == DataType::Type::VARSIZED)
+        nautilus::val<uint64_t> currFieldOffset = 0;
+        if (type == DataType{DataType::Type::VARSIZED})
         {
             VariableSizedData varSizedData{fieldAddress};
-            record.write(fieldName, varSizedData);
-            fieldOffset = varSizedData.getTotalSize();
+            record.write(fieldIdentifier, varSizedData);
+            currFieldOffset = varSizedData.getTotalSize();
         }
         else
         {
-            const auto varVal = VarVal::readVarValFromMemory(fieldAddress, physicalType.type);
-            record.write(fieldName, varVal);
+            const auto varVal = VarVal::readVarValFromMemory(fieldAddress, type.type);
+            record.write(fieldIdentifier, varVal);
         }
-        fieldAddress = fieldAddress + fieldOffset;
+        fieldAddress = fieldAddress + type.getSizeInBytes();
     }
 
     return record;
@@ -52,19 +50,15 @@ Record ReservoirSampleIteratorImpl::operator*()
 
 StatisticProviderIteratorImpl& ReservoirSampleIteratorImpl::operator++()
 {
-    /// As we can not assume that the statistic data is backed by a tuple buffer, we need to manually take care
-    /// of variable sized data. For fixed data, we can use the TupleBufferMemoryProvider::read()
-    for (nautilus::static_val<uint64_t> fieldIndex = 0; fieldIndex < memoryLayout->getSchema().getNumberOfFields(); ++fieldIndex)
+    for (const auto& [fieldIdentifier, type, fieldOffset] : nautilus::static_iterable(sampleFields))
     {
-        const auto fieldName = memoryLayout->getSchema().getFieldAt(fieldIndex).name;
-        const auto physicalType = memoryLayout->getPhysicalType(fieldIndex);
-        nautilus::val<uint64_t> fieldOffset = physicalType.getSizeInBytes();
-        if (physicalType.type == DataType::Type::VARSIZED)
+        nautilus::val<uint64_t> currFieldOffset = fieldOffset;
+        if (type.type == DataType::Type::VARSIZED)
         {
             VariableSizedData varSizedData{nextTupleMem};
-            fieldOffset = varSizedData.getTotalSize();
+            currFieldOffset = varSizedData.getTotalSize();
         }
-        nextTupleMem = nextTupleMem + fieldOffset;
+        nextTupleMem = nextTupleMem + currFieldOffset;
     }
     recordPos += 1;
     return *this;
@@ -77,7 +71,7 @@ nautilus::val<bool> ReservoirSampleIteratorImpl::operator==(const StatisticProvi
         /// We need recordPos to compare with the end iterator. As we do not know the size of the sample beforehand,
         /// we can not set nextTupleMem to the last byte and thus, we need recordPos for comparison.
         return recordPos == otherReservoirSample->recordPos and statisticMemArea == otherReservoirSample->statisticMemArea
-            and sampleSize == otherReservoirSample->sampleSize and memoryLayout == otherReservoirSample->memoryLayout;
+            and sampleSize == otherReservoirSample->sampleSize and sampleFields == otherReservoirSample->sampleFields;
     }
     return false;
 }

@@ -37,7 +37,7 @@ ZstdDecompressLogicalFunction::ZstdDecompressLogicalFunction(const LogicalFuncti
 {
 }
 
-bool ZstdDecompressLogicalFunction::operator==(const LogicalFunctionConcept& rhs) const
+bool ZstdDecompressLogicalFunction::operator==(const ZstdDecompressLogicalFunction& rhs) const
 {
     if (const auto* other = dynamic_cast<const ZstdDecompressLogicalFunction*>(&rhs))
     {

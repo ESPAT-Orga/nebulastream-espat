@@ -14,13 +14,13 @@
 
 #include <RewriteRules/LowerToPhysical/LowerToPhysicalReservoirProbe.hpp>
 
-#include <MemoryLayout/ColumnLayout.hpp>
-#include <MemoryLayout/RowLayout.hpp>
+#include <Nautilus/Interface/HashMap/ChainedHashMap/ChainedEntryMemoryProvider.hpp>
 #include <Operators/Windows/Aggregations/Sample/ReservoirProbeLogicalOperator.hpp>
 #include <Runtime/NodeEngine.hpp>
 #include <Statistic/Sample/ReservoirSampleIteratorImpl.hpp>
 #include <Statistic/StatisticStore/StatisticStoreOperatorHandler.hpp>
 #include <Statistic/StatisticStore/StatisticStoreReader.hpp>
+#include <Traits/MemoryLayoutTypeTrait.hpp>
 #include <ErrorHandling.hpp>
 #include <RewriteRuleRegistry.hpp>
 
@@ -31,19 +31,15 @@ namespace
 {
 StatisticProvider getStatisticProvider(const Schema& sampleSchema)
 {
-    std::unique_ptr<MemoryLayout> memoryLayout;
-    switch (sampleSchema.memoryLayoutType)
+    std::vector<FieldOffsets> sampleFields;
+    uint64_t offset = 0;
+    for (const auto& field : sampleSchema.getFields())
     {
-        case Schema::MemoryLayoutType::ROW_LAYOUT:
-            /// For a row layout, we do not care about the overall memory area size
-            memoryLayout = std::make_unique<RowLayout>(0, sampleSchema);
-            break;
-        case Schema::MemoryLayoutType::COLUMNAR_LAYOUT:
-            throw NotImplemented(
-                "Not possible currently to use a columnar layout, as we do not know the size of the sample at this moment.");
+        sampleFields.emplace_back(FieldOffsets{field.name, field.dataType, offset});
+        offset += field.dataType.getSizeInBytes();
     }
 
-    auto statisticProviderArguments = std::make_unique<ReservoirSampleProviderArguments>(std::move(memoryLayout));
+    auto statisticProviderArguments = std::make_unique<ReservoirSampleProviderArguments>(std::move(sampleFields));
     return {Statistic::StatisticType::Reservoir_Sample, std::move(statisticProviderArguments)};
 }
 }
@@ -51,6 +47,9 @@ StatisticProvider getStatisticProvider(const Schema& sampleSchema)
 RewriteRuleResultSubgraph LowerToPhysicalReservoirProbe::apply(LogicalOperator logicalOperator)
 {
     PRECONDITION(logicalOperator.tryGetAs<ReservoirProbeLogicalOperator>(), "Expected a ReservoirProbeLogicalOperator");
+    const auto memoryLayoutTypeTrait = logicalOperator.getTraitSet().tryGet<MemoryLayoutTypeTrait>();
+    PRECONDITION(memoryLayoutTypeTrait.has_value(), "Expected a memory layout type trait");
+    const auto memoryLayoutType = memoryLayoutTypeTrait.value().memoryLayout;
     const auto reservoirProbe = logicalOperator.getAs<ReservoirProbeLogicalOperator>();
     auto statisticStore = NodeEngine::getStatisticStore();
     auto statisticStoreReaderOperatorHandler = std::make_shared<StatisticStoreOperatorHandler>(std::move(statisticStore));
@@ -70,6 +69,8 @@ RewriteRuleResultSubgraph LowerToPhysicalReservoirProbe::apply(LogicalOperator l
         std::move(statisticStoreReader),
         inputSchema,
         outputSchema,
+        memoryLayoutType,
+        memoryLayoutType,
         operatorHandlerId,
         statisticStoreReaderOperatorHandler,
         PhysicalOperatorWrapper::PipelineLocation::INTERMEDIATE);

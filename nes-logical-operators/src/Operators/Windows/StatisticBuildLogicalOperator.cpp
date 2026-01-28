@@ -21,7 +21,6 @@
 #include <string>
 #include <string_view>
 #include <utility>
-#include <variant>
 #include <vector>
 #include <Configurations/Descriptor.hpp>
 #include <DataTypes/DataType.hpp>
@@ -30,25 +29,18 @@
 #include <Identifiers/Identifiers.hpp>
 #include <Operators/LogicalOperator.hpp>
 #include <Operators/Statistic/LogicalStatisticFields.hpp>
-#include <Operators/Windows/Aggregations/Histogram/EquiWidthHistogramLogicalFunction.hpp>
-#include <Operators/Windows/Aggregations/Sample/ReservoirSampleLogicalFunction.hpp>
-#include <Operators/Windows/Aggregations/Sketch/CountMinSketchLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/WindowAggregationLogicalFunction.hpp>
 #include <Operators/Windows/WindowedAggregationLogicalOperator.hpp>
-#include <Serialization/FunctionSerializationUtil.hpp>
-#include <Serialization/SchemaSerializationUtil.hpp>
+#include <Serialization/WindowTypeReflection.hpp>
 #include <Traits/Trait.hpp>
 #include <Util/PlanRenderer.hpp>
-#include <WindowTypes/Types/SlidingWindow.hpp>
 #include <WindowTypes/Types/TimeBasedWindowType.hpp>
-#include <WindowTypes/Types/TumblingWindow.hpp>
 #include <WindowTypes/Types/WindowType.hpp>
 #include <fmt/format.h>
 #include <fmt/ranges.h>
+#include <AggregationLogicalFunctionRegistry.hpp>
 #include <ErrorHandling.hpp>
 #include <LogicalOperatorRegistry.hpp>
-#include <SerializableOperator.pb.h>
-#include <SerializableVariantDescriptor.pb.h>
 
 namespace NES
 {
@@ -97,7 +89,7 @@ bool StatisticBuildLogicalOperator::operator==(const StatisticBuildLogicalOperat
 
     for (uint64_t i = 0; i < aggregationFunctions.size(); i++)
     {
-        if (*aggregationFunctions[i] != rhsWindowAggregation[i])
+        if (*aggregationFunctions[i] != *rhsWindowAggregation[i])
         {
             return false;
         }
@@ -128,14 +120,13 @@ StatisticBuildLogicalOperator StatisticBuildLogicalOperator::withInferredSchema(
     std::vector<std::shared_ptr<WindowAggregationLogicalFunction>> newFunctions;
     for (const auto& agg : getWindowAggregation())
     {
-        agg->inferStamp(firstSchema);
-        newFunctions.push_back(agg);
+        newFunctions.push_back(std::make_shared<WindowAggregationLogicalFunction>(agg->withInferredStamp(firstSchema)));
     }
     copy.aggregationFunctions = newFunctions;
 
     copy.windowType->inferStamp(firstSchema);
     copy.inputSchema = firstSchema;
-    copy.outputSchema = Schema{copy.outputSchema.memoryLayoutType};
+    copy.outputSchema = Schema();
 
     const auto& newQualifierForSystemField = firstSchema.getQualifierNameForSystemGeneratedFieldsWithSeparator();
     copy.logicalStatisticFields->addQualifierName(newQualifierForSystemField);
@@ -246,174 +237,57 @@ std::string StatisticBuildLogicalOperator::getNumberOfSeenTuplesFieldName() cons
     return logicalStatisticFields->statisticNumberOfSeenTuplesField.name;
 }
 
-void StatisticBuildLogicalOperator::serialize(SerializableOperator& serializableOperator) const
+Reflected Reflector<StatisticBuildLogicalOperator>::operator()(const StatisticBuildLogicalOperator& op) const
 {
-    SerializableLogicalOperator proto;
-
-    proto.set_operator_type(NAME);
-
-    const auto inputs = getInputSchemas();
-    for (size_t i = 0; i < inputs.size(); ++i)
+    std::vector<std::pair<std::string, Reflected>> windowAggregations;
+    for (const auto& agg : op.getWindowAggregation())
     {
-        auto* inSch = proto.add_input_schemas();
-        SchemaSerializationUtil::serializeSchema(inputs[i], inSch);
+        windowAggregations.emplace_back(agg->getName(), agg->reflect());
     }
+    return reflect(detail::ReflectedStatisticBuildLogicalOperator{
+        .aggregations = windowAggregations, .windowType = reflectWindowType(*op.getWindowType())});
+}
 
-    auto* outSch = proto.mutable_output_schema();
-    SchemaSerializationUtil::serializeSchema(getOutputSchema(), outSch);
+StatisticBuildLogicalOperator Unreflector<StatisticBuildLogicalOperator>::operator()(const Reflected& reflected) const
+{
+    auto [aggregations, windowTypeReflected] = unreflect<detail::ReflectedStatisticBuildLogicalOperator>(reflected);
+    auto windowType = unreflectWindowType(windowTypeReflected);
 
-    for (const auto& child : getChildren())
+    std::vector<std::shared_ptr<WindowAggregationLogicalFunction>> aggregationFunctions;
+    for (const auto& [name, reflectedAggregation] : aggregations)
     {
-        serializableOperator.add_children_ids(child.getId().getRawValue());
-    }
-
-    /// Serialize window aggregations
-    AggregationFunctionList aggList;
-    for (const auto& agg : getWindowAggregation())
-    {
-        *aggList.add_functions() = agg->serialize();
-    }
-    (*serializableOperator.mutable_config())[ConfigParameters::WINDOW_AGGREGATIONS] = descriptorConfigTypeToProto(aggList);
-
-    /// Serialize window info
-    WindowInfos windowInfo;
-    if (auto timeBasedWindow = std::dynamic_pointer_cast<Windowing::TimeBasedWindowType>(windowType))
-    {
-        auto timeChar = timeBasedWindow->getTimeCharacteristic();
-        auto timeCharProto = WindowInfos_TimeCharacteristic();
-        timeCharProto.set_type(WindowInfos_TimeCharacteristic_Type_Event_time);
-        timeCharProto.set_field(timeChar.field.name);
-        timeCharProto.set_multiplier(timeChar.getTimeUnit().getMillisecondsConversionMultiplier());
-        windowInfo.mutable_time_characteristic()->CopyFrom(timeCharProto);
-        if (auto tumblingWindow = std::dynamic_pointer_cast<Windowing::TumblingWindow>(windowType))
+        auto functionOpt = AggregationLogicalFunctionRegistry::instance().create(
+            name,
+            AggregationLogicalFunctionRegistryArguments{
+                .fields = {},
+                .reservoirSize = std::nullopt,
+                .sampleHash = std::nullopt,
+                .histogramNumBuckets = std::nullopt,
+                .histogramMinValue = std::nullopt,
+                .histogramMaxValue = std::nullopt,
+                .countMinNumColumns = std::nullopt,
+                .countMinNumRows = std::nullopt,
+                .numberOfSeenTuplesField = std::nullopt,
+                .reflected = reflectedAggregation});
+        if (!functionOpt.has_value())
         {
-            auto* tumbling = windowInfo.mutable_tumbling_window();
-            tumbling->set_size(tumblingWindow->getSize().getTime());
+            throw CannotDeserialize("Invalid Aggregation Function of type {}", name);
         }
-        else if (auto slidingWindow = std::dynamic_pointer_cast<Windowing::SlidingWindow>(windowType))
-        {
-            auto* sliding = windowInfo.mutable_sliding_window();
-            sliding->set_size(slidingWindow->getSize().getTime());
-            sliding->set_slide(slidingWindow->getSlide().getTime());
-        }
+        aggregationFunctions.emplace_back(functionOpt.value());
     }
-    (*serializableOperator.mutable_config())[ConfigParameters::WINDOW_INFOS] = descriptorConfigTypeToProto(windowInfo);
 
-    /// Serialize logicalStatisticFields. Also use a function from LogicalStatisticFields here!
-    SerializableSchema_SerializableField serField;
-    SchemaSerializationUtil::serializeField(logicalStatisticFields->statisticStartTsField, &serField);
-    (*serializableOperator.mutable_config())[ConfigParameters::STATISTIC_START_FIELD_NAME] = descriptorConfigTypeToProto(serField);
-    SchemaSerializationUtil::serializeField(logicalStatisticFields->statisticEndTsField, &serField);
-    (*serializableOperator.mutable_config())[ConfigParameters::STATISTIC_END_FIELD_NAME] = descriptorConfigTypeToProto(serField);
-    SchemaSerializationUtil::serializeField(logicalStatisticFields->statisticDataField, &serField);
-    (*serializableOperator.mutable_config())[ConfigParameters::STATISTIC_DATA_FIELD_NAME] = descriptorConfigTypeToProto(serField);
-    SchemaSerializationUtil::serializeField(logicalStatisticFields->statisticTypeField, &serField);
-    (*serializableOperator.mutable_config())[ConfigParameters::STATISTIC_TYPE_FIELD_NAME] = descriptorConfigTypeToProto(serField);
-    SchemaSerializationUtil::serializeField(logicalStatisticFields->statisticHashField, &serField);
-    (*serializableOperator.mutable_config())[ConfigParameters::STATISTIC_HASH_FIELD_NAME] = descriptorConfigTypeToProto(serField);
-    SchemaSerializationUtil::serializeField(logicalStatisticFields->statisticNumberOfSeenTuplesField, &serField);
-    (*serializableOperator.mutable_config())[ConfigParameters::STATISTIC_NUMBER_OF_SEEN_TUPLES_FIELD_NAME]
-        = descriptorConfigTypeToProto(serField);
-
-    serializableOperator.mutable_operator_()->CopyFrom(proto);
+    return StatisticBuildLogicalOperator{aggregationFunctions, windowType, std::make_shared<LogicalStatisticFields>()};
 }
 
 LogicalOperatorRegistryReturnType
 LogicalOperatorGeneratedRegistrar::RegisterStatisticBuildLogicalOperator(LogicalOperatorRegistryArguments arguments)
 {
-    auto aggregationsVariant = arguments.config[StatisticBuildLogicalOperator::ConfigParameters::WINDOW_AGGREGATIONS];
-    auto keysVariant = arguments.config[StatisticBuildLogicalOperator::ConfigParameters::WINDOW_KEYS];
-    auto windowInfoVariant = arguments.config[StatisticBuildLogicalOperator::ConfigParameters::WINDOW_INFOS];
-
-    if (!std::holds_alternative<AggregationFunctionList>(aggregationsVariant))
+    if (!arguments.reflected.isEmpty())
     {
-        throw UnknownLogicalOperator();
+        return unreflect<StatisticBuildLogicalOperator>(arguments.reflected);
     }
-    auto aggregations = std::get<AggregationFunctionList>(aggregationsVariant).functions();
-    std::vector<std::shared_ptr<WindowAggregationLogicalFunction>> windowAggregations;
-    for (const auto& agg : aggregations)
-    {
-        auto function = FunctionSerializationUtil::deserializeWindowAggregationFunction(agg);
-        windowAggregations.push_back(function);
-    }
-
-    std::shared_ptr<Windowing::WindowType> windowType;
-    if (std::holds_alternative<WindowInfos>(windowInfoVariant))
-    {
-        auto windowInfoProto = std::get<WindowInfos>(windowInfoVariant);
-        if (windowInfoProto.has_tumbling_window())
-        {
-            if (windowInfoProto.time_characteristic().type() == WindowInfos_TimeCharacteristic_Type_Ingestion_time)
-            {
-                auto timeChar = Windowing::TimeCharacteristic::createIngestionTime();
-                windowType = std::make_shared<Windowing::TumblingWindow>(
-                    timeChar, Windowing::TimeMeasure(windowInfoProto.tumbling_window().size()));
-            }
-            else
-            {
-                auto field = FieldAccessLogicalFunction(windowInfoProto.time_characteristic().field());
-                auto multiplier = windowInfoProto.time_characteristic().multiplier();
-                auto timeChar = Windowing::TimeCharacteristic::createEventTime(field, Windowing::TimeUnit(multiplier));
-                windowType = std::make_shared<Windowing::TumblingWindow>(
-                    timeChar, Windowing::TimeMeasure(windowInfoProto.tumbling_window().size()));
-            }
-        }
-        else if (windowInfoProto.has_sliding_window())
-        {
-            if (windowInfoProto.time_characteristic().type() == WindowInfos_TimeCharacteristic_Type_Ingestion_time)
-            {
-                auto timeChar = Windowing::TimeCharacteristic::createIngestionTime();
-                windowType = Windowing::SlidingWindow::of(
-                    timeChar,
-                    Windowing::TimeMeasure(windowInfoProto.sliding_window().size()),
-                    Windowing::TimeMeasure(windowInfoProto.sliding_window().slide()));
-            }
-            else
-            {
-                auto field = FieldAccessLogicalFunction(windowInfoProto.time_characteristic().field());
-                auto multiplier = windowInfoProto.time_characteristic().multiplier();
-                auto timeChar = Windowing::TimeCharacteristic::createEventTime(field, Windowing::TimeUnit(multiplier));
-                windowType = Windowing::SlidingWindow::of(
-                    timeChar,
-                    Windowing::TimeMeasure(windowInfoProto.sliding_window().size()),
-                    Windowing::TimeMeasure(windowInfoProto.sliding_window().slide()));
-            }
-        }
-    }
-    if (!windowType)
-    {
-        throw UnknownLogicalOperator();
-    }
-
-
-    /// Do this the same way as it is done in StatisticStoreWriterLogicalOperator, or, even better, write a function (maybe in
-    /// LogicalStatisticFields).
-    auto windowStartVariant = arguments.config[StatisticBuildLogicalOperator::ConfigParameters::STATISTIC_START_FIELD_NAME];
-    auto windowStart = SchemaSerializationUtil::deserializeField(std::get<SerializableSchema_SerializableField>(windowStartVariant));
-    auto windowEndVariant = arguments.config[StatisticBuildLogicalOperator::ConfigParameters::STATISTIC_END_FIELD_NAME];
-    auto windowEnd = SchemaSerializationUtil::deserializeField(std::get<SerializableSchema_SerializableField>(windowEndVariant));
-    auto statisticDataVariant = arguments.config[StatisticBuildLogicalOperator::ConfigParameters::STATISTIC_DATA_FIELD_NAME];
-    auto statisticData = SchemaSerializationUtil::deserializeField(std::get<SerializableSchema_SerializableField>(statisticDataVariant));
-    auto statisticTypeVariant = arguments.config[StatisticBuildLogicalOperator::ConfigParameters::STATISTIC_TYPE_FIELD_NAME];
-    auto statisticType = SchemaSerializationUtil::deserializeField(std::get<SerializableSchema_SerializableField>(statisticTypeVariant));
-    auto statisticHashVariant = arguments.config[StatisticBuildLogicalOperator::ConfigParameters::STATISTIC_HASH_FIELD_NAME];
-    auto statisticHash = SchemaSerializationUtil::deserializeField(std::get<SerializableSchema_SerializableField>(statisticHashVariant));
-    auto statisticNumberofSeenTuplesVariant
-        = arguments.config[StatisticBuildLogicalOperator::ConfigParameters::STATISTIC_NUMBER_OF_SEEN_TUPLES_FIELD_NAME];
-    auto statisticNumberofSeenTuples
-        = SchemaSerializationUtil::deserializeField(std::get<SerializableSchema_SerializableField>(statisticNumberofSeenTuplesVariant));
-
-    auto logicalStatisticFields
-        = std::make_shared<LogicalStatisticFields>(statisticNumberofSeenTuples, statisticHash, windowStart, windowEnd);
-    logicalStatisticFields->statisticDataField = statisticData;
-    logicalStatisticFields->statisticTypeField = statisticType;
-
-    auto logicalOperator = StatisticBuildLogicalOperator(windowAggregations, windowType, logicalStatisticFields);
-    if (arguments.inputSchemas.empty())
-    {
-        throw CannotDeserialize("Cannot construct StatisticBuild");
-    }
-    return logicalOperator.withInferredSchema(arguments.inputSchemas);
+    PRECONDITION(false, "Expected arguments are missing");
+    std::unreachable();
 }
 
 }

@@ -15,18 +15,16 @@
 #include <Operators/Windows/Aggregations/Sketch/CountMinSketchLogicalFunction.hpp>
 
 #include <cstdint>
-#include <memory>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <DataTypes/DataType.hpp>
-#include <DataTypes/DataTypeProvider.hpp>
 #include <DataTypes/Schema.hpp>
 #include <Functions/FieldAccessLogicalFunction.hpp>
 #include <Functions/LogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/WindowAggregationLogicalFunction.hpp>
-#include <Serialization/DataTypeSerializationUtil.hpp>
-#include <Util/Common.hpp>
-#include <Util/Logger/Logger.hpp>
+#include <Util/Reflection.hpp>
+#include <fmt/format.h>
 #include <AggregationLogicalFunctionRegistry.hpp>
 #include <ErrorHandling.hpp>
 
@@ -35,26 +33,25 @@ namespace NES
 
 CountMinSketchLogicalFunction::CountMinSketchLogicalFunction(
     const FieldAccessLogicalFunction& onField, const uint64_t columns, const uint64_t rows)
-    : WindowAggregationLogicalFunction(
-          onField.getDataType(),
-          DataTypeProvider::provideDataType(partialAggregateStampType),
-          DataTypeProvider::provideDataType(finalAggregateStampType),
-          onField)
-    , columns(columns)
+    : columns(columns)
     , rows(rows)
+    , inputStamp(onField.getDataType())
+    , partialAggregateStamp(DataType::Type::UNDEFINED)
+    , finalAggregateStamp(DataType::Type::VARSIZED)
+    , onField(onField)
+    , asField(onField)
 {
 }
 
 CountMinSketchLogicalFunction::CountMinSketchLogicalFunction(
     const FieldAccessLogicalFunction& onField, const FieldAccessLogicalFunction& asField, const uint64_t columns, const uint64_t rows)
-    : WindowAggregationLogicalFunction(
-          onField.getDataType(),
-          DataTypeProvider::provideDataType(partialAggregateStampType),
-          DataTypeProvider::provideDataType(finalAggregateStampType),
-          onField,
-          asField)
-    , columns(columns)
+    : columns(columns)
     , rows(rows)
+    , inputStamp(onField.getDataType())
+    , partialAggregateStamp(DataType::Type::UNDEFINED)
+    , finalAggregateStamp(DataType::Type::VARSIZED)
+    , onField(onField)
+    , asField(asField)
 {
 }
 
@@ -63,68 +60,137 @@ std::string_view CountMinSketchLogicalFunction::getName() const noexcept
     return NAME;
 }
 
-/// Remove when not necessary anymore in upstream NES.
-void CountMinSketchLogicalFunction::inferStamp(const Schema&)
+std::string CountMinSketchLogicalFunction::toString() const
 {
-    /// We first infer the dataType of the input field and set the output dataType as the same.
-    ///Set fully qualified name for the as Field
-    const auto onFieldName = getOnField().getFieldName();
-    const auto asFieldName = getAsField().getFieldName();
+    return fmt::format("CountMinSketch: onField={} asField={} columns={} rows={}", onField, asField, columns, rows);
+}
 
-    const auto attributeNameResolver = "stream$";
-    if (onFieldName.find(Schema::ATTRIBUTE_NAME_SEPARATOR) == std::string::npos)
+Reflected CountMinSketchLogicalFunction::reflect() const
+{
+    return NES::reflect(this);
+}
+
+Reflected Reflector<CountMinSketchLogicalFunction>::operator()(const CountMinSketchLogicalFunction& function) const
+{
+    return reflect(detail::ReflectedCountMinSketchLogicalFunction{
+        .onField = function.getOnField(), .asField = function.getAsField(), .columns = function.columns, .rows = function.rows});
+}
+
+CountMinSketchLogicalFunction Unreflector<CountMinSketchLogicalFunction>::operator()(const Reflected& reflected) const
+{
+    auto data = unreflect<detail::ReflectedCountMinSketchLogicalFunction>(reflected);
+    return CountMinSketchLogicalFunction{data.onField, data.asField, data.columns, data.rows};
+}
+
+CountMinSketchLogicalFunction CountMinSketchLogicalFunction::withInferredStamp(const Schema& schema) const
+{
+    auto newOnField = this->getOnField().withInferredDataType(schema).getAs<FieldAccessLogicalFunction>().get();
+    if (not newOnField.getDataType().isNumeric())
     {
-        this->setOnField(getOnField().withFieldName(attributeNameResolver + onFieldName).get<FieldAccessLogicalFunction>());
+        throw CannotDeserialize("count min on non numeric fields is not supported, but got {}", newOnField.getDataType());
     }
-    else
-    {
-        const auto fieldName = onFieldName.substr(onFieldName.find_last_of(Schema::ATTRIBUTE_NAME_SEPARATOR) + 1);
-        this->setOnField(getOnField().withFieldName(attributeNameResolver + fieldName).get<FieldAccessLogicalFunction>());
-    }
+
+    const auto onFieldName = newOnField.getFieldName();
+    const auto asFieldName = this->getAsField().getFieldName();
+    const auto attributeNameResolver = onFieldName.substr(0, onFieldName.find(Schema::ATTRIBUTE_NAME_SEPARATOR) + 1);
+
+    std::string newAsFieldName;
     if (asFieldName.find(Schema::ATTRIBUTE_NAME_SEPARATOR) == std::string::npos)
     {
-        this->setAsField(getAsField().withFieldName(attributeNameResolver + asFieldName).get<FieldAccessLogicalFunction>());
+        newAsFieldName = attributeNameResolver + asFieldName;
     }
     else
     {
         const auto fieldName = asFieldName.substr(asFieldName.find_last_of(Schema::ATTRIBUTE_NAME_SEPARATOR) + 1);
-        this->setAsField(getAsField().withFieldName(attributeNameResolver + fieldName).get<FieldAccessLogicalFunction>());
+        newAsFieldName = attributeNameResolver + fieldName;
     }
-    this->setInputStamp(this->getOnField().getDataType());
-    this->setFinalAggregateStamp(DataTypeProvider::provideDataType(DataType::Type::VARSIZED));
-    this->setAsField(this->getAsField().withDataType(getFinalAggregateStamp()).get<FieldAccessLogicalFunction>());
+    auto newAsField = this->getAsField().withFieldName(newAsFieldName).withDataType(newOnField.getDataType());
+    return this->withOnField(newOnField)
+        .withInputStamp(newOnField.getDataType())
+        .withFinalAggregateStamp(newOnField.getDataType())
+        .withAsField(newAsField);
 }
 
-NES::SerializableAggregationFunction CountMinSketchLogicalFunction::serialize() const
+DataType CountMinSketchLogicalFunction::getInputStamp() const
 {
-    NES::SerializableAggregationFunction serializedAggregationFunction;
-    serializedAggregationFunction.set_type(NAME);
+    return inputStamp;
+}
 
-    auto onFieldFuc = SerializableFunction();
-    onFieldFuc.CopyFrom(this->getOnField().serialize());
+DataType CountMinSketchLogicalFunction::getPartialAggregateStamp() const
+{
+    return partialAggregateStamp;
+}
 
-    auto asFieldFuc = SerializableFunction();
-    asFieldFuc.CopyFrom(this->getAsField().serialize());
+DataType CountMinSketchLogicalFunction::getFinalAggregateStamp() const
+{
+    return finalAggregateStamp;
+}
 
-    serializedAggregationFunction.mutable_as_field()->CopyFrom(asFieldFuc);
-    serializedAggregationFunction.mutable_on_field()->CopyFrom(onFieldFuc);
-    serializedAggregationFunction.set_count_min_num_columns(columns);
-    serializedAggregationFunction.set_count_min_num_rows(rows);
-    return serializedAggregationFunction;
+FieldAccessLogicalFunction CountMinSketchLogicalFunction::getOnField() const
+{
+    return onField;
+}
+
+FieldAccessLogicalFunction CountMinSketchLogicalFunction::getAsField() const
+{
+    return asField;
+}
+
+CountMinSketchLogicalFunction CountMinSketchLogicalFunction::withInputStamp(DataType newInputStamp) const
+{
+    auto copy = *this;
+    copy.inputStamp = std::move(newInputStamp);
+    return copy;
+}
+
+CountMinSketchLogicalFunction CountMinSketchLogicalFunction::withPartialAggregateStamp(DataType newPartialAggregateStamp) const
+{
+    auto copy = *this;
+    copy.partialAggregateStamp = std::move(newPartialAggregateStamp);
+    return copy;
+}
+
+CountMinSketchLogicalFunction CountMinSketchLogicalFunction::withFinalAggregateStamp(DataType newFinalAggregateStamp) const
+{
+    auto copy = *this;
+    copy.finalAggregateStamp = std::move(newFinalAggregateStamp);
+    return copy;
+}
+
+CountMinSketchLogicalFunction CountMinSketchLogicalFunction::withOnField(FieldAccessLogicalFunction newOnField) const
+{
+    auto copy = *this;
+    copy.onField = std::move(newOnField);
+    return copy;
+}
+
+CountMinSketchLogicalFunction CountMinSketchLogicalFunction::withAsField(FieldAccessLogicalFunction newAsField) const
+{
+    auto copy = *this;
+    copy.asField = std::move(newAsField);
+    return copy;
+}
+
+bool CountMinSketchLogicalFunction::operator==(const CountMinSketchLogicalFunction& rhs) const
+{
+    return this->getName() == rhs.getName() && this->onField == rhs.onField && this->asField == rhs.asField && this->columns == rhs.columns
+        && this->rows == rhs.rows;
 }
 
 AggregationLogicalFunctionRegistryReturnType AggregationLogicalFunctionGeneratedRegistrar::RegisterCountMinSketchAggregationLogicalFunction(
     AggregationLogicalFunctionRegistryArguments arguments)
 {
+    if (!arguments.reflected.isEmpty())
+    {
+        return std::make_shared<WindowAggregationLogicalFunction>(unreflect<CountMinSketchLogicalFunction>(arguments.reflected));
+    }
     /// We assume the fields vector starts with onField, asField
     PRECONDITION(arguments.fields.size() >= 2, "CountMinSketchLogicalFunction requires onField and asField");
     PRECONDITION(arguments.countMinNumColumns.has_value(), "CountMinSketchLogicalFunction requires number of columns to be set!");
     PRECONDITION(arguments.countMinNumRows.has_value(), "CountMinSketchLogicalFunction requires number of rows to be set!");
-    PRECONDITION(arguments.numberOfSeenTuplesField.has_value(), "CountMinSketchLogicalFunction requires number of seen tuples be set!");
 
-    const auto countMin = std::make_shared<CountMinSketchLogicalFunction>(
-        arguments.fields[0], arguments.fields[1], arguments.countMinNumColumns.value(), arguments.countMinNumRows.value());
-    return countMin;
+    return std::make_shared<WindowAggregationLogicalFunction>(CountMinSketchLogicalFunction{
+        arguments.fields[0], arguments.fields[1], arguments.countMinNumColumns.value(), arguments.countMinNumRows.value()});
 }
 
 }

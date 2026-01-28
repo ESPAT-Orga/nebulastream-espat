@@ -37,26 +37,26 @@ enum class CompressionLevel : uint8_t
     HIGH = 22
 };
 
-class ZstdCompressLogicalFunction final : public LogicalFunctionConcept
+class ZstdCompressLogicalFunction final
 {
 public:
     static constexpr std::string_view NAME = "ZstdCompress";
 
     ZstdCompressLogicalFunction(const LogicalFunction& childFunction);
 
-    [[nodiscard]] SerializableFunction serialize() const override;
+    [[nodiscard]] SerializableFunction serialize() const;
 
-    [[nodiscard]] bool operator==(const LogicalFunctionConcept& rhs) const override;
+    [[nodiscard]] bool operator==(const ZstdCompressLogicalFunction& rhs) const;
 
-    [[nodiscard]] DataType getDataType() const override;
-    [[nodiscard]] LogicalFunction withDataType(const DataType& dataType) const override;
-    [[nodiscard]] LogicalFunction withInferredDataType(const Schema& schema) const override;
+    [[nodiscard]] DataType getDataType() const;
+    [[nodiscard]] LogicalFunction withDataType(const DataType& dataType) const;
+    [[nodiscard]] LogicalFunction withInferredDataType(const Schema& schema) const;
 
-    [[nodiscard]] std::vector<LogicalFunction> getChildren() const override;
-    [[nodiscard]] LogicalFunction withChildren(const std::vector<LogicalFunction>& children) const override;
+    [[nodiscard]] std::vector<LogicalFunction> getChildren() const;
+    [[nodiscard]] LogicalFunction withChildren(const std::vector<LogicalFunction>& children) const;
 
-    [[nodiscard]] std::string_view getType() const override;
-    [[nodiscard]] std::string explain(ExplainVerbosity verbosity) const override;
+    [[nodiscard]] std::string_view getType() const;
+    [[nodiscard]] std::string explain(ExplainVerbosity verbosity) const;
 
     [[nodiscard]] uint8_t getZstdCompressionLevel() const;
 
@@ -66,6 +66,9 @@ private:
 
     CompressionLevel compressionLevel = CompressionLevel::MEDIUM;
 };
+
+static_assert(LogicalFunctionConcept<ZstdCompressLogicalFunction>);
+
 }
 
 FMT_OSTREAM(NES::ZstdCompressLogicalFunction);

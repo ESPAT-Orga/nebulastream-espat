@@ -135,7 +135,7 @@ StatisticBuildLogicalOperator StatisticBuildLogicalOperator::withInferredSchema(
 
     copy.windowType->inferStamp(firstSchema);
     copy.inputSchema = firstSchema;
-    copy.outputSchema = Schema{copy.outputSchema.memoryLayoutType};
+    copy.outputSchema = Schema();
 
     const auto& newQualifierForSystemField = firstSchema.getQualifierNameForSystemGeneratedFieldsWithSeparator();
     copy.logicalStatisticFields->addQualifierName(newQualifierForSystemField);

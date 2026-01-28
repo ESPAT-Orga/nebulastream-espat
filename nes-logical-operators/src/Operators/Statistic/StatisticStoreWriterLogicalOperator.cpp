@@ -151,7 +151,7 @@ StatisticStoreWriterLogicalOperator StatisticStoreWriterLogicalOperator::withInf
     }
 
     /// We set the output logical fields to use the values defined in the class itself, as downstream operators assume it.
-    copy.outputSchema = Schema{firstSchema.memoryLayoutType};
+    copy.outputSchema = Schema();
     const auto& newQualifierForSystemField = firstSchema.getQualifierNameForSystemGeneratedFieldsWithSeparator();
     const auto outputLogicalStatisticFields = getOutputStatisticFields(newQualifierForSystemField);
     copy.outputSchema.addField(outputLogicalStatisticFields.statisticHashField);

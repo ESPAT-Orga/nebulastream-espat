@@ -29,7 +29,6 @@
 #include <Functions/FieldAccessPhysicalFunction.hpp>
 #include <Functions/FunctionProvider.hpp>
 #include <Functions/PhysicalFunction.hpp>
-#include <MemoryLayout/ColumnLayout.hpp>
 #include <Nautilus/Interface/BufferRef/ColumnTupleBufferRef.hpp>
 #include <Nautilus/Interface/Hash/MurMur3HashFunction.hpp>
 #include <Nautilus/Interface/HashMap/ChainedHashMap/ChainedEntryMemoryProvider.hpp>
@@ -44,6 +43,7 @@
 #include <RewriteRules/AbstractRewriteRule.hpp>
 #include <Runtime/Execution/OperatorHandler.hpp>
 #include <SliceStore/DefaultTimeBasedSliceStore.hpp>
+#include <Traits/MemoryLayoutTypeTrait.hpp>
 #include <Traits/OutputOriginIdsTrait.hpp>
 #include <Traits/TraitSet.hpp>
 #include <Watermark/TimeFunction.hpp>
@@ -125,8 +125,11 @@ getAggregationPhysicalFunctions(const StatisticBuildLogicalOperator& logicalOper
 
         auto aggregationInputFunction = QueryCompilation::FunctionProvider::lowerFunction(descriptor->getOnField());
         const auto resultFieldIdentifier = descriptor->getAsField().getFieldName();
-        auto layout = std::make_shared<ColumnLayout>(configuration.pageSize.getValue(), logicalOperator.getInputSchemas()[0]);
-        auto bufferRef = std::make_shared<ColumnTupleBufferRef>(layout);
+        const auto memoryLayoutTypeTrait = logicalOperator.getTraitSet().tryGet<MemoryLayoutTypeTrait>();
+        PRECONDITION(memoryLayoutTypeTrait.has_value(), "Expected a memory layout type trait");
+        const auto memoryLayoutType = memoryLayoutTypeTrait.value().memoryLayout;
+        auto bufferRef
+            = LowerSchemaProvider::lowerSchema(configuration.pageSize.getValue(), logicalOperator.getInputSchemas()[0], memoryLayoutType);
 
         auto name = descriptor->getName();
         auto aggregationArguments = AggregationPhysicalFunctionRegistryArguments(
@@ -186,6 +189,9 @@ RewriteRuleResultSubgraph LowerToPhysicalStatisticBuild::apply(LogicalOperator l
     auto& outputOriginIds = outputOriginIdsOpt.value();
     PRECONDITION(std::ranges::size(outputOriginIds) == 1, "Expected one output origin id");
     PRECONDITION(logicalOperator.getInputSchemas().size() == 1, "Expected one input schema");
+    const auto memoryLayoutTypeTrait = logicalOperator.getTraitSet().tryGet<MemoryLayoutTypeTrait>();
+    PRECONDITION(memoryLayoutTypeTrait.has_value(), "Expected a memory layout type trait");
+    const auto memoryLayoutType = memoryLayoutTypeTrait.value().memoryLayout;
 
     auto aggregation = logicalOperator.getAs<StatisticBuildLogicalOperator>();
     auto handlerId = getNextOperatorHandlerId();
@@ -248,12 +254,21 @@ RewriteRuleResultSubgraph LowerToPhysicalStatisticBuild::apply(LogicalOperator l
     auto probe = AggregationProbePhysicalOperator(hashMapOptions, aggregationPhysicalFunctions, handlerId, windowMetaData);
 
     auto buildWrapper = std::make_shared<PhysicalOperatorWrapper>(
-        build, newInputSchema, outputSchema, handlerId, handler, PhysicalOperatorWrapper::PipelineLocation::EMIT);
+        build,
+        newInputSchema,
+        outputSchema,
+        memoryLayoutType,
+        memoryLayoutType,
+        handlerId,
+        handler,
+        PhysicalOperatorWrapper::PipelineLocation::EMIT);
 
     auto probeWrapper = std::make_shared<PhysicalOperatorWrapper>(
         probe,
         newInputSchema,
         outputSchema,
+        memoryLayoutType,
+        memoryLayoutType,
         handlerId,
         handler,
         PhysicalOperatorWrapper::PipelineLocation::SCAN,

@@ -78,7 +78,7 @@ deserializeWindowAggregationFunction(const SerializableAggregationFunction& seri
                 [](const auto& fn)
                 {
                     const auto logFn = deserializeFunction(fn);
-                    return logFn.template get<FieldAccessLogicalFunction>();
+                    return logFn.template getAs<FieldAccessLogicalFunction>().get();
                 })
             | std::ranges::to<std::vector>()};
     }

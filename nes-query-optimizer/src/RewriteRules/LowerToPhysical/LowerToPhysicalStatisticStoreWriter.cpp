@@ -17,6 +17,7 @@
 #include <Runtime/NodeEngine.hpp>
 #include <Statistic/StatisticStore/StatisticStoreOperatorHandler.hpp>
 #include <Statistic/StatisticStore/StatisticStoreWriter.hpp>
+#include <Traits/MemoryLayoutTypeTrait.hpp>
 #include <RewriteRuleRegistry.hpp>
 
 namespace NES
@@ -25,6 +26,10 @@ namespace NES
 RewriteRuleResultSubgraph LowerToPhysicalStatisticStoreWriter::apply(LogicalOperator logicalOperator)
 {
     PRECONDITION(logicalOperator.tryGetAs<StatisticStoreWriterLogicalOperator>(), "Expected a StatisticStoreWriterLogicalOperator");
+    const auto memoryLayoutTypeTrait = logicalOperator.getTraitSet().tryGet<MemoryLayoutTypeTrait>();
+    PRECONDITION(memoryLayoutTypeTrait.has_value(), "Expected a memory layout type trait");
+    const auto memoryLayoutType = memoryLayoutTypeTrait.value().memoryLayout;
+
     const auto logicalStatisticStoreWriter = logicalOperator.getAs<StatisticStoreWriterLogicalOperator>();
     auto inputSchema = logicalStatisticStoreWriter.getInputSchemas()[0];
     auto statisticStore = NodeEngine::getStatisticStore();
@@ -43,6 +48,8 @@ RewriteRuleResultSubgraph LowerToPhysicalStatisticStoreWriter::apply(LogicalOper
         statisticStoreWriter,
         inputSchema,
         outputSchema,
+        memoryLayoutType,
+        memoryLayoutType,
         operatorHandlerId,
         statisticStoreWriterOperatorHandler,
         PhysicalOperatorWrapper::PipelineLocation::INTERMEDIATE);

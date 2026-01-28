@@ -13,5 +13,3 @@
 add_source_files(nes-fpga
         main.cpp
 )
-
-#target_include_directories(nes-fpga-main PRIVATE ../include)

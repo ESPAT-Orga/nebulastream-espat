@@ -15,20 +15,16 @@
 #include <Operators/Windows/Aggregations/Histogram/EquiWidthHistogramLogicalFunction.hpp>
 
 #include <cstdint>
-#include <memory>
 #include <string>
+#include <string_view>
 #include <utility>
-
 #include <DataTypes/DataType.hpp>
-#include <DataTypes/DataTypeProvider.hpp>
 #include <DataTypes/Schema.hpp>
 #include <Functions/FieldAccessLogicalFunction.hpp>
 #include <Functions/LogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/WindowAggregationLogicalFunction.hpp>
-#include <Serialization/DataTypeSerializationUtil.hpp>
-#include <Serialization/SchemaSerializationUtil.hpp>
-#include <Util/Common.hpp>
-#include <Util/Logger/Logger.hpp>
+#include <Util/Reflection.hpp>
+#include <fmt/format.h>
 #include <AggregationLogicalFunctionRegistry.hpp>
 #include <ErrorHandling.hpp>
 
@@ -37,14 +33,14 @@ namespace NES
 
 EquiWidthHistogramLogicalFunction::EquiWidthHistogramLogicalFunction(
     const FieldAccessLogicalFunction& onField, const uint64_t numBuckets, const uint64_t minValue, const uint64_t maxValue)
-    : WindowAggregationLogicalFunction(
-          onField.getDataType(),
-          DataTypeProvider::provideDataType(partialAggregateStampType),
-          DataTypeProvider::provideDataType(finalAggregateStampType),
-          onField)
-    , numBuckets(numBuckets)
+    : numBuckets(numBuckets)
     , minValue(minValue)
     , maxValue(maxValue)
+    , inputStamp(onField.getDataType())
+    , partialAggregateStamp(DataType::Type::UNDEFINED)
+    , finalAggregateStamp(DataType::Type::VARSIZED)
+    , onField(onField)
+    , asField(onField)
 {
 }
 
@@ -54,15 +50,14 @@ EquiWidthHistogramLogicalFunction::EquiWidthHistogramLogicalFunction(
     const uint64_t numBuckets,
     const uint64_t minValue,
     const uint64_t maxValue)
-    : WindowAggregationLogicalFunction(
-          onField.getDataType(),
-          DataTypeProvider::provideDataType(partialAggregateStampType),
-          DataTypeProvider::provideDataType(finalAggregateStampType),
-          onField,
-          asField)
-    , numBuckets(numBuckets)
+    : numBuckets(numBuckets)
     , minValue(minValue)
     , maxValue(maxValue)
+    , inputStamp(onField.getDataType())
+    , partialAggregateStamp(DataType::Type::UNDEFINED)
+    , finalAggregateStamp(DataType::Type::VARSIZED)
+    , onField(onField)
+    , asField(asField)
 {
 }
 
@@ -71,74 +66,153 @@ std::string_view EquiWidthHistogramLogicalFunction::getName() const noexcept
     return NAME;
 }
 
-///  Remove when not necessary anymore in upstream NES.
-void EquiWidthHistogramLogicalFunction::inferStamp(const Schema&)
+std::string EquiWidthHistogramLogicalFunction::toString() const
 {
-    /// We first infer the dataType of the input field and set the output dataType as the same.
-    ///Set fully qualified name for the as Field
-    const auto onFieldName = getOnField().getFieldName();
-    const auto asFieldName = getAsField().getFieldName();
+    return fmt::format(
+        "EquiWidthHistogram: onField={} asField={} numBuckets={} minValue={} maxValue={}",
+        onField,
+        asField,
+        numBuckets,
+        minValue,
+        maxValue);
+}
 
-    const auto attributeNameResolver = "stream$";
-    if (onFieldName.find(Schema::ATTRIBUTE_NAME_SEPARATOR) == std::string::npos)
+Reflected EquiWidthHistogramLogicalFunction::reflect() const
+{
+    return NES::reflect(this);
+}
+
+Reflected Reflector<EquiWidthHistogramLogicalFunction>::operator()(const EquiWidthHistogramLogicalFunction& function) const
+{
+    return reflect(detail::ReflectedEquiWidthHistogramLogicalFunction{
+        .onField = function.getOnField(),
+        .asField = function.getAsField(),
+        .numBuckets = function.numBuckets,
+        .minValue = function.minValue,
+        .maxValue = function.maxValue});
+}
+
+EquiWidthHistogramLogicalFunction Unreflector<EquiWidthHistogramLogicalFunction>::operator()(const Reflected& reflected) const
+{
+    auto data = unreflect<detail::ReflectedEquiWidthHistogramLogicalFunction>(reflected);
+    return EquiWidthHistogramLogicalFunction{data.onField, data.asField, data.numBuckets, data.minValue, data.maxValue};
+}
+
+EquiWidthHistogramLogicalFunction EquiWidthHistogramLogicalFunction::withInferredStamp(const Schema& schema) const
+{
+    auto newOnField = this->getOnField().withInferredDataType(schema).getAs<FieldAccessLogicalFunction>().get();
+    if (not newOnField.getDataType().isNumeric())
     {
-        this->setOnField(getOnField().withFieldName(attributeNameResolver + onFieldName).get<FieldAccessLogicalFunction>());
+        throw CannotDeserialize("equi width histogram on non numeric fields is not supported, but got {}", newOnField.getDataType());
     }
-    else
-    {
-        const auto fieldName = onFieldName.substr(onFieldName.find_last_of(Schema::ATTRIBUTE_NAME_SEPARATOR) + 1);
-        this->setOnField(getOnField().withFieldName(attributeNameResolver + fieldName).get<FieldAccessLogicalFunction>());
-    }
+
+    const auto onFieldName = newOnField.getFieldName();
+    const auto asFieldName = this->getAsField().getFieldName();
+    const auto attributeNameResolver = onFieldName.substr(0, onFieldName.find(Schema::ATTRIBUTE_NAME_SEPARATOR) + 1);
+
+    std::string newAsFieldName;
     if (asFieldName.find(Schema::ATTRIBUTE_NAME_SEPARATOR) == std::string::npos)
     {
-        this->setAsField(getAsField().withFieldName(attributeNameResolver + asFieldName).get<FieldAccessLogicalFunction>());
+        newAsFieldName = attributeNameResolver + asFieldName;
     }
     else
     {
         const auto fieldName = asFieldName.substr(asFieldName.find_last_of(Schema::ATTRIBUTE_NAME_SEPARATOR) + 1);
-        this->setAsField(getAsField().withFieldName(attributeNameResolver + fieldName).get<FieldAccessLogicalFunction>());
+        newAsFieldName = attributeNameResolver + fieldName;
     }
-    this->setInputStamp(this->getOnField().getDataType());
-    this->setFinalAggregateStamp(DataTypeProvider::provideDataType(DataType::Type::VARSIZED));
-    this->setAsField(this->getAsField().withDataType(getFinalAggregateStamp()).get<FieldAccessLogicalFunction>());
+    auto newAsField = this->getAsField().withFieldName(newAsFieldName).withDataType(newOnField.getDataType());
+    return this->withOnField(newOnField)
+        .withInputStamp(newOnField.getDataType())
+        .withFinalAggregateStamp(newOnField.getDataType())
+        .withAsField(newAsField);
 }
 
-NES::SerializableAggregationFunction EquiWidthHistogramLogicalFunction::serialize() const
+DataType EquiWidthHistogramLogicalFunction::getInputStamp() const
 {
-    NES::SerializableAggregationFunction serializedAggregationFunction;
-    serializedAggregationFunction.set_type(NAME);
+    return inputStamp;
+}
 
-    auto onFieldFuc = SerializableFunction();
-    onFieldFuc.CopyFrom(this->getOnField().serialize());
+DataType EquiWidthHistogramLogicalFunction::getPartialAggregateStamp() const
+{
+    return partialAggregateStamp;
+}
 
-    auto asFieldFuc = SerializableFunction();
-    asFieldFuc.CopyFrom(this->getAsField().serialize());
+DataType EquiWidthHistogramLogicalFunction::getFinalAggregateStamp() const
+{
+    return finalAggregateStamp;
+}
 
-    serializedAggregationFunction.mutable_as_field()->CopyFrom(asFieldFuc);
-    serializedAggregationFunction.mutable_on_field()->CopyFrom(onFieldFuc);
-    serializedAggregationFunction.set_histogram_num_buckets(numBuckets);
-    serializedAggregationFunction.set_histogram_min_value(minValue);
-    serializedAggregationFunction.set_histogram_max_value(maxValue);
-    return serializedAggregationFunction;
+FieldAccessLogicalFunction EquiWidthHistogramLogicalFunction::getOnField() const
+{
+    return onField;
+}
+
+FieldAccessLogicalFunction EquiWidthHistogramLogicalFunction::getAsField() const
+{
+    return asField;
+}
+
+EquiWidthHistogramLogicalFunction EquiWidthHistogramLogicalFunction::withInputStamp(DataType newInputStamp) const
+{
+    auto copy = *this;
+    copy.inputStamp = std::move(newInputStamp);
+    return copy;
+}
+
+EquiWidthHistogramLogicalFunction EquiWidthHistogramLogicalFunction::withPartialAggregateStamp(DataType newPartialAggregateStamp) const
+{
+    auto copy = *this;
+    copy.partialAggregateStamp = std::move(newPartialAggregateStamp);
+    return copy;
+}
+
+EquiWidthHistogramLogicalFunction EquiWidthHistogramLogicalFunction::withFinalAggregateStamp(DataType newFinalAggregateStamp) const
+{
+    auto copy = *this;
+    copy.finalAggregateStamp = std::move(newFinalAggregateStamp);
+    return copy;
+}
+
+EquiWidthHistogramLogicalFunction EquiWidthHistogramLogicalFunction::withOnField(FieldAccessLogicalFunction newOnField) const
+{
+    auto copy = *this;
+    copy.onField = std::move(newOnField);
+    return copy;
+}
+
+EquiWidthHistogramLogicalFunction EquiWidthHistogramLogicalFunction::withAsField(FieldAccessLogicalFunction newAsField) const
+{
+    auto copy = *this;
+    copy.asField = std::move(newAsField);
+    return copy;
+}
+
+bool EquiWidthHistogramLogicalFunction::operator==(const EquiWidthHistogramLogicalFunction& rhs) const
+{
+    return this->getName() == rhs.getName() && this->onField == rhs.onField && this->asField == rhs.asField
+        && this->numBuckets == rhs.numBuckets && this->minValue == rhs.minValue && this->maxValue == rhs.maxValue;
 }
 
 AggregationLogicalFunctionRegistryReturnType
 AggregationLogicalFunctionGeneratedRegistrar::RegisterEquiWidthHistogramAggregationLogicalFunction(
     AggregationLogicalFunctionRegistryArguments arguments)
 {
+    if (!arguments.reflected.isEmpty())
+    {
+        return std::make_shared<WindowAggregationLogicalFunction>(unreflect<EquiWidthHistogramLogicalFunction>(arguments.reflected));
+    }
     /// We assume the fields vector starts with onField, asField
     PRECONDITION(arguments.fields.size() >= 2, "EquiWidthHistogramLogicalFunction requires onField and asField");
     PRECONDITION(arguments.histogramMinValue.has_value(), "EquiWidthHistogramLogicalFunction requires min value to be set!");
     PRECONDITION(arguments.histogramMaxValue.has_value(), "EquiWidthHistogramLogicalFunction requires max value be set!");
     PRECONDITION(arguments.histogramNumBuckets.has_value(), "EquiWidthHistogramLogicalFunction requires number of buckets to be set!");
 
-    const auto equiWidthHist = std::make_shared<EquiWidthHistogramLogicalFunction>(
+    return std::make_shared<WindowAggregationLogicalFunction>(EquiWidthHistogramLogicalFunction{
         arguments.fields[0],
         arguments.fields[1],
         arguments.histogramNumBuckets.value(),
         arguments.histogramMinValue.value(),
-        arguments.histogramMaxValue.value());
-    return equiWidthHist;
+        arguments.histogramMaxValue.value()});
 }
 
 }

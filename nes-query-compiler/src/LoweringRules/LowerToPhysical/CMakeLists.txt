@@ -17,6 +17,7 @@ add_plugin(Projection LoweringRule nes-query-compiler LowerToPhysicalProjection.
 add_plugin(WindowedAggregation LoweringRule nes-query-compiler LowerToPhysicalWindowedAggregation.cpp)
 add_plugin(ReservoirProbe LoweringRule nes-query-compiler LowerToPhysicalReservoirProbe.cpp)
 add_plugin(StatisticStoreWriter LoweringRule nes-query-compiler LowerToPhysicalStatisticStoreWriter.cpp)
+add_plugin(StatisticBuild LoweringRule nes-query-compiler LowerToPhysicalStatisticBuild.cpp)
 add_plugin(Union LoweringRule nes-query-compiler LowerToPhysicalUnion.cpp)
 add_plugin(Sink LoweringRule nes-query-compiler LowerToPhysicalSink.cpp)
 add_plugin(Source LoweringRule nes-query-compiler LowerToPhysicalSource.cpp)

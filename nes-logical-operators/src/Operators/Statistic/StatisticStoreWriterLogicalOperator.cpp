@@ -15,7 +15,6 @@
 #include <Operators/Statistic/StatisticStoreWriterLogicalOperator.hpp>
 
 #include <ranges>
-#include <Serialization/SchemaSerializationUtil.hpp>
 #include <fmt/format.h>
 #include <LogicalOperatorRegistry.hpp>
 
@@ -38,49 +37,6 @@ std::string StatisticStoreWriterLogicalOperator::explain(ExplainVerbosity, Opera
 std::vector<LogicalOperator> StatisticStoreWriterLogicalOperator::getChildren() const
 {
     return children;
-}
-
-void StatisticStoreWriterLogicalOperator::serialize(SerializableOperator& serializableOperator) const
-{
-    SerializableLogicalOperator proto;
-
-    proto.set_operator_type(NAME);
-    const auto inputs = getInputSchemas();
-    for (size_t i = 0; i < inputs.size(); ++i)
-    {
-        auto* inSch = proto.add_input_schemas();
-        SchemaSerializationUtil::serializeSchema(inputs[i], inSch);
-    }
-
-    auto* outSch = proto.mutable_output_schema();
-    SchemaSerializationUtil::serializeSchema(getOutputSchema(), outSch);
-
-    for (const auto& child : getChildren())
-    {
-        serializableOperator.add_children_ids(child.getId().getRawValue());
-    }
-
-    auto serializeAndAddToConfig = [&serializableOperator](const Schema::Field& field, const std::string& configKey)
-    {
-        SerializableSchema_SerializableField inputSerializableField;
-        SchemaSerializationUtil::serializeField(field, &inputSerializableField);
-        (*serializableOperator.mutable_config())[configKey] = descriptorConfigTypeToProto(inputSerializableField);
-    };
-    serializeAndAddToConfig(inputLogicalStatisticFields->statisticEndTsField, LogicalStatisticFields::ConfigParameters::STATISTIC_END_TS);
-    serializeAndAddToConfig(
-        inputLogicalStatisticFields->statisticStartTsField, LogicalStatisticFields::ConfigParameters::STATISTIC_START_TS);
-    serializeAndAddToConfig(
-        inputLogicalStatisticFields->statisticHashField, LogicalStatisticFields::ConfigParameters::STATISTIC_HASH_FIELD);
-    serializeAndAddToConfig(inputLogicalStatisticFields->statisticDataField, LogicalStatisticFields::ConfigParameters::STATISTIC_DATA);
-    serializeAndAddToConfig(
-        inputLogicalStatisticFields->statisticNumberOfSeenTuplesField,
-        LogicalStatisticFields::ConfigParameters::STATISTIC_NUMBER_OF_SEEN_TUPLES);
-    (*serializableOperator.mutable_config())[StatisticStoreWriterLogicalOperator::ConfigParameters::STATISTIC_HASH_VALUE]
-        = descriptorConfigTypeToProto(statisticHash);
-    (*serializableOperator.mutable_config())[StatisticStoreWriterLogicalOperator::ConfigParameters::STATISTIC_TYPE_VALUE]
-        = descriptorConfigTypeToProto(EnumWrapper{statisticType});
-
-    serializableOperator.mutable_operator_()->CopyFrom(proto);
 }
 
 StatisticStoreWriterLogicalOperator StatisticStoreWriterLogicalOperator::withChildren(std::vector<LogicalOperator> children) const
@@ -138,6 +94,9 @@ StatisticStoreWriterLogicalOperator StatisticStoreWriterLogicalOperator::withInf
 
     /// StatisticStoreWriter expects the following fields in its input schema. If not, we need to throw
     copy.inputSchema = firstSchema;
+    const auto& newQualifierForSystemField = firstSchema.getQualifierNameForSystemGeneratedFieldsWithSeparator();
+    copy.inputLogicalStatisticFields = std::make_shared<LogicalStatisticFields>(*copy.inputLogicalStatisticFields);
+    copy.inputLogicalStatisticFields->addQualifierName(newQualifierForSystemField);
     const auto& copyInputLogicalFields = copy.inputLogicalStatisticFields;
     if (not copy.inputSchema.getFieldByName(copyInputLogicalFields->statisticStartTsField.name).has_value()
         or not copy.inputSchema.getFieldByName(copyInputLogicalFields->statisticEndTsField.name).has_value()
@@ -151,8 +110,7 @@ StatisticStoreWriterLogicalOperator StatisticStoreWriterLogicalOperator::withInf
     }
 
     /// We set the output logical fields to use the values defined in the class itself, as downstream operators assume it.
-    copy.outputSchema = Schema{firstSchema.memoryLayoutType};
-    const auto& newQualifierForSystemField = firstSchema.getQualifierNameForSystemGeneratedFieldsWithSeparator();
+    copy.outputSchema = Schema{};
     const auto outputLogicalStatisticFields = getOutputStatisticFields(newQualifierForSystemField);
     copy.outputSchema.addField(outputLogicalStatisticFields.statisticHashField);
     copy.outputSchema.addField(outputLogicalStatisticFields.statisticStartTsField);
@@ -177,46 +135,27 @@ Statistic::StatisticType StatisticStoreWriterLogicalOperator::getStatisticType()
     return statisticType;
 }
 
+Reflected Reflector<StatisticStoreWriterLogicalOperator>::operator()(const StatisticStoreWriterLogicalOperator& op) const
+{
+    return reflect(detail::ReflectedStatisticStoreWriterLogicalOperator{
+        .statisticHash = op.getStatisticHash(), .statisticType = static_cast<uint8_t>(op.getStatisticType())});
+}
+
+StatisticStoreWriterLogicalOperator Unreflector<StatisticStoreWriterLogicalOperator>::operator()(const Reflected& reflected) const
+{
+    auto [statisticHash, statisticType] = unreflect<detail::ReflectedStatisticStoreWriterLogicalOperator>(reflected);
+    return StatisticStoreWriterLogicalOperator{
+        std::make_shared<LogicalStatisticFields>(), statisticHash, static_cast<Statistic::StatisticType>(statisticType)};
+}
+
 LogicalOperatorRegistryReturnType
 LogicalOperatorGeneratedRegistrar::RegisterStatisticStoreWriterLogicalOperator(NES::LogicalOperatorRegistryArguments arguments)
 {
-    auto statisticEndTs = arguments.config[LogicalStatisticFields::ConfigParameters::STATISTIC_END_TS];
-    auto statisticStartTs = arguments.config[LogicalStatisticFields::ConfigParameters::STATISTIC_START_TS];
-    auto statisticHashField = arguments.config[LogicalStatisticFields::ConfigParameters::STATISTIC_HASH_FIELD];
-    auto statisticDataField = arguments.config[LogicalStatisticFields::ConfigParameters::STATISTIC_DATA];
-    auto statisticNumberOfSeenTuples = arguments.config[LogicalStatisticFields::ConfigParameters::STATISTIC_NUMBER_OF_SEEN_TUPLES];
-    auto statisticHashValue = arguments.config[StatisticStoreWriterLogicalOperator::ConfigParameters::STATISTIC_HASH_VALUE];
-    auto statisticTypeEnumWrapper = arguments.config[StatisticStoreWriterLogicalOperator::ConfigParameters::STATISTIC_TYPE_VALUE];
-    if (not std::holds_alternative<NES::SerializableSchema_SerializableField>(statisticEndTs)
-        or not std::holds_alternative<NES::SerializableSchema_SerializableField>(statisticStartTs)
-        or not std::holds_alternative<NES::SerializableSchema_SerializableField>(statisticHashField)
-        or not std::holds_alternative<NES::SerializableSchema_SerializableField>(statisticDataField)
-        or not std::holds_alternative<NES::SerializableSchema_SerializableField>(statisticNumberOfSeenTuples)
-        or not std::holds_alternative<Statistic::StatisticHash>(statisticHashValue)
-        or not std::holds_alternative<EnumWrapper>(statisticTypeEnumWrapper))
+    if (!arguments.reflected.isEmpty())
     {
-        throw UnknownLogicalOperator();
+        return unreflect<StatisticStoreWriterLogicalOperator>(arguments.reflected);
     }
-
-    auto logicalStatisticFields = std::make_shared<LogicalStatisticFields>();
-    logicalStatisticFields->statisticEndTsField
-        = SchemaSerializationUtil::deserializeField(std::get<NES::SerializableSchema_SerializableField>(statisticEndTs));
-    logicalStatisticFields->statisticStartTsField
-        = SchemaSerializationUtil::deserializeField(std::get<NES::SerializableSchema_SerializableField>(statisticStartTs));
-    logicalStatisticFields->statisticHashField
-        = SchemaSerializationUtil::deserializeField(std::get<NES::SerializableSchema_SerializableField>(statisticHashField));
-    logicalStatisticFields->statisticDataField
-        = SchemaSerializationUtil::deserializeField(std::get<NES::SerializableSchema_SerializableField>(statisticDataField));
-    logicalStatisticFields->statisticNumberOfSeenTuplesField
-        = SchemaSerializationUtil::deserializeField(std::get<NES::SerializableSchema_SerializableField>(statisticNumberOfSeenTuples));
-
-    auto statisticTypeValue = std::get<EnumWrapper>(statisticTypeEnumWrapper).asEnum<Statistic::StatisticType>();
-    if (not statisticTypeValue.has_value())
-    {
-        throw UnknownLogicalOperator();
-    }
-    const StatisticStoreWriterLogicalOperator logicalOperator(
-        std::move(logicalStatisticFields), std::get<Statistic::StatisticHash>(statisticHashValue), statisticTypeValue.value());
-    return logicalOperator.withInferredSchema(arguments.inputSchemas);
+    PRECONDITION(false, "Expected arguments are missing");
+    std::unreachable();
 }
 }

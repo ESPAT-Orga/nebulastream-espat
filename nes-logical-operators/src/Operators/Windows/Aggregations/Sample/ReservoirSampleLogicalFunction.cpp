@@ -15,18 +15,16 @@
 #include <Operators/Windows/Aggregations/Sample/ReservoirSampleLogicalFunction.hpp>
 
 #include <cstdint>
-#include <memory>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <DataTypes/DataType.hpp>
-#include <DataTypes/DataTypeProvider.hpp>
 #include <DataTypes/Schema.hpp>
 #include <Functions/FieldAccessLogicalFunction.hpp>
 #include <Functions/LogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/WindowAggregationLogicalFunction.hpp>
-#include <Serialization/DataTypeSerializationUtil.hpp>
-#include <Util/Common.hpp>
-#include <Util/Logger/Logger.hpp>
+#include <Util/Reflection.hpp>
+#include <fmt/format.h>
 #include <AggregationLogicalFunctionRegistry.hpp>
 #include <ErrorHandling.hpp>
 
@@ -38,14 +36,14 @@ ReservoirSampleLogicalFunction::ReservoirSampleLogicalFunction(
     std::vector<FieldAccessLogicalFunction> sampleFields,
     const uint64_t reservoirSize,
     const uint64_t sampleHash)
-    : WindowAggregationLogicalFunction(
-          onField.getDataType(),
-          DataTypeProvider::provideDataType(partialAggregateStampType),
-          DataTypeProvider::provideDataType(finalAggregateStampType),
-          onField)
-    , sampleFields(std::move(sampleFields))
+    : sampleFields(std::move(sampleFields))
     , reservoirSize(reservoirSize)
     , sampleHash(sampleHash)
+    , inputStamp(onField.getDataType())
+    , partialAggregateStamp(DataType::Type::UNDEFINED)
+    , finalAggregateStamp(DataType::Type::VARSIZED)
+    , onField(onField)
+    , asField(onField)
 {
 }
 
@@ -55,15 +53,14 @@ ReservoirSampleLogicalFunction::ReservoirSampleLogicalFunction(
     std::vector<FieldAccessLogicalFunction> sampleFields,
     const uint64_t reservoirSize,
     const uint64_t sampleHash)
-    : WindowAggregationLogicalFunction(
-          onField.getDataType(),
-          DataTypeProvider::provideDataType(partialAggregateStampType),
-          DataTypeProvider::provideDataType(finalAggregateStampType),
-          onField,
-          asField)
-    , sampleFields(std::move(sampleFields))
+    : sampleFields(std::move(sampleFields))
     , reservoirSize(reservoirSize)
     , sampleHash(sampleHash)
+    , inputStamp(onField.getDataType())
+    , partialAggregateStamp(DataType::Type::UNDEFINED)
+    , finalAggregateStamp(DataType::Type::VARSIZED)
+    , onField(onField)
+    , asField(asField)
 {
 }
 
@@ -72,63 +69,134 @@ std::string_view ReservoirSampleLogicalFunction::getName() const noexcept
     return NAME;
 }
 
-/// Remove this function when upstream removes it.
-void ReservoirSampleLogicalFunction::inferStamp(const Schema& schema)
+std::string ReservoirSampleLogicalFunction::toString() const
 {
-    /// We first infer the dataType of the input field and set the output dataType as the same.
-    this->setOnField(getOnField().withInferredDataType(schema).get<FieldAccessLogicalFunction>());
-    ///Set fully qualified name for the as Field
-    const auto onFieldName = getOnField().getFieldName();
-    const auto asFieldName = getAsField().getFieldName();
+    return fmt::format("ReservoirSample: onField={} asField={} reservoirSize={}", onField, asField, reservoirSize);
+}
 
+Reflected ReservoirSampleLogicalFunction::reflect() const
+{
+    return NES::reflect(this);
+}
+
+Reflected Reflector<ReservoirSampleLogicalFunction>::operator()(const ReservoirSampleLogicalFunction& function) const
+{
+    return reflect(detail::ReflectedReservoirSampleLogicalFunction{
+        .onField = function.getOnField(),
+        .asField = function.getAsField(),
+        .sampleFields = function.sampleFields,
+        .reservoirSize = function.reservoirSize,
+        .seed = function.seed,
+        .sampleHash = function.sampleHash});
+}
+
+ReservoirSampleLogicalFunction Unreflector<ReservoirSampleLogicalFunction>::operator()(const Reflected& reflected) const
+{
+    auto data = unreflect<detail::ReflectedReservoirSampleLogicalFunction>(reflected);
+    auto result = ReservoirSampleLogicalFunction{data.onField, data.asField, data.sampleFields, data.reservoirSize, data.sampleHash};
+    result.seed = data.seed;
+    return result;
+}
+
+ReservoirSampleLogicalFunction ReservoirSampleLogicalFunction::withInferredStamp(const Schema& schema) const
+{
+    auto newOnField = this->getOnField().withInferredDataType(schema).getAs<FieldAccessLogicalFunction>().get();
+
+    const auto onFieldName = newOnField.getFieldName();
+    const auto asFieldName = this->getAsField().getFieldName();
     const auto attributeNameResolver = onFieldName.substr(0, onFieldName.find(Schema::ATTRIBUTE_NAME_SEPARATOR) + 1);
 
-    ///If on and as field name are different then append the attribute name resolver from on field to the as field
+    std::string newAsFieldName;
     if (asFieldName.find(Schema::ATTRIBUTE_NAME_SEPARATOR) == std::string::npos)
     {
-        this->setAsField(getAsField().withFieldName(attributeNameResolver + asFieldName).get<FieldAccessLogicalFunction>());
+        newAsFieldName = attributeNameResolver + asFieldName;
     }
     else
     {
         const auto fieldName = asFieldName.substr(asFieldName.find_last_of(Schema::ATTRIBUTE_NAME_SEPARATOR) + 1);
-        this->setAsField(getAsField().withFieldName(attributeNameResolver + fieldName).get<FieldAccessLogicalFunction>());
+        newAsFieldName = attributeNameResolver + fieldName;
     }
-    this->setInputStamp(this->getOnField().getDataType());
-    this->setFinalAggregateStamp(DataTypeProvider::provideDataType(DataType::Type::VARSIZED));
-    this->setAsField(this->getAsField().withDataType(getFinalAggregateStamp()).get<FieldAccessLogicalFunction>());
+    auto newAsField = this->getAsField().withFieldName(newAsFieldName).withDataType(newOnField.getDataType());
+    return this->withOnField(newOnField)
+        .withInputStamp(newOnField.getDataType())
+        .withFinalAggregateStamp(newOnField.getDataType())
+        .withAsField(newAsField);
 }
 
-NES::SerializableAggregationFunction ReservoirSampleLogicalFunction::serialize() const
+DataType ReservoirSampleLogicalFunction::getInputStamp() const
 {
-    NES::SerializableAggregationFunction serializedAggregationFunction;
-    serializedAggregationFunction.set_type(NAME);
+    return inputStamp;
+}
 
-    auto onFieldFuc = SerializableFunction();
-    onFieldFuc.CopyFrom(this->getOnField().serialize());
+DataType ReservoirSampleLogicalFunction::getPartialAggregateStamp() const
+{
+    return partialAggregateStamp;
+}
 
-    auto asFieldFuc = SerializableFunction();
-    asFieldFuc.CopyFrom(this->getAsField().serialize());
+DataType ReservoirSampleLogicalFunction::getFinalAggregateStamp() const
+{
+    return finalAggregateStamp;
+}
 
-    serializedAggregationFunction.mutable_as_field()->CopyFrom(asFieldFuc);
-    serializedAggregationFunction.mutable_on_field()->CopyFrom(onFieldFuc);
+FieldAccessLogicalFunction ReservoirSampleLogicalFunction::getOnField() const
+{
+    return onField;
+}
 
-    FunctionList fnList;
-    for (auto field : sampleFields)
-    {
-        auto* addPtr = fnList.add_functions();
-        addPtr->CopyFrom(field.serialize());
-    }
-    serializedAggregationFunction.mutable_sample_fields()->CopyFrom(fnList);
-    serializedAggregationFunction.set_reservoir_size(reservoirSize);
-    serializedAggregationFunction.set_sample_hash(sampleHash);
+FieldAccessLogicalFunction ReservoirSampleLogicalFunction::getAsField() const
+{
+    return asField;
+}
 
-    return serializedAggregationFunction;
+ReservoirSampleLogicalFunction ReservoirSampleLogicalFunction::withInputStamp(DataType newInputStamp) const
+{
+    auto copy = *this;
+    copy.inputStamp = std::move(newInputStamp);
+    return copy;
+}
+
+ReservoirSampleLogicalFunction ReservoirSampleLogicalFunction::withPartialAggregateStamp(DataType newPartialAggregateStamp) const
+{
+    auto copy = *this;
+    copy.partialAggregateStamp = std::move(newPartialAggregateStamp);
+    return copy;
+}
+
+ReservoirSampleLogicalFunction ReservoirSampleLogicalFunction::withFinalAggregateStamp(DataType newFinalAggregateStamp) const
+{
+    auto copy = *this;
+    copy.finalAggregateStamp = std::move(newFinalAggregateStamp);
+    return copy;
+}
+
+ReservoirSampleLogicalFunction ReservoirSampleLogicalFunction::withOnField(FieldAccessLogicalFunction newOnField) const
+{
+    auto copy = *this;
+    copy.onField = std::move(newOnField);
+    return copy;
+}
+
+ReservoirSampleLogicalFunction ReservoirSampleLogicalFunction::withAsField(FieldAccessLogicalFunction newAsField) const
+{
+    auto copy = *this;
+    copy.asField = std::move(newAsField);
+    return copy;
+}
+
+bool ReservoirSampleLogicalFunction::operator==(const ReservoirSampleLogicalFunction& rhs) const
+{
+    return this->getName() == rhs.getName() && this->onField == rhs.onField && this->asField == rhs.asField
+        && this->reservoirSize == rhs.reservoirSize && this->sampleHash == rhs.sampleHash;
 }
 
 AggregationLogicalFunctionRegistryReturnType
 AggregationLogicalFunctionGeneratedRegistrar::RegisterReservoirSampleAggregationLogicalFunction(
     AggregationLogicalFunctionRegistryArguments arguments)
 {
+    if (!arguments.reflected.isEmpty())
+    {
+        return std::make_shared<WindowAggregationLogicalFunction>(unreflect<ReservoirSampleLogicalFunction>(arguments.reflected));
+    }
     /// We assume the fields vector starts with onField (useless), asField, and then has the sampleFields
     PRECONDITION(
         arguments.fields.size() >= 3,
@@ -137,8 +205,7 @@ AggregationLogicalFunctionGeneratedRegistrar::RegisterReservoirSampleAggregation
 
     const std::vector<FieldAccessLogicalFunction> sampleFields{
         std::make_move_iterator(arguments.fields.begin() + 2), std::make_move_iterator(arguments.fields.end())};
-    const auto reservoirSample = std::make_shared<ReservoirSampleLogicalFunction>(
-        arguments.fields[0], arguments.fields[1], sampleFields, arguments.reservoirSize.value(), arguments.sampleHash.value());
-    return reservoirSample;
+    return std::make_shared<WindowAggregationLogicalFunction>(ReservoirSampleLogicalFunction{
+        arguments.fields[0], arguments.fields[1], sampleFields, arguments.reservoirSize.value(), arguments.sampleHash.value()});
 }
 }

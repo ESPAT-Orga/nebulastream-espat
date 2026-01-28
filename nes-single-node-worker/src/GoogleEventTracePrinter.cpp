@@ -29,11 +29,15 @@
 #include <unistd.h>
 #include <Identifiers/Identifiers.hpp>
 #include <Listeners/SystemEventListener.hpp>
+#include <Runtime/BufferManager.hpp>
+#include <Runtime/BufferManagerStatisticListener.hpp>
 #include <Util/Logger/Logger.hpp>
 #include <Util/Overloaded.hpp>
 #include <Util/Strings.hpp>
 #include <fmt/ostream.h>
 #include <folly/MPMCQueue.h>
+#include <nlohmann/json.hpp>
+#include <nlohmann/json_fwd.hpp>
 #include <QueryEngineStatisticListener.hpp>
 #include <scope_guard.hpp>
 
@@ -74,6 +78,63 @@ uint64_t GoogleEventTracePrinter::timestampToMicroseconds(const std::chrono::sys
     return std::chrono::duration_cast<std::chrono::microseconds>(timestamp.time_since_epoch()).count();
 }
 
+std::string creatorToString(PipelineId id)
+{
+    return "pipeline " + id.toString();
+}
+
+void GoogleEventTracePrinter::emitBufferUsagePeriods(
+    std::vector<BufferManagerChange> bufferManagerChanges, std::function<void()> printComma, std::string label, std::ofstream& file)
+{
+    std::sort(
+        bufferManagerChanges.begin(),
+        bufferManagerChanges.end(),
+        [](const BufferManagerChange& lhs, const BufferManagerChange& rhs) { return lhs.timestamp < rhs.timestamp; });
+
+    int memoryInUse = 0;
+    size_t memSliceCount = 0;
+    for (auto change = bufferManagerChanges.begin(); change != bufferManagerChanges.end(); ++change)
+    {
+        if (change > bufferManagerChanges.begin())
+        {
+            printComma();
+            fmt::print(
+                file,
+                R"JSON(    {{"args":{{"size":"{}"}},"cat":"buffermanager","name":"Mem {}, {}: {} ({})","ph":"E","pid":1,"tid":0,"ts":{}}})JSON",
+                memoryInUse,
+                label,
+                creatorToString,
+                (change->pipelineId),
+                memSliceCount,
+                timestampToMicroseconds(change->timestamp));
+        }
+
+        if (change->action == BufferManagerAction::RecycleBuffer)
+        {
+            memoryInUse -= change->bufferSize;
+        }
+        else
+        {
+            memoryInUse += change->bufferSize;
+        }
+
+        memSliceCount++;
+        if (change < bufferManagerChanges.end() - 1)
+        {
+            printComma();
+            fmt::print(
+                file,
+                R"JSON(    {{"args":{{"size":"{}"}},"cat":"buffermanager","name":"Mem {}, {}: {} ({})","ph":"B","pid":1,"tid":0,"ts":{}}})JSON",
+                memoryInUse,
+                label,
+                creatorToString,
+                (change->pipelineId),
+                memSliceCount,
+                timestampToMicroseconds(change->timestamp));
+        }
+    }
+}
+
 void GoogleEventTracePrinter::threadRoutine(const std::stop_token& token)
 {
     const auto pid = getpid();
@@ -96,6 +157,10 @@ void GoogleEventTracePrinter::threadRoutine(const std::stop_token& token)
         file.close();
     };
 
+    // TODO #19 currently this vector grows without garbage collection. Will crash for long running queries
+    std::vector<BufferManagerChange> pooledBufferChanges;
+    std::vector<BufferManagerChange> unpooledBufferChanges;
+
     /// Helper to print comma before event (except first)
     auto printComma = [&file, firstEvent = true]() mutable
     {
@@ -117,6 +182,67 @@ void GoogleEventTracePrinter::threadRoutine(const std::stop_token& token)
 
         std::visit(
             Overloaded{
+                [&](const GetUnpooledBufferEvent& getBufferEvent)
+                {
+                    unpooledBufferChanges.emplace_back(
+                        BufferManagerAction::GetBuffer, getBufferEvent.pipelineId, getBufferEvent.bufferSize, getBufferEvent.timestamp);
+                    printComma();
+                    fmt::print(
+                        file,
+                        R"(    {{"args":{{"size":"{}"}},"cat":"buffermanager","name":"Get unpooled buffer: {}, size {}","ph":"i","pid":1,"tid":0,"ts":{}}})",
+                        getBufferEvent.bufferSize,
+                        creatorToString(getBufferEvent.pipelineId),
+                        getBufferEvent.bufferSize,
+                        timestampToMicroseconds(getBufferEvent.timestamp));
+                },
+                [&](const RecycleUnpooledBufferEvent& recycleBufferEvent)
+                {
+                    unpooledBufferChanges.emplace_back(
+                        BufferManagerAction::RecycleBuffer,
+                        recycleBufferEvent.pipelineId,
+                        recycleBufferEvent.bufferSize,
+                        recycleBufferEvent.timestamp);
+
+                    printComma();
+                    fmt::print(
+                        file,
+                        R"(    {{"args":{{"size":"{}"}},"cat":"buffermanager","name":"Get unpooled buffer: {}, size {}","ph":"i","pid":1,"tid":0,"ts":{}}})",
+                        recycleBufferEvent.bufferSize,
+                        creatorToString(recycleBufferEvent.pipelineId),
+                        recycleBufferEvent.bufferSize,
+                        timestampToMicroseconds(recycleBufferEvent.timestamp));
+                },
+                [&](const ReturnPooledBufferEvent& recycleBufferEvent)
+                {
+                    printComma();
+                    fmt::print(
+                        file,
+                        R"(    {{"args":{{"size":"{}"}},"cat":"buffermanager","name":"Get unpooled buffer: {}, size {}","ph":"i","pid":1,"tid":0,"ts":{}}})",
+                        recycleBufferEvent.bufferSize,
+                        creatorToString(recycleBufferEvent.pipelineId),
+                        recycleBufferEvent.bufferSize,
+                        timestampToMicroseconds(recycleBufferEvent.timestamp));
+
+                    pooledBufferChanges.emplace_back(
+                        BufferManagerAction::RecycleBuffer,
+                        recycleBufferEvent.pipelineId,
+                        recycleBufferEvent.bufferSize,
+                        recycleBufferEvent.timestamp);
+                },
+                [&](const GetPooledBufferEvent& getBufferEvent)
+                {
+                    printComma();
+                    fmt::print(
+                        file,
+                        R"(    {{"args":{{"size":"{}"}},"cat":"buffermanager","name":"Get unpooled buffer: {}, size {}","ph":"i","pid":1,"tid":0,"ts":{}}})",
+                        getBufferEvent.bufferSize,
+                        creatorToString(getBufferEvent.pipelineId),
+                        getBufferEvent.bufferSize,
+                        timestampToMicroseconds(getBufferEvent.timestamp));
+
+                    pooledBufferChanges.emplace_back(
+                        BufferManagerAction::GetBuffer, getBufferEvent.pipelineId, getBufferEvent.bufferSize, getBufferEvent.timestamp);
+                },
                 [&](const SubmitQuerySystemEvent& submitEvent)
                 {
                     printComma();
@@ -333,6 +459,9 @@ void GoogleEventTracePrinter::threadRoutine(const std::stop_token& token)
                 }},
             event);
     }
+
+    emitBufferUsagePeriods(pooledBufferChanges, printComma, "pooled", file);
+    emitBufferUsagePeriods(unpooledBufferChanges, printComma, "unpooled", file);
 }
 
 namespace
@@ -361,6 +490,12 @@ void GoogleEventTracePrinter::onEvent(SystemEvent event)
 {
     warnOnOverflow(
         !events.writeIfNotFull(std::visit([]<typename T>(T&& arg) { return CombinedEventType(std::forward<T>(arg)); }, std::move(event))));
+}
+
+void GoogleEventTracePrinter::onEvent(BufferManagerEvent event)
+{
+    (void)event;
+    events.writeIfNotFull(std::visit([]<typename T>(T&& arg) { return CombinedEventType(std::forward<T>(arg)); }, std::move(event)));
 }
 
 GoogleEventTracePrinter::GoogleEventTracePrinter(const std::filesystem::path& path) : outputPath(path)

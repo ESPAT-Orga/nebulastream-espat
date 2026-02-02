@@ -47,6 +47,11 @@ class BackpressureHandler
         ChunkNumber pendingChunkNumber = INVALID<ChunkNumber>;
     };
 
+    struct WaitingState
+    {
+        bool isWaiting = false;
+    };
+
     folly::Synchronized<State> stateLock;
 
 public:

@@ -47,7 +47,7 @@ sudo mount /dev/mapper/loop0p2 /mnt
 Copy the whole partition
 
 ```shell
-sudo cp -a /mnt zcu106_chroot
+sudo cp -a /mnt/* zcu106_chroot/
 ```
 
 ## Unmounting and Removing Device Mappings
@@ -89,9 +89,9 @@ schroot -c zcu106
 
 ## Compiling
 
-Install all required packages and clone the Nebulastream repository, as well as vcpkg. Compile as usual. Copy the
-produced executables to root of the filesystem (home directory is not accessible from outside the chroot environment).
-Exit the chroot environment and copy the executables to the FPGA board
+Install all required packages and clone the Nebulastream repository, as well as vcpkg (preferably in root dir as home is
+deleted upon exiting the chroot environment). Compile as usual. Exit the chroot environment and copy the executables to
+the FPGA board
 
 ## Troubleshooting
 
@@ -125,6 +125,8 @@ sudo chown root:root zcu106_chroot/usr/libexec/sudo/sudoers.so
 sudo chmod 755 zcu106_chroot/usr/libexec/sudo/sudoers.so
 sudo chown root:root zcu106_chroot/etc/sudoers.d
 sudo chown root:root zcu106_chroot/etc/sudoers.d/README
+sudo chmod 644 zcu106_chroot/etc/sudo.conf
+sudo chmod 755 zcu106_chroot/usr/libexec/sudo/sudoers.so
 ```
 
 ### Removing Problematic Overrides

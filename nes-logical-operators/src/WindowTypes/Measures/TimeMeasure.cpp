@@ -40,9 +40,19 @@ bool TimeMeasure::operator<(const TimeMeasure& other) const
     return milliSeconds < other.milliSeconds;
 }
 
+bool TimeMeasure::operator>(const TimeMeasure& other) const
+{
+    return milliSeconds > other.milliSeconds;
+}
+
 bool TimeMeasure::operator<=(const TimeMeasure& other) const
 {
     return milliSeconds <= other.milliSeconds;
+}
+
+bool TimeMeasure::operator>=(const TimeMeasure& other) const
+{
+    return milliSeconds >= other.milliSeconds;
 }
 
 bool TimeMeasure::operator==(const TimeMeasure& other) const

@@ -35,11 +35,22 @@ public:
     [[nodiscard]] std::string toString() const;
 
     bool operator<(const TimeMeasure& other) const;
+    bool operator>(const TimeMeasure& other) const;
     bool operator<=(const TimeMeasure& other) const;
+    bool operator>=(const TimeMeasure& other) const;
     bool operator==(const TimeMeasure& other) const;
 
 private:
     uint64_t milliSeconds;
 };
 
+}
+
+namespace std
+{
+template <>
+struct hash<NES::Windowing::TimeMeasure>
+{
+    size_t operator()(const NES::Windowing::TimeMeasure& tm) const { return hash<uint64_t>()(tm.getTime()); }
+};
 }

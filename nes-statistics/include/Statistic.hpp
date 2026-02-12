@@ -30,10 +30,11 @@ class Statistic
 public:
     /// The StatisticHash uniquely identifies a statistic anywhere in our system, which means we do not need to send
     /// characteristics and windows to all workers to uniquely identify a statistic.
+    /// StatisticHash is a combination of the StatisticId and the statistic type
     using StatisticHash = uint64_t;
 
     /// Unique identifier across the system so that we can track statistic over the component
-    /// We assume that the highest 8-bit are never used
+    /// We assume that the highest 8-bit are never used.
     using StatisticId = uint64_t;
 
     /// Fixed-point representation of the fractional part of the golden ratio to provide better distribution properties in hash functions

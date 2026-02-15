@@ -109,7 +109,7 @@ function setup_distributed() {
 }
 
 DOCKER_NES_CLI() {
-  docker compose run --rm nes-cli nes-cli "$@"
+  COMPOSE_PROGRESS=quiet docker compose run --rm nes-cli nes-cli "$@"
 }
 
 assert_json_equal() {
@@ -132,6 +132,24 @@ assert_json_contains() {
     echo "Actual: $actual"
     return 1
   fi
+}
+
+# bats test_tags=bats:focus
+@test "launch prometheus query" {
+  setup_distributed tests/good/prometheus-sink.yaml
+
+  run DOCKER_NES_CLI -t tests/good/prometheus-sink.yaml start 'select DOUBLE from GENERATOR_SOURCE INTO PROMETHEUS_SINK'
+  [ "$status" -eq 0 ]
+  [ -f "$output" ]
+  QUERY_ID=$output
+
+  sleep 1
+
+  run DOCKER_NES_CLI -t tests/good/prometheus-sink.yaml status "$QUERY_ID"
+  [ "$status" -eq 0 ]
+  echo "${output}" | jq -e '(. | length) == 3' # 1 global + 2 local
+  QUERY_STATUS=$(echo "$output" | jq -r --arg query_id "$QUERY_ID" '.[] | select(.query_id == $query_id and (has("local_query_id") | not)) | .query_status')
+  [ "$QUERY_STATUS" = "Running" ]
 }
 
 @test "launch query from topology" {

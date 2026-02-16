@@ -14,7 +14,7 @@ CREATE PHYSICAL SOURCE FOR generatorFile TYPE Generator SET(
     # Next two arguments are irrelevant, but needed for parsing to succeed:
     'ALL' as `SOURCE`.STOP_GENERATOR_WHEN_SEQUENCE_FINISHES,
     'SEQUENCE UINT64 0 10 1' AS `SOURCE`.GENERATOR_SCHEMA,
-    '/tmp/nebulastream-espat/nes-systests/testdata/small/generator-file.csv' AS `SOURCE`.FROM_FILE
+    'TESTDATA/small/generator-file.csv' AS `SOURCE`.FROM_FILE
 );
 
 CREATE LOGICAL SOURCE generatorDifferentDataTypes(field1 UINT64 NOT NULL, field2 UINT32 NOT NULL, field3 UINT16 NOT NULL, field4 UINT8 NOT NULL, field5 INT64 NOT NULL, field6 INT32 NOT NULL, field7 INT16 NOT NULL, field8 INT8 NOT NULL, field9 FLOAT64 NOT NULL, field10 FLOAT32 NOT NULL);

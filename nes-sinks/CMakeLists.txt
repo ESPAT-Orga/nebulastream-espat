@@ -17,6 +17,14 @@ get_source(nes-sinks NES_SINKS_SOURCE_FILES)
 # Add Library
 add_library(nes-sinks ${NES_SINKS_SOURCE_FILES})
 
+
+# Configure Prometheus C++ as a FetchContent dependency
+FetchContent_Declare(
+        prometheus_cpp
+        GIT_REPOSITORY https://github.com/jupp0r/prometheus-cpp.git
+        GIT_TAG        master  # or a specific tag/commit, e.g. v1.3.0
+)
+
 #include_directories("/home/flang/prometheus-cpp/core/include")
 #include_directories("/home/flang/prometheus-cpp/pull/include")
 #include_directories("/home/flang/prometheus-cpp/_build/core/include")
@@ -42,7 +50,9 @@ set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build shared libraries" FORCE)
 
 # Cive
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-missing-field-initializers")
-add_subdirectory("/home/flang/prometheus-cpp" "${CMAKE_BINARY_DIR}/prometheus_build")
+
+
+#add_subdirectory("/home/flang/prometheus-cpp" "${CMAKE_BINARY_DIR}/prometheus_build")
 # Suppress strict warnings for CivetWeb files
 #target_compile_options(prometheus-cpp-core PRIVATE
 #        -Wno-missing-field-initializers
@@ -57,6 +67,9 @@ target_link_libraries(nes-sinks PUBLIC nes-common nes-configurations nes-data-ty
 #target_link_libraries(nes-sinks PUBLIC nes-common nes-configurations nes-data-types nes-memory nes-executable prometheus-cpp-pull prometheus-cpp-core)
 #target_link_libraries(nes-sinks PUBLIC nes-common nes-configurations nes-data-types nes-memory nes-executable "/home/flang/prometheus-cpp/_build/lib/libprometheus-cpp-pull.so" "/home/flang/prometheus-cpp/_build/lib/libprometheus-cpp-pull.so")
 #target_link_libraries(nes-sinks PUBLIC nes-common nes-configurations nes-data-types nes-memory nes-executable "/home/flang/prometheus-cpp/_build/lib/libprometheus-cpp-pull.a" "/home/flang/prometheus-cpp/_build/lib/libprometheus-cpp-pull.a")
+
+# Make the repository available
+FetchContent_MakeAvailable(prometheus_cpp)
 
 target_include_directories(nes-sinks PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>

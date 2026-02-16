@@ -25,12 +25,18 @@ if (NOT _NES_TOOLCHAIN_FILE)
     set(CMAKE_SYSTEM_NAME Linux CACHE STRING "")
     set(CMAKE_CROSSCOMPILING OFF CACHE BOOL "")
 
-    # Optional: mold linker
-    find_program(MOLD_EXECUTABLE NAMES mold)
-    if (MOLD_EXECUTABLE)
-        set(LINK_WITH_MOLD "-fuse-ld=mold")
+    # Prefer LLD
+    find_program(LLD_EXECUTABLE NAMES ld.lld-19 ld.lld)
+
+    if (LLD_EXECUTABLE)
+        set(LINKER_FLAG "-fuse-ld=lld")
     else()
-        set(LINK_WITH_MOLD "")
+        find_program(MOLD_EXECUTABLE NAMES mold)
+        if (MOLD_EXECUTABLE)
+            set(LINKER_FLAG "-fuse-ld=mold")
+        else()
+            set(LINKER_FLAG "")
+        endif()
     endif()
 
     # Optional: ccache
@@ -63,11 +69,11 @@ if (NOT _NES_TOOLCHAIN_FILE)
 
     # Linker flags
     string(APPEND CMAKE_EXE_LINKER_FLAGS_INIT
-            " ${PTHREAD_FLAG} ${LINK_WITH_MOLD} ${VCPKG_LINKER_FLAGS}"
+            " ${PTHREAD_FLAG} ${LINKER_FLAG} ${VCPKG_LINKER_FLAGS}"
     )
 
     string(APPEND CMAKE_SHARED_LINKER_FLAGS_INIT
-            " ${PTHREAD_FLAG} ${LINK_WITH_MOLD} ${VCPKG_LINKER_FLAGS}"
+            " ${PTHREAD_FLAG} ${LINKER_FLAG} ${VCPKG_LINKER_FLAGS}"
     )
 
     # Debug/Release passthrough

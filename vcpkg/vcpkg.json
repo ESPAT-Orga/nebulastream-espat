@@ -48,13 +48,14 @@
     "boost-url",
     "simdjson",
     "highs",
-    "simdjson"
+    "simdjson",
+    "prometheus-cpp"
   ],
   "overrides": [
     {
       "name": "cpptrace",
       "version": "0.8.3",
       "port-version": 0
-    }
+      }
   ]
 }

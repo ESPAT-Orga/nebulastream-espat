@@ -134,7 +134,6 @@ assert_json_contains() {
   fi
 }
 
-# bats test_tags=bats:focus
 @test "launch prometheus query" {
   setup_distributed tests/good/prometheus-sink.yaml
 
@@ -152,25 +151,34 @@ assert_json_contains() {
   [ "$QUERY_STATUS" = "Running" ]
 
   NUM_TRIES=5
-  ENDPOINT="http://localhost:4356/metrics"   # <-- adjust port/path if needed
+  ENDPOINT="http://localhost:4356/metrics"
   SUCCESS=false
 
   for ((i=1; i<=NUM_TRIES; i++)); do
       echo "Attempt $i" >&3
 
-      # Exec curl inside worker-2 container
-      if docker compose exec -T worker-2 \
-          curl -sf -o /dev/null "$ENDPOINT"; then
-          echo "Endpoint reachable. Breaking." >&3
-          SUCCESS=true
-          break
+      RESPONSE=$(docker compose exec -T worker-2 \
+          curl -sf "$ENDPOINT" 2>/dev/null)
+
+      if [ $? -eq 0 ]; then
+          echo "Endpoint reachable. First successful response:" >&3
+          echo "$RESPONSE" >&3
+
+          # Check for existence of metric in output
+          if echo "$RESPONSE" | grep -Eq '^GENERATOR_SOURCE_DOUBLE[[:space:]]-?[0-9]+(\.[0-9]+)?$'; then
+              echo "Metric check passed." >&3
+              SUCCESS=true
+              break
+          else
+              echo "Metric GENERATOR_SOURCE_DOUBLE not found or malformed." >&3
+          fi
       fi
 
       sleep 1
   done
 
   if [ "$SUCCESS" != "true" ]; then
-      echo "ERROR: Endpoint $ENDPOINT not reachable after $NUM_TRIES attempts" >&2
+      echo "ERROR: Metrics endpoint $ENDPOINT not reachable after $NUM_TRIES attempts" >&2
       exit 1
   fi
 }

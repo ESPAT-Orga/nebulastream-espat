@@ -48,8 +48,7 @@
     "boost-url",
     "simdjson",
     "highs",
-    "simdjson",
-    "prometheus-cpp"
+    "simdjson"
   ],
   "overrides": [
     {

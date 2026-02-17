@@ -109,7 +109,7 @@ function setup_distributed() {
 }
 
 DOCKER_NES_CLI() {
-  docker compose run --rm nes-cli nes-cli "$@"
+  COMPOSE_PROGRESS=quiet docker compose run --rm nes-cli nes-cli "$@"
 }
 
 assert_json_equal() {
@@ -131,6 +131,55 @@ assert_json_contains() {
     echo "Expected (subset): $expected"
     echo "Actual: $actual"
     return 1
+  fi
+}
+
+@test "launch prometheus query" {
+  setup_distributed tests/good/prometheus-sink.yaml
+
+  run DOCKER_NES_CLI -t tests/good/prometheus-sink.yaml start 'select DOUBLE from GENERATOR_SOURCE INTO PROMETHEUS_SINK'
+  [ "$status" -eq 0 ]
+  [ -f "$output" ]
+  QUERY_ID=$output
+
+  sleep 1
+
+  run DOCKER_NES_CLI -t tests/good/prometheus-sink.yaml status "$QUERY_ID"
+  [ "$status" -eq 0 ]
+  echo "${output}" | jq -e '(. | length) == 3' # 1 global + 2 local
+  QUERY_STATUS=$(echo "$output" | jq -r --arg query_id "$QUERY_ID" '.[] | select(.query_id == $query_id and (has("local_query_id") | not)) | .query_status')
+  [ "$QUERY_STATUS" = "Running" ]
+
+  NUM_TRIES=5
+  ENDPOINT="http://localhost:4356/metrics"
+  SUCCESS=false
+
+  for ((i=1; i<=NUM_TRIES; i++)); do
+      echo "Attempt $i" >&3
+
+      RESPONSE=$(docker compose exec -T worker-2 \
+          curl -sf "$ENDPOINT" 2>/dev/null)
+
+      if [ $? -eq 0 ]; then
+          echo "Endpoint reachable. First successful response:" >&3
+          echo "$RESPONSE" >&3
+
+          # Check for existence of metric in output
+          if echo "$RESPONSE" | grep -Eq '^GENERATOR_SOURCE_DOUBLE[[:space:]]-?[0-9]+(\.[0-9]+)?$'; then
+              echo "Metric check passed." >&3
+              SUCCESS=true
+              break
+          else
+              echo "Metric GENERATOR_SOURCE_DOUBLE not found or malformed." >&3
+          fi
+      fi
+
+      sleep 1
+  done
+
+  if [ "$SUCCESS" != "true" ]; then
+      echo "ERROR: Metrics endpoint $ENDPOINT not reachable after $NUM_TRIES attempts" >&2
+      exit 1
   fi
 }
 

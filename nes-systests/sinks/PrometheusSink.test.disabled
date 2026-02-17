@@ -7,7 +7,7 @@
 # this test will failed (it is therefore disabled
 # To verify that the metrics get exposed properly, you can
 #
-# 1. run "curl localhost:8080/metrics" to display the raw metrics
+# 1. run "curl localhost:8888/metrics" to display the raw metrics
 #
 # 2.
 #   - Download prometheus from https://prometheus.io/download/
@@ -26,7 +26,7 @@
 #
 #     #static_configs:
 #     static_configs:
-#       - targets: ["localhost:8080"]
+#       - targets: ["localhost:8888"]
 #         labels:
 #           app: "singleNode"
 ###############################################################################
@@ -44,5 +44,5 @@ CREATE PHYSICAL SOURCE FOR generator10K TYPE Generator SET(
 # This test will not terminate for a long time and then fail. It can be used running in paralel to
 # a prometheus server that consumes the exposed metrics
 # Setting INPUT_FORMAT has not effect but has to be set to keep the test from crashing
-SELECT * FROM generator10K INTO Prometheus('127.0.0.1:8080' AS `SINK`.SERVER_URL, 'CSV' AS `SINK`.INPUT_FORMAT);
+SELECT * FROM generator10K INTO Prometheus('127.0.0.1:8888' AS `SINK`.SERVER_URL, 'CSV' AS `SINK`.INPUT_FORMAT);
 ----

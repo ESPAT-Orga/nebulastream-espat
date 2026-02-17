@@ -21,7 +21,7 @@ add_library(nes-sinks ${NES_SINKS_SOURCE_FILES})
 FetchContent_Declare(
         prometheus_cpp
         GIT_REPOSITORY https://github.com/jupp0r/prometheus-cpp.git
-        GIT_TAG        master 
+        GIT_TAG        master
 )
 
 # Disable Prometheus tests to avoid gmock dependency conflicts

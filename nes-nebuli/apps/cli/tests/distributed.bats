@@ -150,6 +150,29 @@ assert_json_contains() {
   echo "${output}" | jq -e '(. | length) == 3' # 1 global + 2 local
   QUERY_STATUS=$(echo "$output" | jq -r --arg query_id "$QUERY_ID" '.[] | select(.query_id == $query_id and (has("local_query_id") | not)) | .query_status')
   [ "$QUERY_STATUS" = "Running" ]
+
+  NUM_TRIES=5
+  ENDPOINT="http://localhost:4356/metrics"   # <-- adjust port/path if needed
+  SUCCESS=false
+
+  for ((i=1; i<=NUM_TRIES; i++)); do
+      echo "Attempt $i" >&3
+
+      # Exec curl inside worker-2 container
+      if docker compose exec -T worker-2 \
+          curl -sf -o /dev/null "$ENDPOINT"; then
+          echo "Endpoint reachable. Breaking." >&3
+          SUCCESS=true
+          break
+      fi
+
+      sleep 1
+  done
+
+  if [ "$SUCCESS" != "true" ]; then
+      echo "ERROR: Endpoint $ENDPOINT not reachable after $NUM_TRIES attempts" >&2
+      exit 1
+  fi
 }
 
 @test "launch query from topology" {

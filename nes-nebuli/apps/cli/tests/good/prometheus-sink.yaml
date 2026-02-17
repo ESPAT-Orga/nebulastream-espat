@@ -26,7 +26,7 @@ sinks:
     type: Prometheus
     config:
       input_format: CSV
-      server_url: 127.0.0.1:4356
+      server_url: localhost:4356
       file_path: dummy_path
 
 

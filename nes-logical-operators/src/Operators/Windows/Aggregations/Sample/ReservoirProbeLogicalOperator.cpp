@@ -17,25 +17,15 @@
 #include <cstddef>
 #include <string>
 #include <string_view>
-#include <unordered_map>
 #include <utility>
-#include <variant>
 #include <vector>
-#include <Configurations/Descriptor.hpp>
-#include <Functions/FieldAssignmentLogicalFunction.hpp>
 #include <Identifiers/Identifiers.hpp>
 #include <Operators/LogicalOperator.hpp>
-#include <Operators/Windows/WindowedAggregationLogicalOperator.hpp>
-#include <Serialization/FunctionSerializationUtil.hpp>
-#include <Serialization/SchemaSerializationUtil.hpp>
 #include <Traits/Trait.hpp>
-#include <Util/Logger/Logger.hpp>
 #include <Util/PlanRenderer.hpp>
 #include <fmt/format.h>
 #include <ErrorHandling.hpp>
 #include <LogicalOperatorRegistry.hpp>
-#include <SerializableOperator.pb.h>
-#include <SerializableVariantDescriptor.pb.h>
 
 namespace NES
 {
@@ -150,90 +140,48 @@ std::string ReservoirProbeLogicalOperator::explain(ExplainVerbosity verbosity, O
     {
         return fmt::format("RESERVOIR_PROBE(opId: {}, statHash: {}, sampleSchema: {})", id, statisticHash, sampleSchema);
     }
-    std::string joined = sampleSchema.getFieldNames() | std::views::transform([](const auto& s) -> std::string_view { return s; })
-        | std::views::join_with(',') | std::ranges::to<std::string>();
+    std::string joined;
+    const auto& fields = sampleSchema.getFieldNames();
+
+    for (size_t i = 0; i < fields.size(); ++i)
+    {
+        if (i > 0)
+            joined += ',';
+        joined += fields[i];
+    }
     return fmt::format("RESERVOIR_PROBE({})", joined);
 }
 
-void ReservoirProbeLogicalOperator::serialize(SerializableOperator& serializableOperator) const
+Reflected Reflector<ReservoirProbeLogicalOperator>::operator()(const ReservoirProbeLogicalOperator& op) const
 {
-    SerializableLogicalOperator proto;
-
-    proto.set_operator_type(NAME);
-    const auto inputs = getInputSchemas();
-    for (size_t i = 0; i < inputs.size(); ++i)
+    std::vector<detail::ReflectedSchemaField> fields;
+    for (const auto& field : op.sampleSchema)
     {
-        auto* inSch = proto.add_input_schemas();
-        SchemaSerializationUtil::serializeSchema(inputs[i], inSch);
+        fields.push_back({field.name, static_cast<uint8_t>(field.dataType.type)});
     }
+    return reflect(detail::ReflectedReservoirProbeLogicalOperator{.statisticHash = op.statisticHash, .sampleFields = fields});
+}
 
-    auto* outSch = proto.mutable_output_schema();
-    SchemaSerializationUtil::serializeSchema(getOutputSchema(), outSch);
-
-    for (const auto& child : getChildren())
+ReservoirProbeLogicalOperator Unreflector<ReservoirProbeLogicalOperator>::operator()(const Reflected& reflected) const
+{
+    auto [statisticHash, sampleFields] = unreflect<detail::ReflectedReservoirProbeLogicalOperator>(reflected);
+    Schema sampleSchema;
+    for (const auto& field : sampleFields)
     {
-        serializableOperator.add_children_ids(child.getId().getRawValue());
+        sampleSchema.addField(field.name, DataType{static_cast<DataType::Type>(field.dataType)});
     }
-
-    auto serializeAndAddToConfig = [&serializableOperator](const Schema::Field& field, const std::string& configKey)
-    {
-        SerializableSchema_SerializableField inputSerializableField;
-        SchemaSerializationUtil::serializeField(field, &inputSerializableField);
-        (*serializableOperator.mutable_config())[configKey] = descriptorConfigTypeToProto(inputSerializableField);
-    };
-
-    serializeAndAddToConfig(statisticEndTsField, LogicalStatisticFields::ConfigParameters::STATISTIC_END_TS);
-    serializeAndAddToConfig(statisticStartTsField, LogicalStatisticFields::ConfigParameters::STATISTIC_START_TS);
-    serializeAndAddToConfig(statisticHashField, LogicalStatisticFields::ConfigParameters::STATISTIC_HASH_FIELD);
-    serializeAndAddToConfig(statisticNumberOfSeenTuplesField, LogicalStatisticFields::ConfigParameters::STATISTIC_NUMBER_OF_SEEN_TUPLES);
-    (*serializableOperator.mutable_config())[ConfigParameters::STATISTIC_HASH] = descriptorConfigTypeToProto(statisticHash);
-
-    SerializableSchema serializedSampleSchema;
-    SchemaSerializationUtil::serializeSchema(sampleSchema, &serializedSampleSchema);
-    (*serializableOperator.mutable_config())[ConfigParameters::SAMPLE_SCHEMA] = descriptorConfigTypeToProto(serializedSampleSchema);
-
-    serializableOperator.mutable_operator_()->CopyFrom(proto);
+    return ReservoirProbeLogicalOperator{statisticHash, sampleSchema};
 }
 
 LogicalOperatorRegistryReturnType
 LogicalOperatorGeneratedRegistrar::RegisterReservoirProbeLogicalOperator(NES::LogicalOperatorRegistryArguments arguments)
 {
-    auto statisticHashValue = std::get_if<uint64_t>(&arguments.config[ReservoirProbeLogicalOperator::ConfigParameters::STATISTIC_HASH]);
-    INVARIANT(statisticHashValue, "Wrong value in ConfigParameter::STATISTIC_HASH!");
-
-    auto sampleSchemaSerialized = arguments.config[ReservoirProbeLogicalOperator::ConfigParameters::SAMPLE_SCHEMA];
-    if (not std::holds_alternative<NES::SerializableSchema>(sampleSchemaSerialized))
+    if (!arguments.reflected.isEmpty())
     {
-        throw UnknownLogicalOperator();
+        return unreflect<ReservoirProbeLogicalOperator>(arguments.reflected);
     }
-    const auto sampleSchema = SchemaSerializationUtil::deserializeSchema(std::get<NES::SerializableSchema>(sampleSchemaSerialized));
-
-    auto statisticEndTs = arguments.config[LogicalStatisticFields::ConfigParameters::STATISTIC_END_TS];
-    auto statisticStartTs = arguments.config[LogicalStatisticFields::ConfigParameters::STATISTIC_START_TS];
-    auto statisticHash = arguments.config[LogicalStatisticFields::ConfigParameters::STATISTIC_HASH_FIELD];
-    auto statisticNumberOfSeenTuples = arguments.config[LogicalStatisticFields::ConfigParameters::STATISTIC_NUMBER_OF_SEEN_TUPLES];
-    if (not std::holds_alternative<NES::SerializableSchema_SerializableField>(statisticEndTs)
-        or not std::holds_alternative<NES::SerializableSchema_SerializableField>(statisticStartTs)
-        or not std::holds_alternative<NES::SerializableSchema_SerializableField>(statisticHash)
-        or not std::holds_alternative<NES::SerializableSchema_SerializableField>(statisticNumberOfSeenTuples))
-    {
-        throw UnknownLogicalOperator();
-    }
-    const auto statisticEndTsField
-        = SchemaSerializationUtil::deserializeField(std::get<NES::SerializableSchema_SerializableField>(statisticEndTs));
-    const auto statisticStartTsField
-        = SchemaSerializationUtil::deserializeField(std::get<NES::SerializableSchema_SerializableField>(statisticStartTs));
-    const auto statisticHashField
-        = SchemaSerializationUtil::deserializeField(std::get<NES::SerializableSchema_SerializableField>(statisticHash));
-    const auto statisticNumberOfSeenTuplesField
-        = SchemaSerializationUtil::deserializeField(std::get<NES::SerializableSchema_SerializableField>(statisticNumberOfSeenTuples));
-
-
-    auto logicalOperator = ReservoirProbeLogicalOperator(
-        *statisticHashValue,
-        sampleSchema,
-        LogicalStatisticFields{statisticNumberOfSeenTuplesField, statisticHashField, statisticStartTsField, statisticEndTsField});
-    return logicalOperator.withInferredSchema(arguments.inputSchemas);
+    PRECONDITION(false, "Expected arguments are missing");
+    std::unreachable();
 }
 
 }

@@ -150,8 +150,14 @@ std::string ReservoirProbeLogicalOperator::explain(ExplainVerbosity verbosity, O
     {
         return fmt::format("RESERVOIR_PROBE(opId: {}, statHash: {}, sampleSchema: {})", id, statisticHash, sampleSchema);
     }
-    std::string joined = sampleSchema.getFieldNames() | std::views::transform([](const auto& s) -> std::string_view { return s; })
-        | std::views::join_with(',') | std::ranges::to<std::string>();
+    std::string joined;
+    const auto& fields = sampleSchema.getFieldNames();
+
+    for (size_t i = 0; i < fields.size(); ++i) {
+        if (i > 0)
+            joined += ',';
+        joined += fields[i];
+    }
     return fmt::format("RESERVOIR_PROBE({})", joined);
 }
 

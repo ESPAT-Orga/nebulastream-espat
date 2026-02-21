@@ -8,7 +8,7 @@
 # To verify that the metrics get exposed properly, you can
 #
 # 1. run "curl localhost:8888/metrics" to display the raw metrics
-#
+# You will see something like this returned:
 # 2.
 #   - Download prometheus from https://prometheus.io/download/
 #   - replace the contents of prometheus.yml with the configuration given below
@@ -41,8 +41,8 @@ CREATE PHYSICAL SOURCE FOR generator10K TYPE Generator SET(
        'SEQUENCE FLOAT64 0 10000 1, SEQUENCE INT64 0 100 1' AS `SOURCE`.GENERATOR_SCHEMA
 );
 
-# This test will not terminate for a long time and then fail. It can be used running in paralel to
+# This test will not terminate for a long time and then fail. It can be used running in parallel to
 # a prometheus server that consumes the exposed metrics
-# Setting INPUT_FORMAT has not effect but has to be set to keep the test from crashing
+# Setting INPUT_FORMAT has no effect but has to be set to keep the test from crashing.
 SELECT * FROM generator10K INTO Prometheus('127.0.0.1:8888' AS `SINK`.SERVER_URL, 'CSV' AS `SINK`.INPUT_FORMAT);
 ----

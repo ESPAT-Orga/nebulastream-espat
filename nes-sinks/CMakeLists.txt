@@ -28,7 +28,7 @@ FetchContent_Declare(
 set(ENABLE_TESTING OFF CACHE BOOL "Disable Prometheus tests" FORCE)
 # Disable push to avoid dependency on curl
 set(ENABLE_PUSH OFF CACHE BOOL "Disable prometheus push" FORCE)
-set(GENERATE_PKGCONFIG OFF CACHE BOOL "Disable prometheus push" FORCE)
+set(GENERATE_PKGCONFIG OFF CACHE BOOL "Disable pkgconfig" FORCE)
 
 # Build static
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build shared libraries" FORCE)

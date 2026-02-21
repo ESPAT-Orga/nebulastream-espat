@@ -25,6 +25,9 @@
 namespace NES
 {
 /// This class emits collected backpressure statistics via tcp
+/// Until a StatisticsSource is implemenented to allow ingesiting collected statistics 
+/// directly into a NES query, this class can be used in conjunction with a TCP source 
+/// as a workaround to allow the processing of statistics data via NES qeries.
 struct BackpressureStatisticTcpEmitter final : BackpressureStatisticListener
 {
     void onEvent(BackpressureEvent event) override;

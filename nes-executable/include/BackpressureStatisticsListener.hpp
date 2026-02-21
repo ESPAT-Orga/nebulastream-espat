@@ -29,6 +29,7 @@ struct BaseBackpressureEvent
     BaseBackpressureEvent() = default;
 
     ChronoClock::time_point timestamp = ChronoClock::now();
+    //record the channel id so that backpressure events can be matched to a specific query
     std::string channelId = "INVALID";
 };
 

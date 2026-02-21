@@ -43,10 +43,11 @@ void CompositeStatisticListener::onEvent(BufferManagerEvent event)
 
 void CompositeStatisticListener::onEvent(BackpressureEvent event)
 {
-    for (auto& listener : backpressureListeners)
-    {
+    std::for_each(backpressureListeners.begin(), backpressureListeners.end(),
+    [&event](auto& listener) {
         listener->onEvent(event);
     }
+);
 }
 
 void CompositeStatisticListener::addQueryEngineListener(std::shared_ptr<QueryEngineStatisticListener> listener)

@@ -83,6 +83,9 @@ void BackpressureStatisticTcpEmitter::threadRoutine(const std::stop_token& token
     {
         asio::io_context io;
 
+        /// This opens a tcp server which will expose the collected statistics to exactly one client
+        /// Creating a NES-TcpSource which connects as a client to this server, allows processing
+        /// statistics data using a reguler NES query
         tcp::endpoint endpoint(asio::ip::make_address(hostAddress), port);
         tcp::acceptor acceptor(io);
         acceptor.open(endpoint.protocol());

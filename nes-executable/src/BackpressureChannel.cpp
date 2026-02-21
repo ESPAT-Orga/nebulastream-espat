@@ -74,6 +74,19 @@ bool BackpressureController::applyPressure(const std::string& channelId)
     return newPressure;
 }
 
+bool BackpressureController::isScheduledToSend(const std::string& channelId)
+{
+    const auto old = std::exchange(*channel->stateMtx.lock(), Channel::CLOSED);
+    INVARIANT(old != Channel::DESTROYED, "The backpressureController is still alive thus the channel should not have been destroyed");
+
+    bool newPressure = old == Channel::OPEN;
+    if (backpressureStatisticListener && newPressure)
+    {
+        backpressureStatisticListener->onEvent(NES::ApplyPressureEvent(channelId));
+    }
+    return newPressure;
+}
+
 bool BackpressureController::releasePressure(const std::string& channelId)
 {
     const auto old = std::exchange(*channel->stateMtx.lock(), Channel::OPEN);

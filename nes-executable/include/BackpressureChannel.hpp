@@ -54,6 +54,7 @@ public:
     BackpressureController& operator=(BackpressureController&& other) noexcept = default;
 
     bool applyPressure(const std::string& channelId);
+    bool isScheduledToSend(const std::string& channelId);
     bool releasePressure(const std::string& channelId);
     void setStatisticListener(std::shared_ptr<NES::BackpressureStatisticListener> listener);
 

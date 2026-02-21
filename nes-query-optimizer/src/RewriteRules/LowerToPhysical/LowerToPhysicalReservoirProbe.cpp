@@ -49,7 +49,7 @@ RewriteRuleResultSubgraph LowerToPhysicalReservoirProbe::apply(LogicalOperator l
     PRECONDITION(logicalOperator.tryGetAs<ReservoirProbeLogicalOperator>(), "Expected a ReservoirProbeLogicalOperator");
     const auto memoryLayoutTypeTrait = logicalOperator.getTraitSet().tryGet<MemoryLayoutTypeTrait>();
     PRECONDITION(memoryLayoutTypeTrait.has_value(), "Expected a memory layout type trait");
-    const auto memoryLayoutType = memoryLayoutTypeTrait.value().memoryLayout;
+    const auto memoryLayoutType = memoryLayoutTypeTrait.value()->memoryLayout;
     const auto reservoirProbe = logicalOperator.getAs<ReservoirProbeLogicalOperator>();
     auto statisticStore = NodeEngine::getStatisticStore();
     auto statisticStoreReaderOperatorHandler = std::make_shared<StatisticStoreOperatorHandler>(std::move(statisticStore));

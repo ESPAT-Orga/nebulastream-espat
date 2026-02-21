@@ -41,7 +41,7 @@ nautilus::val<uint64_t> getRecordDataSizeForSample(const Record& record, const T
         if (type.isSameDataType<VariableSizedData>())
         {
             const auto textValue = record.read(names[i]).cast<VariableSizedData>();
-            recordDataSize += textValue.getTotalSize();
+            recordDataSize += textValue.getSize();
         }
     }
     return recordDataSize;
@@ -154,8 +154,8 @@ ReservoirSamplePhysicalFunction::lower(nautilus::val<AggregationState*> aggregat
             if (type.isSameDataType<VariableSizedData>())
             {
                 const auto varSizedValue = value.cast<VariableSizedData>();
-                nautilus::memcpy(sampleTuplesMemArea, varSizedValue.getReference(), varSizedValue.getTotalSize());
-                sampleTuplesMemArea += varSizedValue.getTotalSize();
+                nautilus::memcpy(sampleTuplesMemArea, varSizedValue.getContent(), varSizedValue.getSize());
+                sampleTuplesMemArea += varSizedValue.getSize();
             }
             else
             {
@@ -181,7 +181,7 @@ ReservoirSamplePhysicalFunction::lower(nautilus::val<AggregationState*> aggregat
     /// Add the reservoir to the result record
     Record resultRecord;
     resultRecord.write(numberOfSeenTuplesFieldName, numberOfSeenTuples);
-    resultRecord.write(resultFieldIdentifier, VariableSizedData{sampleMemory});
+    resultRecord.write(resultFieldIdentifier, VariableSizedData{sampleMemory, requiredMemoryInBytes});
     return resultRecord;
 }
 

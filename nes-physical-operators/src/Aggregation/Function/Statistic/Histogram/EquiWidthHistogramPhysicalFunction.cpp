@@ -90,11 +90,11 @@ EquiWidthHistogramPhysicalFunction::lower(nautilus::val<AggregationState*> aggre
 {
     /// Need to acquire new memory, as the current memory for the bins will be deleted.
     /// We need an additional 4B for the size of the variable sized data, as we store the statistics as var-sized data.
-    const auto histogramMemorySize = getSizeOfStateInBytes() + 4;
+    const auto histogramMemorySize = getSizeOfStateInBytes();
     const auto histogramMemory = pipelineMemoryProvider.arena.allocateMemory(histogramMemorySize);
 
     /// Copying all bins to the newly acquired memory and adding the size of the variable sized data (histogram)
-    nautilus::memcpy(histogramMemory + nautilus::val<uint64_t>{4}, aggregationState, getSizeOfStateInBytes());
+    nautilus::memcpy(histogramMemory, aggregationState, getSizeOfStateInBytes());
     const nautilus::val<uint32_t> sizeOfVariableSizedData{static_cast<uint32_t>(getSizeOfStateInBytes())};
     VarVal{sizeOfVariableSizedData}.writeToMemory(histogramMemory);
 
@@ -106,7 +106,7 @@ EquiWidthHistogramPhysicalFunction::lower(nautilus::val<AggregationState*> aggre
     /// Adding the histogram to the result record
     Record record;
     record.write(numberOfSeenTuplesFieldName, numberOfSeenTuples);
-    record.write(resultFieldIdentifier, VariableSizedData{histogramMemory});
+    record.write(resultFieldIdentifier, VariableSizedData{histogramMemory, histogramMemorySize});
     return record;
 }
 

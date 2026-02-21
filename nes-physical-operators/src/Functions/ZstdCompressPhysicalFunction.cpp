@@ -38,7 +38,8 @@ VarVal ZstdCompressPhysicalFunction::execute(const Record& record, ArenaRef& are
     {
         auto varSizedValueInput = value.cast<VariableSizedData>();
         valueMem = varSizedValueInput.getContent();
-        valueSize = varSizedValueInput.getContentSize();
+        //valueSize = varSizedValueInput.getContentSize();
+        valueSize = varSizedValueInput.getSize();
     }
     else
     {
@@ -61,7 +62,8 @@ VarVal ZstdCompressPhysicalFunction::execute(const Record& record, ArenaRef& are
     auto memCompressedVarSized = arena.allocateMemory(compressedVarSizedTotalSize);
     nautilus::invoke(copyCompressionResultAndSize, memCompressedVarSized, tempBufferCompressed, compressedSize);
 
-    VariableSizedData compressedDataVarsized(memCompressedVarSized);
+    //VariableSizedData compressedDataVarsized(memCompressedVarSized);
+    VariableSizedData compressedDataVarsized(memCompressedVarSized, compressedVarSizedTotalSize);
     return compressedDataVarsized;
 }
 

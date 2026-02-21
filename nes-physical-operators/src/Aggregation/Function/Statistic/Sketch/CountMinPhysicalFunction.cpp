@@ -104,7 +104,7 @@ Record CountMinPhysicalFunction::lower(nautilus::val<AggregationState*> aggregat
 {
     /// Need to acquire new memory, as the current allocated aggregation state for the counters will be deleted.
     /// We need an additional 4B for the size of the variable sized data, as we store the statistics as var-sized data.
-    const auto countMinSize = totalSizeOfSketchInBytes + 4;
+    const auto countMinSize = totalSizeOfSketchInBytes;
     const auto countMinMemory = pipelineMemoryProvider.arena.allocateMemory(countMinSize);
 
     /// Copying all counters to the newly acquired memory and adding the size of the variable sized data (count min sketch)
@@ -120,7 +120,7 @@ Record CountMinPhysicalFunction::lower(nautilus::val<AggregationState*> aggregat
     /// Adding the count min to the result record
     Record record;
     record.write(numberOfSeenTuplesFieldName, numberOfSeenTuples);
-    record.write(resultFieldIdentifier, VariableSizedData{countMinMemory});
+    record.write(resultFieldIdentifier, VariableSizedData{countMinMemory, totalSizeOfSketchInBytes});
     return record;
 }
 

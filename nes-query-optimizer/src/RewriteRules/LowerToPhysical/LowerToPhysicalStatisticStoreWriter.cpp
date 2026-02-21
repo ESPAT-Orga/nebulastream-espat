@@ -28,7 +28,7 @@ RewriteRuleResultSubgraph LowerToPhysicalStatisticStoreWriter::apply(LogicalOper
     PRECONDITION(logicalOperator.tryGetAs<StatisticStoreWriterLogicalOperator>(), "Expected a StatisticStoreWriterLogicalOperator");
     const auto memoryLayoutTypeTrait = logicalOperator.getTraitSet().tryGet<MemoryLayoutTypeTrait>();
     PRECONDITION(memoryLayoutTypeTrait.has_value(), "Expected a memory layout type trait");
-    const auto memoryLayoutType = memoryLayoutTypeTrait.value().memoryLayout;
+    const auto memoryLayoutType = memoryLayoutTypeTrait.value()->memoryLayout;
 
     const auto logicalStatisticStoreWriter = logicalOperator.getAs<StatisticStoreWriterLogicalOperator>();
     auto inputSchema = logicalStatisticStoreWriter.getInputSchemas()[0];

@@ -82,8 +82,9 @@ void StatisticStoreWriter::execute(ExecutionContext& executionCtx, Record& recor
     const nautilus::val<Statistic::StatisticType> statisticTypeVal{statisticType};
     const nautilus::val<Timestamp> startTs{record.read(inputStatisticStartTsFieldName).cast<nautilus::val<Timestamp::Underlying>>()};
     const nautilus::val<Timestamp> endTs{record.read(inputStatisticEndTsFieldName).cast<nautilus::val<Timestamp::Underlying>>()};
-    const auto statisticData = record.read(inputStatisticDataFieldName).cast<VariableSizedData>().getReference();
-    const auto totalSizeOfStatisticData = record.read(inputStatisticDataFieldName).cast<VariableSizedData>().getTotalSize();
+    //TODO: exchanging getReference with getContent will probably not yield what the invoked function expects
+    const auto statisticData = record.read(inputStatisticDataFieldName).cast<VariableSizedData>().getContent();
+    const auto totalSizeOfStatisticData = record.read(inputStatisticDataFieldName).cast<VariableSizedData>().getSize();
     const auto numberOfSeenTuples = record.read(inputStatisticNumberOfSeenTuplesFieldName).cast<nautilus::val<uint64_t>>();
     invoke(
         insertStatisticIntoStoreProxy,

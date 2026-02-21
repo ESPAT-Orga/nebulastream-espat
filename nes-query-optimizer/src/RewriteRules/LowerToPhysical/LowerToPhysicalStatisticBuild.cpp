@@ -127,7 +127,7 @@ getAggregationPhysicalFunctions(const StatisticBuildLogicalOperator& logicalOper
         const auto resultFieldIdentifier = descriptor->getAsField().getFieldName();
         const auto memoryLayoutTypeTrait = logicalOperator.getTraitSet().tryGet<MemoryLayoutTypeTrait>();
         PRECONDITION(memoryLayoutTypeTrait.has_value(), "Expected a memory layout type trait");
-        const auto memoryLayoutType = memoryLayoutTypeTrait.value().memoryLayout;
+        const auto memoryLayoutType = memoryLayoutTypeTrait.value()->memoryLayout;
         auto bufferRef
             = LowerSchemaProvider::lowerSchema(configuration.pageSize.getValue(), logicalOperator.getInputSchemas()[0], memoryLayoutType);
 
@@ -187,16 +187,16 @@ RewriteRuleResultSubgraph LowerToPhysicalStatisticBuild::apply(LogicalOperator l
     PRECONDITION(outputOriginIdsOpt.has_value(), "Expected the outputOriginIds trait to be set");
     PRECONDITION(inputOriginIdsOpt.has_value(), "Expected the inputOriginIds trait to be set");
     auto& outputOriginIds = outputOriginIdsOpt.value();
-    PRECONDITION(std::ranges::size(outputOriginIds) == 1, "Expected one output origin id");
+    PRECONDITION(outputOriginIds->size() == 1, "Expected one output origin id");
     PRECONDITION(logicalOperator.getInputSchemas().size() == 1, "Expected one input schema");
     const auto memoryLayoutTypeTrait = logicalOperator.getTraitSet().tryGet<MemoryLayoutTypeTrait>();
     PRECONDITION(memoryLayoutTypeTrait.has_value(), "Expected a memory layout type trait");
-    const auto memoryLayoutType = memoryLayoutTypeTrait.value().memoryLayout;
+    const auto memoryLayoutType = memoryLayoutTypeTrait.value()->memoryLayout;
 
     auto aggregation = logicalOperator.getAs<StatisticBuildLogicalOperator>();
     auto handlerId = getNextOperatorHandlerId();
     auto outputSchema = aggregation.getOutputSchema();
-    auto outputOriginId = outputOriginIds[0];
+    auto outputOriginId = outputOriginIds->operator[](0);
     auto inputOriginIds = inputOriginIdsOpt.value();
     auto windowType = std::dynamic_pointer_cast<Windowing::TimeBasedWindowType>(aggregation->getWindowType());
     auto timeFunction = getTimeFunction(*aggregation);
@@ -217,7 +217,7 @@ RewriteRuleResultSubgraph LowerToPhysicalStatisticBuild::apply(LogicalOperator l
         auto loweredFunctionType = nodeFunctionKey.getDataType();
         if (loweredFunctionType.isType(DataType::Type::VARSIZED))
         {
-            loweredFunctionType.type = DataType::Type::VARSIZED_POINTER_REP;
+            loweredFunctionType.type = DataType::Type::VARSIZED;
             const bool fieldReplaceSuccess = newInputSchema.replaceTypeOfField(nodeFunctionKey.getFieldName(), loweredFunctionType);
             INVARIANT(fieldReplaceSuccess, "Expect to change the type of {} for {}", nodeFunctionKey.getFieldName(), newInputSchema);
         }
@@ -249,7 +249,7 @@ RewriteRuleResultSubgraph LowerToPhysicalStatisticBuild::apply(LogicalOperator l
     auto sliceAndWindowStore
         = std::make_unique<DefaultTimeBasedSliceStore>(windowType->getSize().getTime(), windowType->getSlide().getTime());
     auto handler = std::make_shared<AggregationOperatorHandler>(
-        inputOriginIds | std::ranges::to<std::vector>(), outputOriginId, std::move(sliceAndWindowStore), conf.maxNumberOfBuckets);
+        std::vector(inputOriginIds->begin(), inputOriginIds->end()), outputOriginId, std::move(sliceAndWindowStore), conf.maxNumberOfBuckets);
     auto build = AggregationBuildPhysicalOperator(handlerId, std::move(timeFunction), aggregationPhysicalFunctions, hashMapOptions);
     auto probe = AggregationProbePhysicalOperator(hashMapOptions, aggregationPhysicalFunctions, handlerId, windowMetaData);
 

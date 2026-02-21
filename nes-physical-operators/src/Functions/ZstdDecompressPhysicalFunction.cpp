@@ -43,7 +43,7 @@ VarVal ZstdDecompressPhysicalFunction::execute(const Record& record, ArenaRef& a
             +[](const uint8_t* compressed, size_t inputSize)
             { return static_cast<uint64_t>(ZSTD_getFrameContentSize(compressed, inputSize)); },
             varSizedValueCompressed.getContent(),
-            varSizedValueCompressed.getContentSize());
+            varSizedValueCompressed.getSize());
 
         /// if it is possible to perform an arena allocation outside of nautilus, the number of invokes could be reduced to one for the
         /// whole function
@@ -52,12 +52,12 @@ VarVal ZstdDecompressPhysicalFunction::execute(const Record& record, ArenaRef& a
 
         nautilus::invoke(
             decompressVarSized,
-            varSizedValueCompressed.getContentSize(),
+            varSizedValueCompressed.getSize(),
             varSizedValueCompressed.getContent(),
             decompressedSize,
             memDecompressed);
 
-        return VariableSizedData(memDecompressed);
+        return VariableSizedData(memDecompressed, decompressedVarSizedTotalSize);
     }
     else
     {
@@ -66,7 +66,7 @@ VarVal ZstdDecompressPhysicalFunction::execute(const Record& record, ArenaRef& a
         memDecompressed = arena.allocateMemory(decompressedSize);
         nautilus::invoke(
             decompressFixedSize,
-            varSizedValueCompressed.getContentSize(),
+            varSizedValueCompressed.getSize(),
             varSizedValueCompressed.getContent(),
             decompressedSize,
             memDecompressed);

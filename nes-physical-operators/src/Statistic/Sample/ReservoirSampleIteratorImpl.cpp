@@ -30,12 +30,10 @@ Record ReservoirSampleIteratorImpl::operator*()
     auto fieldAddress = nextTupleMem;
     for (const auto& [fieldIdentifier, type, fieldOffset] : nautilus::static_iterable(sampleFields))
     {
-        nautilus::val<uint64_t> currFieldOffset = 0;
         if (type == DataType{DataType::Type::VARSIZED})
         {
-            VariableSizedData varSizedData{fieldAddress};
+            VariableSizedData varSizedData{fieldAddress, readValueFromMemRef<uint64_t>(fieldAddress)  + nautilus::val<uint64_t>(sizeof(uint64_t))};
             record.write(fieldIdentifier, varSizedData);
-            currFieldOffset = varSizedData.getTotalSize();
         }
         else
         {
@@ -55,8 +53,9 @@ StatisticProviderIteratorImpl& ReservoirSampleIteratorImpl::operator++()
         nautilus::val<uint64_t> currFieldOffset = fieldOffset;
         if (type.type == DataType::Type::VARSIZED)
         {
-            VariableSizedData varSizedData{nextTupleMem};
-            currFieldOffset = varSizedData.getTotalSize();
+            auto size = readValueFromMemRef<uint64_t>(nextTupleMem);
+            VariableSizedData varSizedData{nextTupleMem, readValueFromMemRef<uint64_t>(nextTupleMem) + nautilus::val<uint64_t>(sizeof(uint64_t))};
+            currFieldOffset = varSizedData.getSize();
         }
         nextTupleMem = nextTupleMem + currFieldOffset;
     }

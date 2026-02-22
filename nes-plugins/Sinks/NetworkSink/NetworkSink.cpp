@@ -48,6 +48,36 @@ namespace NES
 {
 
 std::optional<TupleBuffer>
+BackpressureHandler::checkAdaptiveScheduling(TupleBuffer buffer, BackpressureController& backpressureController, const std::string& channelId)
+{
+    auto rstate = stateLock.ulock();
+    if (rstate->hasBackpressure)
+    {
+        /// Backpressure is already signaled. We want to ensure that at least one TupleBuffer is floating around the TaskQueue,
+        /// so we can peridically test if we can send data again.
+        /// Otherwise, it might be possible that nothing triggers execution of this pipeline again, resulting in a deadlock
+        if (buffer.getSequenceNumber() == rstate->pendingSequenceNumber && buffer.getChunkNumber() == rstate->pendingChunkNumber)
+        {
+            /// We dedicate one seq/chunk number pair as the pending tuple buffer. If this is the pending tuple buffer we emit it again
+            return buffer;
+        }
+
+        const auto wstate = rstate.moveFromUpgradeToWrite();
+        wstate->buffered.emplace_back(std::move(buffer));
+        return {};
+    }
+
+    /// Apply backpressure now on the backpressureController, leading to blocked ingestion threads until pressure is released again onSuccess.
+    const auto wstate = rstate.moveFromUpgradeToWrite();
+    backpressureController.applyPressure(channelId);
+    NES_DEBUG("Backpressure: {}", wstate->buffered.size());
+    wstate->hasBackpressure = true;
+    wstate->pendingSequenceNumber = buffer.getSequenceNumber();
+    wstate->pendingChunkNumber = buffer.getChunkNumber();
+    return buffer;
+}
+
+std::optional<TupleBuffer>
 BackpressureHandler::onFull(TupleBuffer buffer, BackpressureController& backpressureController, const std::string& channelId)
 {
     auto rstate = stateLock.ulock();

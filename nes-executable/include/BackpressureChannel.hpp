@@ -20,6 +20,10 @@
 
 #include <BackpressureStatisticsListener.hpp>
 
+namespace NES
+{
+struct AdaptiveSendingScheduler;
+}
 struct Channel;
 class BackpressureListener;
 class BackpressureController;
@@ -60,6 +64,7 @@ public:
 
 private:
     std::shared_ptr<NES::BackpressureStatisticListener> backpressureStatisticListener;
+    std::shared_ptr<NES::AdaptiveSendingScheduler> adaptiveSendingScheduler;
 };
 
 /// Listener of the backpressure channel is the Ingestion type that is used by sources.

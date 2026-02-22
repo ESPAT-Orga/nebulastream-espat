@@ -50,6 +50,8 @@ class BackpressureHandler
     folly::Synchronized<State> stateLock;
 
 public:
+    std::optional<TupleBuffer>
+    checkAdaptiveScheduling(TupleBuffer buffer, BackpressureController& backpressureController, const std::string& channelId);
     std::optional<TupleBuffer> onFull(TupleBuffer buffer, BackpressureController& backpressureController, const std::string& channelId);
     std::optional<TupleBuffer> onSuccess(BackpressureController& backpressureController, const std::string& channelId);
     bool empty() const;

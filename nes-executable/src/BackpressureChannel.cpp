@@ -24,6 +24,7 @@
 
 #include <folly/Synchronized.h>
 
+#include <AdaptiveSendingScheduler.hpp>
 #include <ErrorHandling.hpp>
 
 /// Represents the state of the backpressure channel guarded by a mutex and communicated to the listener via the condition variable.
@@ -76,15 +77,7 @@ bool BackpressureController::applyPressure(const std::string& channelId)
 
 bool BackpressureController::isScheduledToSend(const std::string& channelId)
 {
-    const auto old = std::exchange(*channel->stateMtx.lock(), Channel::CLOSED);
-    INVARIANT(old != Channel::DESTROYED, "The backpressureController is still alive thus the channel should not have been destroyed");
-
-    bool newPressure = old == Channel::OPEN;
-    if (backpressureStatisticListener && newPressure)
-    {
-        backpressureStatisticListener->onEvent(NES::ApplyPressureEvent(channelId));
-    }
-    return newPressure;
+    return adaptiveSendingScheduler && adaptiveSendingScheduler->canSend(channelId);
 }
 
 bool BackpressureController::releasePressure(const std::string& channelId)

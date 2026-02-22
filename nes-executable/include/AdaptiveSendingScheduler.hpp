@@ -18,12 +18,14 @@
 #include <variant>
 #include <Identifiers/Identifiers.hpp>
 #include <Identifiers/NESStrongType.hpp>
+#include <folly/Synchronized.h>
 #include <BackpressureStatisticsListener.hpp>
 
 namespace NES
 {
 
 using Priority = uint64_t;
+//todo: can probably reduce this to priority only
 struct ChannelData
 {
     std::string channelId;
@@ -37,8 +39,10 @@ struct AdaptiveSendingScheduler : BackpressureStatisticListener {
     bool canSend(const std::string& channelId);
     void addChannel(const std::string& channelId, Priority priority);
 private:
-    std::unordered_map<std::string, ChannelData> channels;
-    std::map<Priority, std::vector<std::string>> underBackpressure;
+    //todo: ideally we can move this to the backpressure channel
+    folly::Synchronized<std::unordered_map<std::string, ChannelData>> channels;
+
+    folly::Synchronized<std::map<Priority, std::vector<std::string>>> underBackpressure;
     //TODO: remove this once we record more priorities
     Priority maxPriority = 0;
 };

@@ -65,7 +65,8 @@ std::ostream& operator<<(std::ostream& os, const ExecutableQueryPlan& instantiat
 std::unique_ptr<ExecutableQueryPlan> ExecutableQueryPlan::instantiate(
     CompiledQueryPlan& compiledQueryPlan,
     const SourceProvider& sourceProvider,
-    std::shared_ptr<BackpressureStatisticListener> backpressureStatisticListener)
+    std::shared_ptr<BackpressureStatisticListener> backpressureStatisticListener,
+    std::shared_ptr<AdaptiveSendingScheduler> adaptiveSendingScheduler)
 {
     std::vector<SourceWithSuccessor> instantiatedSources;
 
@@ -75,6 +76,7 @@ std::unique_ptr<ExecutableQueryPlan> ExecutableQueryPlan::instantiate(
     if (backpressureStatisticListener)
     {
         backpressureController.setStatisticListener(backpressureStatisticListener);
+        backpressureController.setAdaptiveSendingScheduler(adaptiveSendingScheduler);
     }
 
     if (compiledQueryPlan.sinks.size() != 1)

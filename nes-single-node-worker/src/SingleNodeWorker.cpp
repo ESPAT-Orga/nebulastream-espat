@@ -46,6 +46,8 @@
 #include <SingleNodeWorkerConfiguration.hpp>
 #include <WorkerStatus.hpp>
 
+#include "AdaptiveSendingScheduler.hpp"
+
 extern void initReceiverService(const std::string& connectionAddr, const NES::WorkerId& workerId);
 extern void initSenderService(const std::string& connectionAddr, const NES::WorkerId& workerId);
 
@@ -75,7 +77,15 @@ SingleNodeWorker::SingleNodeWorker(const SingleNodeWorkerConfiguration& configur
         listener->addBackpressureListener(backpressureStatisticListener);
     }
 
-    nodeEngine = NodeEngineBuilder(configuration.workerConfiguration, copyPtr(listener)).build(workerId);
+
+    std::shared_ptr<AdaptiveSendingScheduler> adaptiveSendingScheduler;
+    if (configuration.enableAdaptiveNetworkSending.getValue())
+    {
+        adaptiveSendingScheduler = std::make_shared<AdaptiveSendingScheduler>();
+        listener->addBackpressureListener(adaptiveSendingScheduler);
+    }
+
+    nodeEngine = NodeEngineBuilder(configuration.workerConfiguration, copyPtr(listener), adaptiveSendingScheduler).build(workerId);
 
     optimizer = std::make_unique<QueryOptimizer>(configuration.workerConfiguration.defaultQueryExecution);
     compiler = std::make_unique<QueryCompilation::QueryCompiler>();

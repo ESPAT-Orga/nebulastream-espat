@@ -26,12 +26,13 @@ class NodeEngineBuilder
 public:
     NodeEngineBuilder() = delete;
 
-    explicit NodeEngineBuilder(const WorkerConfiguration& workerConfiguration, std::shared_ptr<StatisticListener> statisticListener);
+    explicit NodeEngineBuilder(const WorkerConfiguration& workerConfiguration, std::shared_ptr<StatisticListener> statisticListener, std::shared_ptr<AdaptiveSendingScheduler> adaptiveSendingScheduler);
 
     std::unique_ptr<NodeEngine> build(WorkerId workerId);
 
 private:
     WorkerConfiguration workerConfiguration;
     std::shared_ptr<StatisticListener> statisticsListener;
+    std::shared_ptr<AdaptiveSendingScheduler> adaptiveSendingScheduler;
 };
 }

@@ -61,6 +61,7 @@ public:
     bool isScheduledToSend(const std::string& channelId);
     bool releasePressure(const std::string& channelId, bool adaptivelyThrottled);
     void setStatisticListener(std::shared_ptr<NES::BackpressureStatisticListener> listener);
+    void setAdaptiveSendingScheduler(std::shared_ptr<NES::AdaptiveSendingScheduler> scheduler);
 
 private:
     std::shared_ptr<NES::BackpressureStatisticListener> backpressureStatisticListener;

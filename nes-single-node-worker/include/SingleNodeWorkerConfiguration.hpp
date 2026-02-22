@@ -52,6 +52,12 @@ connections.  Valid values include dns:///localhost:1234,
     UIntOption backpressureStatisticsTCPEmissionPort
         = {"backpressure_statistics_tcp_emission_port", "9000", "The port for exposing backpressure statistics via tcp"};
 
+
+    BoolOption enableAdaptiveNetworkSending
+        = {"enable_adaptive_network_sending",
+       "true", //todo: set to false
+       "Adaptively throttle lower priority queries based on backpressure"};
+
 protected:
     std::vector<BaseOption*> getOptions() override;
 

@@ -27,8 +27,8 @@ namespace NES
 {
 
 
-NodeEngineBuilder::NodeEngineBuilder(const WorkerConfiguration& workerConfiguration, std::shared_ptr<StatisticListener> statisticsListener)
-    : workerConfiguration(workerConfiguration), statisticsListener(std::move(statisticsListener))
+NodeEngineBuilder::NodeEngineBuilder(const WorkerConfiguration& workerConfiguration, std::shared_ptr<StatisticListener> statisticsListener, std::shared_ptr<AdaptiveSendingScheduler> adaptiveSendingScheduler)
+    : workerConfiguration(workerConfiguration), statisticsListener(std::move(statisticsListener)), adaptiveSendingScheduler(std::move(adaptiveSendingScheduler))
 {
 }
 
@@ -49,6 +49,7 @@ std::unique_ptr<NodeEngine> NodeEngineBuilder::build(WorkerId workerId)
         std::move(bufferManager),
         statisticsListener,
         statisticsListener,
+        adaptiveSendingScheduler,
         std::move(queryLog),
         std::move(queryEngine),
         std::move(sourceProvider));

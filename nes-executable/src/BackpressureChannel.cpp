@@ -103,6 +103,11 @@ void BackpressureController::setStatisticListener(std::shared_ptr<NES::Backpress
     this->backpressureStatisticListener = listener;
 }
 
+void BackpressureController::setAdaptiveSendingScheduler(std::shared_ptr<NES::AdaptiveSendingScheduler> scheduler)
+{
+    this->adaptiveSendingScheduler = scheduler;
+}
+
 void BackpressureListener::wait(const std::stop_token& stopToken) const
 {
     auto state = channel->stateMtx.lock();

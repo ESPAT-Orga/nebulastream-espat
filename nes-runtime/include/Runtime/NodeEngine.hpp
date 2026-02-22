@@ -42,11 +42,11 @@ public:
     NodeEngine(const NodeEngine&) = delete;
     NodeEngine& operator=(const NodeEngine&) = delete;
     ~NodeEngine();
-
     NodeEngine(
         std::shared_ptr<BufferManager> bufferManager,
         std::shared_ptr<SystemEventListener> systemEventListener,
         std::shared_ptr<BackpressureStatisticListener> backpressureStatListener,
+        std::shared_ptr<AdaptiveSendingScheduler> adaptiveSendingScheduler,
         std::shared_ptr<QueryLog> queryLog,
         std::unique_ptr<QueryEngine> queryEngine,
         std::unique_ptr<SourceProvider> sourceProvider);
@@ -76,6 +76,7 @@ private:
 
     std::shared_ptr<SystemEventListener> systemEventListener;
     std::shared_ptr<BackpressureStatisticListener> backpressureStatListener;
+    std::shared_ptr<AdaptiveSendingScheduler> adaptiveSendingScheduler;
     std::unique_ptr<QueryEngine> queryEngine;
     std::unique_ptr<QueryTracker> queryTracker;
     std::unique_ptr<SourceProvider> sourceProvider;

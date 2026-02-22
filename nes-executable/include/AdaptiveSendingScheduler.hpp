@@ -28,15 +28,17 @@ struct ChannelData
 {
     std::string channelId;
     Priority priority;
-    bool hasBackpressure = false;
 };
 
 struct AdaptiveSendingScheduler : BackpressureStatisticListener {
+    void onEvent(BackpressureEvent event) override;
+    void applyPressure(const std::string& channelId);
+    void releasePressure(const std::string& channelId);
     bool canSend(const std::string& channelId);
     void addChannel(const std::string& channelId, Priority priority);
 private:
-    std::map<std::string, ChannelData> channels;
-    std::map<Priority, ChannelData> priorities;
+    std::unordered_map<std::string, ChannelData> channels;
+    std::map<Priority, std::vector<std::string>> underBackpressure;
     //TODO: remove this once we record more priorities
     Priority maxPriority = 0;
 };

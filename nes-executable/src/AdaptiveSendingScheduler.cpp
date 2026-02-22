@@ -46,49 +46,68 @@ void AdaptiveSendingScheduler::onEvent(BackpressureEvent event)
 
 void AdaptiveSendingScheduler::applyPressure(const std::string& channelId)
 {
-    auto channel = channels.find(channelId);
-    INVARIANT(channel != channels.end(), "Channel not found");
+    Priority priority;;
+    {
+        auto channelsLocked = channels.rlock();
+        auto it = channelsLocked->find(channelId);
+        //TODO do invariants get removed in release?
+        INVARIANT(it != channelsLocked->end(), "Channel not found");
+        priority = it->second;
+    }
 
-    underBackpressure[channel->second.priority].emplace_back(channel->second.channelId);
+    auto backpressureLocked = underBackpressure.wlock();
+    backpressureLocked->operator[](priority).emplace_back(channelId);
+    maxPriorityUnderPressure = backpressureLocked->rbegin()->first;
 }
 
 void AdaptiveSendingScheduler::releasePressure(const std::string& channelId)
 {
-    auto channel = channels.find(channelId);
-    INVARIANT(channel != channels.end(), "Channel not found");
+    Priority priority;;
+    {
+        auto channelsLocked = channels.rlock();
+        auto it = channelsLocked->find(channelId);
+        //TODO do invariants get removed in release?
+        INVARIANT(it != channelsLocked->end(), "Channel not found");
+        priority = it->second;
+    }
 
-    auto& vec = underBackpressure[channel->second.priority];
+    auto backpressureLocked = underBackpressure.wlock();
+    auto& vec = backpressureLocked->operator[](priority);
     auto toRemove = std::find(vec.begin(), vec.end(), channelId);
     INVARIANT(toRemove != vec.end(), "Channel not found in underBackpressure");
     vec.erase(toRemove);
 
     if (vec.empty())
     {
-        underBackpressure.erase(channel->second.priority);
+        backpressureLocked->erase(priority);
     }
 
+    maxPriorityUnderPressure = backpressureLocked->rbegin()->first;
 }
 
 
 bool AdaptiveSendingScheduler::canSend(const std::string& channelId) {
-    if (!channels.contains(channelId))
+    auto channelsLocked = channels.rlock();
+    auto it = channelsLocked->find(channelId);
+    Priority priority = 0;
+    if (it == channelsLocked->end())
     {
         //TODO: remove once we got proper priorities
-        addChannel(channelId, maxPriority++);
+        channelsLocked.unlock();
+        priority = maxPriority++;
+        addChannel(channelId, priority);
+    } else
+    {
+        INVARIANT(it != channelsLocked->end(), "Channel not found");
+        priority = it->second;
     }
 
-    auto channel = channels.find(channelId);
-    INVARIANT(channel != channels.end(), "Channel not found");
-
-    // check if any channel with lower priority is experiencing backpressure
-    auto it = underBackpressure.lower_bound(channel->second.priority);
-    return it != underBackpressure.begin();
+    return priority <= maxPriorityUnderPressure;
 }
 
 void AdaptiveSendingScheduler::addChannel(const std::string& channelId, Priority priority)
 {
-    ChannelData channelData{channelId, priority};
-    channels.emplace(channelId, channelData);
+    channels.wlock()->emplace(channelId, priority);
 }
 
 }

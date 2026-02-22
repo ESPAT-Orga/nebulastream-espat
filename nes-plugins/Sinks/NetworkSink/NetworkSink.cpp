@@ -47,8 +47,38 @@
 namespace NES
 {
 
+// std::optional<TupleBuffer>
+// BackpressureHandler::checkAdaptiveScheduling(TupleBuffer buffer, BackpressureController& backpressureController, const std::string& channelId)
+// {
+//     if (!backpressureController.isScheduledToSend(channelId))
+//     {
+//         auto rstate = stateLock.ulock();
+//         /// Backpressure is already signaled. We want to ensure that at least one TupleBuffer is floating around the TaskQueue,
+//         /// so we can peridically test if we can send data again.
+//         /// Otherwise, it might be possible that nothing triggers execution of this pipeline again, resulting in a deadlock
+//         if (buffer.getSequenceNumber() == rstate->pendingSequenceNumber && buffer.getChunkNumber() == rstate->pendingChunkNumber)
+//         {
+//             /// We dedicate one seq/chunk number pair as the pending tuple buffer. If this is the pending tuple buffer we emit it again
+//             return buffer;
+//         }
+//
+//         const auto wstate = rstate.moveFromUpgradeToWrite();
+//         wstate->buffered.emplace_back(std::move(buffer));
+//         return {};
+//     }
+//
+//     /// Apply backpressure now on the backpressureController, leading to blocked ingestion threads until pressure is released again onSuccess.
+//     const auto wstate = rstate.moveFromUpgradeToWrite();
+//     backpressureController.applyPressure(channelId);
+//     NES_DEBUG("Backpressure: {}", wstate->buffered.size());
+//     wstate->hasBackpressure = true;
+//     wstate->pendingSequenceNumber = buffer.getSequenceNumber();
+//     wstate->pendingChunkNumber = buffer.getChunkNumber();
+//     return buffer;
+// }
+
 std::optional<TupleBuffer>
-BackpressureHandler::checkAdaptiveScheduling(TupleBuffer buffer, BackpressureController& backpressureController, const std::string& channelId)
+BackpressureHandler::onFull(TupleBuffer buffer, BackpressureController& backpressureController, const std::string& channelId, bool adaptivelyThrottled)
 {
     auto rstate = stateLock.ulock();
     if (rstate->hasBackpressure)
@@ -69,39 +99,10 @@ BackpressureHandler::checkAdaptiveScheduling(TupleBuffer buffer, BackpressureCon
 
     /// Apply backpressure now on the backpressureController, leading to blocked ingestion threads until pressure is released again onSuccess.
     const auto wstate = rstate.moveFromUpgradeToWrite();
-    backpressureController.applyPressure(channelId);
+    backpressureController.applyPressure(channelId, adaptivelyThrottled);
     NES_DEBUG("Backpressure: {}", wstate->buffered.size());
     wstate->hasBackpressure = true;
-    wstate->pendingSequenceNumber = buffer.getSequenceNumber();
-    wstate->pendingChunkNumber = buffer.getChunkNumber();
-    return buffer;
-}
-
-std::optional<TupleBuffer>
-BackpressureHandler::onFull(TupleBuffer buffer, BackpressureController& backpressureController, const std::string& channelId)
-{
-    auto rstate = stateLock.ulock();
-    if (rstate->hasBackpressure)
-    {
-        /// Backpressure is already signaled. We want to ensure that at least one TupleBuffer is floating around the TaskQueue,
-        /// so we can peridically test if we can send data again.
-        /// Otherwise, it might be possible that nothing triggers execution of this pipeline again, resulting in a deadlock
-        if (buffer.getSequenceNumber() == rstate->pendingSequenceNumber && buffer.getChunkNumber() == rstate->pendingChunkNumber)
-        {
-            /// We dedicate one seq/chunk number pair as the pending tuple buffer. If this is the pending tuple buffer we emit it again
-            return buffer;
-        }
-
-        const auto wstate = rstate.moveFromUpgradeToWrite();
-        wstate->buffered.emplace_back(std::move(buffer));
-        return {};
-    }
-
-    /// Apply backpressure now on the backpressureController, leading to blocked ingestion threads until pressure is released again onSuccess.
-    const auto wstate = rstate.moveFromUpgradeToWrite();
-    backpressureController.applyPressure(channelId);
-    NES_DEBUG("Backpressure: {}", wstate->buffered.size());
-    wstate->hasBackpressure = true;
+    wstate->adaptivelyThrottled = adaptivelyThrottled;
     wstate->pendingSequenceNumber = buffer.getSequenceNumber();
     wstate->pendingChunkNumber = buffer.getChunkNumber();
     return buffer;
@@ -115,8 +116,9 @@ std::optional<TupleBuffer> BackpressureHandler::onSuccess(BackpressureController
     const auto state = stateLock.wlock();
     if (state->hasBackpressure)
     {
-        backpressureController.releasePressure(channelId);
+        backpressureController.releasePressure(channelId, state->adaptivelyThrottled);
         state->hasBackpressure = false;
+        state->adaptivelyThrottled = false;
         state->pendingChunkNumber = INVALID<ChunkNumber>;
         state->pendingSequenceNumber = INVALID<SequenceNumber>;
     }
@@ -202,6 +204,15 @@ void NetworkSink::execute(const TupleBuffer& inputBuffer, PipelineExecutionConte
         children.emplace_back(childMemory);
     }
 
+    if (!backpressureController.isScheduledToSend(channelId))
+    {
+        if (const auto emit = backpressureHandler.onFull(inputBuffer, backpressureController, channelId, false))
+        {
+            pec.repeatTask(*emit, BACKPRESSURE_RETRY_INTERVAL);
+        }
+        return;
+    }
+
     std::span usedBufferMemory(inputBuffer.getAvailableMemoryArea<uint8_t>().data(), inputBuffer.getNumberOfTuples() * tupleSize);
     /// Set data and send over the network
     const auto sendResult
@@ -211,7 +222,7 @@ void NetworkSink::execute(const TupleBuffer& inputBuffer, PipelineExecutionConte
         case SendResult::Closed: {
             /// Future buffers are voided.
             this->closed = true;
-            auto _ = backpressureHandler.onFull(inputBuffer, backpressureController, channelId);
+            auto _ = backpressureHandler.onFull(inputBuffer, backpressureController, channelId, false);
             /// Currently there is no way to propagate a query stop without a failure from a sink.
             /// There is not any operator that would propagate a query stop in the upstream direction, so receiving a query stop
             /// from the downstream operator is unexpected, thus failing the query is reasonable.
@@ -227,7 +238,7 @@ void NetworkSink::execute(const TupleBuffer& inputBuffer, PipelineExecutionConte
             break;
         }
         case SendResult::Full: {
-            if (const auto emit = backpressureHandler.onFull(inputBuffer, backpressureController, channelId))
+            if (const auto emit = backpressureHandler.onFull(inputBuffer, backpressureController, channelId, false))
             {
                 pec.repeatTask(*emit, BACKPRESSURE_RETRY_INTERVAL);
             }

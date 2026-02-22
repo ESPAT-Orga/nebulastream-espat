@@ -62,13 +62,13 @@ BackpressureController::~BackpressureController()
     }
 }
 
-bool BackpressureController::applyPressure(const std::string& channelId)
+bool BackpressureController::applyPressure(const std::string& channelId, bool adaptivelyThrottled)
 {
     const auto old = std::exchange(*channel->stateMtx.lock(), Channel::CLOSED);
     INVARIANT(old != Channel::DESTROYED, "The backpressureController is still alive thus the channel should not have been destroyed");
 
     bool newPressure = old == Channel::OPEN;
-    if (backpressureStatisticListener && newPressure)
+    if (!adaptivelyThrottled && backpressureStatisticListener && newPressure)
     {
         backpressureStatisticListener->onEvent(NES::ApplyPressureEvent(channelId));
     }
@@ -77,10 +77,10 @@ bool BackpressureController::applyPressure(const std::string& channelId)
 
 bool BackpressureController::isScheduledToSend(const std::string& channelId)
 {
-    return adaptiveSendingScheduler && adaptiveSendingScheduler->canSend(channelId);
+    return !adaptiveSendingScheduler || adaptiveSendingScheduler->canSend(channelId);
 }
 
-bool BackpressureController::releasePressure(const std::string& channelId)
+bool BackpressureController::releasePressure(const std::string& channelId, bool adaptivelyThrottled)
 {
     const auto old = std::exchange(*channel->stateMtx.lock(), Channel::OPEN);
     INVARIANT(old != Channel::DESTROYED, "The Backpressure Controller is still alive thus the channel should not have been destroyed");
@@ -89,7 +89,7 @@ bool BackpressureController::releasePressure(const std::string& channelId)
         /// The Backpressure Controller was opened, wake up all waiting BackpressureListeners
         channel->change.notify_all();
 
-        if (backpressureStatisticListener)
+        if (!adaptivelyThrottled && backpressureStatisticListener)
         {
             backpressureStatisticListener->onEvent(NES::ReleasePressureEvent(channelId));
         }

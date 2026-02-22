@@ -45,8 +45,8 @@ TEST_F(BackpressureChannelTest, BasicConstruction)
 
     /// Test that the objects are functional by using their public methods
     /// Initially, the channel should be open (no backpressure)
-    EXPECT_TRUE(backpressureController.applyPressure("channel_id")); /// Should return true (was open)
-    EXPECT_TRUE(backpressureController.releasePressure("channel_id")); /// Should return true (was closed)
+    EXPECT_TRUE(backpressureController.applyPressure("channel_id", false)); /// Should return true (was open)
+    EXPECT_TRUE(backpressureController.releasePressure("channel_id", false)); /// Should return true (was closed)
 }
 
 /// Test basic functionality with 1 Backpressure Controller and 1 backpressureListener
@@ -58,16 +58,16 @@ TEST_F(BackpressureChannelTest, BasicFunctionality)
     /// We can't directly test the internal state, but we can test the behavior
 
     /// Apply pressure - should return true (was open)
-    EXPECT_TRUE(backpressureController.applyPressure("channel_id"));
+    EXPECT_TRUE(backpressureController.applyPressure("channel_id", false));
 
     /// Apply pressure again - should return false (was already closed)
-    EXPECT_FALSE(backpressureController.applyPressure("channel_id"));
+    EXPECT_FALSE(backpressureController.applyPressure("channel_id", false));
 
     /// Release pressure - should return true (was closed)
-    EXPECT_TRUE(backpressureController.releasePressure("channel_id"));
+    EXPECT_TRUE(backpressureController.releasePressure("channel_id", false));
 
     /// Release pressure again - should return false (was already open)
-    EXPECT_FALSE(backpressureController.releasePressure("channel_id"));
+    EXPECT_FALSE(backpressureController.releasePressure("channel_id", false));
 }
 
 /// Test that backpressureListener proceeds immediately when no pressure is applied
@@ -123,7 +123,7 @@ TEST_F(BackpressureChannelTest, BackpressureListenerProceedsWithPressure)
 
     /// This is a guess, however 100 sounds very doable on any real hardware
     EXPECT_GT(backpressureListenerCounter.load(), 100);
-    EXPECT_TRUE(backpressureController.applyPressure("channel_id"));
+    EXPECT_TRUE(backpressureController.applyPressure("channel_id", false));
 
     /// Expect that the backpressureListener does not increase any further after pressure has been applied
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -145,7 +145,7 @@ TEST_F(BackpressureChannelTest, IngestionWaitsWhenPressureApplied)
     auto [backpressureController, backpressureListener] = createBackpressureChannel();
 
     /// Apply pressure before starting backpressureListener
-    backpressureController.applyPressure("channel_id");
+    backpressureController.applyPressure("channel_id", false);
 
     std::vector<std::jthread> backpressureListenerThreads;
     backpressureListenerThreads.reserve(numberOfSources);
@@ -173,7 +173,7 @@ TEST_F(BackpressureChannelTest, IngestionWaitsWhenPressureApplied)
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
     /// Release pressure
-    EXPECT_TRUE(backpressureController.releasePressure("channel_id"));
+    EXPECT_TRUE(backpressureController.releasePressure("channel_id", false));
     syncAfterWait.arrive_and_wait();
 
     /// Stop thread to ensure that there is no data race on duration
@@ -245,11 +245,11 @@ TEST_F(BackpressureChannelTest, MultithreadedStressTest)
                 {
                     if (dist(rng) == 0)
                     {
-                        channels[channelId].first.applyPressure("channel_id");
+                        channels[channelId].first.applyPressure("channel_id", false);
                     }
                     else
                     {
-                        channels[channelId].first.releasePressure("channel_id");
+                        channels[channelId].first.releasePressure("channel_id", false);
                     }
 
                     totalOperations.fetch_add(1);
@@ -272,8 +272,8 @@ TEST_F(BackpressureChannelTest, MultithreadedStressTest)
     /// All channels should still be functional
     for (int i = 0; i < numChannels; ++i)
     {
-        channels[i].first.applyPressure("channel_id");
-        EXPECT_TRUE(channels[i].first.releasePressure("channel_id"));
+        channels[i].first.applyPressure("channel_id", false);
+        EXPECT_TRUE(channels[i].first.releasePressure("channel_id", false));
     }
 }
 
@@ -286,7 +286,7 @@ TEST_F(BackpressureChannelTest, BackpressureControllerDestruction)
     auto [backpressureController, ingestion] = createBackpressureChannel();
 
     /// Apply pressure
-    EXPECT_TRUE(backpressureController.applyPressure("channel_id"));
+    EXPECT_TRUE(backpressureController.applyPressure("channel_id", false));
 
     std::barrier syncBarrier{2};
 
@@ -308,7 +308,7 @@ TEST_F(BackpressureChannelTest, StopTokenFunctionality)
     auto [backpressureController, ingestion] = createBackpressureChannel();
 
     /// Apply pressure
-    EXPECT_TRUE(backpressureController.applyPressure("channel_id"));
+    EXPECT_TRUE(backpressureController.applyPressure("channel_id", false));
 
     std::atomic ingestionStarted{false};
     std::atomic ingestionStopped{false};
@@ -330,7 +330,7 @@ TEST_F(BackpressureChannelTest, StopTokenFunctionality)
     /// Stop thread, should trigger stop token
     ingestionThread = {};
     EXPECT_TRUE(ingestionStopped);
-    EXPECT_TRUE(backpressureController.releasePressure("channel_id"));
+    EXPECT_TRUE(backpressureController.releasePressure("channel_id", false));
 }
 
 }

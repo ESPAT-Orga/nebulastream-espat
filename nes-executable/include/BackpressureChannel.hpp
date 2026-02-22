@@ -57,9 +57,9 @@ public:
     BackpressureController(BackpressureController&& other) noexcept = default;
     BackpressureController& operator=(BackpressureController&& other) noexcept = default;
 
-    bool applyPressure(const std::string& channelId);
+    bool applyPressure(const std::string& channelId, bool adaptivelyThrottled);
     bool isScheduledToSend(const std::string& channelId);
-    bool releasePressure(const std::string& channelId);
+    bool releasePressure(const std::string& channelId, bool adaptivelyThrottled);
     void setStatisticListener(std::shared_ptr<NES::BackpressureStatisticListener> listener);
 
 private:

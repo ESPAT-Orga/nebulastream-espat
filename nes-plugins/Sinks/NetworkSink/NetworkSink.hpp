@@ -45,6 +45,7 @@ class BackpressureHandler
         std::deque<TupleBuffer> buffered;
         SequenceNumber pendingSequenceNumber = INVALID<SequenceNumber>;
         ChunkNumber pendingChunkNumber = INVALID<ChunkNumber>;
+        bool adaptivelyThrottled = false;
     };
 
     folly::Synchronized<State> stateLock;
@@ -52,7 +53,7 @@ class BackpressureHandler
 public:
     std::optional<TupleBuffer>
     checkAdaptiveScheduling(TupleBuffer buffer, BackpressureController& backpressureController, const std::string& channelId);
-    std::optional<TupleBuffer> onFull(TupleBuffer buffer, BackpressureController& backpressureController, const std::string& channelId);
+    std::optional<TupleBuffer> onFull(TupleBuffer buffer, BackpressureController& backpressureController, const std::string& channelId, bool adaptivelyThrottled);
     std::optional<TupleBuffer> onSuccess(BackpressureController& backpressureController, const std::string& channelId);
     bool empty() const;
 };

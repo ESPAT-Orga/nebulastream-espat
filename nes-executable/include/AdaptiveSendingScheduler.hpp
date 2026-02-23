@@ -38,7 +38,7 @@ constexpr Priority INVALID_PRIORITY = 0;
 struct AdaptiveSendingScheduler : BackpressureStatisticListener {
     void onEvent(BackpressureEvent event) override;
     void applyPressure(const std::string& channelId);
-    void releasePressure(const std::string& channelId);
+    void unbufferingCompleted(const std::string& channelId);
     bool canSend(const std::string& channelId);
     void addChannel(const std::string& channelId, Priority priority);
 private:
@@ -47,7 +47,7 @@ private:
 
     folly::Synchronized<std::map<Priority, std::vector<std::string>>> underBackpressure;
     //std::atomic<std::optional<Priority>> maxPriorityUnderPressure;
-    std::atomic<Priority> maxPriorityUnderPressure = INVALID_PRIORITY;
+    std::atomic<Priority> minPriorityUnderPressure = INVALID_PRIORITY;
     //TODO: remove this once we record more priorities
     std::atomic<Priority> maxPriority = 1;
 };

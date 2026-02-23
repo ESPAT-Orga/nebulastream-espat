@@ -109,6 +109,11 @@ void BackpressureStatisticTcpEmitter::threadRoutine(const std::stop_token& token
 
             std::visit(
                 Overloaded{
+                    [&](const UnbufferingCompletedEvent& unbufferEvent)
+                    {
+                        //TODO: implement
+                        (void) unbufferEvent;
+                    },
                     [&](const ApplyPressureEvent& applyEvent)
                     {
                         auto nanosec

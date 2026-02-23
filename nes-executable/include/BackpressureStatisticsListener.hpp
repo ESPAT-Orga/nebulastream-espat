@@ -47,7 +47,14 @@ struct ReleasePressureEvent : BaseBackpressureEvent
     ReleasePressureEvent() = default;
 };
 
-using BackpressureEvent = std::variant<ApplyPressureEvent, ReleasePressureEvent>;
+struct UnbufferingCompletedEvent : BaseBackpressureEvent
+{
+    UnbufferingCompletedEvent(const std::string& channelId) : BaseBackpressureEvent(channelId) { }
+
+    UnbufferingCompletedEvent() = default;
+};
+
+using BackpressureEvent = std::variant<ApplyPressureEvent, ReleasePressureEvent, UnbufferingCompletedEvent>;
 
 struct BackpressureStatisticListener
 {

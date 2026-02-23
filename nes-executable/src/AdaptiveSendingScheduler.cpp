@@ -33,13 +33,17 @@ void AdaptiveSendingScheduler::onEvent(BackpressureEvent event)
 {
         std::visit(
             Overloaded{
+                [&](const UnbufferingCompletedEvent& unbufferEvent)
+                {
+                    unbufferingCompleted(unbufferEvent.channelId);
+                },
                 [&](const ApplyPressureEvent& applyEvent)
                 {
                     applyPressure(applyEvent.channelId);
                 },
-                [&](const ReleasePressureEvent& releaseEvent)
+                [&](const ReleasePressureEvent&)
                 {
-                    releasePressure(releaseEvent.channelId);
+                    //no need to do anything, as we still wait for all buffers to be unbuffered
                 }},
             event);
 }
@@ -57,10 +61,10 @@ void AdaptiveSendingScheduler::applyPressure(const std::string& channelId)
 
     auto backpressureLocked = underBackpressure.wlock();
     backpressureLocked->operator[](priority).emplace_back(channelId);
-    maxPriorityUnderPressure.store(backpressureLocked->rbegin()->first);
+    minPriorityUnderPressure.store(backpressureLocked->begin()->first);
 }
 
-void AdaptiveSendingScheduler::releasePressure(const std::string& channelId)
+void AdaptiveSendingScheduler::unbufferingCompleted(const std::string& channelId)
 {
     Priority priority;;
     {
@@ -82,13 +86,15 @@ void AdaptiveSendingScheduler::releasePressure(const std::string& channelId)
         backpressureLocked->erase(priority);
     }
 
-    auto lowest = backpressureLocked->rbegin();
-    if (lowest != backpressureLocked->rend())
+    auto lowest = backpressureLocked->begin();
+    if (lowest != backpressureLocked->end())
     {
-        maxPriorityUnderPressure.store(backpressureLocked->rbegin()->first);
+        NES_DEBUG("New max priority under pressure: {}", lowest->first);
+        minPriorityUnderPressure.store(lowest->first);
     } else
     {
-        maxPriorityUnderPressure.store(INVALID_PRIORITY);
+        NES_DEBUG("No more under pressure channels");
+        minPriorityUnderPressure.store(INVALID_PRIORITY);
     }
 }
 
@@ -108,9 +114,11 @@ bool AdaptiveSendingScheduler::canSend(const std::string& channelId) {
         INVARIANT(it != channelsLocked->end(), "Channel not found");
         priority = it->second;
     }
+    channelsLocked.unlock();
 
-    auto currMaxPrio = maxPriorityUnderPressure.load();
-    return currMaxPrio != INVALID_PRIORITY  || priority <= currMaxPrio;
+    auto currMinPrio = minPriorityUnderPressure.load();
+    NES_DEBUG("Can send: channelId={} currMinPrio={}, priority={}", channelId, currMinPrio, priority);
+    return currMinPrio != INVALID_PRIORITY  || priority <= currMinPrio;
 }
 
 void AdaptiveSendingScheduler::addChannel(const std::string& channelId, Priority priority)

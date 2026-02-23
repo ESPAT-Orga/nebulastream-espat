@@ -127,10 +127,11 @@ std::optional<TupleBuffer> BackpressureHandler::onSuccess(BackpressureController
     {
         auto nextBuffer = std::move(state->buffered.front());
         state->buffered.pop_front();
+        if (state->buffered.empty())
+        {
+            backpressureController.unbufferingCompleted(channelId);
+        }
         return {nextBuffer};
-    } else
-    {
-        //TODO notify buffer empty
     }
     return {};
 }

@@ -98,6 +98,24 @@ bool BackpressureController::releasePressure(const std::string& channelId, bool 
     return false;
 }
 
+bool BackpressureController::unbufferingCompleted(const std::string& channelId)
+{
+    const auto old = std::exchange(*channel->stateMtx.lock(), Channel::OPEN);
+    INVARIANT(old != Channel::DESTROYED, "The Backpressure Controller is still alive thus the channel should not have been destroyed");
+    if (old == Channel::CLOSED)
+    {
+        /// The Backpressure Controller was opened, wake up all waiting BackpressureListeners
+        channel->change.notify_all();
+
+        if (backpressureStatisticListener)
+        {
+            backpressureStatisticListener->onEvent(NES::UnbufferingCompletedEvent(channelId));
+        }
+        return true;
+    }
+    return false;
+}
+
 void BackpressureController::setStatisticListener(std::shared_ptr<NES::BackpressureStatisticListener> listener)
 {
     this->backpressureStatisticListener = listener;

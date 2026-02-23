@@ -182,7 +182,12 @@ void GoogleEventTracePrinter::threadRoutine(const std::stop_token& token)
 
         std::visit(
             Overloaded{
-                [&](const GetUnpooledBufferEvent& getBufferEvent)
+                [&](const UnbufferingCompletedEvent& unbufferEvent)
+                {
+                    //TODO: implement
+                    (void) unbufferEvent;
+                },
+            [&](const GetUnpooledBufferEvent& getBufferEvent)
                 {
                     unpooledBufferChanges.emplace_back(
                         BufferManagerAction::GetBuffer, getBufferEvent.pipelineId, getBufferEvent.bufferSize, getBufferEvent.timestamp);

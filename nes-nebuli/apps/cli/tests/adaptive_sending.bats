@@ -306,6 +306,9 @@ extract_last_line() {
   [ -f "$output" ]
   FIRST_ID=$output
 
+  echo "start first query, sleeping for 10 seconds" >&3
+  sleep 10
+
   #echo "started first query successfully" >&3
   run DOCKER_NES_CLI -t tests/good/adaptive.yaml start 'select * from GENERATOR_SOURCE2 INTO FILE_SINK2'
   echo "started second query" >&3
@@ -317,9 +320,9 @@ extract_last_line() {
   QUERY_ID=$result
   echo "starting of second query succeeded" >&3
 
-  echo "sleeping for 30 seconds" >&3
-  sleep 30
-  echo "30 seconds passed sleeping for 70 seconds" >&3
+  echo "sleeping for 50 seconds" >&3
+  sleep 50
+  echo "50 seconds passed sleeping for 70 seconds" >&3
   #echo "stopping first query with id $FIRST_ID" >&3
   #run DOCKER_NES_CLI -t tests/good/adaptive.yaml stop "$FIRST_ID"
   #[ "$status" -eq 0 ]

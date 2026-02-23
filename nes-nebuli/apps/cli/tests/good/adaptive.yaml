@@ -77,11 +77,11 @@ physical:
     type: Generator
     source_config:
       generator_rate_type: FIXED
-      generator_rate_config: emit_rate 10
-      stop_generator_when_sequence_finishes: ONE
+      generator_rate_config: emit_rate 1000
+      stop_generator_when_sequence_finishes: NONE
       seed: 1
       generator_schema: |
-        SEQUENCE FLOAT64 0 100000 1000
+        NORMAL_DISTRIBUTION FLOAT64 0 1
 
 workers:
   - host: worker-1:9090

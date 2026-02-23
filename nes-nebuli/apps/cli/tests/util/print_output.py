@@ -25,7 +25,7 @@ def wait_for_file(path, poll_interval=0.5):
 def clear_screen():
     print("\033[2J\033[H", end="")
 
-def draw_plot(values, width=60, height=15):
+def draw_plot(file, values, width=60, height=15):
     if len(values) < 2:
         return
 
@@ -58,7 +58,7 @@ def draw_plot(values, width=60, height=15):
         prev_x, prev_y = x, y
 
     print("\033[2J\033[H", end="")
-    print(f"Lines/sec   min={vmin:.2f}  max={vmax:.2f}")
+    print(f"{file}: Lines/sec   min={vmin:.2f}  max={vmax:.2f}")
     for row in grid:
         print("".join(row))
 
@@ -105,7 +105,7 @@ def follow(
 
                 if plot:
                     rates.append(rate)
-                    draw_plot(rates, width=plot_width)
+                    draw_plot(file_path, rates, width=plot_width)
                 elif not print_lines:
                     print(f"{rate:.2f} lines/sec")
 

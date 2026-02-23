@@ -78,7 +78,7 @@ SingleNodeWorker::SingleNodeWorker(const SingleNodeWorkerConfiguration& configur
     }
 
 
-    std::shared_ptr<AdaptiveSendingScheduler> adaptiveSendingScheduler;
+    std::shared_ptr<AdaptiveSendingScheduler> adaptiveSendingScheduler = nullptr;
     if (configuration.enableAdaptiveNetworkSending.getValue())
     {
         adaptiveSendingScheduler = std::make_shared<AdaptiveSendingScheduler>();

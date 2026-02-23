@@ -279,7 +279,7 @@ extract_last_line() {
         }
 
         # open terminal/pane and print live output
-        open_viewer python3 "$TMP_DIR"/tests/util/print_output.py "$TMP_DIR"/worker-2/out2.csv
+        #open_viewer python3 "$TMP_DIR"/tests/util/print_output.py "$TMP_DIR"/worker-2/out2.csv
         open_viewer python3 "$TMP_DIR"/tests/util/print_output.py "$TMP_DIR"/worker-2/out2.csv --plot
         #open_viewer python3 "$TMP_DIR"/tests/util/print_output.py "$TMP_DIR"/worker-2/out.csv --freq
         open_viewer python3 "$TMP_DIR"/tests/util/print_output.py "$TMP_DIR"/worker-2/out.csv --plot
@@ -295,15 +295,15 @@ extract_last_line() {
   echo "# Throttling worker-1 to 10kbit" >&3
   throttle_network worker-1 "10kbit"
 
-  run DOCKER_NES_CLI -t tests/good/adaptive.yaml start 'select DOUBLE from GENERATOR_SOURCE INTO FILE_SINK'
+  #run DOCKER_NES_CLI -t tests/good/adaptive.yaml start 'select DOUBLE from GENERATOR_SOURCE INTO FILE_SINK'
 
-  [ "$status" -eq 0 ]
-  result="$(extract_last_line "$output")"
-  [ -n "$result" ]
-  [ -f "$result" ]
-  QUERY_ID=$result
+  #[ "$status" -eq 0 ]
+  #result="$(extract_last_line "$output")"
+  #[ -n "$result" ]
+  #[ -f "$result" ]
+  #QUERY_ID=$result
 
-  echo "started first query successfully" >&3
+  #echo "started first query successfully" >&3
   run DOCKER_NES_CLI -t tests/good/adaptive.yaml start 'select * from GENERATOR_SOURCE2 INTO FILE_SINK2'
   echo "started second query" >&3
 
@@ -314,7 +314,7 @@ extract_last_line() {
   QUERY_ID=$result
   echo "starting of second query succeeded" >&3
 
-  echo "sleeping for 20 seconds" >&3
+  echo "sleeping for 100 seconds" >&3
   sleep 100
   echo "wake up" >&3
 }

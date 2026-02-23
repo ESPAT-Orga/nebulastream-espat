@@ -55,7 +55,7 @@ connections.  Valid values include dns:///localhost:1234,
 
     BoolOption enableAdaptiveNetworkSending
         = {"enable_adaptive_network_sending",
-       "true", //todo: set to false
+       "false", //todo: set to false
        "Adaptively throttle lower priority queries based on backpressure"};
 
 protected:

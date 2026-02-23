@@ -22,9 +22,9 @@ query:
     SELECT 
       *
     FROM 
-      GENERATOR_SOURCE2
+      TCP_STAT_SOURCE
     INTO 
-      FILE_SINK2
+      STAT_SINK
 sinks:
   - name: FILE_SINK
     host: worker-2:9090
@@ -35,14 +35,18 @@ sinks:
     config:
       file_path: out.csv
       input_format: CSV
-  - name: FILE_SINK2
-    host: worker-2:9090
+  - name: STAT_SINK
+    host: worker-1:9090
     schema:
-      - name: GENERATOR_SOURCE$DOUBLE
-        type: FLOAT64
+      - name: TCP_STAT_SOURCE$BACKPRESSURE
+        type: BOOLEAN
+      - name: TCP_STAT_SOURCE$CHANNEL_NAME
+        type: VARSIZED
+      - name: TCP_STAT_SOURCE$TIME_NS
+        type: INT64
     type: File
     config:
-      file_path: out2.csv
+      file_path: out_stat.csv
       input_format: CSV
 
 logical:
@@ -50,10 +54,14 @@ logical:
     schema:
       - name: DOUBLE
         type: FLOAT64
-  - name: GENERATOR_SOURCE2
+  - name: TCP_STAT_SOURCE
     schema:
-      - name: DOUBLE
-        type: FLOAT64
+      - name: BACKPRESSURE
+        type: BOOLEAN
+      - name: CHANNEL_NAME
+        type: VARSIZED
+      - name: TIME_NS
+        type: INT64
 
 physical:
   - logical: GENERATOR_SOURCE
@@ -69,19 +77,17 @@ physical:
       seed: 1
       generator_schema: |
         NORMAL_DISTRIBUTION FLOAT64 0 1
-  - logical: GENERATOR_SOURCE2
+  - logical: TCP_STAT_SOURCE
     host: worker-1:9090
     parser_config:
       type: CSV
       fieldDelimiter: ","
-    type: Generator
+    type: TCP
     source_config:
-      generator_rate_type: FIXED
-      generator_rate_config: emit_rate 10
-      stop_generator_when_sequence_finishes: ONE
-      seed: 1
-      generator_schema: |
-        SEQUENCE FLOAT64 0 100000 1000
+      socket_host: 0.0.0.0
+      socket_port: 9000
+      connect_timeout_seconds: 100
+      flush_interval_ms: 100
 
 workers:
   - host: worker-1:9090

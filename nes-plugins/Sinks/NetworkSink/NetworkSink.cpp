@@ -128,6 +128,9 @@ std::optional<TupleBuffer> BackpressureHandler::onSuccess(BackpressureController
         auto nextBuffer = std::move(state->buffered.front());
         state->buffered.pop_front();
         return {nextBuffer};
+    } else
+    {
+        //TODO notify buffer empty
     }
     return {};
 }
@@ -206,6 +209,7 @@ void NetworkSink::execute(const TupleBuffer& inputBuffer, PipelineExecutionConte
 
     if (!backpressureController.isScheduledToSend(channelId))
     {
+        NES_DEBUG("Sink is not scheduled to send, buffer: {}-{}", inputBuffer.getSequenceNumber(), inputBuffer.getChunkNumber());
         if (const auto emit = backpressureHandler.onFull(inputBuffer, backpressureController, channelId, false))
         {
             pec.repeatTask(*emit, BACKPRESSURE_RETRY_INTERVAL);

@@ -74,7 +74,7 @@ setup_file() {
     chmod +x /bin/grpc_health_probe
 
     COPY nes-single-node-worker /usr/bin
-    ENTRYPOINT ["nes-single-node-worker", "enable_backpressure_statistics_tcp_emission=true"]
+    ENTRYPOINT ["nes-single-node-worker", "enable_backpressure_statistics_tcp_emission=true", "enable_adaptive_network_sending=true"]
 EOF
   docker build -t nes-cli-image -f - $(dirname $(realpath $NES_CLI)) <<EOF
     FROM ubuntu:24.04 AS app

@@ -42,6 +42,7 @@ sinks:
         type: FLOAT64
     type: File
     config:
+      #priority: 77
       file_path: out2.csv
       input_format: CSV
 

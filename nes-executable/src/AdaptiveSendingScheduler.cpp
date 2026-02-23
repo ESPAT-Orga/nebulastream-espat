@@ -118,7 +118,7 @@ bool AdaptiveSendingScheduler::canSend(const std::string& channelId) {
 
     auto currMinPrio = minPriorityUnderPressure.load();
     NES_DEBUG("Can send: channelId={} currMinPrio={}, priority={}", channelId, currMinPrio, priority);
-    return currMinPrio != INVALID_PRIORITY  || priority <= currMinPrio;
+    return currMinPrio == INVALID_PRIORITY  || priority <= currMinPrio;
 }
 
 void AdaptiveSendingScheduler::addChannel(const std::string& channelId, Priority priority)

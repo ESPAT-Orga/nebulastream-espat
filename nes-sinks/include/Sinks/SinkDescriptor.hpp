@@ -94,6 +94,10 @@ public:
         false,
         [](const std::unordered_map<std::string, std::string>& config) { return DescriptorConfig::tryGet(ADD_TIMESTAMP, config); }};
 
+    static inline const DescriptorConfig::ConfigParameter<uint64_t> PRIORITY {
+        "priority",
+        0,
+        [](const std::unordered_map<std::string, std::string>& config) { return DescriptorConfig::tryGet(PRIORITY, config); }};
 
     /// NOLINTNEXTLINE(cert-err58-cpp)
     static inline std::unordered_map<std::string, DescriptorConfig::ConfigParameterContainer> parameterMap
@@ -105,6 +109,7 @@ public:
         "file_path",
         std::nullopt,
         [](const std::unordered_map<std::string, std::string>& config) { return DescriptorConfig::tryGet(FILE_PATH, config); }};
+
 
     static std::optional<DescriptorConfig::Config>
     validateAndFormatConfig(std::string_view sinkType, std::unordered_map<std::string, std::string> configPairs);

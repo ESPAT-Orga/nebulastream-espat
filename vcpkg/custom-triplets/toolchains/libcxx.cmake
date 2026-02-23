@@ -32,17 +32,10 @@ if (NOT _NES_TOOLCHAIN_FILE)
     set(CMAKE_CXX_COMPILER ${CLANGXX_EXECUTABLE} CACHE STRING "")
     set(CMAKE_C_COMPILER ${CLANG_EXECUTABLE} CACHE STRING "")
 
-    # Use LLD for cmake
+    # Use LLD
     find_program(LLD_EXECUTABLE NAMES ld.lld-$ENV{LLVM_TOOLCHAIN_VERSION} ld.lld REQUIRED)
     set(CMAKE_LINKER ${LLD_EXECUTABLE} CACHE FILEPATH "")
     set(LINKER_FLAG "-fuse-ld=lld")
-
-    # Optional: mold
-    find_program(MOLD_EXECUTABLE NAMES mold)
-    if (MOLD_EXECUTABLE)
-        set(LINKER_FLAG "-fuse-ld=mold")
-        message(STATUS "Using mold")
-    endif ()
 
     # Optional: ccache
     find_program(CCACHE_EXECUTABLE NAMES ccache)

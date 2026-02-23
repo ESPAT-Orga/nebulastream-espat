@@ -20,7 +20,7 @@
 if (NOT _NES_TOOLCHAIN_FILE)
     set(_NES_TOOLCHAIN_FILE 1)
 
-    # We are doing native builds
+    # Native builds
     set(CMAKE_SYSTEM_NAME Linux CACHE STRING "")
     set(CMAKE_CROSSCOMPILING OFF CACHE BOOL "")
 

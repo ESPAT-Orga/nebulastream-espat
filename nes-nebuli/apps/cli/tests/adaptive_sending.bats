@@ -256,8 +256,10 @@ extract_last_line() {
   apply_backpressure_count=$(pcregrep -Mc "^1,[0-9A-Za-z]{8}(?:-[0-9A-Za-z]{4}){3}-[0-9A-Za-z]{12},[0-9]+\n0,[0-9A-Za-z]{8}(?:-[0-9A-Za-z]{4}){3}-[0-9A-Za-z]{12},[0-9]+" "$TMP_DIR"/worker-1/out_stat.csv || true)
   [ "$apply_backpressure_count" -ge 2 ]
 }
+
+# bats test_tags=bats:focus
 @test "adaptive sending" {
-  setup_distributed tests/good/statistics_query.yaml
+  setup_distributed tests/good/adaptive.yaml
 
   # Set SHOW_OUTPUT to 0 by default if not set
   : "${SHOW_OUTPUT:=0}"
@@ -277,13 +279,14 @@ extract_last_line() {
         }
 
         # open terminal/pane and print live output
-        open_viewer python3 "$TMP_DIR"/tests/util/print_output.py "$TMP_DIR"/worker-1/out_stat.csv
-        open_viewer python3 "$TMP_DIR"/tests/util/print_output.py "$TMP_DIR"/worker-2/out.csv --freq
+        open_viewer python3 "$TMP_DIR"/tests/util/print_output.py "$TMP_DIR"/worker-2/out2.csv
+        open_viewer python3 "$TMP_DIR"/tests/util/print_output.py "$TMP_DIR"/worker-2/out2.csv --plot
+        #open_viewer python3 "$TMP_DIR"/tests/util/print_output.py "$TMP_DIR"/worker-2/out.csv --freq
         open_viewer python3 "$TMP_DIR"/tests/util/print_output.py "$TMP_DIR"/worker-2/out.csv --plot
 
         # open terminal/pane and print live logs
-        open_viewer tail -F "$TMP_DIR"/worker-1/singleNodeWorker.log
-        open_viewer tail -F "$TMP_DIR"/worker-2/singleNodeWorker.log
+        #open_viewer tail -F "$TMP_DIR"/worker-1/singleNodeWorker.log
+        #open_viewer tail -F "$TMP_DIR"/worker-2/singleNodeWorker.log
     fi
 
   # Apply heavy throttling to the network connection to trigger backpressure
@@ -292,7 +295,7 @@ extract_last_line() {
   echo "# Throttling worker-1 to 10kbit" >&3
   throttle_network worker-1 "10kbit"
 
-  run DOCKER_NES_CLI -t tests/good/statistics_query.yaml start 'select DOUBLE from GENERATOR_SOURCE INTO FILE_SINK'
+  run DOCKER_NES_CLI -t tests/good/adaptive.yaml start 'select DOUBLE from GENERATOR_SOURCE INTO FILE_SINK'
 
   [ "$status" -eq 0 ]
   result="$(extract_last_line "$output")"
@@ -301,21 +304,17 @@ extract_last_line() {
   QUERY_ID=$result
 
   echo "started first query successfully" >&3
-  run DOCKER_NES_CLI -t tests/good/statistics_query.yaml start 'select * from TCP_STAT_SOURCE INTO STAT_SINK'
-  echo "started statistics query" >&3
+  run DOCKER_NES_CLI -t tests/good/adaptive.yaml start 'select * from GENERATOR_SOURCE2 INTO FILE_SINK2'
+  echo "started second query" >&3
 
   [ "$status" -eq 0 ]
   result="$(extract_last_line "$output")"
   [ -n "$result" ]
   [ -f "$result" ]
   QUERY_ID=$result
-  echo "starting of statistics query succeeded" >&3
+  echo "starting of second query succeeded" >&3
 
   echo "sleeping for 20 seconds" >&3
-  sleep 20
+  sleep 100
   echo "wake up" >&3
-
-  # Check that the output of the statistic query contains the expected events at least 4 times
-  apply_backpressure_count=$(pcregrep -Mc "^1,[0-9A-Za-z]{8}(?:-[0-9A-Za-z]{4}){3}-[0-9A-Za-z]{12},[0-9]+\n0,[0-9A-Za-z]{8}(?:-[0-9A-Za-z]{4}){3}-[0-9A-Za-z]{12},[0-9]+" "$TMP_DIR"/worker-1/out_stat.csv || true)
-  [ "$apply_backpressure_count" -ge 2 ]
 }

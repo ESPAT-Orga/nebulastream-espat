@@ -38,7 +38,7 @@ sinks:
   - name: FILE_SINK2
     host: worker-2:9090
     schema:
-      - name: GENERATOR_SOURCE$DOUBLE
+      - name: GENERATOR_SOURCE2$DOUBLE
         type: FLOAT64
     type: File
     config:

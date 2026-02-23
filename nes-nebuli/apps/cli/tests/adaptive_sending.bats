@@ -306,8 +306,8 @@ extract_last_line() {
   [ -f "$output" ]
   FIRST_ID=$output
 
-  echo "start first query, sleeping for 10 seconds" >&3
-  sleep 10
+  #echo "start first query, sleeping for 10 seconds" >&3
+  #sleep 10
 
   #echo "started first query successfully" >&3
   run DOCKER_NES_CLI -t tests/good/adaptive.yaml start 'select * from GENERATOR_SOURCE2 INTO FILE_SINK2'

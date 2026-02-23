@@ -66,6 +66,7 @@ void AdaptiveSendingScheduler::applyPressure(const std::string& channelId)
 
 void AdaptiveSendingScheduler::unbufferingCompleted(const std::string& channelId)
 {
+    NES_DEBUG("Unbuffering completed channel id = {}", channelId);
     Priority priority;;
     {
         auto channelsLocked = channels.rlock();

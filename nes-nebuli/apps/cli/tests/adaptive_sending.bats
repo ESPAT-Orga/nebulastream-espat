@@ -295,13 +295,13 @@ extract_last_line() {
   echo "# Throttling worker-1 to 10kbit" >&3
   throttle_network worker-1 "10kbit"
 
-  #run DOCKER_NES_CLI -t tests/good/adaptive.yaml start 'select DOUBLE from GENERATOR_SOURCE INTO FILE_SINK'
+  run DOCKER_NES_CLI -t tests/good/adaptive.yaml start 'select DOUBLE from GENERATOR_SOURCE INTO FILE_SINK'
 
-  #[ "$status" -eq 0 ]
-  #result="$(extract_last_line "$output")"
-  #[ -n "$result" ]
-  #[ -f "$result" ]
-  #QUERY_ID=$result
+  [ "$status" -eq 0 ]
+  result="$(extract_last_line "$output")"
+  [ -n "$result" ]
+  [ -f "$result" ]
+  QUERY_ID=$result
 
   #echo "started first query successfully" >&3
   run DOCKER_NES_CLI -t tests/good/adaptive.yaml start 'select * from GENERATOR_SOURCE2 INTO FILE_SINK2'

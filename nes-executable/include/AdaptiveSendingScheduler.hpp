@@ -33,6 +33,12 @@ struct ChannelData
     Priority priority;
 };
 
+struct PriorityInformation
+{
+    bool valid = false;
+    Priority priority = 0;
+};
+
 struct AdaptiveSendingScheduler : BackpressureStatisticListener {
     void onEvent(BackpressureEvent event) override;
     void applyPressure(const std::string& channelId);
@@ -44,7 +50,8 @@ private:
     folly::Synchronized<std::unordered_map<std::string, Priority>> channels;
 
     folly::Synchronized<std::map<Priority, std::vector<std::string>>> underBackpressure;
-    std::atomic<std::optional<Priority>> maxPriorityUnderPressure;
+    //std::atomic<std::optional<Priority>> maxPriorityUnderPressure;
+    std::atomic<PriorityInformation> maxPriorityUnderPressure;
     //TODO: remove this once we record more priorities
     std::atomic<Priority> maxPriority = 0;
 };

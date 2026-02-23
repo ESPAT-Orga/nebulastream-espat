@@ -40,7 +40,7 @@ if (NOT _NES_TOOLCHAIN_FILE)
     find_program(CCACHE_EXECUTABLE NAMES ccache)
     if (CCACHE_EXECUTABLE)
         set(CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_EXECUTABLE}")
-    endif()
+    endif ()
 
     # Ensure pthread is always present
     set(THREADS_PREFER_PTHREAD_FLAG ON)
@@ -66,4 +66,4 @@ if (NOT _NES_TOOLCHAIN_FILE)
     string(APPEND CMAKE_SHARED_LINKER_FLAGS_DEBUG_INIT " ${VCPKG_LINKER_FLAGS_DEBUG}")
     string(APPEND CMAKE_SHARED_LINKER_FLAGS_RELEASE_INIT " ${VCPKG_LINKER_FLAGS_RELEASE}")
 
-endif()
+endif ()

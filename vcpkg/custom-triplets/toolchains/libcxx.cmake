@@ -21,7 +21,7 @@
 if (NOT _NES_TOOLCHAIN_FILE)
     set(_NES_TOOLCHAIN_FILE 1)
 
-    # We are doing native builds
+    # Native builds
     set(CMAKE_SYSTEM_NAME Linux CACHE STRING "")
     set(CMAKE_CROSSCOMPILING OFF CACHE BOOL "")
 
@@ -32,16 +32,23 @@ if (NOT _NES_TOOLCHAIN_FILE)
     set(CMAKE_CXX_COMPILER ${CLANGXX_EXECUTABLE} CACHE STRING "")
     set(CMAKE_C_COMPILER ${CLANG_EXECUTABLE} CACHE STRING "")
 
-    # Use LLD
+    # Use LLD for cmake
     find_program(LLD_EXECUTABLE NAMES ld.lld-$ENV{LLVM_TOOLCHAIN_VERSION} ld.lld REQUIRED)
     set(CMAKE_LINKER ${LLD_EXECUTABLE} CACHE FILEPATH "")
     set(LINKER_FLAG "-fuse-ld=lld")
+
+    # Optional: mold
+    find_program(MOLD_EXECUTABLE NAMES mold)
+    if (MOLD_EXECUTABLE)
+        set(LINKER_FLAG "-fuse-ld=mold")
+        message(STATUS "Using mold")
+    endif ()
 
     # Optional: ccache
     find_program(CCACHE_EXECUTABLE NAMES ccache)
     if (CCACHE_EXECUTABLE)
         set(CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_EXECUTABLE}")
-    endif()
+    endif ()
 
     # libc++
     set(LIBCXX_FLAG "-stdlib=libc++")
@@ -70,4 +77,4 @@ if (NOT _NES_TOOLCHAIN_FILE)
     string(APPEND CMAKE_SHARED_LINKER_FLAGS_DEBUG_INIT " ${VCPKG_LINKER_FLAGS_DEBUG}")
     string(APPEND CMAKE_SHARED_LINKER_FLAGS_RELEASE_INIT " ${VCPKG_LINKER_FLAGS_RELEASE}")
 
-endif()
+endif ()

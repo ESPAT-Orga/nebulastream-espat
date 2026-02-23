@@ -298,10 +298,13 @@ extract_last_line() {
   run DOCKER_NES_CLI -t tests/good/adaptive.yaml start 'select DOUBLE from GENERATOR_SOURCE INTO FILE_SINK'
 
   [ "$status" -eq 0 ]
-  result="$(extract_last_line "$output")"
-  [ -n "$result" ]
-  [ -f "$result" ]
-  QUERY_ID=$result
+  #result="$(extract_last_line "$output")"
+  #[ -n "$result" ]
+  #[ -f "$result" ]
+  #QUERY_ID=$result
+
+  [ -f "$output" ]
+  FIRST_ID=$output
 
   #echo "started first query successfully" >&3
   run DOCKER_NES_CLI -t tests/good/adaptive.yaml start 'select * from GENERATOR_SOURCE2 INTO FILE_SINK2'
@@ -314,7 +317,12 @@ extract_last_line() {
   QUERY_ID=$result
   echo "starting of second query succeeded" >&3
 
-  echo "sleeping for 100 seconds" >&3
-  sleep 100
+  echo "sleeping for 30 seconds" >&3
+  sleep 30
+  echo "30 seconds passed sleeping for 70 seconds" >&3
+  #echo "stopping first query with id $FIRST_ID" >&3
+  #run DOCKER_NES_CLI -t tests/good/adaptive.yaml stop "$FIRST_ID"
+  #[ "$status" -eq 0 ]
+  sleep 70
   echo "wake up" >&3
 }

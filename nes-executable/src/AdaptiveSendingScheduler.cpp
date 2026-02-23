@@ -57,7 +57,7 @@ void AdaptiveSendingScheduler::applyPressure(const std::string& channelId)
 
     auto backpressureLocked = underBackpressure.wlock();
     backpressureLocked->operator[](priority).emplace_back(channelId);
-    maxPriorityUnderPressure.store({true, backpressureLocked->rbegin()->first});
+    maxPriorityUnderPressure.store(backpressureLocked->rbegin()->first);
 }
 
 void AdaptiveSendingScheduler::releasePressure(const std::string& channelId)
@@ -85,10 +85,10 @@ void AdaptiveSendingScheduler::releasePressure(const std::string& channelId)
     auto lowest = backpressureLocked->rbegin();
     if (lowest != backpressureLocked->rend())
     {
-        maxPriorityUnderPressure.store({true, backpressureLocked->rbegin()->first});
+        maxPriorityUnderPressure.store(backpressureLocked->rbegin()->first);
     } else
     {
-        maxPriorityUnderPressure.store({});
+        maxPriorityUnderPressure.store(INVALID_PRIORITY);
     }
 }
 
@@ -110,7 +110,7 @@ bool AdaptiveSendingScheduler::canSend(const std::string& channelId) {
     }
 
     auto currMaxPrio = maxPriorityUnderPressure.load();
-    return !currMaxPrio.valid || priority <= currMaxPrio.priority;
+    return currMaxPrio != INVALID_PRIORITY  || priority <= currMaxPrio;
 }
 
 void AdaptiveSendingScheduler::addChannel(const std::string& channelId, Priority priority)

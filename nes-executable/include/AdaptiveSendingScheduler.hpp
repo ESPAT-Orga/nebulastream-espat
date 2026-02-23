@@ -20,6 +20,7 @@
 #include <Identifiers/NESStrongType.hpp>
 #include <folly/Synchronized.h>
 #include <BackpressureStatisticsListener.hpp>
+#include <atomic>
 
 namespace NES
 {

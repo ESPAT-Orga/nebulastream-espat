@@ -16,7 +16,7 @@
 # 3. Use Libc++ if available
 
 # NebulaStream libc++ toolchain for vcpkg
-# Native Linux + clang + libc++
+# Native Linux + clang + libc++ + enforced LLD
 
 if (NOT _NES_TOOLCHAIN_FILE)
     set(_NES_TOOLCHAIN_FILE 1)
@@ -25,19 +25,17 @@ if (NOT _NES_TOOLCHAIN_FILE)
     set(CMAKE_SYSTEM_NAME Linux CACHE STRING "")
     set(CMAKE_CROSSCOMPILING OFF CACHE BOOL "")
 
-    # Prefer LLD
-    find_program(LLD_EXECUTABLE NAMES ld.lld-19 ld.lld)
+    # Clang selection
+    find_program(CLANGXX_EXECUTABLE NAMES clang++-$ENV{LLVM_TOOLCHAIN_VERSION} REQUIRED)
+    find_program(CLANG_EXECUTABLE NAMES clang-$ENV{LLVM_TOOLCHAIN_VERSION} REQUIRED)
 
-    if (LLD_EXECUTABLE)
-        set(LINKER_FLAG "-fuse-ld=lld")
-    else()
-        find_program(MOLD_EXECUTABLE NAMES mold)
-        if (MOLD_EXECUTABLE)
-            set(LINKER_FLAG "-fuse-ld=mold")
-        else()
-            set(LINKER_FLAG "")
-        endif()
-    endif()
+    set(CMAKE_CXX_COMPILER ${CLANGXX_EXECUTABLE} CACHE STRING "")
+    set(CMAKE_C_COMPILER ${CLANG_EXECUTABLE} CACHE STRING "")
+
+    # Use LLD
+    find_program(LLD_EXECUTABLE NAMES ld.lld-$ENV{LLVM_TOOLCHAIN_VERSION} ld.lld REQUIRED)
+    set(CMAKE_LINKER ${LLD_EXECUTABLE} CACHE FILEPATH "")
+    set(LINKER_FLAG "-fuse-ld=lld")
 
     # Optional: ccache
     find_program(CCACHE_EXECUTABLE NAMES ccache)
@@ -45,17 +43,11 @@ if (NOT _NES_TOOLCHAIN_FILE)
         set(CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_EXECUTABLE}")
     endif()
 
-    # Clang selection
-    find_program(CLANGXX_EXECUTABLE NAMES clang++-$ENV{LLVM_TOOLCHAIN_VERSION} REQUIRED)
-    find_program(CLANG_EXECUTABLE NAMES clang-$ENV{LLVM_TOOLCHAIN_VERSION} REQUIRED)
-
-    set(CMAKE_CXX_COMPILER ${CLANGXX_EXECUTABLE})
-    set(CMAKE_C_COMPILER ${CLANG_EXECUTABLE})
-
     # libc++
     set(LIBCXX_FLAG "-stdlib=libc++")
 
     # Ensure pthread is always present
+    set(THREADS_PREFER_PTHREAD_FLAG ON)
     set(PTHREAD_FLAG "-pthread")
 
     # Compiler flags
@@ -65,6 +57,7 @@ if (NOT _NES_TOOLCHAIN_FILE)
     # Linker flags
     string(APPEND CMAKE_EXE_LINKER_FLAGS_INIT " ${PTHREAD_FLAG} ${LINKER_FLAG} ${VCPKG_LINKER_FLAGS}")
     string(APPEND CMAKE_SHARED_LINKER_FLAGS_INIT " ${PTHREAD_FLAG} ${LINKER_FLAG} ${VCPKG_LINKER_FLAGS}")
+    string(APPEND CMAKE_MODULE_LINKER_FLAGS_INIT " ${PTHREAD_FLAG} ${LINKER_FLAG} ${VCPKG_LINKER_FLAGS}")
 
     # Debug/Release passthrough
     string(APPEND CMAKE_C_FLAGS_DEBUG_INIT " ${VCPKG_C_FLAGS_DEBUG}")

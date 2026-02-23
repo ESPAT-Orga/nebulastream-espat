@@ -173,6 +173,9 @@ void NetworkSink::stop(PipelineExecutionContext& pec)
         }
     }
 
+    //TODO: crate custom event for this
+    backpressureController.unbufferingCompleted(channelId);
+
     NES_DEBUG("Closing Sender channel {}", channelId);
     close_sender_channel(*std::move(this->channel));
     NES_DEBUG("Sender channel {} closed", channelId);

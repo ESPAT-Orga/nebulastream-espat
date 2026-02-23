@@ -43,7 +43,7 @@ private:
     folly::Synchronized<std::unordered_map<std::string, Priority>> channels;
 
     folly::Synchronized<std::map<Priority, std::vector<std::string>>> underBackpressure;
-    std::atomic<Priority> maxPriorityUnderPressure = 0;
+    std::atomic<std::optional<Priority>> maxPriorityUnderPressure;
     //TODO: remove this once we record more priorities
     std::atomic<Priority> maxPriority = 0;
 };

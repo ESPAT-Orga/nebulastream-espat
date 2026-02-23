@@ -102,7 +102,7 @@ bool AdaptiveSendingScheduler::canSend(const std::string& channelId) {
         priority = it->second;
     }
 
-    return priority <= maxPriorityUnderPressure;
+    return !maxPriorityUnderPressure.load() || priority <= maxPriorityUnderPressure.load().value();
 }
 
 void AdaptiveSendingScheduler::addChannel(const std::string& channelId, Priority priority)

@@ -22,6 +22,7 @@ namespace NES
 {
 using ChronoClock = std::chrono::system_clock;
 
+//TODO: should we add an event to record when a query was throttled?
 struct BaseBackpressureEvent
 {
     BaseBackpressureEvent(const std::string& channelId) : channelId(channelId) { }

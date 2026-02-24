@@ -40,6 +40,7 @@ struct Channel
 
     folly::Synchronized<State, std::mutex> stateMtx{OPEN};
     std::condition_variable_any change;
+    std::atomic<bool> blockedByAdaptiveSending{false};
 };
 
 BackpressureController::BackpressureController(std::shared_ptr<Channel> channel) : channel{std::move(channel)}

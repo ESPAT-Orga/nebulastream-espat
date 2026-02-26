@@ -76,9 +76,9 @@ bool BackpressureController::applyPressure(const std::string& channelId, bool ad
     return newPressure;
 }
 
-bool BackpressureController::isScheduledToSend(const std::string& channelId)
+bool BackpressureController::isScheduledToSend([[maybe_unused]] const std::string& channelId)
 {
-    return !adaptiveSendingScheduler || adaptiveSendingScheduler->canSend(channelId);
+    return !channel->blockedByAdaptiveSending.load();
 }
 
 bool BackpressureController::releasePressure(const std::string& channelId, bool adaptivelyThrottled)
@@ -117,9 +117,13 @@ void BackpressureController::setStatisticListener(std::shared_ptr<NES::Backpress
     this->backpressureStatisticListener = listener;
 }
 
-void BackpressureController::setAdaptiveSendingScheduler(std::shared_ptr<NES::AdaptiveSendingScheduler> scheduler)
+void BackpressureController::setAdaptiveSendingScheduler(const std::string& channelId, std::shared_ptr<NES::AdaptiveSendingScheduler> scheduler)
 {
     this->adaptiveSendingScheduler = scheduler;
+    if (scheduler)
+    {
+        scheduler->registerChannel(channelId, channel->blockedByAdaptiveSending);
+    }
 }
 
 void BackpressureListener::wait(const std::stop_token& stopToken) const

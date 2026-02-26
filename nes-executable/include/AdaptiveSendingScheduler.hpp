@@ -13,40 +13,46 @@
 */
 
 #pragma once
+#include <atomic>
 #include <chrono>
+#include <functional>
 #include <map>
 #include <variant>
 #include <Identifiers/Identifiers.hpp>
 #include <Identifiers/NESStrongType.hpp>
 #include <folly/Synchronized.h>
 #include <BackpressureStatisticsListener.hpp>
-#include <atomic>
 
 namespace NES
 {
 
 using Priority = uint64_t;
-//todo: can probably reduce this to priority only
-struct ChannelData
+
+constexpr Priority INVALID_PRIORITY = 0;
+
+struct RegisteredChannel
 {
     std::string channelId;
     Priority priority;
+    std::reference_wrapper<std::atomic<bool>> blockedFlag;
 };
 
-constexpr Priority INVALID_PRIORITY = 0;
+using LockedPriorityMap = folly::LockedPtr<std::map<Priority, std::vector<std::string>>, std::mutex>;
 
 struct AdaptiveSendingScheduler : BackpressureStatisticListener {
     void onEvent(BackpressureEvent event) override;
     void applyPressure(const std::string& channelId);
     void unbufferingCompleted(const std::string& channelId);
     bool canSend(const std::string& channelId);
-    void addChannel(const std::string& channelId, Priority priority);
+    void registerChannel(const std::string& channelId, std::atomic<bool>& blockedFlag);
+    void setBlockedStatusForPriorityRange(Priority start, Priority end, bool blocked, LockedPriorityMap lockedPriorities);
+
 private:
-    //todo: ideally we can move this to the backpressure channel
-    folly::Synchronized<std::unordered_map<std::string, Priority>> channels;
+    //TODO: this one we can probably remove soon
+    folly::Synchronized<std::unordered_map<std::string, RegisteredChannel>> registeredChannels;
+    folly::Synchronized<std::map<std::string, std::reference_wrapper<RegisteredChannel>>> priorities;
 
     folly::Synchronized<std::map<Priority, std::vector<std::string>>> underBackpressure;
-    //std::atomic<std::optional<Priority>> maxPriorityUnderPressure;
     std::atomic<Priority> minPriorityUnderPressure = INVALID_PRIORITY;
     //TODO: remove this once we record more priorities
     std::atomic<Priority> maxPriority = 1;

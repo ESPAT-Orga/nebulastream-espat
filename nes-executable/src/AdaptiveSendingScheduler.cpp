@@ -14,13 +14,9 @@
 
 #include <AdaptiveSendingScheduler.hpp>
 
-#include <condition_variable>
-#include <cstddef>
-#include <cstdint>
-#include <memory>
-#include <mutex>
-#include <stop_token>
-#include <utility>
+#include <algorithm>
+#include <atomic>
+#include <functional>
 
 #include <Util/Overloaded.hpp>
 #include <folly/Synchronized.h>
@@ -31,101 +27,107 @@ namespace NES {
 
 void AdaptiveSendingScheduler::onEvent(BackpressureEvent event)
 {
-        std::visit(
-            Overloaded{
-                [&](const UnbufferingCompletedEvent& unbufferEvent)
-                {
-                    unbufferingCompleted(unbufferEvent.channelId);
-                },
-                [&](const ApplyPressureEvent& applyEvent)
-                {
-                    applyPressure(applyEvent.channelId);
-                },
-                [&](const ReleasePressureEvent&)
-                {
-                    //no need to do anything, as we still wait for all buffers to be unbuffered
-                }},
-            event);
+    std::visit(
+        Overloaded{
+            [&](const UnbufferingCompletedEvent& unbufferEvent)
+            {
+                unbufferingCompleted(unbufferEvent.channelId);
+            },
+            [&](const ApplyPressureEvent& applyEvent)
+            {
+                applyPressure(applyEvent.channelId);
+            },
+            [&](const ReleasePressureEvent&)
+            {
+                //no need to do anything, as we still wait for all buffers to be unbuffered
+            }},
+        event);
 }
-
 
 void AdaptiveSendingScheduler::applyPressure(const std::string& channelId)
 {
-    Priority priority;;
+    auto regLocked = registeredChannels.rlock();
+    auto it = regLocked->find(channelId);
+    INVARIANT(it != regLocked->end(), "Channel not found");
+    const Priority priority = it->second.priority;
+
     {
-        auto channelsLocked = channels.rlock();
-        auto it = channelsLocked->find(channelId);
-        //TODO do invariants get removed in release?
-        INVARIANT(it != channelsLocked->end(), "Channel not found");
-        priority = it->second;
+        auto backpressureLocked = underBackpressure.wlock();
+        backpressureLocked->operator[](priority).emplace_back(channelId);
+        minPriorityUnderPressure.store(backpressureLocked->begin()->first);
     }
 
-    auto backpressureLocked = underBackpressure.wlock();
-    backpressureLocked->operator[](priority).emplace_back(channelId);
-    minPriorityUnderPressure.store(backpressureLocked->begin()->first);
+    const Priority minPrio = minPriorityUnderPressure.load();
+    for (auto& [id, ch] : *regLocked)
+    {
+        ch.blockedFlag.get().store(ch.priority > minPrio);
+    }
 }
 
 void AdaptiveSendingScheduler::unbufferingCompleted(const std::string& channelId)
 {
     NES_DEBUG("Unbuffering completed channel id = {}", channelId);
-    Priority priority;;
+
+    auto regLocked = registeredChannels.rlock();
+    auto it = regLocked->find(channelId);
+    INVARIANT(it != regLocked->end(), "Channel not found");
+    const Priority priority = it->second.priority;
+
     {
-        auto channelsLocked = channels.rlock();
-        auto it = channelsLocked->find(channelId);
-        //TODO do invariants get removed in release?
-        INVARIANT(it != channelsLocked->end(), "Channel not found");
-        priority = it->second;
+        auto backpressureLocked = underBackpressure.wlock();
+        auto& vec = backpressureLocked->operator[](priority);
+        auto toRemove = std::ranges::find(vec, channelId);
+        INVARIANT(toRemove != vec.end(), "Channel not found in underBackpressure");
+        vec.erase(toRemove);
+
+        if (vec.empty())
+        {
+            backpressureLocked->erase(priority);
+        }
+
+        auto lowest = backpressureLocked->begin();
+        if (lowest != backpressureLocked->end())
+        {
+            NES_DEBUG("New min priority under pressure: {}", lowest->first);
+            minPriorityUnderPressure.store(lowest->first);
+        }
+        else
+        {
+            NES_DEBUG("No more under pressure channels");
+            minPriorityUnderPressure.store(INVALID_PRIORITY);
+        }
     }
 
-    auto backpressureLocked = underBackpressure.wlock();
-    auto& vec = backpressureLocked->operator[](priority);
-    auto toRemove = std::find(vec.begin(), vec.end(), channelId);
-    INVARIANT(toRemove != vec.end(), "Channel not found in underBackpressure");
-    vec.erase(toRemove);
-
-    if (vec.empty())
+    const Priority minPrio = minPriorityUnderPressure.load();
+    for (auto& [id, ch] : *regLocked)
     {
-        backpressureLocked->erase(priority);
-    }
-
-    auto lowest = backpressureLocked->begin();
-    if (lowest != backpressureLocked->end())
-    {
-        NES_DEBUG("New max priority under pressure: {}", lowest->first);
-        minPriorityUnderPressure.store(lowest->first);
-    } else
-    {
-        NES_DEBUG("No more under pressure channels");
-        minPriorityUnderPressure.store(INVALID_PRIORITY);
+        ch.blockedFlag.get().store(minPrio != INVALID_PRIORITY && ch.priority > minPrio);
     }
 }
 
-
-bool AdaptiveSendingScheduler::canSend(const std::string& channelId) {
-    auto channelsLocked = channels.rlock();
-    auto it = channelsLocked->find(channelId);
-    Priority priority = 0;
-    if (it == channelsLocked->end())
-    {
-        //TODO: remove once we got proper priorities
-        channelsLocked.unlock();
-        priority = maxPriority++;
-        addChannel(channelId, priority);
-    } else
-    {
-        INVARIANT(it != channelsLocked->end(), "Channel not found");
-        priority = it->second;
-    }
-    channelsLocked.unlock();
-
-    auto currMinPrio = minPriorityUnderPressure.load();
-    NES_DEBUG("Can send: channelId={} currMinPrio={}, priority={}", channelId, currMinPrio, priority);
-    return currMinPrio == INVALID_PRIORITY  || priority <= currMinPrio;
-}
-
-void AdaptiveSendingScheduler::addChannel(const std::string& channelId, Priority priority)
+bool AdaptiveSendingScheduler::canSend(const std::string& channelId)
 {
-    channels.wlock()->emplace(channelId, priority);
+    auto regLocked = registeredChannels.rlock();
+    auto it = regLocked->find(channelId);
+    INVARIANT(it != regLocked->end(), "Channel not found");
+    const Priority priority = it->second.priority;
+    regLocked.unlock();
+
+    const Priority currMinPrio = minPriorityUnderPressure.load();
+    NES_DEBUG("Can send: channelId={} currMinPrio={}, priority={}", channelId, currMinPrio, priority);
+    return currMinPrio == INVALID_PRIORITY || priority <= currMinPrio;
+}
+
+void AdaptiveSendingScheduler::registerChannel(const std::string& channelId, std::atomic<bool>& blockedFlag)
+{
+    const Priority priority = maxPriority++;
+    registeredChannels.wlock()->emplace(channelId, RegisteredChannel{.priority = priority, .blockedFlag = std::ref(blockedFlag)});
+}
+
+void AdaptiveSendingScheduler::setBlockedStatusForPriorityRange(Priority start, Priority end, bool blocked, LockedPriorityMap lockedPriorities)
+{
+
+
 }
 
 }

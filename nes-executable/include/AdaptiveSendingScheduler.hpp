@@ -58,12 +58,19 @@ struct AdaptiveSendingScheduler : BackpressureStatisticListener {
     void setBlockedStatusForPriorityRange(Priority start, Priority end, bool blocked, LockedPriorityMap lockedPriorities)
     {
         NES_DEBUG("Setting blocked status for priority range {} - {} to {}", start, end, blocked);
-        if (end == INVALID_PRIORITY)
+        // if (end == INVALID_PRIORITY)
+        // {
+        //     end = lockedPriorities->end()->first;
+        // }
+        if (start >= end)
         {
-            end = lockedPriorities->end()->first;
+            NES_DEBUG("No blocking to set for range: {} - {}", start, end);
+            return;
         }
         auto begin = lockedPriorities->upper_bound(start);
-        auto endIt = lockedPriorities->lower_bound(end);
+        // auto endIt = lockedPriorities->lower_bound(end);
+        // auto endIt = lockedPriorities->find(end);
+        auto endIt = lockedPriorities->upper_bound(end);
         // INVARIANT(begin != lockedPriorities->end(), "Start priority not found");
         // INVARIANT(endIt != lockedPriorities->end(), "End priority not found");
 

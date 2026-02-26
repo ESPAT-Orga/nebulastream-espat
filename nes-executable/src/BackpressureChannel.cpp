@@ -78,6 +78,7 @@ bool BackpressureController::applyPressure(bool adaptivelyThrottled)
 
 bool BackpressureController::isScheduledToSend([[maybe_unused]] const std::string& channelId)
 {
+    NES_DEBUG("Checking if channel {} with priority {} is scheduled to send: blocked = {} ", channelId, priority, channel->blockedByAdaptiveSending.load());
     return !adaptiveSendingScheduler || !channel->blockedByAdaptiveSending.load();
 }
 

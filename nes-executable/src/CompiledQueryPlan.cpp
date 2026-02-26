@@ -22,6 +22,8 @@
 #include <Util/Ranges.hpp>
 #include <ExecutablePipelineStage.hpp>
 
+#include "AdaptiveSendingScheduler.hpp"
+
 namespace NES
 {
 std::shared_ptr<ExecutablePipeline> ExecutablePipeline::create(
@@ -41,4 +43,10 @@ std::unique_ptr<CompiledQueryPlan> CompiledQueryPlan::create(
 {
     return std::make_unique<CompiledQueryPlan>(localQueryId, std::move(pipelines), std::move(sinks), std::move(sources));
 }
+
+void CompiledQueryPlan::setPriority(Priority priority)
+{
+    this->priority = priority;
+}
+
 }

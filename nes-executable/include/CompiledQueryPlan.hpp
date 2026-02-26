@@ -22,6 +22,8 @@
 #include <Sources/SourceDescriptor.hpp>
 #include <ExecutablePipelineStage.hpp>
 
+#include "AdaptiveSendingScheduler.hpp"
+
 namespace NES
 {
 
@@ -66,10 +68,12 @@ struct CompiledQueryPlan
         std::vector<std::shared_ptr<ExecutablePipeline>> pipelines,
         std::vector<Sink> sinks,
         std::vector<Source> sources);
+    void setPriority(Priority priority);
 
     LocalQueryId localQueryId;
     std::vector<std::shared_ptr<ExecutablePipeline>> pipelines;
     std::vector<Sink> sinks;
     std::vector<Source> sources;
+    Priority priority;
 };
 }

@@ -114,6 +114,7 @@ std::expected<LocalQueryId, Exception> SingleNodeWorker::registerQuery(LogicalPl
         auto request = std::make_unique<QueryCompilation::QueryCompilationRequest>(queryPlan);
         request->dumpCompilationResult = configuration.workerConfiguration.dumpQueryCompilationIntermediateRepresentations.getValue();
         auto result = compiler->compileQuery(std::move(request));
+        result->setPriority(plan.getPriority());
         INVARIANT(result, "expected successful query compilation or exception, but got nothing");
         nodeEngine->registerCompiledQueryPlan(plan.getQueryId(), std::move(result));
         return plan.getQueryId();

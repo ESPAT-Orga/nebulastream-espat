@@ -45,6 +45,16 @@ void LogicalPlan::setQueryId(LocalQueryId id)
     localQueryId = id;
 }
 
+void LogicalPlan::setPriority(Priority priority)
+{
+    this->priority = priority;
+}
+
+Priority LogicalPlan::getPriority() const
+{
+    return priority;
+}
+
 std::string LogicalPlan::getOriginalSql() const
 {
     return originalSql;

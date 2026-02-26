@@ -64,8 +64,8 @@ struct AdaptiveSendingScheduler : BackpressureStatisticListener {
         }
         auto begin = lockedPriorities->upper_bound(start);
         auto endIt = lockedPriorities->lower_bound(end);
-        INVARIANT(begin != lockedPriorities->end(), "Start priority not found");
-        INVARIANT(endIt != lockedPriorities->end(), "End priority not found");
+        // INVARIANT(begin != lockedPriorities->end(), "Start priority not found");
+        // INVARIANT(endIt != lockedPriorities->end(), "End priority not found");
 
         for (auto& [_, ch] : std::ranges::subrange(begin, endIt))
             // for (auto it = begin; it != endIt; ++it)

@@ -28,11 +28,14 @@
 #include <vector>
 #include <Identifiers/Identifiers.hpp>
 #include <Listeners/QueryLog.hpp>
+#include <Operators/Sinks/SinkLogicalOperator.hpp>
 #include <Plans/LogicalPlan.hpp>
 #include <Runtime/Execution/QueryStatus.hpp>
 #include <Util/Logger/Logger.hpp>
 #include <Util/Pointers.hpp>
 #include <fmt/chrono.h>
+
+#include <AdaptiveSendingScheduler.hpp>
 #include <DistributedQuery.hpp>
 #include <ErrorHandling.hpp>
 #include <WorkerCatalog.hpp>
@@ -104,6 +107,17 @@ void QueryManager::QueryManagerBackends::rebuildBackendsIfNeeded() const
 
 [[nodiscard]] std::expected<DistributedQueryId, Exception> QueryManager::registerQuery(const DistributedLogicalPlan& plan)
 {
+    auto rootOperators = plan.getGlobalPlan().getRootOperators();
+    Priority priority;
+    for (auto op : rootOperators)
+    {
+        auto sink = op.getAs<SinkLogicalOperator>();
+        auto descriptor = sink.get().getSinkDescriptor().value();
+        // auto variant = descriptor.getConfig().at("priority");
+        auto currentPriority = std::get<Priority>(descriptor.getConfig().at("priority"));
+        currentPriority = std::get<Priority>(descriptor.getConfig().at("priority"));
+    }
+
     std::unordered_map<GrpcAddr, std::vector<LocalQueryId>> localQueries;
 
     auto id = plan.getQueryId();

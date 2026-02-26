@@ -101,7 +101,7 @@ public:
 
     /// NOLINTNEXTLINE(cert-err58-cpp)
     static inline std::unordered_map<std::string, DescriptorConfig::ConfigParameterContainer> parameterMap
-        = DescriptorConfig::createConfigParameterContainerMap(INPUT_FORMAT, ADD_TIMESTAMP);
+        = DescriptorConfig::createConfigParameterContainerMap(INPUT_FORMAT, ADD_TIMESTAMP, PRIORITY);
 
     /// Well-known property for any sink that sends its data to a file
     /// NOLINTNEXTLINE(cert-err58-cpp)

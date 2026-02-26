@@ -117,18 +117,13 @@ void BackpressureController::setStatisticListener(std::shared_ptr<NES::Backpress
     this->backpressureStatisticListener = listener;
 }
 
-void BackpressureController::setAdaptiveSendingScheduler(std::shared_ptr<NES::AdaptiveSendingScheduler> scheduler)
+void BackpressureController::setAdaptiveSendingScheduler(NES::LocalQueryId localQueryId, NES::Priority priority, std::shared_ptr<NES::AdaptiveSendingScheduler> scheduler)
 {
     this->adaptiveSendingScheduler = scheduler;
-}
-
-void BackpressureController::registerAtScheduler(std::string channelId, NES::Priority priority)
-{
     if (adaptiveSendingScheduler)
     {
-        adaptiveSendingScheduler->registerChannel(channelId, priority, channel->blockedByAdaptiveSending);
+        adaptiveSendingScheduler->registerChannel(localQueryId, priority, channel->blockedByAdaptiveSending);
     }
-
 }
 
 void BackpressureListener::wait(const std::stop_token& stopToken) const

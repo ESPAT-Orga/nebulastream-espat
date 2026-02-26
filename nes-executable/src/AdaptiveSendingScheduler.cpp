@@ -32,11 +32,11 @@ void AdaptiveSendingScheduler::onEvent(BackpressureEvent event)
         Overloaded{
             [&](const UnbufferingCompletedEvent& unbufferEvent)
             {
-                unbufferingCompleted(unbufferEvent.channelId);
+                unbufferingCompleted(unbufferEvent.localQueryId);
             },
             [&](const ApplyPressureEvent& applyEvent)
             {
-                applyPressure(applyEvent.channelId);
+                applyPressure(applyEvent.localQueryId);
             },
             [&](const ReleasePressureEvent&)
             {
@@ -45,11 +45,11 @@ void AdaptiveSendingScheduler::onEvent(BackpressureEvent event)
         event);
 }
 
-void AdaptiveSendingScheduler::applyPressure(const std::string& channelId)
+void AdaptiveSendingScheduler::applyPressure(const LocalQueryId localQueryId)
 {
     //TODO: replace this with param
     auto regLocked = registeredChannels.rlock();
-    auto it = regLocked->find(channelId);
+    auto it = regLocked->find(localQueryId);
     INVARIANT(it != regLocked->end(), "Channel not found");
     const Priority priority = it->second.priority;
     regLocked.unlock();
@@ -59,7 +59,7 @@ void AdaptiveSendingScheduler::applyPressure(const std::string& channelId)
     Priority minPrioNew;
     {
         auto backpressureLocked = underBackpressure.wlock();
-        backpressureLocked->operator[](priority).emplace_back(channelId);
+        backpressureLocked->operator[](priority).emplace_back(localQueryId);
         minPrioNew = backpressureLocked->begin()->first;
         minPrioOld = minPriorityUnderPressure.exchange(minPrioNew);
     }
@@ -78,12 +78,12 @@ void AdaptiveSendingScheduler::applyPressure(const std::string& channelId)
     // }
 }
 
-void AdaptiveSendingScheduler::unbufferingCompleted(const std::string& channelId)
+void AdaptiveSendingScheduler::unbufferingCompleted(const LocalQueryId localQueryId)
 {
-    NES_DEBUG("Unbuffering completed channel id = {}", channelId);
+    NES_DEBUG("Unbuffering completed channel id = {}", localQueryId);
 
     auto regLocked = registeredChannels.rlock();
-    auto it = regLocked->find(channelId);
+    auto it = regLocked->find(localQueryId);
     INVARIANT(it != regLocked->end(), "Channel not found");
     const Priority priority = it->second.priority;
 
@@ -92,7 +92,7 @@ void AdaptiveSendingScheduler::unbufferingCompleted(const std::string& channelId
     {
         auto backpressureLocked = underBackpressure.wlock();
         auto& vec = backpressureLocked->operator[](priority);
-        auto toRemove = std::ranges::find(vec, channelId);
+        auto toRemove = std::ranges::find(vec, localQueryId);
         INVARIANT(toRemove != vec.end(), "Channel not found in underBackpressure");
         vec.erase(toRemove);
 
@@ -119,11 +119,11 @@ void AdaptiveSendingScheduler::unbufferingCompleted(const std::string& channelId
     }
 }
 
-void AdaptiveSendingScheduler::registerChannel(const std::string& channelId, Priority priority, std::atomic<bool>& blockedFlag)
+void AdaptiveSendingScheduler::registerChannel(const LocalQueryId localQueryId, Priority priority, std::atomic<bool>& blockedFlag)
 {
     //TODO remove
     priority = maxPriority++;
-    registeredChannels.wlock()->emplace(channelId, RegisteredChannel{.channelId = channelId, .priority = priority, .blockedFlag = std::ref(blockedFlag)});
+    registeredChannels.wlock()->emplace(localQueryId, RegisteredChannel{.localQueryId = localQueryId, .priority = priority, .blockedFlag = std::ref(blockedFlag)});
 }
 
 

@@ -73,10 +73,11 @@ std::unique_ptr<ExecutableQueryPlan> ExecutableQueryPlan::instantiate(
     std::unordered_map<OperatorId, std::vector<std::shared_ptr<ExecutablePipeline>>> instantiatedSinksWithSourcePredecessor;
 
     auto [backpressureController, backpressureListener] = createBackpressureChannel();
+    Priority TODO = 0;
     if (backpressureStatisticListener)
     {
         backpressureController.setStatisticListener(backpressureStatisticListener);
-        backpressureController.setAdaptiveSendingScheduler(adaptiveSendingScheduler);
+        backpressureController.setAdaptiveSendingScheduler(compiledQueryPlan.localQueryId, TODO, adaptiveSendingScheduler);
     }
 
     if (compiledQueryPlan.sinks.size() != 1)

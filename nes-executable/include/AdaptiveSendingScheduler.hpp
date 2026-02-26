@@ -33,7 +33,7 @@ constexpr Priority INVALID_PRIORITY = 0;
 
 struct RegisteredChannel
 {
-    std::string channelId;
+    LocalQueryId localQueryId;
     Priority priority;
     std::reference_wrapper<std::atomic<bool>> blockedFlag;
 };
@@ -44,9 +44,9 @@ struct RegisteredChannel
 
 struct AdaptiveSendingScheduler : BackpressureStatisticListener {
     void onEvent(BackpressureEvent event) override;
-    void applyPressure(const std::string& channelId);
-    void unbufferingCompleted(const std::string& channelId);
-    void registerChannel(const std::string& channelId, Priority priority, std::atomic<bool>& blockedFlag);
+    void applyPressure(LocalQueryId localQueryId);
+    void unbufferingCompleted(LocalQueryId localQueryId);
+    void registerChannel(LocalQueryId localQueryId, Priority priority, std::atomic<bool>& blockedFlag);
 
     template<typename LockedPriorityMap>
     void setBlockedStatusForPriorityRange(Priority start, Priority end, bool blocked, LockedPriorityMap lockedPriorities)
@@ -70,10 +70,10 @@ struct AdaptiveSendingScheduler : BackpressureStatisticListener {
 
 private:
     //TODO: this one we can probably remove soon
-    folly::Synchronized<std::unordered_map<std::string, RegisteredChannel>> registeredChannels;
+    folly::Synchronized<std::unordered_map<LocalQueryId, RegisteredChannel>> registeredChannels;
     folly::Synchronized<std::map<Priority, std::reference_wrapper<RegisteredChannel>>> priorities;
 
-    folly::Synchronized<std::map<Priority, std::vector<std::string>>> underBackpressure;
+    folly::Synchronized<std::map<Priority, std::vector<LocalQueryId>>> underBackpressure;
     std::atomic<Priority> minPriorityUnderPressure = INVALID_PRIORITY;
     //TODO: remove this once we record more priorities
     std::atomic<Priority> maxPriority = 1;

@@ -25,13 +25,13 @@ using ChronoClock = std::chrono::system_clock;
 //TODO: should we add an event to record when a query was throttled?
 struct BaseBackpressureEvent
 {
-    BaseBackpressureEvent(const std::string& channelId) : channelId(channelId) { }
+    BaseBackpressureEvent(const std::string& channelId) : localQueryId(channelId) { }
 
     BaseBackpressureEvent() = default;
 
     ChronoClock::time_point timestamp = ChronoClock::now();
     //record the channel id so that backpressure events can be matched to a specific query
-    std::string channelId = "INVALID";
+    LocalQueryId localQueryId = INVALID_LOCAL_QUERY_ID;
 };
 
 struct ApplyPressureEvent : BaseBackpressureEvent

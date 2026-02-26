@@ -468,7 +468,7 @@ void GoogleEventTracePrinter::threadRoutine(const std::stop_token& token)
                     fmt::print(
                         file,
                         R"x(    {{"args":{{"channel_id":{}}},"cat":"backpressure","name":"Apply Backpressure","ph":"i","pid":{},"ts":{}}})x",
-                        applyEvent.channelId,
+                        applyEvent.localQueryId,
                         pid,
                         timestampToMicroseconds(applyEvent.timestamp));
                 },
@@ -478,7 +478,7 @@ void GoogleEventTracePrinter::threadRoutine(const std::stop_token& token)
                     fmt::print(
                         file,
                         R"x(    {{"args":{{"channel_id":{}}},"cat":"backpressure","name":"Apply Backpressure","ph":"i","pid":{},"ts":{}}})x",
-                        releaseEvent.channelId,
+                        releaseEvent.localQueryId,
                         pid,
                         timestampToMicroseconds(releaseEvent.timestamp));
                 }},

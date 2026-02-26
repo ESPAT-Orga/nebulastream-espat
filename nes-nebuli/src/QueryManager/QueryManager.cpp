@@ -113,7 +113,6 @@ void QueryManager::QueryManagerBackends::rebuildBackendsIfNeeded() const
     {
         auto sink = op.getAs<SinkLogicalOperator>();
         auto descriptor = sink.get().getSinkDescriptor().value();
-        // auto variant = descriptor.getConfig().at("priority");
         auto currentPriority = std::get<Priority>(descriptor.getConfig().at("priority"));
         currentPriority = std::get<Priority>(descriptor.getConfig().at("priority"));
     }

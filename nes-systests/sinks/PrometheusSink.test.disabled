@@ -44,5 +44,5 @@ CREATE PHYSICAL SOURCE FOR generator10K TYPE Generator SET(
 # This test will not terminate for a long time and then fail. It can be used running in parallel to
 # a prometheus server that consumes the exposed metrics
 # Setting INPUT_FORMAT has no effect but has to be set to keep the test from crashing.
-SELECT * FROM generator10K INTO Prometheus('127.0.0.1:8888' AS `SINK`.SERVER_URL, 'CSV' AS `SINK`.INPUT_FORMAT);
+SELECT * FROM generator10K INTO Prometheus('127.0.0.1:8888' AS `SINK`.SERVER_URL, 'CSV' AS `SINK`.INPUT_FORMAT, 9 AS `SINK`.PRIORITY);
 ----

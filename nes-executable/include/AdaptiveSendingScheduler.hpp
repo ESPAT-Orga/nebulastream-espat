@@ -18,11 +18,15 @@
 #include <functional>
 #include <map>
 #include <variant>
+
 #include <Identifiers/Identifiers.hpp>
 #include <Identifiers/NESStrongType.hpp>
+#include <folly/MPMCQueue.h>
 #include <folly/Synchronized.h>
 #include <BackpressureStatisticsListener.hpp>
 #include <ErrorHandling.hpp>
+
+#include "Thread.hpp"
 
 namespace NES
 {
@@ -44,8 +48,10 @@ struct RegisteredChannel
 
 struct AdaptiveSendingScheduler : BackpressureStatisticListener {
     void onEvent(BackpressureEvent event) override;
+    void threadRoutine(const std::stop_token& token);
     void applyPressure(LocalQueryId localQueryId, Priority priority);
     void unbufferingCompleted(LocalQueryId localQueryId, Priority priority);
+    void start();
     Priority registerChannel(LocalQueryId localQueryId, Priority priority, std::atomic<bool>& blockedFlag);
 
     template<typename LockedPriorityMap>
@@ -80,6 +86,9 @@ private:
     std::atomic<Priority> minPriorityUnderPressure = INVALID_PRIORITY;
     //TODO: remove this once we record more priorities
     std::atomic<Priority> maxPriority = 1;
+    static constexpr size_t QUEUE_LENGTH = 1000;
+    folly::MPMCQueue<BackpressureEvent> events{QUEUE_LENGTH};
+    Thread schedulerThread;
 };
 
 }

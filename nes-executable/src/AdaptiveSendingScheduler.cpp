@@ -24,25 +24,61 @@
 
 #include <ErrorHandling.hpp>
 
+#include "Thread.hpp"
+
 namespace NES {
+constexpr uint64_t READ_RETRY_MS = 100;
+constexpr uint64_t DROP_LOG_INTERVAL = 100;
+namespace
+{
+void warnOnOverflow(bool writeFailed)
+{
+    if (writeFailed) [[unlikely]]
+    {
+        static std::atomic<uint64_t> droppedCount{0};
+        /// Log first drop immediately, then every DROP_LOG_INTERVAL
+        if (uint64_t dropped = droppedCount.fetch_add(1, std::memory_order_relaxed) + 1; dropped == 1 || dropped % DROP_LOG_INTERVAL == 0)
+        {
+            NES_WARNING("Event queue full, {} events dropped so far", dropped);
+        }
+    }
+}
+}
 
 void AdaptiveSendingScheduler::onEvent(BackpressureEvent event)
 {
-    std::visit(
-        Overloaded{
-            [&](const UnbufferingCompletedEvent& unbufferEvent)
-            {
-                unbufferingCompleted(unbufferEvent.localQueryId, unbufferEvent.priority);
-            },
-            [&](const ApplyPressureEvent& applyEvent)
-            {
-                applyPressure(applyEvent.localQueryId, applyEvent.priority);
-            },
-            [&](const ReleasePressureEvent&)
-            {
-                //no need to do anything, as we still wait for all buffers to be unbuffered
-            }},
-        event);
+
+    warnOnOverflow(
+        !events.writeIfNotFull(std::visit([]<typename T>(T&& arg) { return BackpressureEvent(std::forward<T>(arg)); }, std::move(event))));
+}
+
+
+void AdaptiveSendingScheduler::threadRoutine(const std::stop_token& token)
+{
+    while (!token.stop_requested())
+    {
+        BackpressureEvent event = ReleasePressureEvent{}; /// Will be overwritten
+
+        if (!events.tryReadUntil(std::chrono::high_resolution_clock::now() + std::chrono::milliseconds(READ_RETRY_MS), event))
+        {
+            continue;
+        }
+        std::visit(
+            Overloaded{
+                [&](const UnbufferingCompletedEvent& unbufferEvent)
+                {
+                    unbufferingCompleted(unbufferEvent.localQueryId, unbufferEvent.priority);
+                },
+                [&](const ApplyPressureEvent& applyEvent)
+                {
+                    applyPressure(applyEvent.localQueryId, applyEvent.priority);
+                },
+                [&](const ReleasePressureEvent&)
+                {
+                    //no need to do anything, as we still wait for all buffers to be unbuffered
+                }},
+            event);
+    }
 }
 
 void AdaptiveSendingScheduler::applyPressure(const LocalQueryId localQueryId, Priority priority)
@@ -106,6 +142,11 @@ void AdaptiveSendingScheduler::unbufferingCompleted(const LocalQueryId localQuer
 
         setBlockedStatusForPriorityRange(minPrioOld, minPrioNew, false, std::move(lockedPriorities));
     }
+}
+
+void AdaptiveSendingScheduler::start()
+{
+    schedulerThread = Thread("adaptive-sending-scheduler", [this](const std::stop_token& stopToken) { threadRoutine(stopToken); });
 }
 
 //TODO: we only return priority because propagating it does not work yet

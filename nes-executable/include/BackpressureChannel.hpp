@@ -17,6 +17,7 @@
 #include <memory>
 #include <stop_token>
 #include <utility>
+#include <AdaptiveSendingScheduler.hpp>
 
 #include <BackpressureStatisticsListener.hpp>
 
@@ -62,7 +63,8 @@ public:
     bool releasePressure(const std::string& channelId, bool adaptivelyThrottled);
     bool unbufferingCompleted(const std::string& channelId);
     void setStatisticListener(std::shared_ptr<NES::BackpressureStatisticListener> listener);
-    void setAdaptiveSendingScheduler(const std::string& channelId, std::shared_ptr<NES::AdaptiveSendingScheduler> scheduler);
+    void setAdaptiveSendingScheduler(std::shared_ptr<NES::AdaptiveSendingScheduler> scheduler);
+    void registerAtScheduler(std::string channelId, NES::Priority priority);
 
 private:
     std::shared_ptr<NES::BackpressureStatisticListener> backpressureStatisticListener;

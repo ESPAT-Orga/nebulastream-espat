@@ -20,6 +20,7 @@
 
 #include <Util/Overloaded.hpp>
 #include <folly/Synchronized.h>
+#include <ranges>
 
 #include <ErrorHandling.hpp>
 
@@ -46,22 +47,35 @@ void AdaptiveSendingScheduler::onEvent(BackpressureEvent event)
 
 void AdaptiveSendingScheduler::applyPressure(const std::string& channelId)
 {
+    //TODO: replace this with param
     auto regLocked = registeredChannels.rlock();
     auto it = regLocked->find(channelId);
     INVARIANT(it != regLocked->end(), "Channel not found");
     const Priority priority = it->second.priority;
+    regLocked.unlock();
 
+    auto lockedPriorities = priorities.wlock();
+    Priority minPrioOld;
+    Priority minPrioNew;
     {
         auto backpressureLocked = underBackpressure.wlock();
         backpressureLocked->operator[](priority).emplace_back(channelId);
-        minPriorityUnderPressure.store(backpressureLocked->begin()->first);
+        minPrioNew = backpressureLocked->begin()->first;
+        minPrioOld = minPriorityUnderPressure.exchange(minPrioNew);
     }
 
-    const Priority minPrio = minPriorityUnderPressure.load();
-    for (auto& [id, ch] : *regLocked)
-    {
-        ch.blockedFlag.get().store(ch.priority > minPrio);
-    }
+    setBlockedStatusForPriorityRange(minPrioNew, minPrioOld, true, std::move(lockedPriorities));
+    // auto begin = lockedPriorities->upper_bound(minPrioNew);
+    // auto endIt = lockedPriorities->lower_bound(minPrioOld);
+    // INVARIANT(begin != lockedPriorities->end(), "Start priority not found");
+    // INVARIANT(endIt != lockedPriorities->end(), "End priority not found");
+    //
+    // for (auto& [_, ch] : std::ranges::subrange(begin, endIt))
+    //     // for (auto it = begin; it != endIt; ++it)
+    // {
+    //     // it->second.blockedFlag.get().store(blocked);
+    //     ch.get().blockedFlag.get().store(true);
+    // }
 }
 
 void AdaptiveSendingScheduler::unbufferingCompleted(const std::string& channelId)
@@ -73,6 +87,8 @@ void AdaptiveSendingScheduler::unbufferingCompleted(const std::string& channelId
     INVARIANT(it != regLocked->end(), "Channel not found");
     const Priority priority = it->second.priority;
 
+    Priority minPrioOld;
+    Priority minPrioNew;
     {
         auto backpressureLocked = underBackpressure.wlock();
         auto& vec = backpressureLocked->operator[](priority);
@@ -88,20 +104,18 @@ void AdaptiveSendingScheduler::unbufferingCompleted(const std::string& channelId
         auto lowest = backpressureLocked->begin();
         if (lowest != backpressureLocked->end())
         {
-            NES_DEBUG("New min priority under pressure: {}", lowest->first);
-            minPriorityUnderPressure.store(lowest->first);
+            minPrioNew = lowest->first;
+            NES_DEBUG("New min priority under pressure: {}", minPrioNew);
         }
         else
         {
+            minPrioNew = INVALID_PRIORITY;
             NES_DEBUG("No more under pressure channels");
-            minPriorityUnderPressure.store(INVALID_PRIORITY);
         }
-    }
+        minPrioOld = minPriorityUnderPressure.exchange(minPrioNew);
+        auto lockedPriorities = priorities.wlock();
 
-    const Priority minPrio = minPriorityUnderPressure.load();
-    for (auto& [id, ch] : *regLocked)
-    {
-        ch.blockedFlag.get().store(minPrio != INVALID_PRIORITY && ch.priority > minPrio);
+        setBlockedStatusForPriorityRange(minPrioOld, minPrioNew, false, std::move(lockedPriorities));
     }
 }
 
@@ -118,16 +132,12 @@ bool AdaptiveSendingScheduler::canSend(const std::string& channelId)
     return currMinPrio == INVALID_PRIORITY || priority <= currMinPrio;
 }
 
-void AdaptiveSendingScheduler::registerChannel(const std::string& channelId, std::atomic<bool>& blockedFlag)
+void AdaptiveSendingScheduler::registerChannel(const std::string& channelId, Priority priority, std::atomic<bool>& blockedFlag)
 {
-    const Priority priority = maxPriority++;
-    registeredChannels.wlock()->emplace(channelId, RegisteredChannel{.priority = priority, .blockedFlag = std::ref(blockedFlag)});
+    //TODO remove
+    priority = maxPriority++;
+    registeredChannels.wlock()->emplace(channelId, RegisteredChannel{.channelId = channelId, .priority = priority, .blockedFlag = std::ref(blockedFlag)});
 }
 
-void AdaptiveSendingScheduler::setBlockedStatusForPriorityRange(Priority start, Priority end, bool blocked, LockedPriorityMap lockedPriorities)
-{
-
-
-}
 
 }

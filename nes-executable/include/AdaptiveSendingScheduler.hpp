@@ -22,6 +22,7 @@
 #include <Identifiers/NESStrongType.hpp>
 #include <folly/Synchronized.h>
 #include <BackpressureStatisticsListener.hpp>
+#include <ErrorHandling.hpp>
 
 namespace NES
 {
@@ -37,20 +38,41 @@ struct RegisteredChannel
     std::reference_wrapper<std::atomic<bool>> blockedFlag;
 };
 
-using LockedPriorityMap = folly::LockedPtr<std::map<Priority, std::vector<std::string>>, std::mutex>;
+// using LockedPriorityMap = folly::LockedPtr<std::map<Priority, std::vector<std::string>>, std::mutex>;
+// using LockedPriorityMap = folly::LockedPtr<std::mutex, std::map<Priority, std::vector<std::string>>>;
+// using LockedPriorityMap = folly::LockedPtr<std::map<Priority, std::vector<std::string>>, folly::detail::SynchronizedLockPolicyShared>;
 
 struct AdaptiveSendingScheduler : BackpressureStatisticListener {
     void onEvent(BackpressureEvent event) override;
     void applyPressure(const std::string& channelId);
     void unbufferingCompleted(const std::string& channelId);
     bool canSend(const std::string& channelId);
-    void registerChannel(const std::string& channelId, std::atomic<bool>& blockedFlag);
-    void setBlockedStatusForPriorityRange(Priority start, Priority end, bool blocked, LockedPriorityMap lockedPriorities);
+    void registerChannel(const std::string& channelId, Priority priority, std::atomic<bool>& blockedFlag);
+
+    template<typename LockedPriorityMap>
+    void setBlockedStatusForPriorityRange(Priority start, Priority end, bool blocked, LockedPriorityMap lockedPriorities)
+    {
+        if (end == INVALID_PRIORITY)
+        {
+            end = lockedPriorities->end()->first;
+        }
+        auto begin = lockedPriorities->upper_bound(start);
+        auto endIt = lockedPriorities->lower_bound(end);
+        INVARIANT(begin != lockedPriorities->end(), "Start priority not found");
+        INVARIANT(endIt != lockedPriorities->end(), "End priority not found");
+
+        for (auto& [_, ch] : std::ranges::subrange(begin, endIt))
+            // for (auto it = begin; it != endIt; ++it)
+        {
+            // it->second.blockedFlag.get().store(blocked);
+            ch.get().blockedFlag.get().store(blocked);
+        }
+    }
 
 private:
     //TODO: this one we can probably remove soon
     folly::Synchronized<std::unordered_map<std::string, RegisteredChannel>> registeredChannels;
-    folly::Synchronized<std::map<std::string, std::reference_wrapper<RegisteredChannel>>> priorities;
+    folly::Synchronized<std::map<Priority, std::reference_wrapper<RegisteredChannel>>> priorities;
 
     folly::Synchronized<std::map<Priority, std::vector<std::string>>> underBackpressure;
     std::atomic<Priority> minPriorityUnderPressure = INVALID_PRIORITY;

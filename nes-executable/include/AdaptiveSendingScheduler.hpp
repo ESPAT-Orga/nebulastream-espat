@@ -44,8 +44,8 @@ struct RegisteredChannel
 
 struct AdaptiveSendingScheduler : BackpressureStatisticListener {
     void onEvent(BackpressureEvent event) override;
-    void applyPressure(LocalQueryId localQueryId);
-    void unbufferingCompleted(LocalQueryId localQueryId);
+    void applyPressure(LocalQueryId localQueryId, Priority priority);
+    void unbufferingCompleted(LocalQueryId localQueryId, Priority priority);
     void registerChannel(LocalQueryId localQueryId, Priority priority, std::atomic<bool>& blockedFlag);
 
     template<typename LockedPriorityMap>
@@ -64,14 +64,16 @@ struct AdaptiveSendingScheduler : BackpressureStatisticListener {
             // for (auto it = begin; it != endIt; ++it)
         {
             // it->second.blockedFlag.get().store(blocked);
-            ch.get().blockedFlag.get().store(blocked);
+            NES_DEBUG("Setting blocked status for channel id = {} to {}", ch.localQueryId, blocked);
+            ch.blockedFlag.get().store(blocked);
         }
     }
 
 private:
     //TODO: this one we can probably remove soon
-    folly::Synchronized<std::unordered_map<LocalQueryId, RegisteredChannel>> registeredChannels;
-    folly::Synchronized<std::map<Priority, std::reference_wrapper<RegisteredChannel>>> priorities;
+    // folly::Synchronized<std::unordered_map<LocalQueryId, RegisteredChannel>> registeredChannels;
+    // folly::Synchronized<std::map<Priority, std::reference_wrapper<RegisteredChannel>>> priorities;
+    folly::Synchronized<std::map<Priority, RegisteredChannel>> priorities;
 
     folly::Synchronized<std::map<Priority, std::vector<LocalQueryId>>> underBackpressure;
     std::atomic<Priority> minPriorityUnderPressure = INVALID_PRIORITY;

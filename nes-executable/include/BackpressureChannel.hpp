@@ -17,6 +17,7 @@
 #include <memory>
 #include <stop_token>
 #include <utility>
+
 #include <AdaptiveSendingScheduler.hpp>
 
 #include <BackpressureStatisticsListener.hpp>
@@ -58,10 +59,10 @@ public:
     BackpressureController(BackpressureController&& other) noexcept = default;
     BackpressureController& operator=(BackpressureController&& other) noexcept = default;
 
-    bool applyPressure(const std::string& channelId, bool adaptivelyThrottled);
+    bool applyPressure(bool adaptivelyThrottled);
     bool isScheduledToSend(const std::string& channelId);
-    bool releasePressure(const std::string& channelId, bool adaptivelyThrottled);
-    bool unbufferingCompleted(const std::string& channelId);
+    bool releasePressure(bool adaptivelyThrottled);
+    bool unbufferingCompleted();
     void setStatisticListener(std::shared_ptr<NES::BackpressureStatisticListener> listener);
     void setAdaptiveSendingScheduler(
         NES::LocalQueryId localQueryId, NES::Priority priority, std::shared_ptr<NES::AdaptiveSendingScheduler> scheduler);
@@ -69,6 +70,7 @@ public:
 private:
     std::shared_ptr<NES::BackpressureStatisticListener> backpressureStatisticListener;
     std::shared_ptr<NES::AdaptiveSendingScheduler> adaptiveSendingScheduler;
+    NES::LocalQueryId localQueryId = NES::INVALID_LOCAL_QUERY_ID;
 };
 
 /// Listener of the backpressure channel is the Ingestion type that is used by sources.

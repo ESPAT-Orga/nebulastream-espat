@@ -32,11 +32,11 @@ void AdaptiveSendingScheduler::onEvent(BackpressureEvent event)
         Overloaded{
             [&](const UnbufferingCompletedEvent& unbufferEvent)
             {
-                unbufferingCompleted(unbufferEvent.localQueryId);
+                unbufferingCompleted(unbufferEvent.localQueryId, unbufferEvent.priority);
             },
             [&](const ApplyPressureEvent& applyEvent)
             {
-                applyPressure(applyEvent.localQueryId);
+                applyPressure(applyEvent.localQueryId, applyEvent.priority);
             },
             [&](const ReleasePressureEvent&)
             {
@@ -45,15 +45,8 @@ void AdaptiveSendingScheduler::onEvent(BackpressureEvent event)
         event);
 }
 
-void AdaptiveSendingScheduler::applyPressure(const LocalQueryId localQueryId)
+void AdaptiveSendingScheduler::applyPressure(const LocalQueryId localQueryId, Priority priority)
 {
-    //TODO: replace this with param
-    auto regLocked = registeredChannels.rlock();
-    auto it = regLocked->find(localQueryId);
-    INVARIANT(it != regLocked->end(), "Channel not found");
-    const Priority priority = it->second.priority;
-    regLocked.unlock();
-
     auto lockedPriorities = priorities.wlock();
     Priority minPrioOld;
     Priority minPrioNew;
@@ -78,14 +71,9 @@ void AdaptiveSendingScheduler::applyPressure(const LocalQueryId localQueryId)
     // }
 }
 
-void AdaptiveSendingScheduler::unbufferingCompleted(const LocalQueryId localQueryId)
+void AdaptiveSendingScheduler::unbufferingCompleted(const LocalQueryId localQueryId, Priority priority)
 {
     NES_DEBUG("Unbuffering completed channel id = {}", localQueryId);
-
-    auto regLocked = registeredChannels.rlock();
-    auto it = regLocked->find(localQueryId);
-    INVARIANT(it != regLocked->end(), "Channel not found");
-    const Priority priority = it->second.priority;
 
     Priority minPrioOld;
     Priority minPrioNew;
@@ -121,9 +109,13 @@ void AdaptiveSendingScheduler::unbufferingCompleted(const LocalQueryId localQuer
 
 void AdaptiveSendingScheduler::registerChannel(const LocalQueryId localQueryId, Priority priority, std::atomic<bool>& blockedFlag)
 {
-    //TODO remove
-    priority = maxPriority++;
-    registeredChannels.wlock()->emplace(localQueryId, RegisteredChannel{.localQueryId = localQueryId, .priority = priority, .blockedFlag = std::ref(blockedFlag)});
+    // registeredChannels.wlock()->emplace(localQueryId, RegisteredChannel{.localQueryId = localQueryId, .priority = priority, .blockedFlag = std::ref(blockedFlag)});
+    NES_DEBUG("Registered channel id = {}, priority = {}", localQueryId, priority);
+    auto registeredChannel = RegisteredChannel {
+    .localQueryId = localQueryId,
+    .priority = priority,
+    .blockedFlag = std::ref(blockedFlag)};
+    priorities.wlock()->emplace(priority, registeredChannel);
 }
 
 

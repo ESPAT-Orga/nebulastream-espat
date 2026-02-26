@@ -53,8 +53,8 @@ class BackpressureHandler
 public:
     std::optional<TupleBuffer>
     checkAdaptiveScheduling(TupleBuffer buffer, BackpressureController& backpressureController, const std::string& channelId);
-    std::optional<TupleBuffer> onFull(TupleBuffer buffer, BackpressureController& backpressureController, const std::string& channelId, bool adaptivelyThrottled);
-    std::optional<TupleBuffer> onSuccess(BackpressureController& backpressureController, const std::string& channelId);
+    std::optional<TupleBuffer> onFull(TupleBuffer buffer, BackpressureController& backpressureController, bool adaptivelyThrottled);
+    std::optional<TupleBuffer> onSuccess(BackpressureController& backpressureController);
     bool empty() const;
 };
 

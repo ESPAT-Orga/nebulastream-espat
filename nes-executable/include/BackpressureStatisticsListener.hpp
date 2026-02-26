@@ -25,32 +25,34 @@ using ChronoClock = std::chrono::system_clock;
 //TODO: should we add an event to record when a query was throttled?
 struct BaseBackpressureEvent
 {
-    BaseBackpressureEvent(const std::string& channelId) : localQueryId(channelId) { }
+    BaseBackpressureEvent(const LocalQueryId localQueryId) : localQueryId(localQueryId) { }
 
     BaseBackpressureEvent() = default;
 
     ChronoClock::time_point timestamp = ChronoClock::now();
     //record the channel id so that backpressure events can be matched to a specific query
     LocalQueryId localQueryId = INVALID_LOCAL_QUERY_ID;
+    //TODO: use proper type
+    uint64_t priority = 0;
 };
 
 struct ApplyPressureEvent : BaseBackpressureEvent
 {
-    ApplyPressureEvent(const std::string& channelId) : BaseBackpressureEvent(channelId) { }
+    ApplyPressureEvent(const LocalQueryId localQueryId) : BaseBackpressureEvent(localQueryId) { }
 
     ApplyPressureEvent() = default;
 };
 
 struct ReleasePressureEvent : BaseBackpressureEvent
 {
-    ReleasePressureEvent(const std::string& channelId) : BaseBackpressureEvent(channelId) { }
+    ReleasePressureEvent(const LocalQueryId localQueryId) : BaseBackpressureEvent(localQueryId) { }
 
     ReleasePressureEvent() = default;
 };
 
 struct UnbufferingCompletedEvent : BaseBackpressureEvent
 {
-    UnbufferingCompletedEvent(const std::string& channelId) : BaseBackpressureEvent(channelId) { }
+    UnbufferingCompletedEvent(const LocalQueryId localQueryId) : BaseBackpressureEvent(localQueryId) { }
 
     UnbufferingCompletedEvent() = default;
 };

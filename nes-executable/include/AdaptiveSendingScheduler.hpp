@@ -46,7 +46,6 @@ struct AdaptiveSendingScheduler : BackpressureStatisticListener {
     void onEvent(BackpressureEvent event) override;
     void applyPressure(const std::string& channelId);
     void unbufferingCompleted(const std::string& channelId);
-    bool canSend(const std::string& channelId);
     void registerChannel(const std::string& channelId, Priority priority, std::atomic<bool>& blockedFlag);
 
     template<typename LockedPriorityMap>

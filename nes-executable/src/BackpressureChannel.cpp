@@ -78,7 +78,7 @@ bool BackpressureController::applyPressure(const std::string& channelId, bool ad
 
 bool BackpressureController::isScheduledToSend([[maybe_unused]] const std::string& channelId)
 {
-    return !channel->blockedByAdaptiveSending.load();
+    return !adaptiveSendingScheduler || !channel->blockedByAdaptiveSending.load();
 }
 
 bool BackpressureController::releasePressure(const std::string& channelId, bool adaptivelyThrottled)

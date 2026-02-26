@@ -119,19 +119,6 @@ void AdaptiveSendingScheduler::unbufferingCompleted(const std::string& channelId
     }
 }
 
-bool AdaptiveSendingScheduler::canSend(const std::string& channelId)
-{
-    auto regLocked = registeredChannels.rlock();
-    auto it = regLocked->find(channelId);
-    INVARIANT(it != regLocked->end(), "Channel not found");
-    const Priority priority = it->second.priority;
-    regLocked.unlock();
-
-    const Priority currMinPrio = minPriorityUnderPressure.load();
-    NES_DEBUG("Can send: channelId={} currMinPrio={}, priority={}", channelId, currMinPrio, priority);
-    return currMinPrio == INVALID_PRIORITY || priority <= currMinPrio;
-}
-
 void AdaptiveSendingScheduler::registerChannel(const std::string& channelId, Priority priority, std::atomic<bool>& blockedFlag)
 {
     //TODO remove

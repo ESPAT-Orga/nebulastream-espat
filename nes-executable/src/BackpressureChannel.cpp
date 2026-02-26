@@ -71,7 +71,7 @@ bool BackpressureController::applyPressure(bool adaptivelyThrottled)
     bool newPressure = old == Channel::OPEN;
     if (!adaptivelyThrottled && backpressureStatisticListener && newPressure)
     {
-        backpressureStatisticListener->onEvent(NES::ApplyPressureEvent(localQueryId));
+        backpressureStatisticListener->onEvent(NES::ApplyPressureEvent(localQueryId, priority));
     }
     return newPressure;
 }
@@ -92,7 +92,7 @@ bool BackpressureController::releasePressure(bool adaptivelyThrottled)
 
         if (!adaptivelyThrottled && backpressureStatisticListener)
         {
-            backpressureStatisticListener->onEvent(NES::ReleasePressureEvent(localQueryId));
+            backpressureStatisticListener->onEvent(NES::ReleasePressureEvent(localQueryId, priority));
         }
         return true;
     }
@@ -107,7 +107,7 @@ bool BackpressureController::unbufferingCompleted()
 
     if (backpressureStatisticListener)
     {
-        backpressureStatisticListener->onEvent(NES::UnbufferingCompletedEvent(localQueryId));
+        backpressureStatisticListener->onEvent(NES::UnbufferingCompletedEvent(localQueryId, priority));
     }
     return true;
 }
@@ -121,9 +121,12 @@ void BackpressureController::setAdaptiveSendingScheduler(NES::LocalQueryId local
 {
     this->adaptiveSendingScheduler = scheduler;
     this->localQueryId = localQueryId;
+    NES_DEBUG("Registering channel id = {}, with priority {}", localQueryId, priority);
+    // INVARIANT(priority != NES::INVALID_PRIORITY, "Priority must be valid");
+    this->priority = priority;
     if (adaptiveSendingScheduler)
     {
-        adaptiveSendingScheduler->registerChannel(localQueryId, priority, channel->blockedByAdaptiveSending);
+        this->priority = adaptiveSendingScheduler->registerChannel(localQueryId, priority, channel->blockedByAdaptiveSending);
     }
 }
 

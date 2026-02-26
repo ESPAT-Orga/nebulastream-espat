@@ -121,7 +121,10 @@ void QueryManager::QueryManagerBackends::rebuildBackendsIfNeeded() const
         {
             priority = std::min(priority, currentPriority);
         }
+        NES_DEBUG("Priority set to {}", priority);
     }
+    NES_DEBUG("Final priority is to {}", priority);
+    INVARIANT(priority != INVALID_PRIORITY, "Priority must be set");
 
     std::unordered_map<GrpcAddr, std::vector<LocalQueryId>> localQueries;
 

@@ -33,6 +33,8 @@
 #include <folly/MPMCQueue.h>
 #include <scope_guard.hpp>
 
+#include "AdaptiveSendingScheduler.hpp"
+
 namespace NES
 {
 
@@ -99,7 +101,7 @@ void BackpressureStatisticTcpEmitter::threadRoutine(const std::stop_token& token
         boost::system::error_code ec;
         while (!token.stop_requested())
         {
-            BackpressureEvent event = ApplyPressureEvent{INVALID_LOCAL_QUERY_ID}; /// Will be overwritten
+            BackpressureEvent event = ApplyPressureEvent{INVALID_LOCAL_QUERY_ID, INVALID_PRIORITY}; /// Will be overwritten
 
             if (!events.tryReadUntil(std::chrono::high_resolution_clock::now() + std::chrono::milliseconds(READ_RETRY_MS), event))
             {

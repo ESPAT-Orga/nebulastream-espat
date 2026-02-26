@@ -71,6 +71,7 @@ private:
     std::shared_ptr<NES::BackpressureStatisticListener> backpressureStatisticListener;
     std::shared_ptr<NES::AdaptiveSendingScheduler> adaptiveSendingScheduler;
     NES::LocalQueryId localQueryId = NES::INVALID_LOCAL_QUERY_ID;
+    NES::Priority priority = NES::INVALID_PRIORITY;
 };
 
 /// Listener of the backpressure channel is the Ingestion type that is used by sources.

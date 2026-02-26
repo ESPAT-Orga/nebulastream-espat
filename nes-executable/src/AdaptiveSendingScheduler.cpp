@@ -47,6 +47,7 @@ void AdaptiveSendingScheduler::onEvent(BackpressureEvent event)
 
 void AdaptiveSendingScheduler::applyPressure(const LocalQueryId localQueryId, Priority priority)
 {
+    NES_DEBUG("Applying pressure to channel id = {} with priority {}", localQueryId, priority);
     auto lockedPriorities = priorities.wlock();
     Priority minPrioOld;
     Priority minPrioNew;
@@ -73,7 +74,7 @@ void AdaptiveSendingScheduler::applyPressure(const LocalQueryId localQueryId, Pr
 
 void AdaptiveSendingScheduler::unbufferingCompleted(const LocalQueryId localQueryId, Priority priority)
 {
-    NES_DEBUG("Unbuffering completed channel id = {}", localQueryId);
+    NES_DEBUG("Unbuffering completed channel id = {}, with priority {}", localQueryId, priority);
 
     Priority minPrioOld;
     Priority minPrioNew;
@@ -107,15 +108,17 @@ void AdaptiveSendingScheduler::unbufferingCompleted(const LocalQueryId localQuer
     }
 }
 
-void AdaptiveSendingScheduler::registerChannel(const LocalQueryId localQueryId, Priority priority, std::atomic<bool>& blockedFlag)
+//TODO: we only return priority because propagating it does not work yet
+Priority AdaptiveSendingScheduler::registerChannel(const LocalQueryId localQueryId, Priority priority, std::atomic<bool>& blockedFlag)
 {
-    // registeredChannels.wlock()->emplace(localQueryId, RegisteredChannel{.localQueryId = localQueryId, .priority = priority, .blockedFlag = std::ref(blockedFlag)});
+    priority = maxPriority++;
     NES_DEBUG("Registered channel id = {}, priority = {}", localQueryId, priority);
     auto registeredChannel = RegisteredChannel {
     .localQueryId = localQueryId,
     .priority = priority,
     .blockedFlag = std::ref(blockedFlag)};
     priorities.wlock()->emplace(priority, registeredChannel);
+    return priority;
 }
 
 

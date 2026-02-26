@@ -46,6 +46,7 @@ std::unique_ptr<CompiledQueryPlan> CompiledQueryPlan::create(
 
 void CompiledQueryPlan::setPriority(Priority priority)
 {
+    // INVARIANT(priority != INVALID_PRIORITY, "Priority must be not invalid!");
     this->priority = priority;
 }
 

@@ -44,6 +44,7 @@ EmbeddedWorkerQuerySubmissionBackend::EmbeddedWorkerQuerySubmissionBackend(
 
 std::expected<LocalQueryId, Exception> EmbeddedWorkerQuerySubmissionBackend::registerQuery(LogicalPlan plan)
 {
+    // INVARIANT(false, "HERE");
     return worker.registerQuery(plan);
 }
 

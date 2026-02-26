@@ -96,7 +96,7 @@ public:
 
     static inline const DescriptorConfig::ConfigParameter<uint64_t> PRIORITY {
         "priority",
-        0,
+        1,
         [](const std::unordered_map<std::string, std::string>& config) { return DescriptorConfig::tryGet(PRIORITY, config); }};
 
     /// NOLINTNEXTLINE(cert-err58-cpp)

@@ -48,6 +48,7 @@ GRPCQuerySubmissionBackend::GRPCQuerySubmissionBackend(WorkerConfig config)
 
 std::expected<LocalQueryId, Exception> GRPCQuerySubmissionBackend::registerQuery(LogicalPlan localPlan)
 {
+    // INVARIANT(false, "HERE");
     grpc::ClientContext context;
     RegisterQueryReply reply;
     RegisterQueryRequest request;

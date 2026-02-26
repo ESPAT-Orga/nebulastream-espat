@@ -285,7 +285,7 @@ extract_last_line() {
         open_viewer python3 "$TMP_DIR"/tests/util/print_output.py "$TMP_DIR"/worker-2/out.csv --plot
 
         # open terminal/pane and print live logs
-        #open_viewer tail -F "$TMP_DIR"/worker-1/singleNodeWorker.log
+        open_viewer tail -F "$TMP_DIR"/worker-1/singleNodeWorker.log
         #open_viewer tail -F "$TMP_DIR"/worker-2/singleNodeWorker.log
     fi
 

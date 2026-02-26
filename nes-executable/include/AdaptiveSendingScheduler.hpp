@@ -46,11 +46,12 @@ struct AdaptiveSendingScheduler : BackpressureStatisticListener {
     void onEvent(BackpressureEvent event) override;
     void applyPressure(LocalQueryId localQueryId, Priority priority);
     void unbufferingCompleted(LocalQueryId localQueryId, Priority priority);
-    void registerChannel(LocalQueryId localQueryId, Priority priority, std::atomic<bool>& blockedFlag);
+    Priority registerChannel(LocalQueryId localQueryId, Priority priority, std::atomic<bool>& blockedFlag);
 
     template<typename LockedPriorityMap>
     void setBlockedStatusForPriorityRange(Priority start, Priority end, bool blocked, LockedPriorityMap lockedPriorities)
     {
+        NES_DEBUG("Setting blocked status for priority range {} - {} to {}", start, end, blocked);
         if (end == INVALID_PRIORITY)
         {
             end = lockedPriorities->end()->first;

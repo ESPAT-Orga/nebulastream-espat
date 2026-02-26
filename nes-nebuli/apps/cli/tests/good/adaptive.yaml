@@ -33,6 +33,7 @@ sinks:
         type: FLOAT64
     type: File
     config:
+      priority: 1
       file_path: out.csv
       input_format: CSV
   - name: FILE_SINK2
@@ -42,7 +43,7 @@ sinks:
         type: FLOAT64
     type: File
     config:
-      #priority: 77
+      priority: 77
       file_path: out2.csv
       input_format: CSV
 

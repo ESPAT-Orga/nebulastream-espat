@@ -47,6 +47,7 @@ void LogicalPlan::setQueryId(LocalQueryId id)
 
 void LogicalPlan::setPriority(Priority priority)
 {
+    INVARIANT(priority != INVALID_PRIORITY, "Priority must be not invalid!");
     this->priority = priority;
 }
 

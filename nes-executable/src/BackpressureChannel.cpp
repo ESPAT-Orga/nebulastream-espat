@@ -27,6 +27,8 @@
 #include <AdaptiveSendingScheduler.hpp>
 #include <ErrorHandling.hpp>
 
+constexpr uint64_t INVALID_CONTINGENT = INT64_MAX;
+
 /// Represents the state of the backpressure channel guarded by a mutex and communicated to the listener via the condition variable.
 /// The channel is initially open.
 struct Channel
@@ -40,7 +42,7 @@ struct Channel
 
     folly::Synchronized<State, std::mutex> stateMtx{OPEN};
     std::condition_variable_any change;
-    std::atomic<bool> blockedByAdaptiveSending{false};
+    std::atomic<uint64_t> contingent{INVALID_CONTINGENT};
 };
 
 BackpressureController::BackpressureController(std::shared_ptr<Channel> channel) : channel{std::move(channel)}
@@ -78,8 +80,22 @@ bool BackpressureController::applyPressure(bool adaptivelyThrottled)
 
 bool BackpressureController::isScheduledToSend([[maybe_unused]] const std::string& channelId)
 {
-    NES_DEBUG("Checking if channel {} with priority {} is scheduled to send: blocked = {} ", channelId, priority, channel->blockedByAdaptiveSending.load());
-    return !adaptiveSendingScheduler || !channel->blockedByAdaptiveSending.load();
+    NES_DEBUG("Checking if channel {} with priority {} is scheduled to send: contingent = {} ", channelId, priority, channel->contingent.load());
+    // if (adaptiveSendingScheduler)
+    // {
+    //     auto current =  channel->contingent.load();
+    //     while (current > 0)
+    //     {
+    //         if (current == INVALID_CONTINGENT || channel->contingent.compare_exchange_strong(current, current - 1))
+    //         {
+    //             NES_DEBUG("For channel {} with priority {}: decremented contingent to {}, sending", channelId, priority, current);
+    //             return true;
+    //         }
+    //     }
+    //     NES_DEBUG("Contingent exhausted for channel {} with priority {} (contingent {})", channelId, priority, current);
+    //     return false;
+    // }
+    return true;
 }
 
 bool BackpressureController::releasePressure(bool adaptivelyThrottled)
@@ -127,7 +143,7 @@ void BackpressureController::setAdaptiveSendingScheduler(NES::LocalQueryId local
     this->priority = priority;
     if (adaptiveSendingScheduler)
     {
-        this->priority = adaptiveSendingScheduler->registerChannel(localQueryId, priority, channel->blockedByAdaptiveSending);
+        this->priority = adaptiveSendingScheduler->registerChannel(localQueryId, priority, channel.get()->contingent);
     }
 }
 

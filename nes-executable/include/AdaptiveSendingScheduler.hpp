@@ -39,7 +39,8 @@ struct RegisteredChannel
 {
     LocalQueryId localQueryId;
     Priority priority;
-    std::reference_wrapper<std::atomic<bool>> blockedFlag;
+    //std::reference_wrapper<std::atomic<bool>> blockedFlag;
+    std::reference_wrapper<std::atomic<uint64_t>> contingent;
 };
 
 // using LockedPriorityMap = folly::LockedPtr<std::map<Priority, std::vector<std::string>>, std::mutex>;
@@ -49,10 +50,11 @@ struct RegisteredChannel
 struct AdaptiveSendingScheduler : BackpressureStatisticListener {
     void onEvent(BackpressureEvent event) override;
     void threadRoutine(const std::stop_token& token);
+    void assignContingents();
     void applyPressure(LocalQueryId localQueryId, Priority priority);
     void unbufferingCompleted(LocalQueryId localQueryId, Priority priority);
     void start();
-    Priority registerChannel(LocalQueryId localQueryId, Priority priority, std::atomic<bool>& blockedFlag);
+    Priority registerChannel(LocalQueryId localQueryId, Priority priority, std::atomic<uint64_t>& contingent);
 
     template<typename LockedPriorityMap>
     void setBlockedStatusForPriorityRange(Priority start, Priority end, bool blocked, LockedPriorityMap lockedPriorities)

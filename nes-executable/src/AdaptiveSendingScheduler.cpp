@@ -29,27 +29,30 @@
 namespace NES {
 constexpr uint64_t READ_RETRY_MS = 100;
 constexpr uint64_t DROP_LOG_INTERVAL = 100;
-namespace
-{
-void warnOnOverflow(bool writeFailed)
-{
-    if (writeFailed) [[unlikely]]
-    {
-        static std::atomic<uint64_t> droppedCount{0};
-        /// Log first drop immediately, then every DROP_LOG_INTERVAL
-        if (uint64_t dropped = droppedCount.fetch_add(1, std::memory_order_relaxed) + 1; dropped == 1 || dropped % DROP_LOG_INTERVAL == 0)
-        {
-            NES_WARNING("Event queue full, {} events dropped so far", dropped);
-        }
-    }
-}
-}
+constexpr uint64_t ASSIGN_INTERVAL_MS = 1000;
+constexpr uint64_t CONTINGET_PER_INTERVAL = 10;
+// namespace
+// {
+// void warnOnOverflow(bool writeFailed)
+// {
+//     if (writeFailed) [[unlikely]]
+//     {
+//         static std::atomic<uint64_t> droppedCount{0};
+//         /// Log first drop immediately, then every DROP_LOG_INTERVAL
+//         if (uint64_t dropped = droppedCount.fetch_add(1, std::memory_order_relaxed) + 1; dropped == 1 || dropped % DROP_LOG_INTERVAL == 0)
+//         {
+//             NES_WARNING("Event queue full, {} events dropped so far", dropped);
+//         }
+//     }
+// }
+// }
 
 void AdaptiveSendingScheduler::onEvent(BackpressureEvent event)
 {
 
-    warnOnOverflow(
-        !events.writeIfNotFull(std::visit([]<typename T>(T&& arg) { return BackpressureEvent(std::forward<T>(arg)); }, std::move(event))));
+    (void) event;
+    // warnOnOverflow(
+    //     !events.writeIfNotFull(std::visit([]<typename T>(T&& arg) { return BackpressureEvent(std::forward<T>(arg)); }, std::move(event))));
 }
 
 
@@ -57,28 +60,41 @@ void AdaptiveSendingScheduler::threadRoutine(const std::stop_token& token)
 {
     while (!token.stop_requested())
     {
-        BackpressureEvent event = ReleasePressureEvent{}; /// Will be overwritten
-
-        if (!events.tryReadUntil(std::chrono::high_resolution_clock::now() + std::chrono::milliseconds(READ_RETRY_MS), event))
-        {
-            continue;
-        }
-        std::visit(
-            Overloaded{
-                [&](const UnbufferingCompletedEvent& unbufferEvent)
-                {
-                    unbufferingCompleted(unbufferEvent.localQueryId, unbufferEvent.priority);
-                },
-                [&](const ApplyPressureEvent& applyEvent)
-                {
-                    applyPressure(applyEvent.localQueryId, applyEvent.priority);
-                },
-                [&](const ReleasePressureEvent&)
-                {
-                    //no need to do anything, as we still wait for all buffers to be unbuffered
-                }},
-            event);
+        assignContingents();
+        std::this_thread::sleep_for(std::chrono::milliseconds(ASSIGN_INTERVAL_MS));
+        // BackpressureEvent event = ReleasePressureEvent{}; /// Will be overwritten
+        //
+        // if (!events.tryReadUntil(std::chrono::high_resolution_clock::now() + std::chrono::milliseconds(READ_RETRY_MS), event))
+        // {
+        //     continue;
+        // }
+        // std::visit(
+        //     Overloaded{
+        //         [&](const UnbufferingCompletedEvent& unbufferEvent)
+        //         {
+        //             unbufferingCompleted(unbufferEvent.localQueryId, unbufferEvent.priority);
+        //         },
+        //         [&](const ApplyPressureEvent& applyEvent)
+        //         {
+        //             applyPressure(applyEvent.localQueryId, applyEvent.priority);
+        //         },
+        //         [&](const ReleasePressureEvent&)
+        //         {
+        //             //no need to do anything, as we still wait for all buffers to be unbuffered
+        //         }},
+        //     event);
     }
+}
+
+void AdaptiveSendingScheduler::assignContingents()
+{
+    auto lockedPriorities = priorities.wlock();
+    for (auto& [_, ch] : std::ranges::subrange(priorities->begin()++, priorities->end()))
+    {
+        NES_DEBUG("Setting contingent for query {} with priority {} to {}", ch.localQueryId, ch.priority, CONTINGET_PER_INTERVAL);
+        ch.contingent.get().store(CONTINGET_PER_INTERVAL);
+    }
+
 }
 
 void AdaptiveSendingScheduler::applyPressure(const LocalQueryId localQueryId, Priority priority)
@@ -94,7 +110,8 @@ void AdaptiveSendingScheduler::applyPressure(const LocalQueryId localQueryId, Pr
         minPrioOld = minPriorityUnderPressure.exchange(minPrioNew);
     }
 
-    setBlockedStatusForPriorityRange(minPrioNew, minPrioOld, true, std::move(lockedPriorities));
+    // setBlockedStatusForPriorityRange(minPrioNew, minPrioOld, true, std::move(lockedPriorities));
+
     // auto begin = lockedPriorities->upper_bound(minPrioNew);
     // auto endIt = lockedPriorities->lower_bound(minPrioOld);
     // INVARIANT(begin != lockedPriorities->end(), "Start priority not found");
@@ -140,7 +157,7 @@ void AdaptiveSendingScheduler::unbufferingCompleted(const LocalQueryId localQuer
         minPrioOld = minPriorityUnderPressure.exchange(minPrioNew);
         auto lockedPriorities = priorities.wlock();
 
-        setBlockedStatusForPriorityRange(minPrioOld, minPrioNew, false, std::move(lockedPriorities));
+        // setBlockedStatusForPriorityRange(minPrioOld, minPrioNew, false, std::move(lockedPriorities));
     }
 }
 
@@ -150,14 +167,14 @@ void AdaptiveSendingScheduler::start()
 }
 
 //TODO: we only return priority because propagating it does not work yet
-Priority AdaptiveSendingScheduler::registerChannel(const LocalQueryId localQueryId, Priority priority, std::atomic<bool>& blockedFlag)
+Priority AdaptiveSendingScheduler::registerChannel(const LocalQueryId localQueryId, Priority priority, std::atomic<uint64_t>& contingent)
 {
     priority = maxPriority++;
     NES_DEBUG("Registered channel id = {}, priority = {}", localQueryId, priority);
     auto registeredChannel = RegisteredChannel {
     .localQueryId = localQueryId,
     .priority = priority,
-    .blockedFlag = std::ref(blockedFlag)};
+    .contingent = std::ref(contingent)};
     priorities.wlock()->emplace(priority, registeredChannel);
     return priority;
 }

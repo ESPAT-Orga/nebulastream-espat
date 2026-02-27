@@ -93,12 +93,17 @@ void AdaptiveSendingScheduler::assignContingents()
     {
         return;
     }
-    lockedPriorities->begin()->second.contingent.get().store(INT64_MAX);
+    for (auto ch : lockedPriorities->begin()->second)
+    {
+        ch.contingent.get().store(INT64_MAX);
+    }
     for (auto it = std::next(lockedPriorities->begin()); it != lockedPriorities->end(); ++it)
     {
-        auto ch = it->second;
-        NES_DEBUG("Setting contingent for query {} with priority {} to {}", ch.localQueryId, ch.priority, CONTINGET_PER_INTERVAL);
-        ch.contingent.get().store(CONTINGET_PER_INTERVAL);
+        for (auto ch : it->second)
+        {
+            NES_DEBUG("Setting contingent for query {} with priority {} to {}", ch.localQueryId, ch.priority, CONTINGET_PER_INTERVAL);
+            ch.contingent.get().store(INT64_MAX);
+        }
     }
 
 }
@@ -117,18 +122,6 @@ void AdaptiveSendingScheduler::applyPressure(const LocalQueryId localQueryId, Pr
     }
 
     // setBlockedStatusForPriorityRange(minPrioNew, minPrioOld, true, std::move(lockedPriorities));
-
-    // auto begin = lockedPriorities->upper_bound(minPrioNew);
-    // auto endIt = lockedPriorities->lower_bound(minPrioOld);
-    // INVARIANT(begin != lockedPriorities->end(), "Start priority not found");
-    // INVARIANT(endIt != lockedPriorities->end(), "End priority not found");
-    //
-    // for (auto& [_, ch] : std::ranges::subrange(begin, endIt))
-    //     // for (auto it = begin; it != endIt; ++it)
-    // {
-    //     // it->second.blockedFlag.get().store(blocked);
-    //     ch.get().blockedFlag.get().store(true);
-    // }
 }
 
 void AdaptiveSendingScheduler::unbufferingCompleted(const LocalQueryId localQueryId, Priority priority)
@@ -181,8 +174,14 @@ Priority AdaptiveSendingScheduler::registerChannel(const LocalQueryId localQuery
     .localQueryId = localQueryId,
     .priority = priority,
     .contingent = std::ref(contingent)};
-    priorities.wlock()->emplace(priority, registeredChannel);
+    priorities.wlock()->operator[](priority).push_back(registeredChannel);
     return priority;
+}
+
+void AdaptiveSendingScheduler::unregisterChannel(LocalQueryId localQueryId, Priority priority)
+{
+    auto& vec = priorities.wlock()->at(priority);
+    std::erase_if(vec, [&localQueryId](const RegisteredChannel& ch) { return ch.localQueryId == localQueryId; });
 }
 
 

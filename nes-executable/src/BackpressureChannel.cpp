@@ -58,6 +58,10 @@ BackpressureController::BackpressureController(
 
 BackpressureController::~BackpressureController()
 {
+    if (adaptiveSendingScheduler)
+    {
+        adaptiveSendingScheduler->unregisterChannel(localQueryId, priority);
+    }
     if (channel)
     {
         *channel->stateMtx.lock() = Channel::DESTROYED;
@@ -86,6 +90,11 @@ bool BackpressureController::isScheduledToSend([[maybe_unused]] const std::strin
         auto current =  channel->contingent.load();
         while (current > 0)
         {
+            if (current == INVALID_CONTINGENT)
+            {
+                NES_DEBUG("For channel {} with priority {}: invalid contingent, sending", channelId, priority);
+                return true;
+            }
             if (current == INVALID_CONTINGENT || channel->contingent.compare_exchange_strong(current, current - 1))
             {
                 NES_DEBUG("For channel {} with priority {}: decremented contingent to {}, sending", channelId, priority, current);

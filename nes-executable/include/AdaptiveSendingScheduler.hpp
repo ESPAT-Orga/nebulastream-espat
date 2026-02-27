@@ -39,13 +39,8 @@ struct RegisteredChannel
 {
     LocalQueryId localQueryId;
     Priority priority;
-    //std::reference_wrapper<std::atomic<bool>> blockedFlag;
     std::reference_wrapper<std::atomic<uint64_t>> contingent;
 };
-
-// using LockedPriorityMap = folly::LockedPtr<std::map<Priority, std::vector<std::string>>, std::mutex>;
-// using LockedPriorityMap = folly::LockedPtr<std::mutex, std::map<Priority, std::vector<std::string>>>;
-// using LockedPriorityMap = folly::LockedPtr<std::map<Priority, std::vector<std::string>>, folly::detail::SynchronizedLockPolicyShared>;
 
 struct AdaptiveSendingScheduler : BackpressureStatisticListener {
     void onEvent(BackpressureEvent event) override;
@@ -55,45 +50,33 @@ struct AdaptiveSendingScheduler : BackpressureStatisticListener {
     void unbufferingCompleted(LocalQueryId localQueryId, Priority priority);
     void start();
     Priority registerChannel(LocalQueryId localQueryId, Priority priority, std::atomic<uint64_t>& contingent);
+    void unregisterChannel(LocalQueryId localQueryId, Priority priority);
 
     template<typename LockedPriorityMap>
     void setBlockedStatusForPriorityRange(Priority start, Priority end, bool blocked, LockedPriorityMap lockedPriorities)
     {
         NES_DEBUG("Setting blocked status for priority range {} - {} to {}", start, end, blocked);
-        // if (end == INVALID_PRIORITY)
-        // {
-        //     end = lockedPriorities->end()->first;
-        // }
         if (start >= end)
         {
             NES_DEBUG("No blocking to set for range: {} - {}", start, end);
             return;
         }
         auto begin = lockedPriorities->upper_bound(start);
-        // auto endIt = lockedPriorities->lower_bound(end);
-        // auto endIt = lockedPriorities->find(end);
         auto endIt = lockedPriorities->upper_bound(end);
-        // INVARIANT(begin != lockedPriorities->end(), "Start priority not found");
-        // INVARIANT(endIt != lockedPriorities->end(), "End priority not found");
 
         for (auto& [_, ch] : std::ranges::subrange(begin, endIt))
-            // for (auto it = begin; it != endIt; ++it)
         {
-            // it->second.blockedFlag.get().store(blocked);
             NES_DEBUG("Setting blocked status for channel id = {} to {}", ch.localQueryId, blocked);
             ch.blockedFlag.get().store(blocked);
         }
     }
 
 private:
-    //TODO: this one we can probably remove soon
-    // folly::Synchronized<std::unordered_map<LocalQueryId, RegisteredChannel>> registeredChannels;
-    // folly::Synchronized<std::map<Priority, std::reference_wrapper<RegisteredChannel>>> priorities;
-    folly::Synchronized<std::map<Priority, RegisteredChannel>> priorities;
+    folly::Synchronized<std::map<Priority, std::vector<RegisteredChannel>>> priorities;
 
     folly::Synchronized<std::map<Priority, std::vector<LocalQueryId>>> underBackpressure;
     std::atomic<Priority> minPriorityUnderPressure = INVALID_PRIORITY;
-    //TODO: remove this once we record more priorities
+    //TODO: remove this once we the actual priority
     std::atomic<Priority> maxPriority = 1;
     static constexpr size_t QUEUE_LENGTH = 1000;
     folly::MPMCQueue<BackpressureEvent> events{QUEUE_LENGTH};

@@ -30,7 +30,7 @@ namespace NES {
 constexpr uint64_t READ_RETRY_MS = 100;
 constexpr uint64_t DROP_LOG_INTERVAL = 100;
 constexpr uint64_t ASSIGN_INTERVAL_MS = 1000;
-constexpr uint64_t CONTINGET_PER_INTERVAL = 10;
+constexpr uint64_t CONTINGET_PER_INTERVAL = 1;
 // namespace
 // {
 // void warnOnOverflow(bool writeFailed)
@@ -88,9 +88,15 @@ void AdaptiveSendingScheduler::threadRoutine(const std::stop_token& token)
 
 void AdaptiveSendingScheduler::assignContingents()
 {
-    auto lockedPriorities = priorities.wlock();
-    for (auto& [_, ch] : std::ranges::subrange(priorities->begin()++, priorities->end()))
+    auto lockedPriorities = priorities.rlock();
+    if (lockedPriorities->empty())
     {
+        return;
+    }
+    lockedPriorities->begin()->second.contingent.get().store(INT64_MAX);
+    for (auto it = std::next(lockedPriorities->begin()); it != lockedPriorities->end(); ++it)
+    {
+        auto ch = it->second;
         NES_DEBUG("Setting contingent for query {} with priority {} to {}", ch.localQueryId, ch.priority, CONTINGET_PER_INTERVAL);
         ch.contingent.get().store(CONTINGET_PER_INTERVAL);
     }

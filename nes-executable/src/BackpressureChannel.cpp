@@ -81,20 +81,20 @@ bool BackpressureController::applyPressure(bool adaptivelyThrottled)
 bool BackpressureController::isScheduledToSend([[maybe_unused]] const std::string& channelId)
 {
     NES_DEBUG("Checking if channel {} with priority {} is scheduled to send: contingent = {} ", channelId, priority, channel->contingent.load());
-    // if (adaptiveSendingScheduler)
-    // {
-    //     auto current =  channel->contingent.load();
-    //     while (current > 0)
-    //     {
-    //         if (current == INVALID_CONTINGENT || channel->contingent.compare_exchange_strong(current, current - 1))
-    //         {
-    //             NES_DEBUG("For channel {} with priority {}: decremented contingent to {}, sending", channelId, priority, current);
-    //             return true;
-    //         }
-    //     }
-    //     NES_DEBUG("Contingent exhausted for channel {} with priority {} (contingent {})", channelId, priority, current);
-    //     return false;
-    // }
+    if (adaptiveSendingScheduler)
+    {
+        auto current =  channel->contingent.load();
+        while (current > 0)
+        {
+            if (current == INVALID_CONTINGENT || channel->contingent.compare_exchange_strong(current, current - 1))
+            {
+                NES_DEBUG("For channel {} with priority {}: decremented contingent to {}, sending", channelId, priority, current);
+                return true;
+            }
+        }
+        NES_DEBUG("Contingent exhausted for channel {} with priority {} (contingent {})", channelId, priority, current);
+        return false;
+    }
     return true;
 }
 

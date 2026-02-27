@@ -16,12 +16,13 @@
 
 #include <Listeners/SystemEventListener.hpp>
 #include <Runtime/BufferManagerStatisticListener.hpp>
+#include <BackpressureStatisticsListener.hpp>
 #include <QueryEngineStatisticListener.hpp>
 
 namespace NES
 {
 /// Listener interface that can handle both query engine events and system events
-struct StatisticListener : QueryEngineStatisticListener, SystemEventListener, BufferManagerStatisticListener
+struct StatisticListener : QueryEngineStatisticListener, SystemEventListener, BufferManagerStatisticListener, BackpressureStatisticListener
 {
     virtual ~StatisticListener() = default;
 };

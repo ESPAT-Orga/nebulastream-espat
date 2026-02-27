@@ -37,10 +37,10 @@
 template <typename Var1, typename Var2, typename... Ts3>
 struct FlattenVariant;
 
-template <typename... Ts1, typename... Ts2, typename... Ts3>
-struct FlattenVariant<std::variant<Ts1...>, std::variant<Ts2...>, std::variant<Ts3...>>
+template <typename... Ts1, typename... Ts2, typename... Ts3, typename... Ts4>
+struct FlattenVariant<std::variant<Ts1...>, std::variant<Ts2...>, std::variant<Ts3...>, std::variant<Ts4...>>
 {
-    using type = std::variant<Ts1..., Ts2..., Ts3...>;
+    using type = std::variant<Ts1..., Ts2..., Ts3..., Ts4...>;
 };
 
 namespace NES
@@ -49,8 +49,9 @@ namespace NES
 /// chrome://tracing/ interface for performance analysis (or any other event trace visualizer)
 struct GoogleEventTracePrinter final : StatisticListener
 {
-    using CombinedEventType = FlattenVariant<SystemEvent, Event, BufferManagerEvent>::type;
+    using CombinedEventType = FlattenVariant<SystemEvent, Event, BufferManagerEvent, BackpressureEvent>::type;
     void onEvent(Event event) override;
+    void onEvent(BackpressureEvent event) override;
     void onEvent(SystemEvent event) override;
     void onEvent(BufferManagerEvent event) override;
 

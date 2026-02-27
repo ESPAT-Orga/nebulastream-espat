@@ -41,6 +41,15 @@ void CompositeStatisticListener::onEvent(BufferManagerEvent event)
     }
 }
 
+void CompositeStatisticListener::onEvent(BackpressureEvent event)
+{
+    std::for_each(backpressureListeners.begin(), backpressureListeners.end(),
+    [&event](auto& listener) {
+        listener->onEvent(event);
+    }
+);
+}
+
 void CompositeStatisticListener::addQueryEngineListener(std::shared_ptr<QueryEngineStatisticListener> listener)
 {
     queryEngineListeners.push_back(std::move(listener));
@@ -51,10 +60,16 @@ void CompositeStatisticListener::addSystemListener(std::shared_ptr<SystemEventLi
     systemListeners.push_back(std::move(listener));
 }
 
+void CompositeStatisticListener::addBackpressureListener(std::shared_ptr<BackpressureStatisticListener> listener)
+{
+    backpressureListeners.push_back(std::move(listener));
+}
+
 void CompositeStatisticListener::addListener(std::shared_ptr<StatisticListener> listener)
 {
     queryEngineListeners.push_back(listener);
     systemListeners.push_back(listener);
+    backpressureListeners.push_back(listener);
     bufferManagerListeners.push_back(listener);
 }
 

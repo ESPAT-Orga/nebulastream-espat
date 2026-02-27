@@ -456,6 +456,26 @@ void GoogleEventTracePrinter::threadRoutine(const std::stop_token& token)
 
                     /// Remove from active tasks if present
                     activeTasks.erase(taskExpired.taskId);
+                },
+                [&](const ApplyPressureEvent& applyEvent)
+                {
+                    printComma();
+                    fmt::print(
+                        file,
+                        R"x(    {{"args":{{"channel_id":{}}},"cat":"backpressure","name":"Apply Backpressure","ph":"i","pid":{},"ts":{}}})x",
+                        applyEvent.channelId,
+                        pid,
+                        timestampToMicroseconds(applyEvent.timestamp));
+                },
+                [&](const ReleasePressureEvent& releaseEvent)
+                {
+                    printComma();
+                    fmt::print(
+                        file,
+                        R"x(    {{"args":{{"channel_id":{}}},"cat":"backpressure","name":"Apply Backpressure","ph":"i","pid":{},"ts":{}}})x",
+                        releaseEvent.channelId,
+                        pid,
+                        timestampToMicroseconds(releaseEvent.timestamp));
                 }},
             event);
     }
@@ -484,6 +504,12 @@ void GoogleEventTracePrinter::onEvent(Event event)
 {
     warnOnOverflow(
         !events.writeIfNotFull(std::visit([]<typename T>(T&& arg) { return CombinedEventType(std::forward<T>(arg)); }, std::move(event))));
+}
+
+void GoogleEventTracePrinter::onEvent(BackpressureEvent event)
+{
+    warnOnOverflow(
+        not events.writeIfNotFull(std::visit([]<typename T>(T&& arg) { return CombinedEventType(std::forward<T>(arg)); }, std::move(event))));
 }
 
 void GoogleEventTracePrinter::onEvent(SystemEvent event)

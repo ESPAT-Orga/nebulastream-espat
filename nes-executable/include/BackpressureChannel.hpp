@@ -43,7 +43,7 @@ class BackpressureController
 {
     explicit BackpressureController(std::shared_ptr<Channel> channel);
     explicit BackpressureController(
-        std::shared_ptr<Channel> channel, std::shared_ptr<NES::BackpressureStatisticListener> backpressureStatisticListener);
+        std::shared_ptr<Channel> channel, std::shared_ptr<NES::TrafficStatisticListener> backpressureStatisticListener);
 
     std::shared_ptr<Channel> channel;
     friend std::pair<BackpressureController, BackpressureListener> createBackpressureChannel();
@@ -63,13 +63,13 @@ public:
     bool isScheduledToSend(const std::string& channelId);
     bool releasePressure(bool adaptivelyThrottled);
     bool unbufferingCompleted();
-    bool recordBufferSentEvent();
-    void setStatisticListener(std::shared_ptr<NES::BackpressureStatisticListener> listener);
+    bool recordBufferSentEvent(uint64_t numberOfTuples);
+    void setStatisticListener(std::shared_ptr<NES::TrafficStatisticListener> listener);
     void setAdaptiveSendingScheduler(
         NES::LocalQueryId localQueryId, NES::Priority priority, std::shared_ptr<NES::AdaptiveSendingScheduler> scheduler);
 
 private:
-    std::shared_ptr<NES::BackpressureStatisticListener> backpressureStatisticListener;
+    std::shared_ptr<NES::TrafficStatisticListener> backpressureStatisticListener;
     std::shared_ptr<NES::AdaptiveSendingScheduler> adaptiveSendingScheduler;
     NES::LocalQueryId localQueryId = NES::INVALID_LOCAL_QUERY_ID;
     NES::Priority priority = NES::INVALID_PRIORITY;
@@ -86,11 +86,11 @@ class BackpressureListener
     friend std::pair<BackpressureController, BackpressureListener> createBackpressureChannel();
 
     std::shared_ptr<Channel> channel;
-    std::shared_ptr<NES::BackpressureStatisticListener> backpressureStatisticListener;
+    std::shared_ptr<NES::TrafficStatisticListener> backpressureStatisticListener;
     NES::LocalQueryId localQueryId = NES::INVALID_LOCAL_QUERY_ID;
 
 public:
     void wait(const std::stop_token& stopToken) const;
-    void setStatisticListener(std::shared_ptr<NES::BackpressureStatisticListener> listener, NES::LocalQueryId localQueryId);
-    bool recordBufferIngestedEvent();
+    void setStatisticListener(std::shared_ptr<NES::TrafficStatisticListener> listener, NES::LocalQueryId localQueryId);
+    bool recordBufferIngestedEvent(uint64_t numberOfBytes);
 };

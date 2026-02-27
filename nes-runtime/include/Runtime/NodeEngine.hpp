@@ -45,7 +45,7 @@ public:
     NodeEngine(
         std::shared_ptr<BufferManager> bufferManager,
         std::shared_ptr<SystemEventListener> systemEventListener,
-        std::shared_ptr<BackpressureStatisticListener> backpressureStatListener,
+        std::shared_ptr<TrafficStatisticListener> backpressureStatListener,
         std::shared_ptr<AdaptiveSendingScheduler> adaptiveSendingScheduler,
         std::shared_ptr<QueryLog> queryLog,
         std::unique_ptr<QueryEngine> queryEngine,
@@ -75,7 +75,7 @@ private:
     std::shared_ptr<QueryLog> queryLog;
 
     std::shared_ptr<SystemEventListener> systemEventListener;
-    std::shared_ptr<BackpressureStatisticListener> backpressureStatListener;
+    std::shared_ptr<TrafficStatisticListener> backpressureStatListener;
     std::shared_ptr<AdaptiveSendingScheduler> adaptiveSendingScheduler;
     std::unique_ptr<QueryEngine> queryEngine;
     std::unique_ptr<QueryTracker> queryTracker;

@@ -59,7 +59,7 @@ void CompositeStatisticListener::addSystemListener(std::shared_ptr<SystemEventLi
     systemListeners.push_back(std::move(listener));
 }
 
-void CompositeStatisticListener::addBackpressureListener(std::shared_ptr<BackpressureStatisticListener> listener)
+void CompositeStatisticListener::addBackpressureListener(std::shared_ptr<TrafficStatisticListener> listener)
 {
     backpressureListeners.push_back(std::move(listener));
 }

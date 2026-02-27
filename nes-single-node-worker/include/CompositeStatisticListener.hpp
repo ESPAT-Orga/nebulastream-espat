@@ -32,7 +32,7 @@ struct CompositeStatisticListener final : StatisticListener
 
     void addQueryEngineListener(std::shared_ptr<QueryEngineStatisticListener> listener);
     void addSystemListener(std::shared_ptr<SystemEventListener> listener);
-    void addBackpressureListener(std::shared_ptr<BackpressureStatisticListener> listener);
+    void addBackpressureListener(std::shared_ptr<TrafficStatisticListener> listener);
     void addListener(std::shared_ptr<StatisticListener> listener);
     [[nodiscard]] bool hasListeners() const;
 
@@ -40,6 +40,6 @@ private:
     std::vector<std::shared_ptr<QueryEngineStatisticListener>> queryEngineListeners;
     std::vector<std::shared_ptr<SystemEventListener>> systemListeners;
     std::vector<std::shared_ptr<BufferManagerStatisticListener>> bufferManagerListeners;
-    std::vector<std::shared_ptr<BackpressureStatisticListener>> backpressureListeners;
+    std::vector<std::shared_ptr<TrafficStatisticListener>> backpressureListeners;
 };
 }

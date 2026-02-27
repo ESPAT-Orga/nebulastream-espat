@@ -22,7 +22,7 @@
 namespace NES
 {
 /// Listener interface that can handle both query engine events and system events
-struct StatisticListener : QueryEngineStatisticListener, SystemEventListener, BufferManagerStatisticListener, BackpressureStatisticListener
+struct StatisticListener : QueryEngineStatisticListener, SystemEventListener, BufferManagerStatisticListener, TrafficStatisticListener
 {
     virtual ~StatisticListener() = default;
 };

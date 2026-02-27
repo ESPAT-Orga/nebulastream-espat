@@ -111,38 +111,47 @@ void BackpressureStatisticTcpEmitter::threadRoutine(const std::stop_token& token
 
             std::visit(
                 Overloaded{
+                    [&](const AdaptivelyBlockSendingEvent& adaptivelyBlockEvent)
+                    {
+                        auto nanosec
+                            = std::chrono::duration_cast<std::chrono::nanoseconds>(adaptivelyBlockEvent.timestamp.time_since_epoch()).count();
+                        NES_TRACE("UnbufferingCompleted event for {}, {}", adaptivelyBlockEvent.localQueryId, adaptivelyBlockEvent.timestamp);
+                        msg = std::format("UnbufferingCompleted,{},{},{}\n", adaptivelyBlockEvent.localQueryId.getRawValue(), 0, nanosec);
+                    },
                     [&](const UnbufferingCompletedEvent& unbufferEvent)
                     {
-                        //TODO: implement
-                        (void) unbufferEvent;
+                        auto nanosec
+                            = std::chrono::duration_cast<std::chrono::nanoseconds>(unbufferEvent.timestamp.time_since_epoch()).count();
+                        NES_TRACE("UnbufferingCompleted event for {}, {}", unbufferEvent.localQueryId, unbufferEvent.timestamp);
+                        msg = std::format("UnbufferingCompleted,{},{},{}\n", unbufferEvent.localQueryId.getRawValue(), 0, nanosec);
                     },
-                    [&](const BufferIngestEvent& sentEvent)
+                    [&](const BufferIngestEvent& ingestEvent)
                     {
                         auto nanosec
-                            = std::chrono::duration_cast<std::chrono::nanoseconds>(sentEvent.timestamp.time_since_epoch()).count();
-                        NES_TRACE("Send event for {}, {}", sentEvent.localQueryId, sentEvent.timestamp);
-                        msg = std::format("BufferIngest,{},{}\n", sentEvent.localQueryId.getRawValue(), nanosec);
+                            = std::chrono::duration_cast<std::chrono::nanoseconds>(ingestEvent.timestamp.time_since_epoch()).count();
+                        NES_TRACE("Send event for {}, {}", ingestEvent.localQueryId, ingestEvent.timestamp);
+                        msg = std::format("BufferIngest,{},{},{}\n", ingestEvent.localQueryId.getRawValue(), ingestEvent.numberOfTuples, nanosec);
                     },
-                    [&](const BufferSendEvent& sentEvent)
+                    [&](const BufferSendEvent& sendEvent)
                     {
                         auto nanosec
-                            = std::chrono::duration_cast<std::chrono::nanoseconds>(sentEvent.timestamp.time_since_epoch()).count();
-                        NES_TRACE("Send event for {}, {}", sentEvent.localQueryId, sentEvent.timestamp);
-                        msg = std::format("BufferSend,{},{}\n", sentEvent.localQueryId.getRawValue(), nanosec);
+                            = std::chrono::duration_cast<std::chrono::nanoseconds>(sendEvent.timestamp.time_since_epoch()).count();
+                        NES_TRACE("Send event for {}, {}", sendEvent.localQueryId, sendEvent.timestamp);
+                        msg = std::format("BufferSend,{},{},{}\n", sendEvent.localQueryId.getRawValue(), sendEvent.numberOfTuples,  nanosec);
                     },
                         [&](const ApplyPressureEvent& applyEvent)
                     {
                         auto nanosec
                             = std::chrono::duration_cast<std::chrono::nanoseconds>(applyEvent.timestamp.time_since_epoch()).count();
                         NES_TRACE("Apply Backpressure {}, {}", applyEvent.localQueryId, applyEvent.timestamp);
-                        msg = std::format("ApplyPressure,{},{}\n", applyEvent.localQueryId.getRawValue(), nanosec);
+                        msg = std::format("ApplyPressure,{},{},{}\n", applyEvent.localQueryId.getRawValue(), 0, nanosec);
                     },
                     [&](const ReleasePressureEvent& releaseEvent)
                     {
                         auto nanosec
                             = std::chrono::duration_cast<std::chrono::nanoseconds>(releaseEvent.timestamp.time_since_epoch()).count();
                         NES_TRACE("Release Backpressure {}, {}", releaseEvent.localQueryId, releaseEvent.timestamp);
-                        msg = std::format("ReleasePressure,{},{}\n", releaseEvent.localQueryId.getRawValue(), nanosec);
+                        msg = std::format("ReleasePressure,{},{},{}\n", releaseEvent.localQueryId.getRawValue(), 0, nanosec);
                     }},
                 event);
 

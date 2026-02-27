@@ -34,7 +34,7 @@ struct ExecutableQueryPlan
     static std::unique_ptr<ExecutableQueryPlan> instantiate(
         CompiledQueryPlan& compiledQueryPlan,
         const SourceProvider& sourceProvider,
-        std::shared_ptr<BackpressureStatisticListener> backpressureStatisticListener,
+        std::shared_ptr<TrafficStatisticListener> backpressureStatisticListener,
         std::shared_ptr<AdaptiveSendingScheduler> adaptiveSendingScheduler);
 
     ExecutableQueryPlan(

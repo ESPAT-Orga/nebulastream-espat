@@ -42,7 +42,7 @@ struct RegisteredChannel
     std::reference_wrapper<std::atomic<uint64_t>> contingent;
 };
 
-struct AdaptiveSendingScheduler : BackpressureStatisticListener {
+struct AdaptiveSendingScheduler : TrafficStatisticListener {
     void onEvent(BackpressureEvent event) override;
     void threadRoutine(const std::stop_token& token);
     void assignContingents();

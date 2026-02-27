@@ -22,61 +22,67 @@ namespace NES
 {
 using ChronoClock = std::chrono::system_clock;
 
-//TODO: should we add an event to record when a query was throttled?
-struct BaseBackpressureEvent
+struct BaseTrafficEvent
 {
-    BaseBackpressureEvent(const LocalQueryId localQueryId, uint64_t priority) : localQueryId(localQueryId), priority(priority) { }
+    BaseTrafficEvent(const LocalQueryId localQueryId, uint64_t priority) : localQueryId(localQueryId), priority(priority) { }
 
-    BaseBackpressureEvent() = default;
+    BaseTrafficEvent() = default;
 
     ChronoClock::time_point timestamp = ChronoClock::now();
     //record the channel id so that backpressure events can be matched to a specific query
     LocalQueryId localQueryId = INVALID_LOCAL_QUERY_ID;
-    //TODO: use proper type
     uint64_t priority = 0;
 };
 
-struct ApplyPressureEvent : BaseBackpressureEvent
+struct ApplyPressureEvent : BaseTrafficEvent
 {
-    ApplyPressureEvent(const LocalQueryId localQueryId, uint64_t priority) : BaseBackpressureEvent(localQueryId, priority) { }
+    ApplyPressureEvent(const LocalQueryId localQueryId, uint64_t priority) : BaseTrafficEvent(localQueryId, priority) { }
 
     ApplyPressureEvent() = default;
 };
 
-struct ReleasePressureEvent : BaseBackpressureEvent
+struct ReleasePressureEvent : BaseTrafficEvent
 {
-    ReleasePressureEvent(const LocalQueryId localQueryId, uint64_t priority) : BaseBackpressureEvent(localQueryId, priority) { }
+    ReleasePressureEvent(const LocalQueryId localQueryId, uint64_t priority) : BaseTrafficEvent(localQueryId, priority) { }
 
     ReleasePressureEvent() = default;
 };
 
-struct UnbufferingCompletedEvent : BaseBackpressureEvent
+struct UnbufferingCompletedEvent : BaseTrafficEvent
 {
-    UnbufferingCompletedEvent(const LocalQueryId localQueryId, uint64_t priority) : BaseBackpressureEvent(localQueryId, priority) { }
+    UnbufferingCompletedEvent(const LocalQueryId localQueryId, uint64_t priority) : BaseTrafficEvent(localQueryId, priority) { }
 
     UnbufferingCompletedEvent() = default;
 };
 
-//TODO: if we keep this in, then we need to rename the class
-struct BufferSendEvent : BaseBackpressureEvent
+struct BufferSendEvent : BaseTrafficEvent
 {
-    BufferSendEvent(const LocalQueryId localQueryId, uint64_t priority) : BaseBackpressureEvent(localQueryId, priority) { }
+    BufferSendEvent(const LocalQueryId localQueryId, uint64_t priority, uint64_t numberOfTuples) : BaseTrafficEvent(localQueryId, priority), numberOfTuples(numberOfTuples) { }
 
     BufferSendEvent() = default;
+    uint64_t numberOfTuples;
 };
 
-struct BufferIngestEvent : BaseBackpressureEvent
+struct BufferIngestEvent : BaseTrafficEvent
 {
-    BufferIngestEvent(const LocalQueryId localQueryId) : BaseBackpressureEvent(localQueryId, 0) { }
+    BufferIngestEvent(const LocalQueryId localQueryId, uint64_t numberOfTuples) : BaseTrafficEvent(localQueryId, 0), numberOfTuples(numberOfTuples) { }
 
     BufferIngestEvent() = default;
+    uint64_t numberOfTuples = 0;
 };
 
-using BackpressureEvent = std::variant<ApplyPressureEvent, ReleasePressureEvent, UnbufferingCompletedEvent, BufferSendEvent, BufferIngestEvent>;
-
-struct BackpressureStatisticListener
+struct AdaptivelyBlockSendingEvent : BaseTrafficEvent
 {
-    virtual ~BackpressureStatisticListener() = default;
+    AdaptivelyBlockSendingEvent(const LocalQueryId localQueryId, uint64_t priority) : BaseTrafficEvent(localQueryId, priority) { }
+
+    AdaptivelyBlockSendingEvent() = default;
+};
+
+using BackpressureEvent = std::variant<ApplyPressureEvent, ReleasePressureEvent, UnbufferingCompletedEvent, BufferSendEvent, BufferIngestEvent, AdaptivelyBlockSendingEvent>;
+
+struct TrafficStatisticListener
+{
+    virtual ~TrafficStatisticListener() = default;
 
     /// This function is called from a WorkerThread!
     /// It should not block, and it has to be thread-safe!

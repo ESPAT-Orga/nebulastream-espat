@@ -25,7 +25,7 @@
 namespace NES
 {
 /// This class emits collected backpressure statistics via tcp
-struct BackpressureStatisticTcpEmitter final : BackpressureStatisticListener
+struct BackpressureStatisticTcpEmitter final : TrafficStatisticListener
 {
     void onEvent(BackpressureEvent event) override;
 

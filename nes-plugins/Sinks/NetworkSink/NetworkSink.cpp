@@ -83,7 +83,6 @@ BackpressureHandler::onFull(TupleBuffer buffer, BackpressureController& backpres
 /// 2. In case of buffers remaining in the state, pop the oldest from the deque and return to try to send. Otherwise, return an empty optional.
 std::optional<TupleBuffer> BackpressureHandler::onSuccess(BackpressureController& backpressureController)
 {
-    backpressureController.recordBufferSentEvent();
     const auto state = stateLock.wlock();
     if (state->hasBackpressure)
     {
@@ -208,6 +207,7 @@ void NetworkSink::execute(const TupleBuffer& inputBuffer, PipelineExecutionConte
             throw CannotOpenSink("NetworkSink was closed by other side");
         }
         case SendResult::Ok: {
+            backpressureController.recordBufferSentEvent(inputBuffer.getNumberOfTuples());
             NES_TRACE("Sending buffer {}", inputBuffer.getSequenceNumber());
             /// Sent a buffer, check the backpressure handler to send another one
             if (const auto nextBuffer = backpressureHandler.onSuccess(backpressureController))

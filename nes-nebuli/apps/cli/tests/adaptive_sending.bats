@@ -193,6 +193,7 @@ extract_last_line() {
   printf '%s\n' "$1" | tail -n 1 | tr -d '\r'
 }
 
+# bats test_tags=bats:focus
 @test "statistics query" {
   setup_distributed tests/good/statistics_query.yaml
 
@@ -257,7 +258,6 @@ extract_last_line() {
   [ "$apply_backpressure_count" -ge 2 ]
 }
 
-# bats test_tags=bats:focus
 @test "adaptive sending" {
   setup_distributed tests/good/adaptive.yaml
 

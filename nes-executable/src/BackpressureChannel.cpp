@@ -138,6 +138,15 @@ bool BackpressureController::unbufferingCompleted()
     return true;
 }
 
+bool BackpressureController::recordBufferSentEvent()
+{
+    if (backpressureStatisticListener)
+    {
+        backpressureStatisticListener->onEvent(NES::BufferSentEvent(localQueryId, priority));
+    }
+    return true;
+}
+
 void BackpressureController::setStatisticListener(std::shared_ptr<NES::BackpressureStatisticListener> listener)
 {
     this->backpressureStatisticListener = listener;

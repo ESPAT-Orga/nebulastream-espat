@@ -39,7 +39,7 @@ sinks:
     host: worker-1:9090
     schema:
       - name: TCP_STAT_SOURCE$BACKPRESSURE
-        type: BOOLEAN
+        type: VARSIZED
       - name: TCP_STAT_SOURCE$CHANNEL_NAME
         type: VARSIZED
       - name: TCP_STAT_SOURCE$TIME_NS
@@ -57,7 +57,7 @@ logical:
   - name: TCP_STAT_SOURCE
     schema:
       - name: BACKPRESSURE
-        type: BOOLEAN
+        type: VARSIZED
       - name: CHANNEL_NAME
         type: VARSIZED
       - name: TIME_NS

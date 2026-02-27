@@ -88,7 +88,6 @@ protected:
 
 private:
     size_t tupleSize;
-    folly::Synchronized<std::vector<TupleBuffer>> bufferBacklog;
     BackpressureHandler backpressureHandler;
     std::optional<rust::Box<SenderNetworkService>> server;
     std::optional<rust::Box<SenderDataChannel>> channel;

@@ -182,6 +182,9 @@ void GoogleEventTracePrinter::threadRoutine(const std::stop_token& token)
 
         std::visit(
             Overloaded{
+                [&](const BufferSentEvent&)
+                {
+                },
                 [&](const UnbufferingCompletedEvent& unbufferEvent)
                 {
                     //TODO: implement

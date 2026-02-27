@@ -57,7 +57,15 @@ struct UnbufferingCompletedEvent : BaseBackpressureEvent
     UnbufferingCompletedEvent() = default;
 };
 
-using BackpressureEvent = std::variant<ApplyPressureEvent, ReleasePressureEvent, UnbufferingCompletedEvent>;
+//TODO: if we keep this in, then we need to rename the class
+struct BufferSentEvent : BaseBackpressureEvent
+{
+    BufferSentEvent(const LocalQueryId localQueryId, uint64_t priority) : BaseBackpressureEvent(localQueryId, priority) { }
+
+    BufferSentEvent() = default;
+};
+
+using BackpressureEvent = std::variant<ApplyPressureEvent, ReleasePressureEvent, UnbufferingCompletedEvent, BufferSentEvent>;
 
 struct BackpressureStatisticListener
 {

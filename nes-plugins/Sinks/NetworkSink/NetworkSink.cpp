@@ -83,6 +83,7 @@ BackpressureHandler::onFull(TupleBuffer buffer, BackpressureController& backpres
 /// 2. In case of buffers remaining in the state, pop the oldest from the deque and return to try to send. Otherwise, return an empty optional.
 std::optional<TupleBuffer> BackpressureHandler::onSuccess(BackpressureController& backpressureController)
 {
+    backpressureController.recordBufferSentEvent();
     const auto state = stateLock.wlock();
     if (state->hasBackpressure)
     {

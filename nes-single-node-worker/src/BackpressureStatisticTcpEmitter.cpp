@@ -116,19 +116,26 @@ void BackpressureStatisticTcpEmitter::threadRoutine(const std::stop_token& token
                         //TODO: implement
                         (void) unbufferEvent;
                     },
-                    [&](const ApplyPressureEvent& applyEvent)
+                    [&](const BufferSentEvent& sentEvent)
+                    {
+                        auto nanosec
+                            = std::chrono::duration_cast<std::chrono::nanoseconds>(sentEvent.timestamp.time_since_epoch()).count();
+                        NES_TRACE("Sent event for {}, {}", sentEvent.localQueryId, sentEvent.timestamp);
+                        msg = std::format("BufferSent,{},{}\n", sentEvent.localQueryId.getRawValue(), nanosec);
+                    },
+                        [&](const ApplyPressureEvent& applyEvent)
                     {
                         auto nanosec
                             = std::chrono::duration_cast<std::chrono::nanoseconds>(applyEvent.timestamp.time_since_epoch()).count();
                         NES_TRACE("Apply Backpressure {}, {}", applyEvent.localQueryId, applyEvent.timestamp);
-                        msg = std::format("true,{},{}\n", applyEvent.localQueryId.getRawValue(), nanosec);
+                        msg = std::format("ApplyPressure,{},{}\n", applyEvent.localQueryId.getRawValue(), nanosec);
                     },
                     [&](const ReleasePressureEvent& releaseEvent)
                     {
                         auto nanosec
                             = std::chrono::duration_cast<std::chrono::nanoseconds>(releaseEvent.timestamp.time_since_epoch()).count();
                         NES_TRACE("Release Backpressure {}, {}", releaseEvent.localQueryId, releaseEvent.timestamp);
-                        msg = std::format("false,{},{}\n", releaseEvent.localQueryId.getRawValue(), nanosec);
+                        msg = std::format("ReleasePressure,{},{}\n", releaseEvent.localQueryId.getRawValue(), nanosec);
                     }},
                 event);
 

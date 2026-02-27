@@ -126,6 +126,7 @@ SourceImplementationTermination dataSourceThreadRoutine(
             /// The InputFormatter expects that the source set the number of bytes this way and uses it to determine the number of tuples.
             emptyBuffer->setNumberOfTuples(fillTupleResult.getNumberOfBytes());
             emit(std::move(*emptyBuffer), requiresMetadata);
+            backpressureListener.recordBufferIngestedEvent();
         }
         else
         {

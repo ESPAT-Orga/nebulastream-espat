@@ -76,8 +76,13 @@ std::unique_ptr<ExecutableQueryPlan> ExecutableQueryPlan::instantiate(
     if (backpressureStatisticListener)
     {
         backpressureController.setStatisticListener(backpressureStatisticListener);
-        backpressureController.setAdaptiveSendingScheduler(compiledQueryPlan.localQueryId, compiledQueryPlan.priority, adaptiveSendingScheduler);
+        backpressureListener.setStatisticListener(backpressureStatisticListener, compiledQueryPlan.localQueryId);
+        if (adaptiveSendingScheduler)
+        {
+            backpressureController.setAdaptiveSendingScheduler(compiledQueryPlan.localQueryId, compiledQueryPlan.priority, adaptiveSendingScheduler);
+        }
     }
+
 
     if (compiledQueryPlan.sinks.size() != 1)
     {

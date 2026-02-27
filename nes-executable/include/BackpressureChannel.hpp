@@ -84,8 +84,13 @@ class BackpressureListener
     explicit BackpressureListener(std::shared_ptr<Channel> channel) : channel(std::move(channel)) { }
 
     friend std::pair<BackpressureController, BackpressureListener> createBackpressureChannel();
+
     std::shared_ptr<Channel> channel;
+    std::shared_ptr<NES::BackpressureStatisticListener> backpressureStatisticListener;
+    NES::LocalQueryId localQueryId = NES::INVALID_LOCAL_QUERY_ID;
 
 public:
     void wait(const std::stop_token& stopToken) const;
+    void setStatisticListener(std::shared_ptr<NES::BackpressureStatisticListener> listener, NES::LocalQueryId localQueryId);
+    bool recordBufferIngestedEvent();
 };

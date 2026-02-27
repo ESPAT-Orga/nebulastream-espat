@@ -116,12 +116,19 @@ void BackpressureStatisticTcpEmitter::threadRoutine(const std::stop_token& token
                         //TODO: implement
                         (void) unbufferEvent;
                     },
-                    [&](const BufferSentEvent& sentEvent)
+                    [&](const BufferIngestEvent& sentEvent)
                     {
                         auto nanosec
                             = std::chrono::duration_cast<std::chrono::nanoseconds>(sentEvent.timestamp.time_since_epoch()).count();
-                        NES_TRACE("Sent event for {}, {}", sentEvent.localQueryId, sentEvent.timestamp);
-                        msg = std::format("BufferSent,{},{}\n", sentEvent.localQueryId.getRawValue(), nanosec);
+                        NES_TRACE("Send event for {}, {}", sentEvent.localQueryId, sentEvent.timestamp);
+                        msg = std::format("BufferIngest,{},{}\n", sentEvent.localQueryId.getRawValue(), nanosec);
+                    },
+                    [&](const BufferSendEvent& sentEvent)
+                    {
+                        auto nanosec
+                            = std::chrono::duration_cast<std::chrono::nanoseconds>(sentEvent.timestamp.time_since_epoch()).count();
+                        NES_TRACE("Send event for {}, {}", sentEvent.localQueryId, sentEvent.timestamp);
+                        msg = std::format("BufferSend,{},{}\n", sentEvent.localQueryId.getRawValue(), nanosec);
                     },
                         [&](const ApplyPressureEvent& applyEvent)
                     {

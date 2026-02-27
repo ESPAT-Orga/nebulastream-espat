@@ -142,7 +142,7 @@ bool BackpressureController::recordBufferSentEvent()
 {
     if (backpressureStatisticListener)
     {
-        backpressureStatisticListener->onEvent(NES::BufferSentEvent(localQueryId, priority));
+        backpressureStatisticListener->onEvent(NES::BufferSendEvent(localQueryId, priority));
     }
     return true;
 }
@@ -163,6 +163,15 @@ void BackpressureController::setAdaptiveSendingScheduler(NES::LocalQueryId local
     {
         this->priority = adaptiveSendingScheduler->registerChannel(localQueryId, priority, channel.get()->contingent);
     }
+}
+
+bool BackpressureListener::recordBufferIngestedEvent()
+{
+    if (backpressureStatisticListener)
+    {
+        backpressureStatisticListener->onEvent(NES::BufferIngestEvent(localQueryId));
+    }
+    return true;
 }
 
 void BackpressureListener::wait(const std::stop_token& stopToken) const
@@ -186,6 +195,13 @@ void BackpressureListener::wait(const std::stop_token& stopToken) const
         });
 
     INVARIANT(!destroyed, "Backpressure Controller was destroyed before the BackpressureListener");
+}
+
+void BackpressureListener::setStatisticListener(
+    std::shared_ptr<NES::BackpressureStatisticListener> listener, NES::LocalQueryId localQueryId)
+{
+    this->backpressureStatisticListener = listener;
+    this->localQueryId = localQueryId;
 }
 
 std::pair<BackpressureController, BackpressureListener> createBackpressureChannel()

@@ -102,7 +102,7 @@ void AdaptiveSendingScheduler::assignContingents()
         for (auto ch : it->second)
         {
             NES_DEBUG("Setting contingent for query {} with priority {} to {}", ch.localQueryId, ch.priority, CONTINGET_PER_INTERVAL);
-            ch.contingent.get().store(INT64_MAX);
+            ch.contingent.get().store(CONTINGET_PER_INTERVAL);
         }
     }
 
@@ -180,8 +180,13 @@ Priority AdaptiveSendingScheduler::registerChannel(const LocalQueryId localQuery
 
 void AdaptiveSendingScheduler::unregisterChannel(LocalQueryId localQueryId, Priority priority)
 {
-    auto& vec = priorities.wlock()->at(priority);
+    auto locked = priorities.wlock();
+    auto& vec = locked->at(priority);
     std::erase_if(vec, [&localQueryId](const RegisteredChannel& ch) { return ch.localQueryId == localQueryId; });
+    if (vec.empty())
+    {
+        locked->erase(priority);
+    }
 }
 
 

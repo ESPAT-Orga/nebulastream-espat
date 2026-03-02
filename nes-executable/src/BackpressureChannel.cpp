@@ -60,7 +60,7 @@ BackpressureController::~BackpressureController()
 {
     if (adaptiveSendingScheduler)
     {
-        adaptiveSendingScheduler->unregisterChannel(localQueryId, priority);
+        adaptiveSendingScheduler->unregisterChannel(localQueryId);
     }
     if (channel)
     {

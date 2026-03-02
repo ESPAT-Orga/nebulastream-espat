@@ -31,14 +31,13 @@
 namespace NES
 {
 
-using Priority = uint64_t;
+using Priority = bool;
 
 constexpr Priority INVALID_PRIORITY = 0;
 
 struct RegisteredChannel
 {
     LocalQueryId localQueryId;
-    Priority priority;
     std::reference_wrapper<std::atomic<uint64_t>> contingent;
 };
 
@@ -46,11 +45,11 @@ struct AdaptiveSendingScheduler : TrafficStatisticListener {
     void onEvent(BackpressureEvent event) override;
     void threadRoutine(const std::stop_token& token);
     void assignContingents();
-    void applyPressure(LocalQueryId localQueryId, Priority priority);
-    void unbufferingCompleted(LocalQueryId localQueryId, Priority priority);
+    void applyPressure(LocalQueryId localQueryId);
+    void unbufferingCompleted(LocalQueryId localQueryId);
     void start();
-    Priority registerChannel(LocalQueryId localQueryId, Priority priority, std::atomic<uint64_t>& contingent);
-    void unregisterChannel(LocalQueryId localQueryId, Priority priority);
+    Priority registerChannel(LocalQueryId localQueryId, Priority throttled, std::atomic<uint64_t>& contingent);
+    void unregisterChannel(LocalQueryId localQueryId);
 
     template<typename LockedPriorityMap>
     void setBlockedStatusForPriorityRange(Priority start, Priority end, bool blocked, LockedPriorityMap lockedPriorities)
@@ -72,15 +71,15 @@ struct AdaptiveSendingScheduler : TrafficStatisticListener {
     }
 
 private:
-    folly::Synchronized<std::map<Priority, std::vector<RegisteredChannel>>> priorities;
+    folly::Synchronized<std::map<LocalQueryId, RegisteredChannel>> high_priority;
+    folly::Synchronized<std::map<LocalQueryId, RegisteredChannel>> low_priority;
 
-    folly::Synchronized<std::map<Priority, std::vector<LocalQueryId>>> underBackpressure;
-    std::atomic<Priority> minPriorityUnderPressure = INVALID_PRIORITY;
-    //TODO: remove this once we the actual priority
-    std::atomic<Priority> maxPriority = 1;
+    std::map<LocalQueryId, RegisteredChannel&> high_priority_under_backpressure;
+
     static constexpr size_t QUEUE_LENGTH = 1000;
     folly::MPMCQueue<BackpressureEvent> events{QUEUE_LENGTH};
     Thread schedulerThread;
+    std::atomic<bool> init_throttled{false};
 };
 
 }

@@ -223,14 +223,16 @@ LogicalOperatorGeneratedRegistrar::RegisterCountMinProbeLogicalOperator(NES::Log
     auto counterTypeValue = std::get_if<std::string>(&arguments.config[CountMinSketchProbeLogicalOperator::ConfigParameters::COUNTER_TYPE]);
     INVARIANT(counterTypeValue, "Wrong value in ConfigParameter::COUNTER_TYPE");
 
-    auto rowIndexValue = std::get_if<std::string>(&arguments.config[CountMinSketchProbeLogicalOperator::ConfigParameters::ROW_INDEX_FIELD_NAME]);
+    auto rowIndexValue
+        = std::get_if<std::string>(&arguments.config[CountMinSketchProbeLogicalOperator::ConfigParameters::ROW_INDEX_FIELD_NAME]);
     INVARIANT(rowIndexValue, "Wrong value in ConfigParameter::ROW_INDEX_FIELD_NAME");
 
     auto columnIndexValue
         = std::get_if<std::string>(&arguments.config[CountMinSketchProbeLogicalOperator::ConfigParameters::COLUMN_INDEX_FIELD_NAME]);
     INVARIANT(columnIndexValue, "Wrong value in ConfigParameter::COLUMN_INDEX_FIELD_NAME");
 
-    auto counterValue = std::get_if<std::string>(&arguments.config[CountMinSketchProbeLogicalOperator::ConfigParameters::COUNTER_FIELD_NAME]);
+    auto counterValue
+        = std::get_if<std::string>(&arguments.config[CountMinSketchProbeLogicalOperator::ConfigParameters::COUNTER_FIELD_NAME]);
     INVARIANT(counterValue, "Wrong value in ConfigParameter::COUNTER_FIELD_NAME");
 
     auto statisticEndTs = arguments.config[LogicalStatisticFields::ConfigParameters::STATISTIC_END_TS];

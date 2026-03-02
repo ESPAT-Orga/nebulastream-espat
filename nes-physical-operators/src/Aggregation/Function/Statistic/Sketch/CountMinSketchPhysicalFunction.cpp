@@ -19,9 +19,9 @@
 #include <ranges>
 
 #include <Nautilus/Interface/Hash/H3HashFunction.hpp>
+#include <Statistic/StatisticProvider.hpp>
 #include <std/cstring.h>
 #include <AggregationPhysicalFunctionRegistry.hpp>
-#include <Statistic/StatisticProvider.hpp>
 
 namespace NES
 {
@@ -103,7 +103,8 @@ void CountMinSketchPhysicalFunction::combine(
     VarVal{numberOfSeenTuples1}.writeToMemory(numberOfSeenTuplesRef1);
 }
 
-Record CountMinSketchPhysicalFunction::lower(nautilus::val<AggregationState*> aggregationState, PipelineMemoryProvider& pipelineMemoryProvider)
+Record
+CountMinSketchPhysicalFunction::lower(nautilus::val<AggregationState*> aggregationState, PipelineMemoryProvider& pipelineMemoryProvider)
 {
     /// Need to acquire new memory, as the current allocated aggregation state for the counters will be deleted.
     const auto loweredHeaderSize = StatisticProviderIteratorImpl::sizeOfMetaDataSize + StatisticProviderIteratorImpl::sizeOfTotalAreaSize;
@@ -114,7 +115,8 @@ Record CountMinSketchPhysicalFunction::lower(nautilus::val<AggregationState*> ag
     VarVal{sizeOfVariableSizedData}.writeToMemory(countMinMemory);
     VarVal{loweredMetaDataSize}.writeToMemory(countMinMemory + nautilus::val<uint64_t>{StatisticProviderIteratorImpl::sizeOfTotalAreaSize});
     VarVal{numberOfRows}.writeToMemory(countMinMemory + nautilus::val<uint64_t>{loweredHeaderSize});
-    VarVal{numberOfCols}.writeToMemory(countMinMemory + nautilus::val<uint64_t>{loweredHeaderSize} + nautilus::val<uint64_t>{sizeof(numberOfRows)});
+    VarVal{numberOfCols}.writeToMemory(
+        countMinMemory + nautilus::val<uint64_t>{loweredHeaderSize} + nautilus::val<uint64_t>{sizeof(numberOfRows)});
     /// Copying all counters to the newly acquired memory and adding the size of the variable sized data (count min sketch)
     const auto dataOffset = nautilus::val<uint64_t>{loweredHeaderSize + loweredMetaDataSize};
     nautilus::memcpy(countMinMemory + dataOffset, aggregationState, totalSizeOfSketchInBytes);

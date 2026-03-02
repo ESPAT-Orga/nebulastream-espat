@@ -28,7 +28,8 @@ namespace NES
 
 namespace
 {
-StatisticProvider getStatisticProvider(const DataType counterType, std::string columnFieldName, std::string rowFieldName, std::string counterFieldName)
+StatisticProvider
+getStatisticProvider(const DataType counterType, std::string columnFieldName, std::string rowFieldName, std::string counterFieldName)
 {
     auto statisticProviderArguments
         = std::make_unique<CountMinSketchProviderArguments>(counterType, columnFieldName, rowFieldName, counterFieldName);
@@ -46,7 +47,8 @@ RewriteRuleResultSubgraph LowerToPhysicalCountMinSketchProbe::apply(LogicalOpera
     auto statisticStore = NodeEngine::getStatisticStore();
     auto statisticStoreReaderOperatorHandler = std::make_shared<StatisticStoreOperatorHandler>(std::move(statisticStore));
     const auto operatorHandlerId = getNextOperatorHandlerId();
-    auto statisticProvider = getStatisticProvider(countMinProbe->counterType, countMinProbe->columnIndexFieldName, countMinProbe->rowIndexFieldName, countMinProbe->counterFieldName);
+    auto statisticProvider = getStatisticProvider(
+        countMinProbe->counterType, countMinProbe->columnIndexFieldName, countMinProbe->rowIndexFieldName, countMinProbe->counterFieldName);
     StatisticStoreReader statisticStoreReader{
         operatorHandlerId,
         countMinProbe->statisticHashField.name,

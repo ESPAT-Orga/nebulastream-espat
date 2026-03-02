@@ -45,7 +45,8 @@ struct CountMinSketchProviderArguments final : StatisticProviderArguments
 class CountMinSketchIteratorImpl final : public StatisticProviderIteratorImpl
 {
 public:
-    explicit CountMinSketchIteratorImpl(const nautilus::val<int8_t*>& statisticMemArea, CountMinSketchProviderArguments& countMinProviderArguments);
+    explicit CountMinSketchIteratorImpl(
+        const nautilus::val<int8_t*>& statisticMemArea, CountMinSketchProviderArguments& countMinProviderArguments);
     ~CountMinSketchIteratorImpl() override = default;
     Record operator*() override;
     StatisticProviderIteratorImpl& operator++() override;

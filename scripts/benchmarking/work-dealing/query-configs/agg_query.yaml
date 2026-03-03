@@ -1,0 +1,36 @@
+query: SELECT AVG(value) AS avg_value FROM tcp_source WINDOW TUMBLING (timestamp, size 10 sec) INTO discard_sink
+sinks:
+  - name: discard_sink
+    schema:
+      - name: tcp_source$avg_value
+        type: FLOAT64
+    type: Discard
+    config:
+      filePath: "/tmp/discard_sink.csv"
+      inputFormat: CSV
+logical:
+  - name: tcp_source
+    schema:
+      - name: id
+        type: UINT64
+      - name: value
+        type: UINT64
+      - name: timestamp
+        type: UINT64
+physical:
+  - logical: tcp_source
+    type: Generator
+    parserConfig:
+      type: CSV
+    sourceConfig:
+      stopGeneratorWhenSequenceFinishes: ONE
+      maxRuntimeMs: 1000000000
+      flushIntervalMs: TBA
+      seed: 42
+      generatorRateType: TBD
+      generatorRateConfig: |
+        TBA
+      generatorSchema: |
+        NORMAL_DISTRIBUTION UINT64 0 4999 1666
+        NORMAL_DISTRIBUTION UINT64 0 499999 166666
+        SEQUENCE UINT64 0 1000000000 1

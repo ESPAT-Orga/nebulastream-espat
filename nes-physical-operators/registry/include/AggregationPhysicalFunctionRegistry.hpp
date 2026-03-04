@@ -37,6 +37,7 @@ struct AggregationPhysicalFunctionRegistryArguments
     Record::RecordFieldIdentifier resultFieldIdentifier;
     std::optional<std::shared_ptr<TupleBufferRef>> bufferRefPagedVector;
     std::optional<std::string> numberOfSeenTuplesFieldName{};
+    /// ReservoirSample and CountMinSketch:
     std::optional<uint64_t> seed{};
     /// ReservoirSample:
     std::optional<uint64_t> sampleSize{};

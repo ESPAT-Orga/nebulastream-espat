@@ -21,8 +21,8 @@
 #include <ranges>
 #include <Nautilus/Interface/HashMap/ChainedHashMap/ChainedHashMap.hpp>
 #include <Nautilus/Interface/HashMap/ChainedHashMap/ChainedHashMapRef.hpp>
-#include <std/cstring.h>
 #include <Statistic/StatisticProvider.hpp>
+#include <std/cstring.h>
 
 #include <AggregationPhysicalFunctionRegistry.hpp>
 

@@ -12,7 +12,7 @@
     limitations under the License.
 */
 
-#include <Operators/Windows/Aggregations/Histogram/EquiWidthHistogramProbeLogicalOperator.hpp>
+#include <Operators/Windows/Aggregations/Sketch/CountMinSketchProbeLogicalOperator.hpp>
 
 #include <cstddef>
 #include <string>
@@ -43,57 +43,50 @@
 namespace NES
 {
 
-EquiWidthHistogramProbeLogicalOperator::EquiWidthHistogramProbeLogicalOperator(
-    const uint64_t statisticHash, DataType counterType, DataType startEndType)
-    : statisticHash(statisticHash), counterType(counterType), startEndType(startEndType)
+CountMinSketchProbeLogicalOperator::CountMinSketchProbeLogicalOperator(const Statistic::StatisticHash statisticHash, DataType counterType)
+    : statisticHash(statisticHash), counterType(counterType)
 {
 }
 
-EquiWidthHistogramProbeLogicalOperator::EquiWidthHistogramProbeLogicalOperator(
-    uint64_t stashHash,
+CountMinSketchProbeLogicalOperator::CountMinSketchProbeLogicalOperator(
+    Statistic::StatisticHash statisticHash,
     DataType counterType,
-    DataType startEndType,
-    std::string binStartFieldName,
-    std::string binEndFieldName,
-    std::string binCounterFieldName,
+    std::string rowIndexFieldName,
+    std::string columnIndexFieldName,
+    std::string counterFieldName,
     LogicalStatisticFields logicalStatisticFields)
     : LogicalStatisticFields(std::move(logicalStatisticFields))
-    , statisticHash(stashHash)
+    , statisticHash(statisticHash)
     , counterType(counterType)
-    , startEndType(startEndType)
-    , binStartFieldName(std::move(binStartFieldName))
-    , binEndFieldName(std::move(binEndFieldName))
-    , binCounterFieldName(std::move(binCounterFieldName))
+    , rowIndexFieldName(std::move(rowIndexFieldName))
+    , columnIndexFieldName(std::move(columnIndexFieldName))
+    , counterFieldName(std::move(counterFieldName))
 {
 }
 
-std::string_view EquiWidthHistogramProbeLogicalOperator::getName() const noexcept
+std::string_view CountMinSketchProbeLogicalOperator::getName() const noexcept
 {
     return NAME;
 }
 
-bool EquiWidthHistogramProbeLogicalOperator::operator==(const EquiWidthHistogramProbeLogicalOperator& rhs) const
+bool CountMinSketchProbeLogicalOperator::operator==(const CountMinSketchProbeLogicalOperator& rhs) const
 {
-    return statisticHash == rhs.statisticHash and counterType == rhs.counterType and startEndType == rhs.startEndType
-        and inputSchema == rhs.inputSchema and outputSchema == rhs.outputSchema and inputOriginIds == rhs.inputOriginIds
-        and outputOriginIds == rhs.outputOriginIds;
+    return statisticHash == rhs.statisticHash and counterType == rhs.counterType and inputSchema == rhs.inputSchema
+        and outputSchema == rhs.outputSchema and inputOriginIds == rhs.inputOriginIds and outputOriginIds == rhs.outputOriginIds;
 };
 
-EquiWidthHistogramProbeLogicalOperator
-EquiWidthHistogramProbeLogicalOperator::withInferredSchema(const std::vector<Schema>& inputSchemas) const
+CountMinSketchProbeLogicalOperator CountMinSketchProbeLogicalOperator::withInferredSchema(const std::vector<Schema>& inputSchemas) const
 {
     auto copy = *this;
-    INVARIANT(inputSchemas.size() == 1, "EquiWidthProbe should have one input schema but got {}", inputSchemas.size());
+    INVARIANT(inputSchemas.size() == 1, "CountMinProbe should have one input schema but got {}", inputSchemas.size());
     const auto& firstSchema = inputSchemas[0];
-    const bool allEqual =
-       std::ranges::adjacent_find(inputSchemas, std::ranges::not_equal_to{})
-       == inputSchemas.end();
+    const bool allEqual = std::ranges::adjacent_find(inputSchemas, std::ranges::not_equal_to{}) == inputSchemas.end();
     if (not allEqual)
     {
-        throw CannotInferSchema("All input schemas must be equal for EquiWidthProbe operator");
+        throw CannotInferSchema("All input schemas must be equal for CountMinProbe operator");
     }
 
-    /// EquiWidthHistogramProbeLogicalOperator expects the following fields in its input schema. If not, we need to throw
+    /// CountMinSketchProbeLogicalOperator expects the following fields in its input schema. If not, we need to throw
     copy.inputSchema = firstSchema;
     if (not copy.inputSchema.getFieldByName(copy.statisticStartTsField.name).has_value()
         or not copy.inputSchema.getFieldByName(copy.statisticEndTsField.name).has_value()
@@ -108,9 +101,9 @@ EquiWidthHistogramProbeLogicalOperator::withInferredSchema(const std::vector<Sch
 
     auto addIfMissing = [](std::string s, const std::string& sub) { return s.find(sub) != std::string::npos ? s : sub + s; };
 
-    copy.binStartFieldName = addIfMissing(this->binStartFieldName, newQualifierForSystemField);
-    copy.binEndFieldName = addIfMissing(this->binEndFieldName, newQualifierForSystemField);
-    copy.binCounterFieldName = addIfMissing(this->binCounterFieldName, newQualifierForSystemField);
+    copy.rowIndexFieldName = addIfMissing(this->rowIndexFieldName, newQualifierForSystemField);
+    copy.columnIndexFieldName = addIfMissing(this->columnIndexFieldName, newQualifierForSystemField);
+    copy.counterFieldName = addIfMissing(this->counterFieldName, newQualifierForSystemField);
 
     copy.outputSchema = Schema{};
     copy.statisticHashField.addQualifierIfNotExists(newQualifierForSystemField);
@@ -123,65 +116,63 @@ EquiWidthHistogramProbeLogicalOperator::withInferredSchema(const std::vector<Sch
     copy.outputSchema.addField(copy.statisticEndTsField);
     copy.outputSchema.addField(copy.statisticNumberOfSeenTuplesField);
 
-    Schema::Field start{copy.binStartFieldName, DataType{startEndType}};
-    start.addQualifierIfNotExists(newQualifierForSystemField);
-    copy.outputSchema.addField(start);
-    Schema::Field counter{copy.binCounterFieldName, DataType{counterType}};
+    Schema::Field row(copy.rowIndexFieldName, CountMinSketchProbeLogicalOperator::indexType);
+    row.addQualifierIfNotExists(newQualifierForSystemField);
+    copy.outputSchema.addField(row);
+    Schema::Field column(copy.columnIndexFieldName, CountMinSketchProbeLogicalOperator::indexType);
+    column.addQualifierIfNotExists(newQualifierForSystemField);
+    copy.outputSchema.addField(column);
+    Schema::Field counter(copy.counterFieldName, copy.counterType);
     counter.addQualifierIfNotExists(newQualifierForSystemField);
     copy.outputSchema.addField(counter);
-    Schema::Field end{copy.binEndFieldName, DataType{startEndType}};
-    end.addQualifierIfNotExists(newQualifierForSystemField);
-    copy.outputSchema.addField(end);
-
 
     return copy;
 }
 
-EquiWidthHistogramProbeLogicalOperator EquiWidthHistogramProbeLogicalOperator::withTraitSet(TraitSet traitSet) const
+CountMinSketchProbeLogicalOperator CountMinSketchProbeLogicalOperator::withTraitSet(TraitSet traitSet) const
 {
     auto copy = *this;
     copy.traitSet = traitSet;
     return copy;
 }
 
-TraitSet EquiWidthHistogramProbeLogicalOperator::getTraitSet() const
+TraitSet CountMinSketchProbeLogicalOperator::getTraitSet() const
 {
     return traitSet;
 }
 
-EquiWidthHistogramProbeLogicalOperator EquiWidthHistogramProbeLogicalOperator::withChildren(std::vector<LogicalOperator> children) const
+CountMinSketchProbeLogicalOperator CountMinSketchProbeLogicalOperator::withChildren(std::vector<LogicalOperator> children) const
 {
     auto copy = *this;
     copy.children = children;
     return copy;
 }
 
-std::vector<Schema> EquiWidthHistogramProbeLogicalOperator::getInputSchemas() const
+std::vector<Schema> CountMinSketchProbeLogicalOperator::getInputSchemas() const
 {
     return {inputSchema};
 };
 
-Schema EquiWidthHistogramProbeLogicalOperator::getOutputSchema() const
+Schema CountMinSketchProbeLogicalOperator::getOutputSchema() const
 {
     return outputSchema;
 }
 
-std::vector<LogicalOperator> EquiWidthHistogramProbeLogicalOperator::getChildren() const
+std::vector<LogicalOperator> CountMinSketchProbeLogicalOperator::getChildren() const
 {
     return children;
 }
 
-std::string EquiWidthHistogramProbeLogicalOperator::explain(ExplainVerbosity verbosity, OperatorId id) const
+std::string CountMinSketchProbeLogicalOperator::explain(ExplainVerbosity verbosity, OperatorId id) const
 {
     if (verbosity == ExplainVerbosity::Debug)
     {
-        return fmt::format(
-            "EQUIWIDTH_PROBE(opId: {}, statHash: {}, counterType: {}, startEndType: {})", id, statisticHash, counterType, startEndType);
+        return fmt::format("COUNTMIN_PROBE(opId: {}, statHash: {}, counterType: {})", id, statisticHash, counterType);
     }
-    return fmt::format("EQUIWIDTH_PROBE()", statisticHash);
+    return fmt::format("COUNTMIN_PROBE()", statisticHash);
 }
 
-void EquiWidthHistogramProbeLogicalOperator::serialize(SerializableOperator& serializableOperator) const
+void CountMinSketchProbeLogicalOperator::serialize(SerializableOperator& serializableOperator) const
 {
     SerializableLogicalOperator proto;
 
@@ -212,40 +203,37 @@ void EquiWidthHistogramProbeLogicalOperator::serialize(SerializableOperator& ser
     serializeAndAddToConfig(statisticStartTsField, LogicalStatisticFields::ConfigParameters::STATISTIC_START_TS);
     serializeAndAddToConfig(statisticHashField, LogicalStatisticFields::ConfigParameters::STATISTIC_HASH_FIELD);
     serializeAndAddToConfig(statisticNumberOfSeenTuplesField, LogicalStatisticFields::ConfigParameters::STATISTIC_NUMBER_OF_SEEN_TUPLES);
-
     (*serializableOperator.mutable_config())[ConfigParameters::STATISTIC_HASH] = descriptorConfigTypeToProto(statisticHash);
     (*serializableOperator.mutable_config())[ConfigParameters::COUNTER_TYPE]
         = descriptorConfigTypeToProto(std::string(magic_enum::enum_name<DataType::Type>(counterType.type)));
-    (*serializableOperator.mutable_config())[ConfigParameters::START_END_TYPE]
-        = descriptorConfigTypeToProto(std::string(magic_enum::enum_name<DataType::Type>(startEndType.type)));
-    (*serializableOperator.mutable_config())[ConfigParameters::BIN_START_FIELD_NAME] = descriptorConfigTypeToProto(this->binStartFieldName);
-    (*serializableOperator.mutable_config())[ConfigParameters::BIN_END_FIELD_NAME] = descriptorConfigTypeToProto(this->binEndFieldName);
-    (*serializableOperator.mutable_config())[ConfigParameters::BIN_COUNTER_FIELD_NAME]
-        = descriptorConfigTypeToProto(this->binCounterFieldName);
+    (*serializableOperator.mutable_config())[ConfigParameters::ROW_INDEX_FIELD_NAME] = descriptorConfigTypeToProto(rowIndexFieldName);
+    (*serializableOperator.mutable_config())[ConfigParameters::COLUMN_INDEX_FIELD_NAME] = descriptorConfigTypeToProto(columnIndexFieldName);
+    (*serializableOperator.mutable_config())[ConfigParameters::COUNTER_FIELD_NAME] = descriptorConfigTypeToProto(counterFieldName);
 
     serializableOperator.mutable_operator_()->CopyFrom(proto);
 }
 
 LogicalOperatorRegistryReturnType
-LogicalOperatorGeneratedRegistrar::RegisterEquiWidthHistogramProbeLogicalOperator(NES::LogicalOperatorRegistryArguments arguments)
+LogicalOperatorGeneratedRegistrar::RegisterCountMinProbeLogicalOperator(NES::LogicalOperatorRegistryArguments arguments)
 {
     auto statisticHashValue
-        = std::get_if<uint64_t>(&arguments.config[EquiWidthHistogramProbeLogicalOperator::ConfigParameters::STATISTIC_HASH]);
+        = std::get_if<Statistic::StatisticHash>(&arguments.config[CountMinSketchProbeLogicalOperator::ConfigParameters::STATISTIC_HASH]);
     INVARIANT(statisticHashValue, "Wrong value in ConfigParameter::STATISTIC_HASH");
-    auto counterTypeValue
-        = std::get_if<std::string>(&arguments.config[EquiWidthHistogramProbeLogicalOperator::ConfigParameters::COUNTER_TYPE]);
+
+    auto counterTypeValue = std::get_if<std::string>(&arguments.config[CountMinSketchProbeLogicalOperator::ConfigParameters::COUNTER_TYPE]);
     INVARIANT(counterTypeValue, "Wrong value in ConfigParameter::COUNTER_TYPE");
-    auto startEndType
-        = std::get_if<std::string>(&arguments.config[EquiWidthHistogramProbeLogicalOperator::ConfigParameters::START_END_TYPE]);
-    INVARIANT(startEndType, "Wrong value in ConfigParameter::START_END_TYPE");
-    auto start
-        = std::get_if<std::string>(&arguments.config[EquiWidthHistogramProbeLogicalOperator::ConfigParameters::BIN_START_FIELD_NAME]);
-    INVARIANT(start, "Wrong value in ConfigParameter::BIN_START_FIELD_NAME");
-    auto end = std::get_if<std::string>(&arguments.config[EquiWidthHistogramProbeLogicalOperator::ConfigParameters::BIN_END_FIELD_NAME]);
-    INVARIANT(end, "Wrong value in ConfigParameter::BIN_END_FIELD_NAME");
-    auto counter
-        = std::get_if<std::string>(&arguments.config[EquiWidthHistogramProbeLogicalOperator::ConfigParameters::BIN_COUNTER_FIELD_NAME]);
-    INVARIANT(counter, "Wrong value in ConfigParameter::BIN_COUNTER_FIELD_NAME");
+
+    auto rowIndexValue
+        = std::get_if<std::string>(&arguments.config[CountMinSketchProbeLogicalOperator::ConfigParameters::ROW_INDEX_FIELD_NAME]);
+    INVARIANT(rowIndexValue, "Wrong value in ConfigParameter::ROW_INDEX_FIELD_NAME");
+
+    auto columnIndexValue
+        = std::get_if<std::string>(&arguments.config[CountMinSketchProbeLogicalOperator::ConfigParameters::COLUMN_INDEX_FIELD_NAME]);
+    INVARIANT(columnIndexValue, "Wrong value in ConfigParameter::COLUMN_INDEX_FIELD_NAME");
+
+    auto counterValue
+        = std::get_if<std::string>(&arguments.config[CountMinSketchProbeLogicalOperator::ConfigParameters::COUNTER_FIELD_NAME]);
+    INVARIANT(counterValue, "Wrong value in ConfigParameter::COUNTER_FIELD_NAME");
 
     auto statisticEndTs = arguments.config[LogicalStatisticFields::ConfigParameters::STATISTIC_END_TS];
     auto statisticStartTs = arguments.config[LogicalStatisticFields::ConfigParameters::STATISTIC_START_TS];
@@ -268,13 +256,12 @@ LogicalOperatorGeneratedRegistrar::RegisterEquiWidthHistogramProbeLogicalOperato
         = SchemaSerializationUtil::deserializeField(std::get<NES::SerializableSchema_SerializableField>(statisticNumberOfSeenTuples));
 
 
-    auto logicalOperator = EquiWidthHistogramProbeLogicalOperator(
+    auto logicalOperator = CountMinSketchProbeLogicalOperator(
         *statisticHashValue,
         DataTypeProvider::provideDataType(*counterTypeValue),
-        DataTypeProvider::provideDataType(*startEndType),
-        *start,
-        *end,
-        *counter,
+        *rowIndexValue,
+        *columnIndexValue,
+        *counterValue,
         LogicalStatisticFields{statisticNumberOfSeenTuplesField, statisticHashField, statisticStartTsField, statisticEndTsField});
     return logicalOperator.withInferredSchema(arguments.inputSchemas);
 }

@@ -19,14 +19,14 @@
 namespace NES
 {
 
-struct CountMinProviderArguments final : StatisticProviderArguments
+struct CountMinSketchProviderArguments final : StatisticProviderArguments
 {
     DataType counterDataType;
     std::string columnFieldName;
     std::string rowFieldName;
     std::string counterFieldName;
 
-    explicit CountMinProviderArguments(
+    explicit CountMinSketchProviderArguments(
         DataType counterDataType, std::string columnFieldName, std::string rowFieldName, std::string counterFieldName)
         : counterDataType(std::move(counterDataType))
         , columnFieldName(std::move(columnFieldName))
@@ -35,18 +35,19 @@ struct CountMinProviderArguments final : StatisticProviderArguments
     {
     }
 
-    ~CountMinProviderArguments() override = default;
+    ~CountMinSketchProviderArguments() override = default;
 
-    std::unique_ptr<StatisticProviderArguments> clone() override { return std::make_unique<CountMinProviderArguments>(*this); }
+    std::unique_ptr<StatisticProviderArguments> clone() override { return std::make_unique<CountMinSketchProviderArguments>(*this); }
 };
 
 /// |       ------ Meta-Data ------        |       --- Statistics Area ---       |
 /// | No. Rows (64bit) No. Columns (64it)  |    Count Min 2-D Array[rows][col]   |
-class CountMinIteratorImpl final : public StatisticProviderIteratorImpl
+class CountMinSketchIteratorImpl final : public StatisticProviderIteratorImpl
 {
 public:
-    explicit CountMinIteratorImpl(const nautilus::val<int8_t*>& statisticMemArea, CountMinProviderArguments& countMinProviderArguments);
-    ~CountMinIteratorImpl() override = default;
+    explicit CountMinSketchIteratorImpl(
+        const nautilus::val<int8_t*>& statisticMemArea, CountMinSketchProviderArguments& countMinProviderArguments);
+    ~CountMinSketchIteratorImpl() override = default;
     Record operator*() override;
     StatisticProviderIteratorImpl& operator++() override;
     nautilus::val<bool> operator==(const StatisticProviderIteratorImpl& other) const override;
@@ -57,7 +58,7 @@ protected:
 
 private:
     /// Provided via the constructor
-    CountMinProviderArguments countMinProviderArgs;
+    CountMinSketchProviderArguments countMinProviderArgs;
 
     /// Set by each statistic
     nautilus::val<uint64_t> numberOfRows;

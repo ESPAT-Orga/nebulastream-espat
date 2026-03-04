@@ -12,18 +12,18 @@
     limitations under the License.
 */
 
-#include <Statistic/Sketch/CountMinIteratorImpl.hpp>
+#include <Statistic/Sketch/CountMinSketchIteratorImpl.hpp>
 
 namespace NES
 {
 
-CountMinIteratorImpl::CountMinIteratorImpl(
-    const nautilus::val<int8_t*>& statisticMemArea, CountMinProviderArguments& countMinProviderArguments)
+CountMinSketchIteratorImpl::CountMinSketchIteratorImpl(
+    const nautilus::val<int8_t*>& statisticMemArea, CountMinSketchProviderArguments& countMinProviderArguments)
     : StatisticProviderIteratorImpl(std::move(statisticMemArea)), countMinProviderArgs(std::move(countMinProviderArguments))
 {
 }
 
-Record CountMinIteratorImpl::operator*()
+Record CountMinSketchIteratorImpl::operator*()
 {
     Record record;
     record.write(countMinProviderArgs.rowFieldName, counterRow);
@@ -33,38 +33,37 @@ Record CountMinIteratorImpl::operator*()
     return record;
 }
 
-StatisticProviderIteratorImpl& CountMinIteratorImpl::operator++()
+StatisticProviderIteratorImpl& CountMinSketchIteratorImpl::operator++()
 {
-    /// Continuing to the next row, if we are at the end of the current on
-    if (counterCol >= numberOfColumns)
+    counterRow += 1;
+    if (counterRow >= numberOfRows)
     {
-        counterCol = 0;
-        counterRow += 1;
+        counterRow = 0;
+        counterCol += 1;
     }
 
-    /// As the full 2-D array lies consequetively in memory, we can simply increment the curCounter
+    /// As the full 2-D array lies consecutively in memory, we can simply increment the curCounter
     curCounter += countMinProviderArgs.counterDataType.getSizeInBytes();
 
     return *this;
 }
 
-nautilus::val<bool> CountMinIteratorImpl::operator==(const StatisticProviderIteratorImpl& other) const
+nautilus::val<bool> CountMinSketchIteratorImpl::operator==(const StatisticProviderIteratorImpl& other) const
 {
-    if (const auto otherCountMin = dynamic_cast<const CountMinIteratorImpl*>(&other); otherCountMin != nullptr)
+    if (const auto otherCountMin = dynamic_cast<const CountMinSketchIteratorImpl*>(&other); otherCountMin != nullptr)
     {
-        return countMinProviderArgs.counterDataType == otherCountMin->countMinProviderArgs.counterDataType
-            and numberOfColumns == otherCountMin->numberOfColumns and numberOfRows == otherCountMin->numberOfRows
+        return numberOfColumns == otherCountMin->numberOfColumns and numberOfRows == otherCountMin->numberOfRows
             and counterCol == otherCountMin->counterCol and counterRow == otherCountMin->counterRow
             and curCounter == otherCountMin->curCounter and statisticMemArea == otherCountMin->statisticMemArea;
     }
     return false;
 }
 
-void CountMinIteratorImpl::advanceToBegin()
+void CountMinSketchIteratorImpl::advanceToBegin()
 {
     numberOfRows = readValueFromMemRef<uint64_t>(statisticMemArea + nautilus::val<uint64_t>(sizeOfTotalAreaSize + sizeOfMetaDataSize));
-    numberOfColumns
-        = readValueFromMemRef<uint64_t>(statisticMemArea + nautilus::val<uint64_t>{sizeOfTotalAreaSize + sizeOfMetaDataSize} + nautilus::val<uint64_t>(8));
+    numberOfColumns = readValueFromMemRef<uint64_t>(
+        statisticMemArea + nautilus::val<uint64_t>(sizeOfTotalAreaSize + sizeOfMetaDataSize) + nautilus::val<uint64_t>(8));
 
 
     const auto metaDataSize = readValueFromMemRef<uint32_t>(statisticMemArea + sizeOfTotalAreaSize);
@@ -73,14 +72,20 @@ void CountMinIteratorImpl::advanceToBegin()
     curCounter = statisticMemArea + nautilus::val<uint64_t>{sizeOfTotalAreaSize + sizeOfMetaDataSize} + metaDataSize;
 }
 
-void CountMinIteratorImpl::advanceToEnd()
+void CountMinSketchIteratorImpl::advanceToEnd()
 {
     numberOfRows = readValueFromMemRef<uint64_t>(statisticMemArea + nautilus::val<uint8_t>(sizeOfTotalAreaSize + sizeOfMetaDataSize));
-    numberOfColumns
-        = readValueFromMemRef<uint64_t>(statisticMemArea + nautilus::val<uint64_t>{sizeOfTotalAreaSize + sizeOfMetaDataSize} + nautilus::val<uint64_t>{8});
+    numberOfColumns = readValueFromMemRef<uint64_t>(
+        statisticMemArea + nautilus::val<uint64_t>(sizeOfTotalAreaSize + sizeOfMetaDataSize) + nautilus::val<uint64_t>(8));
+
+    const auto metaDataSizeRef = statisticMemArea + sizeOfTotalAreaSize;
+    const auto metaDataSize = readValueFromMemRef<uint32_t>(metaDataSizeRef);
 
     counterCol = numberOfColumns;
-    counterRow = numberOfRows;
+    /// The row counter is reset to zero when the column counter is increased.
+    counterRow = 0;
+    curCounter = statisticMemArea + nautilus::val<uint64_t>(sizeOfTotalAreaSize + sizeOfMetaDataSize) + metaDataSize
+        + (countMinProviderArgs.counterDataType.getSizeInBytes() * numberOfColumns * numberOfRows);
 }
 
 }

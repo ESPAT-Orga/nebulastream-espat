@@ -70,7 +70,6 @@ deserializeWindowAggregationFunction(const SerializableAggregationFunction& seri
     if (serializedFunction.has_sample_hash())
     {
         args.sampleHash = serializedFunction.sample_hash();
-        /// TODO We do not use numberOfSeenTuplesField?
         if (type == "ReservoirSample")
         {
             args.reservoirSize = serializedFunction.reservoir_size();

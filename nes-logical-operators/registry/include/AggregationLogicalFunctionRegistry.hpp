@@ -32,8 +32,6 @@ struct AggregationLogicalFunctionRegistryArguments
     std::vector<FieldAccessLogicalFunction> fields;
     /// Additional arguments for statistics (TODO Store them differently):
     std::optional<Statistic::StatisticHash> sampleHash;
-    /// TODO This field is unused.
-    std::optional<Schema::Field> numberOfSeenTuplesField{};
     /// Reservoir Sample and Count Min Sketch:
     std::optional<uint64_t> seed;
     /// Reservoir Sample:

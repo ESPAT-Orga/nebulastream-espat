@@ -14,6 +14,7 @@
 
 #include <Phases/PipeliningPhase.hpp>
 
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -26,23 +27,29 @@
 #include <vector>
 
 #include <DataTypes/Schema.hpp>
+#include <Functions/FieldAccessPhysicalFunction.hpp>
 #include <Identifiers/Identifiers.hpp>
 #include <Nautilus/Interface/BufferRef/LowerSchemaProvider.hpp>
 #include <Nautilus/Interface/BufferRef/RowTupleBufferRef.hpp>
 #include <Nautilus/Interface/BufferRef/TupleBufferRef.hpp>
+#include <Nautilus/Interface/Record.hpp>
 #include <Runtime/Execution/OperatorHandler.hpp>
 #include <Util/Logger/Logger.hpp>
 #include <Util/Strings.hpp>
+#include <Watermark/EventTimeWatermarkAssignerPhysicalOperator.hpp>
 #include <EmitOperatorHandler.hpp>
 #include <EmitPhysicalOperator.hpp>
 #include <ErrorHandling.hpp>
 #include <InputFormatterTupleBufferRefProvider.hpp>
+#include <MapPhysicalOperator.hpp>
 #include <PhysicalOperator.hpp>
 #include <PhysicalPlan.hpp>
 #include <Pipeline.hpp>
 #include <PipelinedQueryPlan.hpp>
 #include <ScanPhysicalOperator.hpp>
+#include <SelectionPhysicalOperator.hpp>
 #include <SinkPhysicalOperator.hpp>
+#include <UnionRenamePhysicalOperator.hpp>
 
 namespace NES::QueryCompilation::PipeliningPhase
 {
@@ -241,6 +248,7 @@ void buildPipelineRecursively(
             buildPipelineRecursively(
                 child, opWrapper, newPipelinePtr, pipelineMap, PipelinePolicy::Continue, configuredBufferSize, mergePoints);
         }
+
         return;
     }
 

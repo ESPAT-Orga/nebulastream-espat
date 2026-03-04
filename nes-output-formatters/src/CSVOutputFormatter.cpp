@@ -123,11 +123,29 @@ void writeValue(
         case DataType::Type::FLOAT64:
         case DataType::Type::BOOLEAN:
         case DataType::Type::CHAR: {
-            /// Convert the VarVal to a string and write it into the address.
-            const nautilus::val<uint64_t> amountWritten
-                = formatAndWriteVal(value, fieldType, fieldPointer, currentRemainingSize, recordBuffer, bufferProvider);
-            written += amountWritten;
-            currentRemainingSize -= amountWritten;
+            if (value.isLazyValue())
+            {
+                const auto lazyValue = value.getRawValueAs<std::shared_ptr<LazyValueRepresentation>>();
+                const auto amountWritten = nautilus::invoke(
+                    writeVarsized,
+                    fieldPointer,
+                    currentRemainingSize,
+                    nautilus::val<bool>{false},
+                    lazyValue->getContent(),
+                    lazyValue->getSize(),
+                    recordBuffer.getReference(),
+                    bufferProvider);
+                written += amountWritten;
+                currentRemainingSize -= amountWritten;
+            }
+            else
+            {
+                /// Convert the VarVal to a string and write it into the address.
+                const nautilus::val<uint64_t> amountWritten
+                    = formatAndWriteVal(value, fieldType, fieldPointer, currentRemainingSize, recordBuffer, bufferProvider);
+                written += amountWritten;
+                currentRemainingSize -= amountWritten;
+            }
             break;
         }
         case DataType::Type::UNDEFINED: {
@@ -161,7 +179,12 @@ nautilus::val<uint64_t> CSVOutputFormatter::writeFormattedValue(
     /// Handle NULL values and write value
     if (value.isNullable())
     {
-        if (value.isNull())
+        /// Nullable values that are represented as lazy values need to be parsed here
+        /// The reason is that some NULL values due to malformed strings are only detected during the parse
+        /// However, given that we still have access to the original, lazy representation afterwards, we can still utilize it if the value turns out
+        /// to be not null.
+        const VarVal parsedVal = value.getAsParsedUnderlyingValue();
+        if (parsedVal.isNull())
         {
             const nautilus::val<uint64_t> amountWritten = nautilus::invoke(
                 writeValueToBuffer,
@@ -175,7 +198,7 @@ nautilus::val<uint64_t> CSVOutputFormatter::writeFormattedValue(
         }
         else
         {
-            writeValue(value, fieldType, fieldPointer, recordBuffer, bufferProvider, quoteStrings, written, currentRemainingSize);
+            writeValue(parsedVal, fieldType, fieldPointer, recordBuffer, bufferProvider, quoteStrings, written, currentRemainingSize);
         }
     }
     else

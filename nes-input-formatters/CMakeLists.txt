@@ -48,3 +48,4 @@ endif ()
 create_registries_for_component(InputFormatIndexer)
 
 add_tests_if_enabled(tests)
+nautilus_inline(nes-input-formatters)

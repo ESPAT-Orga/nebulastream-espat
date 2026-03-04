@@ -26,8 +26,10 @@
 #include <Nautilus/DataTypes/VariableSizedData.hpp>
 #include <Nautilus/Interface/Record.hpp>
 #include <Util/Strings.hpp>
+#include <nautilus/common/FunctionAttributes.hpp>
 #include <Arena.hpp>
 #include <ErrorHandling.hpp>
+#include <select.hpp>
 #include <val.hpp>
 #include <val_arith.hpp>
 #include <val_bool.hpp>
@@ -103,6 +105,72 @@ ParseResult<T>* parseIntoVarValProxy(int8_t* fieldAddress, const uint64_t fieldS
         result.value = T{0};
     }
     return &result;
+}
+
+template <typename T, bool Nullable>
+ParseResult<T>* parseRawValue(const char* fieldAddress, const uint64_t fieldSize, const bool isNullString)
+{
+    thread_local static ParseResult<T> result;
+    result.isNull = false;
+
+    if constexpr (Nullable)
+    {
+        if (isNullString)
+        {
+            result.isNull = true;
+            result.value = T{0};
+            return &result;
+        }
+    }
+
+    try
+    {
+        const std::string fieldAsString{fieldAddress, fieldAddress + fieldSize};
+        const auto trimmedFieldAsString = trimWhiteSpaces(fieldAsString);
+        result.value = NES::from_chars_with_exception<T>(trimmedFieldAsString);
+    }
+    catch (const Exception& ex)
+    {
+        /// If the field is nullable, we return a null value, otherwise we throw an exception
+        if constexpr (not Nullable)
+        {
+            throw;
+        }
+        result.isNull = true;
+        result.value = T{0};
+    }
+    return &result;
+}
+
+/// Used by the LazyValueRepresentations to parse a lazy value into teh corresponding nautilus val
+/// nullable is given as arg, because it can be resolved during compile time. If nullable = false, we can avoid branching over isNullString
+template <typename T>
+VarVal parseIntoNautilusRecord(
+    const nautilus::val<int8_t*>& fieldAddress,
+    const nautilus::val<uint64_t>& fieldSize,
+    const bool& nullable,
+    const nautilus::val<bool>& isNullString)
+{
+    if (nullable)
+    {
+        /// We checked previously, if the string is a null representation. Should this be the case, we return early
+        const auto parseResult = nautilus::invoke(
+            parseRawValue<T, true>,
+            fieldAddress,
+            fieldSize,
+            isNullString);
+        const nautilus::val<T> nautilusValue = *getMemberWithOffset<T>(parseResult, offsetof(ParseResult<T>, value));
+        const nautilus::val<bool> isNull = *getMemberWithOffset<bool>(parseResult, offsetof(ParseResult<T>, isNull));
+        return VarVal{nautilusValue, nullable, isNull};
+    }
+    const auto parseResult = nautilus::invoke(
+        nautilus::FunctionAttributes{.modRefInfo = nautilus::ModRefInfo::Ref, .willReturn = true, .noUnwind = true},
+        parseRawValue<T, false>,
+        fieldAddress,
+        fieldSize,
+        nautilus::val<bool>{false});
+    const nautilus::val<T> nautilusValue = *getMemberWithOffset<T>(parseResult, offsetof(ParseResult<T>, value));
+    return VarVal{nautilusValue, nullable, false};
 }
 
 template <typename T>

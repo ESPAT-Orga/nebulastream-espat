@@ -361,7 +361,7 @@ TEST_F(SourceThreadTest, ApplyBackbressure)
     auto bm = BufferManager::create();
     RecordingEmitFunction recorder(*bm);
     auto [backpressureController, backpressureListener] = createBackpressureChannel();
-    backpressureController.applyPressure("channel_id", false);
+    backpressureController.applyPressure("channel_id");
     auto control = std::make_shared<TestSourceControl>();
     control->injectData(std::vector{DEFAULT_BUFFER_SIZE, std::byte(0)}, DEFAULT_NUMBER_OF_TUPLES_IN_BUFFER);
     control->injectData(std::vector{DEFAULT_BUFFER_SIZE, std::byte(0)}, DEFAULT_NUMBER_OF_TUPLES_IN_BUFFER);
@@ -385,7 +385,7 @@ TEST_F(SourceThreadTest, ApplyBackbressure)
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
         EXPECT_FALSE(control->wasClosed());
         wait_for_emits(recorder, 0);
-        backpressureController.releasePressure("channel_id", false);
+        backpressureController.releasePressure("channel_id");
         wait_for_emits(recorder, 4);
         verify_non_blocking_stop(sourceThread);
     }
@@ -402,7 +402,7 @@ TEST_F(SourceThreadTest, StopDuringBackpressure)
     auto bm = BufferManager::create();
     RecordingEmitFunction recorder(*bm);
     auto [backpressureController, ingestion] = createBackpressureChannel();
-    backpressureController.applyPressure("channel_id", false);
+    backpressureController.applyPressure("channel_id");
     auto control = std::make_shared<TestSourceControl>();
     control->injectData(std::vector{DEFAULT_BUFFER_SIZE, std::byte(0)}, DEFAULT_NUMBER_OF_TUPLES_IN_BUFFER);
     control->injectData(std::vector{DEFAULT_BUFFER_SIZE, std::byte(0)}, DEFAULT_NUMBER_OF_TUPLES_IN_BUFFER);

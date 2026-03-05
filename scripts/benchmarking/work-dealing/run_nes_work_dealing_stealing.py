@@ -35,7 +35,7 @@ latency_csv_file_path = "latency_results_nebulastream.csv"
 throughput_csv_file_path = "throughput_results_nebulastream.csv"
 config_file = "config.yaml"
 single_node_executable = os.path.join(build_dir, "nes-single-node-worker/nes-single-node-worker")
-nebuli_executable = os.path.join(build_dir, "nes-nebuli/nes-nebuli --debug")
+nebuli_executable = os.path.join(build_dir, "nes-nebuli/apps/nes-cli --debug")
 cmake_flags = ("-G Ninja "
                "-DCMAKE_BUILD_TYPE=Release "
                f"-DCMAKE_TOOLCHAIN_FILE={get_vcpkg_dir()} "
@@ -86,17 +86,12 @@ def terminate_process_if_exists(process):
 
 def start_single_node_worker(file_path_stdout):
     # Running the query with a particular worker configuration
-    worker_config = (f"--worker.queryEngine.numberOfWorkerThreads={numberOfWorkerThreads} "
-                     f"--worker.queryEngine.resourceAssignment={resourceAssignment} "
-                     f"--worker.defaultQueryExecution.executionMode={executionMode} "
-                     f"--worker.numberOfBuffersInGlobalBufferManager={buffersInGlobalBufferManager} "
-                     f"--worker.bufferSizeInBytes={bufferSizeInBytes} "
-                     f"--worker.defaultQueryExecution.joinStrategy={joinStrategy} "
-                     f"--worker.defaultQueryExecution.pageSize={pageSize} "
-                     f"--worker.latencyListener=true "
-                     f"--worker.defaultQueryExecution.operatorBufferSize={bufferSizeInBytes} "
-                     f"--worker.defaultQueryExecution.sliceCache.numberOfEntriesSliceCache={numberOfEntriesSliceCaches} "
-                     f"--worker.defaultQueryExecution.sliceCache.sliceCacheType={sliceCacheType}")
+    worker_config = (f"--worker.query_engine.number_of_worker_threads={numberOfWorkerThreads} "
+                     f"--worker.default_query_execution.execution_mode={executionMode} "
+                     f"--worker.default_query_execution.join_strategy={joinStrategy} "
+                     f"--worker.default_query_execution.page_size={pageSize} "
+                     # TODO Uncomment when added: f"--worker.latencyListener=true "
+                     f"--worker.default_query_execution.operator_buffer_size={bufferSizeInBytes}")
 
     cmd = f"{single_node_executable} {worker_config}"
     print(f"Starting the single node worker with {cmd}")
@@ -107,7 +102,8 @@ def start_single_node_worker(file_path_stdout):
 
 
 def submitting_query(query_file):
-    cmd = f"cat {query_file} | {nebuli_executable} -s localhost:8080 register -x"
+    # TODO submitting still necessary?
+    cmd = f"cat {query_file} | {nebuli_executable} start"
     print(f"Submitting the query via {cmd}...")
     # shell=True is needed to pipe the output of cat to the register command
     try:
@@ -125,14 +121,14 @@ def submitting_query(query_file):
         exit(1)
 
 def start_query(query_id):
-    cmd = f"{nebuli_executable} start {query_id} -s localhost:8080"
+    cmd = f"{nebuli_executable} start {query_id}"
     # print(f"Stopping the query via {cmd}...")
     process = subprocess.Popen(cmd.split(" "), stdout=subprocess.DEVNULL)
     return process
 
 
 def stop_query(query_id):
-    cmd = f"{nebuli_executable} stop {query_id} -s localhost:8080"
+    cmd = f"{nebuli_executable} stop {query_id}"
     # print(f"Stopping the query via {cmd}...")
     process = subprocess.Popen(cmd.split(" "), stdout=subprocess.DEVNULL)
     return process

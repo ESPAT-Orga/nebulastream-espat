@@ -141,7 +141,7 @@ void AdaptiveSendingScheduler::start()
 }
 
 //TODO: we only return priority because propagating it does not work yet
-Priority AdaptiveSendingScheduler::registerChannel(const LocalQueryId localQueryId, Priority throttled, std::atomic<uint64_t>& contingent)
+LowPriority AdaptiveSendingScheduler::registerChannel(const LocalQueryId localQueryId, LowPriority throttled, std::atomic<uint64_t>& contingent)
 {
     NES_DEBUG("Registered channel id = {}, priority = {}", localQueryId, throttled);
     auto registeredChannel = RegisteredChannel{.localQueryId = localQueryId, .contingent = std::ref(contingent)};

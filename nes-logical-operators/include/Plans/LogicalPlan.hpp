@@ -60,14 +60,14 @@ public:
 
     void setOriginalSql(const std::string& sql);
     void setQueryId(LocalQueryId id);
-    void setPriority(Priority priority);
-    Priority getPriority() const;
+    void setPriority(LowPriority priority);
+    LowPriority getPriority() const;
 
 private:
     LocalQueryId localQueryId = INVALID_LOCAL_QUERY_ID;
     std::vector<LogicalOperator> rootOperators;
     std::string originalSql; /// Holds the original SQL string
-    Priority priority = INVALID_PRIORITY;
+    LowPriority priority = false;
 };
 
 /// Get all parent operators of the target operator

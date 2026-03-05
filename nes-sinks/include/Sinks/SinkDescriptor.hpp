@@ -94,9 +94,9 @@ public:
         false,
         [](const std::unordered_map<std::string, std::string>& config) { return DescriptorConfig::tryGet(ADD_TIMESTAMP, config); }};
 
-    static inline const DescriptorConfig::ConfigParameter<uint64_t> PRIORITY {
-        "priority",
-        1,
+    static inline const DescriptorConfig::ConfigParameter<bool> PRIORITY {
+        "low_priority",
+        false,
         [](const std::unordered_map<std::string, std::string>& config) { return DescriptorConfig::tryGet(PRIORITY, config); }};
 
     /// NOLINTNEXTLINE(cert-err58-cpp)

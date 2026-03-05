@@ -66,13 +66,13 @@ public:
     bool recordBufferSentEvent(uint64_t numberOfTuples);
     void setStatisticListener(std::shared_ptr<NES::TrafficStatisticListener> listener);
     void setAdaptiveSendingScheduler(
-        NES::LocalQueryId localQueryId, NES::Priority priority, std::shared_ptr<NES::AdaptiveSendingScheduler> scheduler);
+        NES::LocalQueryId localQueryId, NES::LowPriority priority, std::shared_ptr<NES::AdaptiveSendingScheduler> scheduler);
 
 private:
     std::shared_ptr<NES::TrafficStatisticListener> backpressureStatisticListener;
     std::shared_ptr<NES::AdaptiveSendingScheduler> adaptiveSendingScheduler;
     NES::LocalQueryId localQueryId = NES::INVALID_LOCAL_QUERY_ID;
-    NES::Priority priority = NES::INVALID_PRIORITY;
+    NES::LowPriority priority = false;
 };
 
 /// Listener of the backpressure channel is the Ingestion type that is used by sources.

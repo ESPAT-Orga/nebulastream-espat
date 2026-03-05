@@ -153,7 +153,7 @@ void BackpressureController::setStatisticListener(std::shared_ptr<NES::TrafficSt
     this->backpressureStatisticListener = listener;
 }
 
-void BackpressureController::setAdaptiveSendingScheduler(NES::LocalQueryId localQueryId, NES::Priority priority, std::shared_ptr<NES::AdaptiveSendingScheduler> scheduler)
+void BackpressureController::setAdaptiveSendingScheduler(NES::LocalQueryId localQueryId, NES::LowPriority priority, std::shared_ptr<NES::AdaptiveSendingScheduler> scheduler)
 {
     this->adaptiveSendingScheduler = scheduler;
     this->localQueryId = localQueryId;

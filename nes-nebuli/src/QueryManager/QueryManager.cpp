@@ -108,23 +108,21 @@ void QueryManager::QueryManagerBackends::rebuildBackendsIfNeeded() const
 [[nodiscard]] std::expected<DistributedQueryId, Exception> QueryManager::registerQuery(const DistributedLogicalPlan& plan)
 {
     auto rootOperators = plan.getGlobalPlan().getRootOperators();
-    Priority priority = INVALID_PRIORITY;
+    LowPriority lowPriority = true;
     for (auto op : rootOperators)
     {
         auto sink = op.getAs<SinkLogicalOperator>();
         auto descriptor = sink.get().getSinkDescriptor().value();
-        auto currentPriority = std::get<Priority>(descriptor.getConfig().at("priority"));
-        if (priority == INVALID_PRIORITY)
+        auto currentPriority = std::get<LowPriority>(descriptor.getConfig().at("low_priority"));
+
+        /// if at least one sink is not marked as low priority, we mark this query as not being low priority
+        if (not currentPriority)
         {
-            priority = currentPriority;
-        } else
-        {
-            priority = std::min(priority, currentPriority);
+            lowPriority = false;
+            break;
         }
-        NES_DEBUG("Priority set to {}", priority);
     }
-    NES_DEBUG("Final priority is to {}", priority);
-    INVARIANT(priority != INVALID_PRIORITY, "Priority must be set");
+    NES_DEBUG("Priority set to {}", lowPriority);
 
     std::unordered_map<GrpcAddr, std::vector<LocalQueryId>> localQueries;
 
@@ -143,7 +141,7 @@ void QueryManager::QueryManagerBackends::rebuildBackendsIfNeeded() const
         INVARIANT(backends.contains(grpcAddr), "Plan was assigned to a node ({}) that is not part of the cluster", grpcAddr);
         for (auto localPlan : localPlans)
         {
-            localPlan.setPriority(priority);
+            localPlan.setPriority(lowPriority);
             try
             {
                 const auto result = backends.at(grpcAddr).registerQuery(localPlan);

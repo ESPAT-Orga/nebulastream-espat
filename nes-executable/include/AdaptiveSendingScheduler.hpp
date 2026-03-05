@@ -31,9 +31,9 @@
 namespace NES
 {
 
-using Priority = bool;
+using LowPriority = bool;
 
-constexpr Priority INVALID_PRIORITY = 0;
+// constexpr Priority INVALID_PRIORITY = 0;
 
 struct RegisteredChannel
 {
@@ -48,11 +48,11 @@ struct AdaptiveSendingScheduler : TrafficStatisticListener {
     void applyPressure(LocalQueryId localQueryId);
     void unbufferingCompleted(LocalQueryId localQueryId);
     void start();
-    Priority registerChannel(LocalQueryId localQueryId, Priority throttled, std::atomic<uint64_t>& contingent);
+    LowPriority registerChannel(LocalQueryId localQueryId, LowPriority throttled, std::atomic<uint64_t>& contingent);
     void unregisterChannel(LocalQueryId localQueryId);
 
     template<typename LockedPriorityMap>
-    void setBlockedStatusForPriorityRange(Priority start, Priority end, bool blocked, LockedPriorityMap lockedPriorities)
+    void setBlockedStatusForPriorityRange(LowPriority start, LowPriority end, bool blocked, LockedPriorityMap lockedPriorities)
     {
         NES_DEBUG("Setting blocked status for priority range {} - {} to {}", start, end, blocked);
         if (start >= end)

@@ -44,9 +44,8 @@ std::unique_ptr<CompiledQueryPlan> CompiledQueryPlan::create(
     return std::make_unique<CompiledQueryPlan>(localQueryId, std::move(pipelines), std::move(sinks), std::move(sources));
 }
 
-void CompiledQueryPlan::setPriority(Priority priority)
+void CompiledQueryPlan::setPriority(LowPriority priority)
 {
-    // INVARIANT(priority != INVALID_PRIORITY, "Priority must be not invalid!");
     this->priority = priority;
 }
 

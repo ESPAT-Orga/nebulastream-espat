@@ -45,13 +45,12 @@ void LogicalPlan::setQueryId(LocalQueryId id)
     localQueryId = id;
 }
 
-void LogicalPlan::setPriority(Priority priority)
+void LogicalPlan::setPriority(LowPriority priority)
 {
-    INVARIANT(priority != INVALID_PRIORITY, "Priority must be not invalid!");
     this->priority = priority;
 }
 
-Priority LogicalPlan::getPriority() const
+LowPriority LogicalPlan::getPriority() const
 {
     return priority;
 }

@@ -61,6 +61,12 @@ public:
 
     BoolOption dumpGraph = {"dump_graph", "false", "If to dump graph of the compilation results"};
 
+    BoolOption latencyListener
+     = {"latency_listener",
+        "false",
+        "Should add the latency listener to the query engine listeners"};
+
+
 private:
     std::vector<BaseOption*> getOptions() override
     {

@@ -35,6 +35,7 @@ public:
     void open(ExecutionContext& executionCtx, RecordBuffer& recordBuffer) const override;
     [[nodiscard]] std::optional<PhysicalOperator> getChild() const override;
     void setChild(PhysicalOperator child) override;
+    bool getIsRawScan() const;
 
 private:
     std::shared_ptr<TupleBufferRef> bufferRef;

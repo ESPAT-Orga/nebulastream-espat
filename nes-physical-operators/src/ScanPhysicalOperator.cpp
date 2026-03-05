@@ -95,4 +95,9 @@ void ScanPhysicalOperator::setChild(PhysicalOperator child)
     this->child = std::move(child);
 }
 
+bool ScanPhysicalOperator::getIsRawScan() const
+{
+    return isRawScan;
+}
+
 }

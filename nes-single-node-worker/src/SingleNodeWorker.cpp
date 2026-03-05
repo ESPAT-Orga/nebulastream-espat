@@ -45,6 +45,8 @@
 #include <SingleNodeWorkerConfiguration.hpp>
 #include <WorkerStatus.hpp>
 
+#include <LatencyListener.hpp>
+
 namespace NES
 {
 
@@ -68,6 +70,42 @@ SingleNodeWorker::SingleNodeWorker(const SingleNodeWorkerConfiguration& configur
         googleTracePrinter->start();
         listener->addListener(googleTracePrinter);
     }
+
+    if (configuration.workerConfiguration.latencyListener.getValue())
+    {
+        auto latencyCallBack = [](const LatencyListener::CallBackParams& callBackParams)
+        {
+            /// Helper function to format latency in SI units
+            auto formatLatency = [](const std::chrono::duration<double> latency)
+            {
+                auto latencyCount = latency.count();
+                constexpr std::array<const char*, 5> units = {"", "m", "u", "n"};
+                int unitIndex = 0;
+
+                while (latencyCount <= 1 && unitIndex < 4)
+                {
+                    latencyCount *= 1000;
+                    ++unitIndex;
+                }
+
+                return fmt::format("{:.3f} {}s", latencyCount, units[unitIndex]);
+            };
+
+            const auto latencyMessage = formatLatency(callBackParams.averageLatency);
+            std::cout << fmt::format(
+                "Latency for queryId {} and {} tasks over duration {}-{} is {}\n",
+                callBackParams.queryId,
+                callBackParams.numberOfTasks,
+                callBackParams.firstTaskTimestamp,
+                callBackParams.lastTaskTimestamp,
+                latencyMessage);
+        };
+
+        constexpr auto numberOfTasks = 1;
+        const auto latencyListener = std::make_shared<LatencyListener>(latencyCallBack, numberOfTasks);
+        listener->addQueryEngineListener(latencyListener);
+    }
+
 
     nodeEngine = NodeEngineBuilder(configuration.workerConfiguration, copyPtr(listener)).build(workerId);
     compiler = std::make_unique<QueryCompilation::QueryCompiler>(configuration.workerConfiguration.defaultQueryExecution);

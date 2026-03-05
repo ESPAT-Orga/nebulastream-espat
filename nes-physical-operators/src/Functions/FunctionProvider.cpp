@@ -55,11 +55,11 @@ PhysicalFunction FunctionProvider::lowerFunction(LogicalFunction logicalFunction
     {
         return lowerConstantFunction(constantValueFunction->get());
     }
-    if (const auto zstdCompressFunction = logicalFunction.tryGet<ZstdCompressLogicalFunction>())
+    if (const auto zstdCompressFunction = logicalFunction.tryGetAs<ZstdCompressLogicalFunction>())
     {
         INVARIANT(childFunctions.size() == 1, "ZstdCompressFunction expects exactly one child!");
         return ZstdCompressPhysicalFunction(
-            childFunctions[0], logicalFunction.getDataType(), zstdCompressFunction->getZstdCompressionLevel());
+            childFunctions[0], logicalFunction.getDataType(), zstdCompressFunction.value()->getZstdCompressionLevel());
     }
 
     /// 3. Calling the registry to create an executable function.

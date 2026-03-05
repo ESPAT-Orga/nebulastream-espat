@@ -22,7 +22,9 @@
 #include <DataTypes/Schema.hpp>
 #include <Functions/LogicalFunction.hpp>
 #include <Serialization/DataTypeSerializationUtil.hpp>
+#include <Serialization/LogicalFunctionReflection.hpp>
 #include <Util/PlanRenderer.hpp>
+#include <Util/Reflection.hpp>
 #include <fmt/format.h>
 #include <ErrorHandling.hpp>
 #include <LogicalFunctionRegistry.hpp>
@@ -58,7 +60,7 @@ DataType ZstdCompressLogicalFunction::getDataType() const
     return dataType;
 };
 
-LogicalFunction ZstdCompressLogicalFunction::withDataType(const DataType& dataType) const
+ZstdCompressLogicalFunction ZstdCompressLogicalFunction::withDataType(const DataType& dataType) const
 {
     auto copy = *this;
     copy.dataType = dataType;
@@ -80,7 +82,7 @@ std::vector<LogicalFunction> ZstdCompressLogicalFunction::getChildren() const
     return {child};
 };
 
-LogicalFunction ZstdCompressLogicalFunction::withChildren(const std::vector<LogicalFunction>& children) const
+ZstdCompressLogicalFunction ZstdCompressLogicalFunction::withChildren(const std::vector<LogicalFunction>& children) const
 {
     auto copy = *this;
     copy.child = children[0];
@@ -93,19 +95,40 @@ std::string_view ZstdCompressLogicalFunction::getType() const
     return NAME;
 }
 
-SerializableFunction ZstdCompressLogicalFunction::serialize() const
+Reflected Reflector<ZstdCompressLogicalFunction>::operator()(const ZstdCompressLogicalFunction& function) const
 {
-    SerializableFunction serializedFunction;
-    serializedFunction.set_function_type(NAME);
-    serializedFunction.set_compression_level(static_cast<uint8_t>(compressionLevel));
-    serializedFunction.add_children()->CopyFrom(child.serialize());
-    DataTypeSerializationUtil::serializeDataType(getDataType(), serializedFunction.mutable_data_type());
-    return serializedFunction;
+    return reflect(detail::ReflectedZstdCompressLogicalFunction{.child = function.child});
 }
+
+ZstdCompressLogicalFunction Unreflector<ZstdCompressLogicalFunction>::operator()(const Reflected& reflected) const
+{
+    auto [child] = unreflect<detail::ReflectedZstdCompressLogicalFunction>(reflected);
+
+    if (not child.has_value())
+    {
+        throw CannotDeserialize("ZstdCompressLogicalFunction is missing a child function");
+    }
+
+    return {child.value()};
+}
+
+// SerializableFunction ZstdCompressLogicalFunction::serialize() const
+// {
+//     SerializableFunction serializedFunction;
+//     serializedFunction.set_function_type(NAME);
+//     serializedFunction.set_compression_level(static_cast<uint8_t>(compressionLevel));
+//     serializedFunction.add_children()->CopyFrom(child.serialize());
+//     DataTypeSerializationUtil::serializeDataType(getDataType(), serializedFunction.mutable_data_type());
+//     return serializedFunction;
+// }
 
 LogicalFunctionRegistryReturnType
 LogicalFunctionGeneratedRegistrar::RegisterZstdCompressLogicalFunction(LogicalFunctionRegistryArguments arguments)
 {
+    if (!arguments.reflected.isEmpty())
+    {
+        return unreflect<ZstdCompressLogicalFunction>(arguments.reflected);
+    }
     if (arguments.children.size() != 1)
     {
         throw CannotDeserialize("ZstdCompressLogicalFunction requires exactly one child, but got {}", arguments.children.size());

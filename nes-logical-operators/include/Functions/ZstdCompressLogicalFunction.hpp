@@ -22,6 +22,7 @@
 #include <Functions/LogicalFunction.hpp>
 #include <Util/Logger/Formatter.hpp>
 #include <Util/PlanRenderer.hpp>
+#include <Util/Reflection.hpp>
 #include <SerializableVariantDescriptor.pb.h>
 
 namespace NES
@@ -44,16 +45,14 @@ public:
 
     ZstdCompressLogicalFunction(const LogicalFunction& childFunction);
 
-    [[nodiscard]] SerializableFunction serialize() const;
-
     [[nodiscard]] bool operator==(const ZstdCompressLogicalFunction& rhs) const;
 
     [[nodiscard]] DataType getDataType() const;
-    [[nodiscard]] LogicalFunction withDataType(const DataType& dataType) const;
+    [[nodiscard]] ZstdCompressLogicalFunction withDataType(const DataType& dataType) const;
     [[nodiscard]] LogicalFunction withInferredDataType(const Schema& schema) const;
 
     [[nodiscard]] std::vector<LogicalFunction> getChildren() const;
-    [[nodiscard]] LogicalFunction withChildren(const std::vector<LogicalFunction>& children) const;
+    [[nodiscard]] ZstdCompressLogicalFunction withChildren(const std::vector<LogicalFunction>& children) const;
 
     [[nodiscard]] std::string_view getType() const;
     [[nodiscard]] std::string explain(ExplainVerbosity verbosity) const;
@@ -64,11 +63,33 @@ private:
     DataType dataType;
     LogicalFunction child;
 
+    friend Reflector<ZstdCompressLogicalFunction>;
+
     CompressionLevel compressionLevel = CompressionLevel::MEDIUM;
+};
+
+template <>
+struct Reflector<ZstdCompressLogicalFunction>
+{
+    Reflected operator()(const ZstdCompressLogicalFunction& function) const;
+};
+
+template <>
+struct Unreflector<ZstdCompressLogicalFunction>
+{
+    ZstdCompressLogicalFunction operator()(const Reflected& reflected) const;
 };
 
 static_assert(LogicalFunctionConcept<ZstdCompressLogicalFunction>);
 
+}
+
+namespace NES::detail
+{
+struct ReflectedZstdCompressLogicalFunction
+{
+    std::optional<LogicalFunction> child;
+};
 }
 
 FMT_OSTREAM(NES::ZstdCompressLogicalFunction);

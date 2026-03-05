@@ -151,17 +151,15 @@ StatisticBuildLogicalOperator StatisticBuildLogicalOperator::withInferredSchema(
     {
         throw CannotInferSchema("Unsupported window type {}", getWindowType()->toString());
     }
-    for (const auto& agg : copy.aggregationFunctions)
-    {
-        copy.outputSchema.addField(agg->getAsField().getFieldName(), agg->getAsField().getDataType());
-    }
 
     if (aggregationFunctions.size() != 1)
     {
         throw CannotInferSchema("Expect exactly one aggregation for a statistic aggregation but found {}", aggregationFunctions.size());
     }
-    copy.logicalStatisticFields->statisticDataField
-        = {aggregationFunctions[0]->getAsField().getFieldName(), aggregationFunctions[0]->getAsField().getDataType()};
+
+    /// We do not change the field type, as we assume it is always VARSIZED and set per default
+    copy.logicalStatisticFields->statisticDataField.name = aggregationFunctions[0]->getAsField().getFieldName();
+    copy.outputSchema.addField(logicalStatisticFields->statisticDataField);
     copy.outputSchema.addField(logicalStatisticFields->statisticNumberOfSeenTuplesField);
 
     return copy;

@@ -86,18 +86,8 @@ void EquiWidthHistogramPhysicalFunction::combine(
 }
 
 Record
-EquiWidthHistogramPhysicalFunction::lower(nautilus::val<AggregationState*> aggregationState, PipelineMemoryProvider& pipelineMemoryProvider)
+EquiWidthHistogramPhysicalFunction::lower(nautilus::val<AggregationState*> aggregationState, PipelineMemoryProvider&)
 {
-    /// Need to acquire new memory, as the current memory for the bins will be deleted.
-    /// We need an additional 4B for the size of the variable sized data, as we store the statistics as var-sized data.
-    const auto histogramMemorySize = getSizeOfStateInBytes();
-    const auto histogramMemory = pipelineMemoryProvider.arena.allocateMemory(histogramMemorySize);
-
-    /// Copying all bins to the newly acquired memory and adding the size of the variable sized data (histogram)
-    nautilus::memcpy(histogramMemory, aggregationState, getSizeOfStateInBytes());
-    const nautilus::val<uint32_t> sizeOfVariableSizedData{static_cast<uint32_t>(getSizeOfStateInBytes())};
-    VarVal{sizeOfVariableSizedData}.writeToMemory(histogramMemory);
-
     /// Reading the number of seen tuples
     const auto numberOfSeenTuplesRef
         = static_cast<nautilus::val<int8_t*>>(aggregationState) + nautilus::val<uint64_t>{totalBinSize * numberOfBins};
@@ -106,7 +96,8 @@ EquiWidthHistogramPhysicalFunction::lower(nautilus::val<AggregationState*> aggre
     /// Adding the histogram to the result record
     Record record;
     record.write(numberOfSeenTuplesFieldName, numberOfSeenTuples);
-    record.write(resultFieldIdentifier, VariableSizedData{histogramMemory, histogramMemorySize});
+    /// Need to subtract 64bits as we store the no. seen tuples after the histogram
+    record.write(resultFieldIdentifier, VariableSizedData{aggregationState, getSizeOfStateInBytes() - sizeof(uint64_t)});
     return record;
 }
 

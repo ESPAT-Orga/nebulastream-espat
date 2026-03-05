@@ -30,16 +30,9 @@ Record ReservoirSampleIteratorImpl::operator*()
     auto fieldAddress = nextTupleMem;
     for (const auto& [fieldIdentifier, type, fieldOffset] : nautilus::static_iterable(sampleFields))
     {
-        if (type == DataType{DataType::Type::VARSIZED})
-        {
-            VariableSizedData varSizedData{fieldAddress, readValueFromMemRef<uint64_t>(fieldAddress)  + nautilus::val<uint64_t>(sizeof(uint64_t))};
-            record.write(fieldIdentifier, varSizedData);
-        }
-        else
-        {
-            const auto varVal = VarVal::readVarValFromMemory(fieldAddress, type.type);
-            record.write(fieldIdentifier, varVal);
-        }
+        INVARIANT(not type.isSameDataType<VariableSizedData>(), "Currently, we do not support var sized data in the sample!");
+        const auto varVal = VarVal::readVarValFromMemory(fieldAddress, type.type);
+        record.write(fieldIdentifier, varVal);
         fieldAddress = fieldAddress + type.getSizeInBytes();
     }
 
@@ -50,14 +43,8 @@ StatisticProviderIteratorImpl& ReservoirSampleIteratorImpl::operator++()
 {
     for (const auto& [fieldIdentifier, type, fieldOffset] : nautilus::static_iterable(sampleFields))
     {
-        nautilus::val<uint64_t> currFieldOffset = fieldOffset;
-        if (type.type == DataType::Type::VARSIZED)
-        {
-            auto size = readValueFromMemRef<uint64_t>(nextTupleMem);
-            VariableSizedData varSizedData{nextTupleMem, readValueFromMemRef<uint64_t>(nextTupleMem) + nautilus::val<uint64_t>(sizeof(uint64_t))};
-            currFieldOffset = varSizedData.getSize();
-        }
-        nextTupleMem = nextTupleMem + currFieldOffset;
+        INVARIANT(not type.isSameDataType<VariableSizedData>(), "Currently, we do not support var sized data in the sample!");
+        nextTupleMem = nextTupleMem + fieldOffset;
     }
     recordPos += 1;
     return *this;

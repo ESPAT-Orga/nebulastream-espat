@@ -145,33 +145,25 @@ ReservoirSamplePhysicalFunction::lower(nautilus::val<AggregationState*> aggregat
         const auto sampleRecord = *sampleIt;
         const auto names = bufferRef->getAllFieldNames();
         const auto types = bufferRef->getAllDataTypes();
+        tuplesInSample += 1;
         for (nautilus::static_val<size_t> i = 0; i < names.size(); ++i)
         {
-            const auto name = names[i];
             const auto type = types[i];
+            INVARIANT(not type.isSameDataType<VariableSizedData>(), "Currently, we do not support var sized data in the sample!");
+
+            /// For all other data types, we can reuse the existing store value function map
+            const auto name = names[i];
             const auto& value = sampleRecord.read(name);
-            /// As we store varsized data directly in the sample area, we need to handle it ourselves.
-            if (type.isSameDataType<VariableSizedData>())
+            if (const auto storeFunction = storeValueFunctionMap.find(type.type); storeFunction != storeValueFunctionMap.end())
             {
-                const auto varSizedValue = value.cast<VariableSizedData>();
-                nautilus::memcpy(sampleTuplesMemArea, varSizedValue.getContent(), varSizedValue.getSize());
-                sampleTuplesMemArea += varSizedValue.getSize();
+                auto _ = storeFunction->second(value, sampleTuplesMemArea);
+                sampleTuplesMemArea += type.getSizeInBytes();
             }
             else
             {
-                /// For all other data types, we can reuse the existing store value function map
-                if (const auto storeFunction = storeValueFunctionMap.find(type.type); storeFunction != storeValueFunctionMap.end())
-                {
-                    auto _ = storeFunction->second(value, sampleTuplesMemArea);
-                    sampleTuplesMemArea += type.getSizeInBytes();
-                }
-                else
-                {
-                    throw UnknownDataType("Physical Type: {} is currently not supported", type);
-                }
+                throw UnknownDataType("Physical Type: {} is currently not supported", type);
             }
         }
-        tuplesInSample += 1;
     }
 
     /// Writing the meta data and the total size

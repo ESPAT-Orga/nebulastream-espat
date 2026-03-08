@@ -1,2 +1,2 @@
 - type: "FIXED"
-  rate: "emitRate 1000"
+  rate: "emit_rate 1000"

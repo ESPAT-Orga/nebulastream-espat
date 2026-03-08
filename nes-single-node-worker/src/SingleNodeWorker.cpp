@@ -46,6 +46,7 @@
 #include <SingleNodeWorkerConfiguration.hpp>
 #include <WorkerStatus.hpp>
 #include <LatencyListener.hpp>
+#include <ThroughputListener.hpp>
 
 extern void initNetworkServices(const std::string& connectionAddr, const NES::Host& host, const NES::NetworkOptions& options);
 
@@ -72,6 +73,36 @@ SingleNodeWorker::SingleNodeWorker(const SingleNodeWorkerConfiguration& configur
         googleTracePrinter->start();
         listener->addListener(googleTracePrinter);
     }
+
+    /// Writing the current throughput to the log
+    auto throughputCallback = [](const ThroughputListener::CallBackParams& callBackParams)
+    {
+        /// Helper function to format throughput in SI units
+        auto formatThroughput = [](double throughput, const std::string_view suffix)
+        {
+            constexpr std::array<const char*, 5> units = {"", "k", "M", "G", "T"};
+            int unitIndex = 0;
+
+            while (throughput >= 1000 && unitIndex < 4)
+            {
+                throughput /= 1000;
+                ++unitIndex;
+            }
+
+            return fmt::format("{:.3f} {}{}/s", throughput, units[unitIndex], suffix);
+        };
+
+        const auto tuplesPerSecondMessage = formatThroughput(callBackParams.throughputInTuplesPerSec, "Tup");
+        std::cout << fmt::format(
+            "Throughput for queryId {} in window {}-{} is {}\n",
+            callBackParams.queryId,
+            callBackParams.windowStart,
+            callBackParams.windowEnd,
+            tuplesPerSecondMessage);
+    };
+    constexpr auto timeIntervalInMilliSeconds = 200;
+    const auto throughputListener = std::make_shared<ThroughputListener>(timeIntervalInMilliSeconds, throughputCallback);
+    listener->addQueryEngineListener(throughputListener);
 
     if (configuration.workerConfiguration.latencyListener.getValue())
     {

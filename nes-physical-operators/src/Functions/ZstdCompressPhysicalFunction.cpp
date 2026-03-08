@@ -53,7 +53,7 @@ VarVal ZstdCompressPhysicalFunction::execute(const Record& record, ArenaRef& are
     /// compress the data
     auto maxCompressedSize = nautilus::invoke(+[](size_t inputSize) { return ZSTD_compressBound(inputSize); }, valueSize);
     auto tempBufferCompressed = arena.allocateMemory(maxCompressedSize);
-    nautilus::val<uint32_t>compressionLevelValue{compressionLevel};
+    nautilus::val<uint32_t> compressionLevelValue{compressionLevel};
     auto compressedSize = nautilus::invoke(compress, valueSize, valueMem, maxCompressedSize, tempBufferCompressed, compressionLevelValue);
 
     /// this allocation can be optimized away if we use the original buffer. But this requires some additional metadata to handle the

@@ -153,7 +153,7 @@ void LatencyListener::onEvent(Event event)
         event);
 }
 
-void LatencyListener::onNodeShutdown()
+LatencyListener::~LatencyListener()
 {
     /// We wait until the queue is empty or for 30 seconds
     const std::chrono::seconds timeout{30};

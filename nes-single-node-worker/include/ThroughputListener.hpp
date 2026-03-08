@@ -13,37 +13,36 @@
 */
 
 #pragma once
-
-#include <chrono>
-#include <functional>
+#include <filesystem>
+#include <fstream>
 #include <queue>
 #include <thread>
-#include <Time/Timestamp.hpp>
-#include <QueryEngineStatisticListener.hpp>
 #include <folly/Synchronized.h>
+#include <QueryEngineStatisticListener.hpp>
 
 namespace NES
 {
 
-class LatencyListener : public QueryEngineStatisticListener
+class ThroughputListener : public QueryEngineStatisticListener
 {
 public:
     struct CallBackParams
     {
-        const Timestamp firstTaskTimestamp;
-        const Timestamp lastTaskTimestamp;
         const QueryId queryId;
-        const uint64_t numberOfTasks;
-        const std::chrono::duration<double> averageLatency;
+        const Timestamp windowStart;
+        const Timestamp windowEnd;
+        const double throughputInTuplesPerSec;
     };
 
     void onEvent(Event event) override;
-    explicit LatencyListener(const std::function<void(const CallBackParams&)>& callBack, uint64_t numberOfTasks);
-    ~LatencyListener() override;
-
+    explicit ThroughputListener(
+        const Timestamp::Underlying timeIntervalInMilliSeconds, const std::function<void(const CallBackParams&)>& callBack);
+    ~ThroughputListener() override;
 
 private:
+    std::ofstream file;
     folly::Synchronized<std::queue<Event>> events;
+    const Timestamp::Underlying timeIntervalInMilliSeconds;
 
     /// We need to store the callback, as it might go out of scope
     std::function<void(const CallBackParams&)> callBack;

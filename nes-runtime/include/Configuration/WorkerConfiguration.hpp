@@ -77,7 +77,8 @@ private:
             &numberOfBuffersInGlobalBufferManager,
             &defaultMaxInflightBuffers,
             &dumpQueryCompilationIR,
-            &dumpGraph};
+            &dumpGraph,
+            &latencyListener};
     }
 };
 }

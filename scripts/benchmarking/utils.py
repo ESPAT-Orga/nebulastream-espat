@@ -54,13 +54,15 @@ def get_vcpkg_dir():
     # Get the hostname
     hostname = socket.gethostname()
 
+    print(f'Getting vcpkg directory for hostname: {hostname}')
+
     # Determine the vcpkg directory based on the hostname
     if hostname == "nschubert-thinkstation":
         vcpkg_dir = "/home/nschubert/remote_server/vcpkg/scripts/buildsystems/vcpkg.cmake"
     elif hostname == "hare":
         vcpkg_dir = "/data/vcpkg/scripts/buildsystems/vcpkg.cmake"
     elif hostname == "mif-ws":
-        vcpkg_dir = "/home/nschubert/remote_server/vcpkg/scripts/buildsystems/vcpkg.cmake"
+        vcpkg_dir = "/home/flang/vcpkg/scripts/buildsystems/vcpkg.cmake"
     elif hostname == "docker-hostname":
         vcpkg_dir = "/vcpkg"
     elif hostname == "beaver":

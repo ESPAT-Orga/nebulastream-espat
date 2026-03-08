@@ -16,4 +16,5 @@ add_source_files(nes-single-node-worker
         GoogleEventTracePrinter.cpp
         CompositeStatisticListener.cpp
         LatencyListener.cpp
+        ThroughputListener.cpp
 )

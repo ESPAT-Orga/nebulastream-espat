@@ -35,7 +35,7 @@ latency_csv_file_path = "latency_results_nebulastream.csv"
 throughput_csv_file_path = "throughput_results_nebulastream.csv"
 config_file = "config.yaml"
 single_node_executable = os.path.join(build_dir, "nes-single-node-worker/nes-single-node-worker")
-nebuli_executable = os.path.join(build_dir, "nes-nebuli/apps/nes-cli --debug")
+nebuli_executable = os.path.join(build_dir, "nes-frontend/apps/nes-cli") + " --debug"
 cmake_flags = ("-G Ninja "
                "-DCMAKE_BUILD_TYPE=Release "
                f"-DCMAKE_TOOLCHAIN_FILE={get_vcpkg_dir()} "
@@ -88,9 +88,9 @@ def start_single_node_worker(file_path_stdout):
     # Running the query with a particular worker configuration
     worker_config = (f"--worker.query_engine.number_of_worker_threads={numberOfWorkerThreads} "
                      f"--worker.default_query_execution.execution_mode={executionMode} "
-                     f"--worker.default_query_execution.join_strategy={joinStrategy} "
+                     f"--worker.default_query_optimization.join_strategy={joinStrategy} "
                      f"--worker.default_query_execution.page_size={pageSize} "
-                     # TODO Uncomment when added: f"--worker.latencyListener=true "
+                     f"--worker.latencyListener=true "
                      f"--worker.default_query_execution.operator_buffer_size={bufferSizeInBytes}")
 
     cmd = f"{single_node_executable} {worker_config}"
@@ -103,11 +103,10 @@ def start_single_node_worker(file_path_stdout):
 
 def submitting_query(query_file):
     # TODO submitting still necessary?
-    cmd = f"cat {query_file} | {nebuli_executable} start"
+    cmd = f"{nebuli_executable} -t {query_file} start"
     print(f"Submitting the query via {cmd}...")
-    # shell=True is needed to pipe the output of cat to the register command
     try:
-        result = subprocess.run(cmd, shell=True, check=True, stdout=subprocess.PIPE,  # Capture standard output
+        result = subprocess.run(cmd.split(" "), check=True, stdout=subprocess.PIPE,  # Capture standard output
                                 stderr=subprocess.PIPE,  # Capture standard error
                                 text=True  # Decode output to a string
                                 )
@@ -117,6 +116,7 @@ def submitting_query(query_file):
         return query_id
     except subprocess.CalledProcessError as e:
         print("Command failed with exit status:", e.returncode)
+        print("Standard output:", e.stdout)
         print("Error output:", e.stderr)
         exit(1)
 
@@ -154,9 +154,9 @@ def copy_and_modify_query_config(old_config, new_config, new_source_name, genera
     yaml_query_config['physical'][0]['logical'] = new_source_name
 
     # Update the generator rate type
-    yaml_query_config['physical'][0]['sourceConfig']['generatorRateConfig'] = generator_rate_config
-    yaml_query_config['physical'][0]['sourceConfig']['generatorRateType'] = generator_type
-    yaml_query_config['physical'][0]['sourceConfig']['flushIntervalMs'] = flush_interval
+    yaml_query_config['physical'][0]['source_config']['generator_rate_config'] = generator_rate_config
+    yaml_query_config['physical'][0]['source_config']['generator_rate_type'] = generator_type
+    yaml_query_config['physical'][0]['source_config']['flush_interval_ms'] = flush_interval
 
     # Save the updated content back to the YAML file
     with open(new_config, 'w') as file:
@@ -213,7 +213,7 @@ def parse_log_to_latency_csv(log_file_path, csv_file_path):
 def parse_log_to_throughput_csv(log_file_path, csv_file_path):
     # Regular expression to parse each log line
     log_pattern = re.compile(
-        r'Throughput for queryId (\d+) in window (\d+)-(\d+) is \d+\.\d+ \w*B/s / (\d+\.\d+) (\w*)Tup/s'
+        r'Throughput for queryId (\d+) in window (\d+)-(\d+) is (\d+\.\d+) (\w*)Tup/s'
     )
 
     # List to store the extracted data
@@ -391,9 +391,9 @@ if __name__ == "__main__":
 
             # Starting the single node worker
             file_path_stdout = os.path.join(folder_name, "SingleNodeStdout.log")
-            with open(file_path_stdout, 'w') as stdout_file:
-                single_node_process = start_single_node_worker(stdout_file)
-                time.sleep(WAIT_BETWEEN_COMMANDS_LONG)
+            stdout_file = open(file_path_stdout, 'w')
+            single_node_process = start_single_node_worker(stdout_file)
+            time.sleep(WAIT_BETWEEN_COMMANDS_LONG)
 
             start_port = [5123]
             query_ids = []
@@ -426,6 +426,7 @@ if __name__ == "__main__":
                 if not proc:
                     continue
                 terminate_process_if_exists(proc)
+            stdout_file.close()
 
         throughput_full_csv_path = os.path.join(folder_name, throughput_csv_file_path)
         parse_log_to_throughput_csv(file_path_stdout, throughput_full_csv_path)

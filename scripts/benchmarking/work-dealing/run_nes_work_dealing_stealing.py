@@ -90,7 +90,7 @@ def start_single_node_worker(file_path_stdout):
                      f"--worker.default_query_execution.execution_mode={executionMode} "
                      f"--worker.default_query_optimization.join_strategy={joinStrategy} "
                      f"--worker.default_query_execution.page_size={pageSize} "
-                     f"--worker.latencyListener=true "
+                     f"--worker.latency_listener=true "
                      f"--worker.default_query_execution.operator_buffer_size={bufferSizeInBytes}")
 
     cmd = f"{single_node_executable} {worker_config}"

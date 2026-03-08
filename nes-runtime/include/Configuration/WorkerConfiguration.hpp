@@ -62,7 +62,7 @@ public:
     BoolOption dumpGraph = {"dump_graph", "false", "If to dump graph of the compilation results"};
 
     BoolOption latencyListener
-     = {"latencyListener",
+     = {"latency_listener",
         "false",
         "Should add the latency listener to the query engine listeners"};
 

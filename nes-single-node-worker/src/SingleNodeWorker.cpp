@@ -46,8 +46,8 @@
 #include <SingleNodeWorkerConfiguration.hpp>
 #include <WorkerStatus.hpp>
 
-#include "LatencyListener.hpp"
-#include "ThroughputListener.hpp"
+#include <LatencyListener.hpp>
+#include <ThroughputListener.hpp>
 
 namespace NES
 {
@@ -85,7 +85,7 @@ SingleNodeWorker::SingleNodeWorker(const SingleNodeWorkerConfiguration& configur
             while (throughput >= 1000 && unitIndex < 4)
             {
                 throughput /= 1000;
-                unitIndex++;
+                ++unitIndex;
             }
 
             return fmt::format("{:.3f} {}{}/s", throughput, units[unitIndex], suffix);
@@ -117,7 +117,7 @@ SingleNodeWorker::SingleNodeWorker(const SingleNodeWorkerConfiguration& configur
                 while (latencyCount <= 1 && unitIndex < 4)
                 {
                     latencyCount *= 1000;
-                    unitIndex++;
+                    ++unitIndex;
                 }
 
                 return fmt::format("{:.3f} {}s", latencyCount, units[unitIndex]);

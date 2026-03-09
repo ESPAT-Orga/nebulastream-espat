@@ -82,8 +82,12 @@ static void BM_InsertStatistic(benchmark::State& state)
     const auto windowSize = static_cast<uint64_t>(state.range(1));
     const auto numberOfStatisticIds = static_cast<int>(state.range(2));
 
+    // todo add another parameter for noThreads
     auto store = createStore(storeType, 1, windowSize);
 
+    // todo instead of creating the statistics on-demand in the for loop, we should create them beforehand, and then in the benchmark loop simply iterate over the vector/statistics
+    // todo add a parameter that decides how many dummyStatistics we create, so we can vary both numStatistics and numberOfStatisticIds
+    // todo for the creation of the statistics, we should stick with the random statistic id and createDummyStatistic
     std::mt19937 rng(std::random_device{}());
     std::uniform_int_distribution<Statistic::StatisticId> dist{0, static_cast<unsigned long>(numberOfStatisticIds - 1)};
     uint64_t curTs = 0;
@@ -92,6 +96,8 @@ static void BM_InsertStatistic(benchmark::State& state)
         const Statistic::StatisticId statisticId = dist(rng);
         const Windowing::TimeMeasure startTs{curTs};
         const Windowing::TimeMeasure endTs{curTs + windowSize};
+
+        // todo add another parameter for the createDummyStatistic as well as for the benchmark that stores the statistic size
         auto statistic = createDummyStatistic(statisticId, startTs, endTs);
         const auto hash = statistic.getHash();
 
@@ -115,6 +121,7 @@ static void BM_GetStatistics(benchmark::State& state)
     auto store = createStore(storeType, 1, windowSize);
 
     /// Pre-populate the store
+    // todo it is correct to pre-populate the store but we should store the statistics in a vector so that we can pick a random one in the actual benchmark loop
     for (int id = 0; id < numberOfStatisticIds; ++id)
     {
         uint64_t curTs = 0;
@@ -133,7 +140,7 @@ static void BM_GetStatistics(benchmark::State& state)
     std::mt19937 gen{42};
     std::uniform_int_distribution<> idDist{0, numberOfStatisticIds - 1};
     const uint64_t maxTs = numStatisticsPerKey * windowSize;
-
+    // todo also we should create a statistic that was not inserted into the store and add a new config numberOfAccessToExistingStatistics to the benchmark::State
     for (auto _ : state)
     {
         const Statistic::StatisticId statisticId = idDist(gen);

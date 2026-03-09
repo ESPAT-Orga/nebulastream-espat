@@ -1,0 +1,21 @@
+# name: benchmark_statistic_build/StatisticBuild.test
+# description: Benchmark for reservoir sampling and equiwidth histogram build operators over Nexmark bid data
+# groups: [benchmark, large, Synopsis, Aggregation]
+
+# Bid source from Nexmark benchmark
+CREATE LOGICAL SOURCE bid(timestamp UINT64, auctionId INT32, bidder INT32, price FLOAT64);
+CREATE PHYSICAL SOURCE FOR bid TYPE File;
+ATTACH FILE large/nexmark/bid_6GB.csv
+
+CREATE SINK reservoirBuildSink(bid.statisticHash UINT64, bid.statisticStart UINT64, bid.statisticEnd UINT64, bid.statisticNumberOfSeenTuples UINT64) TYPE Checksum;
+CREATE SINK histogramBuildSink(bid.statisticHash UINT64, bid.statisticStart UINT64, bid.statisticEnd UINT64, bid.statisticNumberOfSeenTuples UINT64) TYPE Checksum;
+
+# Reservoir build over all bid fields with reservoir size 1000, 10 second tumbling window
+SELECT RESERVOIR(100, auctionId, bidder, price, 1000) FROM bid WINDOW TUMBLING(timestamp, size 10 sec) INTO reservoirBuildSink;
+----
+0 0
+
+# Equiwidth histogram build over price field with 100 buckets, range 0-1000000, 10 second tumbling window
+SELECT EQUIWIDTHHISTOGRAM(200, price, 100, 0, 1000000, uint64) FROM bid WINDOW TUMBLING(timestamp, size 10 sec) INTO histogramBuildSink;
+----
+0 0

@@ -27,34 +27,37 @@ namespace NES
 namespace
 {
 
-/// Configurable min/max statistic data size in bytes
-constexpr int MIN_STATISTIC_DATA_SIZE = 1;
-constexpr int MAX_STATISTIC_DATA_SIZE = 100 * 1024;
-
 /// Output CSV filename
 constexpr std::string_view BENCHMARK_CSV = "statistic_store_benchmark.csv";
 
-Statistic createDummyStatistic(const Statistic::StatisticId statisticId, Windowing::TimeMeasure startTs, Windowing::TimeMeasure endTs)
+Statistic createDummyStatistic(
+    const Statistic::StatisticId statisticId,
+    Windowing::TimeMeasure startTs,
+    Windowing::TimeMeasure endTs,
+    std::mt19937& gen,
+    int statisticSize)
 {
-    std::random_device rd;
-    std::mt19937 gen(rd());
-
     /// Picking a random statistic type value
     constexpr auto statisticTypes = magic_enum::enum_values<Statistic::StatisticType>();
-    std::uniform_int_distribution<> enumDistribution{0, magic_enum::enum_count<Statistic::StatisticType>()};
+    std::uniform_int_distribution<> enumDistribution{0, static_cast<int>(magic_enum::enum_count<Statistic::StatisticType>()) - 1};
     const auto randomStatisticType = statisticTypes[enumDistribution(gen)];
 
     /// Generating random statistic data
-    std::uniform_int_distribution<> sizeDistribution{MIN_STATISTIC_DATA_SIZE, MAX_STATISTIC_DATA_SIZE};
-    const size_t statisticSize = sizeDistribution(gen);
     std::vector<int8_t> statisticData(statisticSize);
     std::uniform_int_distribution<> byteDistribution{0, 255};
-    for (size_t i = 0; i < statisticSize; ++i)
+    for (int i = 0; i < statisticSize; ++i)
     {
         statisticData[i] = byteDistribution(gen);
     }
 
-    return {statisticId, randomStatisticType, startTs, endTs, statisticSize, statisticData.data(), statisticSize};
+    return {
+        statisticId,
+        randomStatisticType,
+        startTs,
+        endTs,
+        static_cast<uint64_t>(statisticSize),
+        statisticData.data(),
+        static_cast<uint64_t>(statisticSize)};
 }
 
 using StatisticStoreVariant = std::variant<DefaultStatisticStore, WindowStatisticStore, SubStoresStatisticStore>;
@@ -75,34 +78,51 @@ StatisticStoreVariant createStore(StatisticStoreType storeType, int numThreads, 
 }
 
 /// Benchmark insertStatistic throughput
-/// Args: {storeType, windowSize, numberOfStatisticIds}
+/// Args: {storeType, windowSize, numberOfStatisticIds, numThreads, numStatistics, statisticSize}
 static void BM_InsertStatistic(benchmark::State& state)
 {
     const auto storeType = static_cast<StatisticStoreType>(state.range(0));
     const auto windowSize = static_cast<uint64_t>(state.range(1));
     const auto numberOfStatisticIds = static_cast<int>(state.range(2));
+    const auto numThreads = static_cast<int>(state.range(3));
+    const auto numStatistics = static_cast<int>(state.range(4));
+    const auto statisticSize = static_cast<int>(state.range(5));
 
-    // todo add another parameter for noThreads
-    auto store = createStore(storeType, 1, windowSize);
+    auto store = createStore(storeType, numThreads, windowSize);
 
-    // todo instead of creating the statistics on-demand in the for loop, we should create them beforehand, and then in the benchmark loop simply iterate over the vector/statistics
-    // todo add a parameter that decides how many dummyStatistics we create, so we can vary both numStatistics and numberOfStatisticIds
-    // todo for the creation of the statistics, we should stick with the random statistic id and createDummyStatistic
-    std::mt19937 rng(std::random_device{}());
-    std::uniform_int_distribution<Statistic::StatisticId> dist{0, static_cast<unsigned long>(numberOfStatisticIds - 1)};
-    uint64_t curTs = 0;
-    for (auto _ : state)
+    /// Pre-create all statistics before the benchmark loop
+    std::mt19937 rng{42};
+    std::uniform_int_distribution<Statistic::StatisticId> idDist{0, static_cast<uint64_t>(numberOfStatisticIds - 1)};
+
+    struct PreparedStatistic
     {
-        const Statistic::StatisticId statisticId = dist(rng);
+        Statistic statistic;
+        Statistic::StatisticHash hash;
+    };
+
+    std::vector<PreparedStatistic> preparedStatistics;
+    preparedStatistics.reserve(numStatistics);
+    uint64_t curTs = 0;
+    for (int i = 0; i < numStatistics; ++i)
+    {
+        const Statistic::StatisticId statisticId = idDist(rng);
         const Windowing::TimeMeasure startTs{curTs};
         const Windowing::TimeMeasure endTs{curTs + windowSize};
-
-        // todo add another parameter for the createDummyStatistic as well as for the benchmark that stores the statistic size
-        auto statistic = createDummyStatistic(statisticId, startTs, endTs);
+        auto statistic = createDummyStatistic(statisticId, startTs, endTs, rng, statisticSize);
         const auto hash = statistic.getHash();
-
-        std::visit([&](auto& s) { s.insertStatistic(hash, std::move(statistic)); }, store);
+        preparedStatistics.push_back({std::move(statistic), hash});
         curTs += windowSize;
+    }
+
+    /// Benchmark loop: iterate over pre-created statistics
+    int idx = 0;
+    for (auto _ : state)
+    {
+        auto& prepared = preparedStatistics[idx % numStatistics];
+        /// Copy the statistic since insertStatistic takes by move
+        auto statisticCopy = prepared.statistic;
+        std::visit([&](auto& s) { s.insertStatistic(prepared.hash, std::move(statisticCopy)); }, store);
+        ++idx;
     }
 
     state.SetItemsProcessed(state.iterations());
@@ -110,18 +130,21 @@ static void BM_InsertStatistic(benchmark::State& state)
 }
 
 /// Benchmark getStatistics latency
-/// Args: {storeType, windowSize, numberOfStatisticIds}
+/// Args: {storeType, windowSize, numberOfStatisticIds, pctAccessExisting}
 static void BM_GetStatistics(benchmark::State& state)
 {
     const auto storeType = static_cast<StatisticStoreType>(state.range(0));
     const auto windowSize = static_cast<uint64_t>(state.range(1));
     const auto numberOfStatisticIds = static_cast<int>(state.range(2));
+    const auto pctAccessExisting = static_cast<int>(state.range(3));
     constexpr int numStatisticsPerKey = 100;
+    constexpr int statisticSize = 1024;
 
     auto store = createStore(storeType, 1, windowSize);
 
-    /// Pre-populate the store
-    // todo it is correct to pre-populate the store but we should store the statistics in a vector so that we can pick a random one in the actual benchmark loop
+    /// Pre-populate the store and save the hashes of inserted statistics
+    std::mt19937 gen{42};
+    std::vector<Statistic::StatisticHash> insertedHashes;
     for (int id = 0; id < numberOfStatisticIds; ++id)
     {
         uint64_t curTs = 0;
@@ -129,27 +152,41 @@ static void BM_GetStatistics(benchmark::State& state)
         {
             const Windowing::TimeMeasure startTs{curTs};
             const Windowing::TimeMeasure endTs{curTs + windowSize};
-            auto statistic = createDummyStatistic(id, startTs, endTs);
+            auto statistic = createDummyStatistic(id, startTs, endTs, gen, statisticSize);
             const auto hash = statistic.getHash();
+            insertedHashes.push_back(hash);
             std::visit([&](auto& s) { s.insertStatistic(hash, std::move(statistic)); }, store);
             curTs += windowSize;
         }
     }
 
-    /// Benchmark retrieving statistics
-    std::mt19937 gen{42};
-    std::uniform_int_distribution<> idDist{0, numberOfStatisticIds - 1};
+    /// Create hashes for non-existing statistics (use IDs beyond the inserted range)
+    std::vector<Statistic::StatisticHash> nonExistingHashes;
+    for (int id = numberOfStatisticIds; id < numberOfStatisticIds + 10; ++id)
+    {
+        auto dummyStatistic = createDummyStatistic(id, Windowing::TimeMeasure{0}, Windowing::TimeMeasure{windowSize}, gen, statisticSize);
+        nonExistingHashes.push_back(dummyStatistic.getHash());
+    }
+
+    /// Benchmark retrieving statistics, mixing existing and non-existing lookups
     const uint64_t maxTs = numStatisticsPerKey * windowSize;
-    // todo also we should create a statistic that was not inserted into the store and add a new config numberOfAccessToExistingStatistics to the benchmark::State
+    std::uniform_int_distribution<> existingDist{0, static_cast<int>(insertedHashes.size()) - 1};
+    std::uniform_int_distribution<> nonExistingDist{0, static_cast<int>(nonExistingHashes.size()) - 1};
+    std::uniform_int_distribution<> pctDist{0, 99};
     for (auto _ : state)
     {
-        const Statistic::StatisticId statisticId = idDist(gen);
-        /// Create a dummy statistic just to get its hash (hash depends on statistic type)
-        auto dummyStatistic = createDummyStatistic(statisticId, Windowing::TimeMeasure{0}, Windowing::TimeMeasure{windowSize});
-        const auto hash = dummyStatistic.getHash();
+        Statistic::StatisticHash hash;
+        if (pctDist(gen) < pctAccessExisting)
+        {
+            hash = insertedHashes[existingDist(gen)];
+        }
+        else
+        {
+            hash = nonExistingHashes[nonExistingDist(gen)];
+        }
 
-        auto result = std::visit(
-            [&](auto& s) { return s.getStatistics(hash, Windowing::TimeMeasure{0}, Windowing::TimeMeasure{maxTs}); }, store);
+        auto result
+            = std::visit([&](auto& s) { return s.getStatistics(hash, Windowing::TimeMeasure{0}, Windowing::TimeMeasure{maxTs}); }, store);
         benchmark::DoNotOptimize(result);
     }
 
@@ -162,48 +199,58 @@ constexpr auto WINDOW = static_cast<int>(StatisticStoreType::WINDOW);
 constexpr auto SUB_STORES = static_cast<int>(StatisticStoreType::SUB_STORES);
 
 /// Register benchmarks for all three store types with varying parameters
-/// Args: {storeType, windowSize, numberOfStatisticIds}
+/// Args: {storeType, windowSize, numberOfStatisticIds, numThreads, numStatistics, statisticSize}
 /// Run with: --benchmark_out=insert_statistic_benchmark.csv --benchmark_out_format=csv
 BENCHMARK(BM_InsertStatistic)
-    ->Args({DEFAULT, 10, 1})
-    ->Args({DEFAULT, 10, 10})
-    ->Args({DEFAULT, 100, 1})
-    ->Args({DEFAULT, 100, 10})
-    ->Args({DEFAULT, 1000, 1})
-    ->Args({DEFAULT, 1000, 10})
-    ->Args({WINDOW, 10, 1})
-    ->Args({WINDOW, 10, 10})
-    ->Args({WINDOW, 100, 1})
-    ->Args({WINDOW, 100, 10})
-    ->Args({WINDOW, 1000, 1})
-    ->Args({WINDOW, 1000, 10})
-    ->Args({SUB_STORES, 10, 1})
-    ->Args({SUB_STORES, 10, 10})
-    ->Args({SUB_STORES, 100, 1})
-    ->Args({SUB_STORES, 100, 10})
-    ->Args({SUB_STORES, 1000, 1})
-    ->Args({SUB_STORES, 1000, 10});
+    ->Args({DEFAULT, 10, 1, 1, 100, 1024})
+    ->Args({DEFAULT, 10, 10, 1, 100, 1024})
+    ->Args({DEFAULT, 10, 10, 1, 1000, 1024})
+    ->Args({DEFAULT, 10, 10, 1, 100, 100 * 1024})
+    ->Args({DEFAULT, 100, 1, 1, 100, 1024})
+    ->Args({DEFAULT, 100, 10, 1, 100, 1024})
+    ->Args({DEFAULT, 1000, 1, 1, 100, 1024})
+    ->Args({DEFAULT, 1000, 10, 1, 100, 1024})
+    ->Args({WINDOW, 10, 1, 1, 100, 1024})
+    ->Args({WINDOW, 10, 10, 1, 100, 1024})
+    ->Args({WINDOW, 10, 10, 1, 1000, 1024})
+    ->Args({WINDOW, 10, 10, 1, 100, 100 * 1024})
+    ->Args({WINDOW, 100, 1, 1, 100, 1024})
+    ->Args({WINDOW, 100, 10, 1, 100, 1024})
+    ->Args({WINDOW, 1000, 1, 1, 100, 1024})
+    ->Args({WINDOW, 1000, 10, 1, 100, 1024})
+    ->Args({SUB_STORES, 10, 1, 1, 100, 1024})
+    ->Args({SUB_STORES, 10, 10, 1, 100, 1024})
+    ->Args({SUB_STORES, 10, 10, 1, 1000, 1024})
+    ->Args({SUB_STORES, 10, 10, 1, 100, 100 * 1024})
+    ->Args({SUB_STORES, 100, 1, 1, 100, 1024})
+    ->Args({SUB_STORES, 100, 10, 1, 100, 1024})
+    ->Args({SUB_STORES, 1000, 1, 1, 100, 1024})
+    ->Args({SUB_STORES, 1000, 10, 1, 100, 1024});
 
+/// Args: {storeType, windowSize, numberOfStatisticIds, pctAccessExisting}
 /// Run with: --benchmark_out=get_statistics_benchmark.csv --benchmark_out_format=csv
 BENCHMARK(BM_GetStatistics)
-    ->Args({DEFAULT, 10, 1})
-    ->Args({DEFAULT, 10, 10})
-    ->Args({DEFAULT, 100, 1})
-    ->Args({DEFAULT, 100, 10})
-    ->Args({DEFAULT, 1000, 1})
-    ->Args({DEFAULT, 1000, 10})
-    ->Args({WINDOW, 10, 1})
-    ->Args({WINDOW, 10, 10})
-    ->Args({WINDOW, 100, 1})
-    ->Args({WINDOW, 100, 10})
-    ->Args({WINDOW, 1000, 1})
-    ->Args({WINDOW, 1000, 10})
-    ->Args({SUB_STORES, 10, 1})
-    ->Args({SUB_STORES, 10, 10})
-    ->Args({SUB_STORES, 100, 1})
-    ->Args({SUB_STORES, 100, 10})
-    ->Args({SUB_STORES, 1000, 1})
-    ->Args({SUB_STORES, 1000, 10});
+    ->Args({DEFAULT, 10, 1, 100})
+    ->Args({DEFAULT, 10, 10, 100})
+    ->Args({DEFAULT, 10, 10, 50})
+    ->Args({DEFAULT, 100, 1, 100})
+    ->Args({DEFAULT, 100, 10, 100})
+    ->Args({DEFAULT, 1000, 1, 100})
+    ->Args({DEFAULT, 1000, 10, 100})
+    ->Args({WINDOW, 10, 1, 100})
+    ->Args({WINDOW, 10, 10, 100})
+    ->Args({WINDOW, 10, 10, 50})
+    ->Args({WINDOW, 100, 1, 100})
+    ->Args({WINDOW, 100, 10, 100})
+    ->Args({WINDOW, 1000, 1, 100})
+    ->Args({WINDOW, 1000, 10, 100})
+    ->Args({SUB_STORES, 10, 1, 100})
+    ->Args({SUB_STORES, 10, 10, 100})
+    ->Args({SUB_STORES, 10, 10, 50})
+    ->Args({SUB_STORES, 100, 1, 100})
+    ->Args({SUB_STORES, 100, 10, 100})
+    ->Args({SUB_STORES, 1000, 1, 100})
+    ->Args({SUB_STORES, 1000, 10, 100});
 
 }
 }

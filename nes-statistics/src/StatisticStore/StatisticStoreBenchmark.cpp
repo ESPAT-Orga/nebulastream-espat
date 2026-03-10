@@ -79,12 +79,12 @@ StatisticStoreVariant createStore(StatisticStoreType storeType, int numThreads, 
 }
 
 /// Benchmark insertStatistic throughput
-/// Args: {storeType, windowSize, numberOfStatisticIds, numThreads, numStatistics, statisticSize}
+/// Args: {storeType, windowSize, numStatisticIds, numThreads, numStatistics, statisticSize}
 static void BM_InsertStatistic(benchmark::State& state)
 {
     const auto storeType = static_cast<StatisticStoreType>(state.range(0));
     const auto windowSize = static_cast<uint64_t>(state.range(1));
-    const auto numberOfStatisticIds = static_cast<int>(state.range(2));
+    const auto numStatisticIds = static_cast<int>(state.range(2));
     const auto numThreads = static_cast<int>(state.range(3));
     const auto numStatistics = static_cast<int>(state.range(4));
     const auto statisticSize = static_cast<int>(state.range(5));
@@ -93,7 +93,7 @@ static void BM_InsertStatistic(benchmark::State& state)
 
     /// Pre-create all statistics before the benchmark loop
     std::mt19937 rng{RNG_SEED};
-    std::uniform_int_distribution<Statistic::StatisticId> idDist{0, static_cast<uint64_t>(numberOfStatisticIds - 1)};
+    std::uniform_int_distribution<Statistic::StatisticId> idDist{0, static_cast<uint64_t>(numStatisticIds - 1)};
 
     struct PreparedStatistic
     {
@@ -131,24 +131,23 @@ static void BM_InsertStatistic(benchmark::State& state)
 }
 
 /// Benchmark getStatistics latency
-/// Args: {storeType, windowSize, numberOfStatisticIds, pctAccessExisting, numStatistics, statisticSize}
+/// Args: {storeType, windowSize, numStatisticIds, pctAccessExisting, numStatistics, statisticSize, numThreads}
 static void BM_GetStatistics(benchmark::State& state)
 {
     const auto storeType = static_cast<StatisticStoreType>(state.range(0));
     const auto windowSize = static_cast<uint64_t>(state.range(1));
-    // todo make the variable names consistent, here number is used, elsewhere num
-    const auto numberOfStatisticIds = static_cast<int>(state.range(2));
+    const auto numStatisticIds = static_cast<int>(state.range(2));
     const auto pctAccessExisting = static_cast<int>(state.range(3));
     const auto numStatistics = static_cast<int>(state.range(4));
     const auto statisticSize = static_cast<int>(state.range(5));
+    const auto numThreads = static_cast<int>(state.range(6));
 
-    // todo add a parameter to the function to make numThreads configurable
-    auto store = createStore(storeType, 1, windowSize);
+    auto store = createStore(storeType, numThreads, windowSize);
 
     /// Pre-populate the store and save the hashes of inserted statistics
     std::mt19937 gen{RNG_SEED};
     std::vector<Statistic::StatisticHash> insertedHashes;
-    for (int id = 0; id < numberOfStatisticIds; ++id)
+    for (int id = 0; id < numStatisticIds; ++id)
     {
         uint64_t curTs = 0;
         for (int i = 0; i < numStatistics; ++i)
@@ -165,30 +164,37 @@ static void BM_GetStatistics(benchmark::State& state)
 
     /// Create hashes for non-existing statistics (use IDs beyond the inserted range)
     std::vector<Statistic::StatisticHash> nonExistingHashes;
-    for (int id = numberOfStatisticIds; id < numberOfStatisticIds + 10; ++id)
+    for (int id = numStatisticIds; id < numStatisticIds + 10; ++id)
     {
         auto dummyStatistic = createDummyStatistic(id, Windowing::TimeMeasure{0}, Windowing::TimeMeasure{windowSize}, gen, statisticSize);
         nonExistingHashes.push_back(dummyStatistic.getHash());
     }
 
-    /// Benchmark retrieving statistics, mixing existing and non-existing lookups
+    /// Pre-build the lookup hash sequence before the benchmark loop
     const uint64_t maxTs = numStatistics * windowSize;
+    const int numLookups = numStatistics * numStatisticIds;
+    std::vector<Statistic::StatisticHash> lookupHashes;
+    lookupHashes.reserve(numLookups);
     std::uniform_int_distribution<> existingDist{0, static_cast<int>(insertedHashes.size()) - 1};
     std::uniform_int_distribution<> nonExistingDist{0, static_cast<int>(nonExistingHashes.size()) - 1};
     std::uniform_int_distribution<> pctDist{0, 99};
-    for (auto _ : state)
+    for (int i = 0; i < numLookups; ++i)
     {
-        Statistic::StatisticHash hash;
-        // todo also don't decide which hash array to use in the benchmark loop, instead prepare this beforehand.
         if (pctDist(gen) < pctAccessExisting)
         {
-            hash = insertedHashes[existingDist(gen)];
+            lookupHashes.push_back(insertedHashes[existingDist(gen)]);
         }
         else
         {
-            hash = nonExistingHashes[nonExistingDist(gen)];
+            lookupHashes.push_back(nonExistingHashes[nonExistingDist(gen)]);
         }
+    }
 
+    /// Benchmark retrieving statistics
+    int idx = 0;
+    for (auto _ : state)
+    {
+        const auto& hash = lookupHashes[idx % numLookups];
         try
         {
             auto result = std::visit(
@@ -199,6 +205,7 @@ static void BM_GetStatistics(benchmark::State& state)
         {
             /// Expected for non-existing statistic lookups
         }
+        ++idx;
     }
 
     state.SetLabel(std::string{magic_enum::enum_name(storeType)});
@@ -210,7 +217,7 @@ constexpr auto WINDOW = static_cast<int>(StatisticStoreType::WINDOW);
 constexpr auto SUB_STORES = static_cast<int>(StatisticStoreType::SUB_STORES);
 
 /// Register benchmarks for all three store types with varying parameters
-/// Args: {storeType, windowSize, numberOfStatisticIds, numThreads, numStatistics, statisticSize}
+/// Args: {storeType, windowSize, numStatisticIds, numThreads, numStatistics, statisticSize}
 /// Run with: --benchmark_out=insert_statistic_benchmark.csv --benchmark_out_format=csv
 BENCHMARK(BM_InsertStatistic)
     ->Args({DEFAULT, 10, 1, 1, 100, 1024})
@@ -238,30 +245,30 @@ BENCHMARK(BM_InsertStatistic)
     ->Args({SUB_STORES, 1000, 1, 1, 100, 1024})
     ->Args({SUB_STORES, 1000, 10, 1, 100, 1024});
 
-/// Args: {storeType, windowSize, numberOfStatisticIds, pctAccessExisting, numStatistics, statisticSize}
+/// Args: {storeType, windowSize, numStatisticIds, pctAccessExisting, numStatistics, statisticSize, numThreads}
 /// Run with: --benchmark_out=get_statistics_benchmark.csv --benchmark_out_format=csv
 BENCHMARK(BM_GetStatistics)
-    ->Args({DEFAULT, 10, 1, 100, 100, 1024})
-    ->Args({DEFAULT, 10, 10, 100, 100, 1024})
-    ->Args({DEFAULT, 10, 10, 50, 100, 1024})
-    ->Args({DEFAULT, 100, 1, 100, 100, 1024})
-    ->Args({DEFAULT, 100, 10, 100, 100, 1024})
-    ->Args({DEFAULT, 1000, 1, 100, 100, 1024})
-    ->Args({DEFAULT, 1000, 10, 100, 100, 1024})
-    ->Args({WINDOW, 10, 1, 100, 100, 1024})
-    ->Args({WINDOW, 10, 10, 100, 100, 1024})
-    ->Args({WINDOW, 10, 10, 50, 100, 1024})
-    ->Args({WINDOW, 100, 1, 100, 100, 1024})
-    ->Args({WINDOW, 100, 10, 100, 100, 1024})
-    ->Args({WINDOW, 1000, 1, 100, 100, 1024})
-    ->Args({WINDOW, 1000, 10, 100, 100, 1024})
-    ->Args({SUB_STORES, 10, 1, 100, 100, 1024})
-    ->Args({SUB_STORES, 10, 10, 100, 100, 1024})
-    ->Args({SUB_STORES, 10, 10, 50, 100, 1024})
-    ->Args({SUB_STORES, 100, 1, 100, 100, 1024})
-    ->Args({SUB_STORES, 100, 10, 100, 100, 1024})
-    ->Args({SUB_STORES, 1000, 1, 100, 100, 1024})
-    ->Args({SUB_STORES, 1000, 10, 100, 100, 1024});
+    ->Args({DEFAULT, 10, 1, 100, 100, 1024, 1})
+    ->Args({DEFAULT, 10, 10, 100, 100, 1024, 1})
+    ->Args({DEFAULT, 10, 10, 50, 100, 1024, 1})
+    ->Args({DEFAULT, 100, 1, 100, 100, 1024, 1})
+    ->Args({DEFAULT, 100, 10, 100, 100, 1024, 1})
+    ->Args({DEFAULT, 1000, 1, 100, 100, 1024, 1})
+    ->Args({DEFAULT, 1000, 10, 100, 100, 1024, 1})
+    ->Args({WINDOW, 10, 1, 100, 100, 1024, 1})
+    ->Args({WINDOW, 10, 10, 100, 100, 1024, 1})
+    ->Args({WINDOW, 10, 10, 50, 100, 1024, 1})
+    ->Args({WINDOW, 100, 1, 100, 100, 1024, 1})
+    ->Args({WINDOW, 100, 10, 100, 100, 1024, 1})
+    ->Args({WINDOW, 1000, 1, 100, 100, 1024, 1})
+    ->Args({WINDOW, 1000, 10, 100, 100, 1024, 1})
+    ->Args({SUB_STORES, 10, 1, 100, 100, 1024, 1})
+    ->Args({SUB_STORES, 10, 10, 100, 100, 1024, 1})
+    ->Args({SUB_STORES, 10, 10, 50, 100, 1024, 1})
+    ->Args({SUB_STORES, 100, 1, 100, 100, 1024, 1})
+    ->Args({SUB_STORES, 100, 10, 100, 100, 1024, 1})
+    ->Args({SUB_STORES, 1000, 1, 100, 100, 1024, 1})
+    ->Args({SUB_STORES, 1000, 10, 100, 100, 1024, 1});
 
 }
 }

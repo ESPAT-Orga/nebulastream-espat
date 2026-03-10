@@ -136,11 +136,13 @@ static void BM_GetStatistics(benchmark::State& state)
 {
     const auto storeType = static_cast<StatisticStoreType>(state.range(0));
     const auto windowSize = static_cast<uint64_t>(state.range(1));
+    // todo make the variable names consistent, here number is used, elsewhere num
     const auto numberOfStatisticIds = static_cast<int>(state.range(2));
     const auto pctAccessExisting = static_cast<int>(state.range(3));
     const auto numStatistics = static_cast<int>(state.range(4));
     const auto statisticSize = static_cast<int>(state.range(5));
 
+    // todo add a parameter to the function to make numThreads configurable
     auto store = createStore(storeType, 1, windowSize);
 
     /// Pre-populate the store and save the hashes of inserted statistics
@@ -177,6 +179,7 @@ static void BM_GetStatistics(benchmark::State& state)
     for (auto _ : state)
     {
         Statistic::StatisticHash hash;
+        // todo also don't decide which hash array to use in the benchmark loop, instead prepare this beforehand.
         if (pctDist(gen) < pctAccessExisting)
         {
             hash = insertedHashes[existingDist(gen)];

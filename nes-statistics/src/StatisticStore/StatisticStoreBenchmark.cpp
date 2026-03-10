@@ -38,7 +38,7 @@ Statistic createDummyStatistic(
     Windowing::TimeMeasure startTs,
     Windowing::TimeMeasure endTs,
     std::mt19937& gen,
-    int statisticSize)
+    const int statisticSize)
 {
     /// Picking a random statistic type value
     constexpr auto statisticTypes = magic_enum::enum_values<Statistic::StatisticType>();
@@ -64,7 +64,7 @@ Statistic createDummyStatistic(
 using StatisticStoreVariant = std::variant<DefaultStatisticStore, WindowStatisticStore, SubStoresStatisticStore>;
 
 /// Creates a statistic store variant based on the StatisticStoreType enum
-StatisticStoreVariant createStore(StatisticStoreType storeType, int numThreads, uint64_t windowSize)
+StatisticStoreVariant createStore(const StatisticStoreType storeType, const int numThreads, const uint64_t windowSize)
 {
     switch (storeType)
     {
@@ -75,7 +75,7 @@ StatisticStoreVariant createStore(StatisticStoreType storeType, int numThreads, 
         case StatisticStoreType::SUB_STORES:
             return SubStoresStatisticStore{static_cast<uint64_t>(numThreads)};
     }
-    return DefaultStatisticStore{};
+    std::unreachable();
 }
 
 /// Benchmark insertStatistic throughput
@@ -103,26 +103,26 @@ static void BM_InsertStatistic(benchmark::State& state)
 
     std::vector<PreparedStatistic> preparedStatistics;
     preparedStatistics.reserve(numStatistics);
-    uint64_t curTs = 0;
+    uint64_t curTimestamp = 0;
     for (int i = 0; i < numStatistics; ++i)
     {
         const Statistic::StatisticId statisticId = idDist(rng);
-        const Windowing::TimeMeasure startTs{curTs};
-        const Windowing::TimeMeasure endTs{curTs + windowSize};
+        const Windowing::TimeMeasure startTs{curTimestamp};
+        const Windowing::TimeMeasure endTs{curTimestamp + windowSize};
         auto statistic = createDummyStatistic(statisticId, startTs, endTs, rng, statisticSize);
         const auto hash = statistic.getHash();
         preparedStatistics.push_back({std::move(statistic), hash});
-        curTs += windowSize;
+        curTimestamp += windowSize;
     }
 
     /// Benchmark loop: iterate over pre-created statistics
     int idx = 0;
     for (auto _ : state)
     {
-        auto& prepared = preparedStatistics[idx % numStatistics];
+        auto& [statistic, hash] = preparedStatistics[idx % numStatistics];
         /// Copy the statistic since insertStatistic takes by move
-        auto statisticCopy = prepared.statistic;
-        std::visit([&](auto& s) { s.insertStatistic(prepared.hash, std::move(statisticCopy)); }, store);
+        auto statisticCopy = statistic;
+        std::visit([&](auto& s) { s.insertStatistic(hash, std::move(statisticCopy)); }, store);
         ++idx;
     }
 
@@ -137,7 +137,7 @@ static void BM_GetStatistics(benchmark::State& state)
     const auto storeType = static_cast<StatisticStoreType>(state.range(0));
     const auto windowSize = static_cast<uint64_t>(state.range(1));
     const auto numStatisticIds = static_cast<int>(state.range(2));
-    const auto pctAccessExisting = static_cast<int>(state.range(3));
+    const auto percentAccessExisting = static_cast<int>(state.range(3));
     const auto numStatistics = static_cast<int>(state.range(4));
     const auto statisticSize = static_cast<int>(state.range(5));
     const auto numThreads = static_cast<int>(state.range(6));
@@ -177,10 +177,10 @@ static void BM_GetStatistics(benchmark::State& state)
     lookupHashes.reserve(numLookups);
     std::uniform_int_distribution<> existingDist{0, static_cast<int>(insertedHashes.size()) - 1};
     std::uniform_int_distribution<> nonExistingDist{0, static_cast<int>(nonExistingHashes.size()) - 1};
-    std::uniform_int_distribution<> pctDist{0, 99};
+    std::uniform_int_distribution<> percentDist{0, 99};
     for (int i = 0; i < numLookups; ++i)
     {
-        if (pctDist(gen) < pctAccessExisting)
+        if (percentDist(gen) < percentAccessExisting)
         {
             lookupHashes.push_back(insertedHashes[existingDist(gen)]);
         }

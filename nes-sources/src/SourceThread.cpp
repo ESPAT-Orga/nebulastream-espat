@@ -185,6 +185,11 @@ void dataSourceThread(
 }
 }
 
+bool SourceThread::setup() const
+{
+    return sourceImplementation->setup();
+}
+
 bool SourceThread::start(SourceReturnType::EmitFunction&& emitFunction)
 {
     INVARIANT(this->originId != INVALID_ORIGIN_ID, "The id of the source is not set properly");

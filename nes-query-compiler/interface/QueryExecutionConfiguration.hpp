@@ -31,6 +31,7 @@ namespace NES
 
 static constexpr auto DEFAULT_NUMBER_OF_PARTITIONS_DATASTRUCTURES = 100;
 static constexpr auto DEFAULT_PAGED_VECTOR_SIZE = 1024;
+static constexpr auto DEFAULT_MIN_ENTRIES_PER_PAGE = 10;
 static constexpr auto DEFAULT_OPERATOR_BUFFER_SIZE = 4096;
 static constexpr auto DEFAULT_NUMBER_OF_RECORDS_PER_KEY = 10;
 static constexpr auto DEFAULT_MAX_NUMBER_OF_BUCKETS = 10'000.0;
@@ -72,6 +73,12 @@ public:
         std::to_string(DEFAULT_MAX_NUMBER_OF_BUCKETS),
         "Maximal number of buckets for a hash table. If set too low or high degrades either the performance or increases the memory usage.",
         {std::make_shared<FloatValidation>()}};
+    UIntOption minEntriesPerPage
+        = {"min_entries_per_page",
+           std::to_string(DEFAULT_MIN_ENTRIES_PER_PAGE),
+           "Minimum number of entries per page in a hash map. If the page size is too small for the entry size, the page size will be "
+           "increased.",
+           {std::make_shared<NumberValidation>()}};
     UIntOption operatorBufferSize
         = {"operator_buffer_size",
            std::to_string(DEFAULT_OPERATOR_BUFFER_SIZE),
@@ -81,7 +88,14 @@ public:
 private:
     std::vector<BaseOption*> getOptions() override
     {
-        return {&executionMode, &pageSize, &numberOfPartitions, &numberOfRecordsPerKey, &maxNumberOfBuckets, &operatorBufferSize};
+        return {
+            &executionMode,
+            &pageSize,
+            &minEntriesPerPage,
+            &numberOfPartitions,
+            &numberOfRecordsPerKey,
+            &maxNumberOfBuckets,
+            &operatorBufferSize};
     }
 };
 

@@ -65,50 +65,27 @@ allHistogramConfigs = [
     (1000, 0, 1000000, "uint64"),
 ]
 
-RESERVOIR_TEMPLATE = """\
-# name: benchmark_statistic_build/ReservoirBuild.test
-# description: Benchmark for reservoir build operator over Nexmark bid data
-# groups: [benchmark, large, Synopsis, Aggregation]
-
-CREATE LOGICAL SOURCE bid(timestamp UINT64, auctionId INT32, bidder INT32, price FLOAT64);
-CREATE PHYSICAL SOURCE FOR bid TYPE File;
-ATTACH FILE large/nexmark/bid_6GB.csv
-
-CREATE SINK reservoirBuildSink(bid.statisticHash UINT64, bid.statisticStart UINT64, bid.statisticEnd UINT64, bid.statisticNumberOfSeenTuples UINT64) TYPE Checksum;
-
-SELECT RESERVOIR(100, auctionId, bidder, price, {reservoir_size}) FROM bid WINDOW TUMBLING(timestamp, size 10 sec) INTO reservoirBuildSink;
-----
-0 0
-"""
-
-HISTOGRAM_TEMPLATE = """\
-# name: benchmark_statistic_build/HistogramBuild.test
-# description: Benchmark for equiwidth histogram build operator over Nexmark bid data
-# groups: [benchmark, large, Synopsis, Aggregation]
-
-CREATE LOGICAL SOURCE bid(timestamp UINT64, auctionId INT32, bidder INT32, price FLOAT64);
-CREATE PHYSICAL SOURCE FOR bid TYPE File;
-ATTACH FILE large/nexmark/bid_6GB.csv
-
-CREATE SINK histogramBuildSink(bid.statisticHash UINT64, bid.statisticStart UINT64, bid.statisticEnd UINT64, bid.statisticNumberOfSeenTuples UINT64) TYPE Checksum;
-
-SELECT EQUIWIDTHHISTOGRAM(200, price, {num_buckets}, {min_value}, {max_value}, {counter_type}) FROM bid WINDOW TUMBLING(timestamp, size 10 sec) INTO histogramBuildSink;
-----
-0 0
-"""
-
+QUERY_CONFIGS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "query-configs")
 generated_test_dir = os.path.join("nes-systests", "benchmark_statistic_build")
+
+def load_template(name):
+    """Load a query template from the query-configs directory."""
+    template_path = os.path.join(QUERY_CONFIGS_DIR, name)
+    with open(template_path, 'r') as f:
+        return f.read()
 
 def generate_queries():
     """Generate query dict and .test files from statistic build configurations."""
     os.makedirs(generated_test_dir, exist_ok=True)
+    reservoir_template = load_template("ReservoirBuild.test.template")
+    histogram_template = load_template("HistogramBuild.test.template")
     queries = {}
     for reservoir_size in allReservoirSizes:
         name = f"ReservoirBuild_{reservoir_size}"
         filename = f"{name}.test"
         filepath = os.path.join(generated_test_dir, filename)
         with open(filepath, 'w') as f:
-            f.write(RESERVOIR_TEMPLATE.format(reservoir_size=reservoir_size))
+            f.write(reservoir_template.format(reservoir_size=reservoir_size))
         queries[name] = f"{filepath}:01"
 
     for num_buckets, min_value, max_value, counter_type in allHistogramConfigs:
@@ -116,7 +93,7 @@ def generate_queries():
         filename = f"{name}.test"
         filepath = os.path.join(generated_test_dir, filename)
         with open(filepath, 'w') as f:
-            f.write(HISTOGRAM_TEMPLATE.format(num_buckets=num_buckets, min_value=min_value, max_value=max_value, counter_type=counter_type))
+            f.write(histogram_template.format(num_buckets=num_buckets, min_value=min_value, max_value=max_value, counter_type=counter_type))
         queries[name] = f"{filepath}:01"
 
     return queries
@@ -235,6 +212,9 @@ if __name__ == "__main__":
     parser.add_argument("-w", "--worker-threads", nargs="+", help="Number of worker threads to run the queries.")
     parser.add_argument("-b", "--buffer-config", nargs="+", help="List of buffer configurations as tuples and buffer size is first, e.g., '(1234, 100) (128, 40)'.")
     args = parser.parse_args()
+
+    # Generate query .test files from templates
+    queries = generate_queries()
 
     # Determine which queries to run
     queries_to_run = queries

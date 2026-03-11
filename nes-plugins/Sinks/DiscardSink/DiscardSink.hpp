@@ -14,12 +14,13 @@
 
 #pragma once
 
-#include <cstddef>
+#include <memory>
 #include <ostream>
 #include <string>
 #include <string_view>
 #include <unordered_map>
 #include <Configurations/Descriptor.hpp>
+#include <DataTypes/Schema.hpp>
 #include <Runtime/TupleBuffer.hpp>
 #include <Sinks/Sink.hpp>
 #include <Sinks/SinkDescriptor.hpp>
@@ -29,14 +30,13 @@
 namespace NES
 {
 
-/// A sink that simply dumps input tuples into the void
-/// As such the output written to file will always be
-/// an empty line
-class VoidSink final : public Sink
+/// A sink that discards all incoming tuple buffers.
+/// It writes the schema header to the output file, then discards all data during execution.
+class DiscardSink final : public Sink
 {
 public:
-    static constexpr std::string_view NAME = "Void";
-    explicit VoidSink(BackpressureController backpressureController, const SinkDescriptor& sinkDescriptor);
+    static constexpr std::string_view NAME = "Discard";
+    explicit DiscardSink(BackpressureController backpressureController, const SinkDescriptor& sinkDescriptor);
 
     void start(PipelineExecutionContext&) override;
     void stop(PipelineExecutionContext&) override;
@@ -44,14 +44,19 @@ public:
     static DescriptorConfig::Config validateAndFormat(std::unordered_map<std::string, std::string> config);
 
 protected:
-    std::ostream& toString(std::ostream& os) const override { return os << "VoidSink"; }
+    std::ostream& toString(std::ostream& os) const override { return os << "DiscardSink"; }
+
+private:
+    std::string outputFilePath;
+    std::shared_ptr<const Schema> schema;
 };
 
-struct ConfigParametersVoid
+struct ConfigParametersDiscard
 {
     static inline std::unordered_map<std::string, DescriptorConfig::ConfigParameterContainer> parameterMap
-        = DescriptorConfig::createConfigParameterContainerMap(SinkDescriptor::FILE_PATH);
+        = DescriptorConfig::createConfigParameterContainerMap(SinkDescriptor::FILE_PATH, SinkDescriptor::INPUT_FORMAT);
 };
+
 }
 
-FMT_OSTREAM(NES::VoidSink);
+FMT_OSTREAM(NES::DiscardSink);

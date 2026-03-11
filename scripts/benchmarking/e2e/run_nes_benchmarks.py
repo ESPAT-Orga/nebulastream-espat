@@ -26,6 +26,7 @@ import shutil
 import itertools
 import socket
 import re
+from datetime import datetime
 
 from scripts.benchmarking.utils import *
 
@@ -48,13 +49,14 @@ NUM_RUNS_PER_EXPERIMENT = 1
 
 #### Worker Configurations
 allExecutionModes = ["COMPILER"]  # ["COMPILER", "INTERPRETER"]
-allNumberOfWorkerThreads = ['1', '4', '8', '16', '24'] #['4', '16']
+allNumberOfWorkerThreads = ['4', '16'] #['1', '4', '8', '16', '24'] #['4', '16']
 allJoinStrategies = ["HASH_JOIN"]
 allNumberOfEntriesSliceCaches = [10]
 allSliceCacheTypes = ["NONE", "SECOND_CHANCE", "LRU", "ALWAYS_MISS"]
 allPageSizes = [8192]
 #[4000000] if buffer size is 8192 #[500000] if buffer size is 102400
 allBufferConfigs = [(1048576, 20000)]
+allEnableLatencyListeners = [False]
 
 #### Statistic Build Configurations
 allReservoirSizes = [100, 1000, 10000]
@@ -65,50 +67,27 @@ allHistogramConfigs = [
     (1000, 0, 1000000, "uint64"),
 ]
 
-RESERVOIR_TEMPLATE = """\
-# name: benchmark_statistic_build/ReservoirBuild.test
-# description: Benchmark for reservoir build operator over Nexmark bid data
-# groups: [benchmark, large, Synopsis, Aggregation]
+QUERY_CONFIGS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "query-configs")
+generated_test_dir = os.path.join("nes-systests", f"benchmark_statistic_build_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
 
-CREATE LOGICAL SOURCE bid(timestamp UINT64, auctionId INT32, bidder INT32, price FLOAT64);
-CREATE PHYSICAL SOURCE FOR bid TYPE File;
-ATTACH FILE large/nexmark/bid_6GB.csv
-
-CREATE SINK reservoirBuildSink(bid.statisticHash UINT64, bid.statisticStart UINT64, bid.statisticEnd UINT64, bid.statisticNumberOfSeenTuples UINT64) TYPE Checksum;
-
-SELECT RESERVOIR(100, auctionId, bidder, price, {reservoir_size}) FROM bid WINDOW TUMBLING(timestamp, size 10 sec) INTO reservoirBuildSink;
-----
-0 0
-"""
-
-HISTOGRAM_TEMPLATE = """\
-# name: benchmark_statistic_build/HistogramBuild.test
-# description: Benchmark for equiwidth histogram build operator over Nexmark bid data
-# groups: [benchmark, large, Synopsis, Aggregation]
-
-CREATE LOGICAL SOURCE bid(timestamp UINT64, auctionId INT32, bidder INT32, price FLOAT64);
-CREATE PHYSICAL SOURCE FOR bid TYPE File;
-ATTACH FILE large/nexmark/bid_6GB.csv
-
-CREATE SINK histogramBuildSink(bid.statisticHash UINT64, bid.statisticStart UINT64, bid.statisticEnd UINT64, bid.statisticNumberOfSeenTuples UINT64) TYPE Checksum;
-
-SELECT EQUIWIDTHHISTOGRAM(200, price, {num_buckets}, {min_value}, {max_value}, {counter_type}) FROM bid WINDOW TUMBLING(timestamp, size 10 sec) INTO histogramBuildSink;
-----
-0 0
-"""
-
-generated_test_dir = os.path.join("nes-systests", "benchmark_statistic_build")
+def load_template(name):
+    """Load a query template from the query-configs directory."""
+    template_path = os.path.join(QUERY_CONFIGS_DIR, name)
+    with open(template_path, 'r') as f:
+        return f.read()
 
 def generate_queries():
     """Generate query dict and .test files from statistic build configurations."""
     os.makedirs(generated_test_dir, exist_ok=True)
+    reservoir_template = load_template("ReservoirBuild.test.template")
+    histogram_template = load_template("HistogramBuild.test.template")
     queries = {}
     for reservoir_size in allReservoirSizes:
         name = f"ReservoirBuild_{reservoir_size}"
         filename = f"{name}.test"
         filepath = os.path.join(generated_test_dir, filename)
         with open(filepath, 'w') as f:
-            f.write(RESERVOIR_TEMPLATE.format(reservoir_size=reservoir_size))
+            f.write(reservoir_template.format(reservoir_size=reservoir_size))
         queries[name] = f"{filepath}:01"
 
     for num_buckets, min_value, max_value, counter_type in allHistogramConfigs:
@@ -116,7 +95,7 @@ def generate_queries():
         filename = f"{name}.test"
         filepath = os.path.join(generated_test_dir, filename)
         with open(filepath, 'w') as f:
-            f.write(HISTOGRAM_TEMPLATE.format(num_buckets=num_buckets, min_value=min_value, max_value=max_value, counter_type=counter_type))
+            f.write(histogram_template.format(num_buckets=num_buckets, min_value=min_value, max_value=max_value, counter_type=counter_type))
         queries[name] = f"{filepath}:01"
 
     return queries
@@ -162,7 +141,7 @@ def parse_average_throughput_from_throughput_listener(console_output):
     return average_throughput
 
 
-def run_benchmark(config, query, queryIdx, workerConfigIdx, no_combinations, no_queries):
+def run_benchmark(config, query, queryIdx, workerConfigIdx, enableLatency, no_combinations, no_queries):
     # Create the working directory
     create_folder_and_remove_if_exists(working_dir)
 
@@ -175,7 +154,7 @@ def run_benchmark(config, query, queryIdx, workerConfigIdx, no_combinations, no_
                          f"--worker.query_engine.admission_queue_size=1000000 "
                          f"--worker.default_query_execution.page_size={pageSize} "
                          f"--worker.default_query_execution.operator_buffer_size={bufferSizeInBytes} "
-                         f"--worker.latency_listener=true")
+                         f"--worker.latency_listener={enableLatency}")
 
         benchmark_command = f"{systest_executable} -b -t {os.path.abspath(queries[query])} --data {os.path.abspath(test_data_dir)} --workingDir={working_dir} -- {worker_config}"
 
@@ -236,6 +215,9 @@ if __name__ == "__main__":
     parser.add_argument("-b", "--buffer-config", nargs="+", help="List of buffer configurations as tuples and buffer size is first, e.g., '(1234, 100) (128, 40)'.")
     args = parser.parse_args()
 
+    # Generate query .test files from templates
+    queries = generate_queries()
+
     # Determine which queries to run
     queries_to_run = queries
 
@@ -262,6 +244,7 @@ if __name__ == "__main__":
     print(",".join(slice_caches_to_run))
     print(",".join(number_of_worker_threads_to_run))
     print(",".join(map(str, allBufferConfigs)))
+    print(",".join(map(str, allEnableLatencyListeners)))
 
     # Checking if the script has been executed from the repository root
     check_repository_root()
@@ -283,7 +266,8 @@ if __name__ == "__main__":
             len(allNumberOfEntriesSliceCaches) *
             len(slice_caches_to_run) *
             len(allPageSizes) *
-            len(allBufferConfigs)
+            len(allBufferConfigs) *
+            len(allEnableLatencyListeners)
     )
     no_queries = len(queries_to_run)
     for queryIdx, query in enumerate(queries_to_run):
@@ -292,10 +276,10 @@ if __name__ == "__main__":
         combinations = itertools.product(allExecutionModes, number_of_worker_threads_to_run,
                                          allBufferConfigs, allJoinStrategies,
                                          allNumberOfEntriesSliceCaches, slice_caches_to_run,
-                                         allPageSizes)
+                                         allPageSizes, allEnableLatencyListeners)
         for [executionMode, numberOfWorkerThreads, (bufferSizeInBytes, buffersInGlobalBufferManager), joinStrategy,
              numberOfEntriesSliceCaches,
-             sliceCacheType, pageSize] in combinations:
+             sliceCacheType, pageSize, enableLatency] in combinations:
             workerConfigIdx += 1
 
             # Otherwise we run out-of-memory / out-of-buffers
@@ -317,7 +301,7 @@ if __name__ == "__main__":
             }
 
             for i in range(NUM_RUNS_PER_EXPERIMENT):
-                run_benchmark(config, query, queryIdx + 1, workerConfigIdx, no_combinations, no_queries)
+                run_benchmark(config, query, queryIdx + 1, workerConfigIdx, enableLatency, no_combinations, no_queries)
 
     abs_csv_path = os.path.abspath(csv_file_path)
     print(f"CSV Measurement file can be found in {abs_csv_path}")

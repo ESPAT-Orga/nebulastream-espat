@@ -33,6 +33,8 @@
 #include <function.hpp>
 #include <options.hpp>
 
+#include <ScanPhysicalOperator.hpp>
+
 namespace NES
 {
 
@@ -120,6 +122,12 @@ void CompiledExecutablePipelineStage::start(PipelineExecutionContext& pipelineEx
     CompilationContext compilationCtx{engine};
     pipeline->getRootOperator().setup(ctx, compilationCtx);
     compiledPipelineFunction = this->compilePipeline();
-}
 
+    auto rootOperator = pipeline->getRootOperator();
+    auto scanPhysicalOperator = rootOperator.tryGet<ScanPhysicalOperator>();
+    if (scanPhysicalOperator)
+    {
+        this->formattingTask = scanPhysicalOperator.value().getIsRawScan();
+    }
+}
 }

@@ -39,7 +39,7 @@ struct EquiWidthHistogramProviderArguments : StatisticProviderArguments
         , binCounterFieldName(std::move(binCounterFieldName))
         , dataTypeCounter(std::move(dataTypeCounter))
         , dataTypeStartEnd(std::move(dataTypeStartEnd))
-        , sizeOfDataType(dataTypeCounter.getSizeInBytes() + dataTypeStartEnd.getSizeInBytes() * 2)
+        , sizeOfDataType(dataTypeCounter.getSizeInBytesWithoutNull() + dataTypeStartEnd.getSizeInBytesWithoutNull() * 2)
     {
     }
 

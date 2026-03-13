@@ -20,6 +20,7 @@
 #include <utility>
 #include <vector>
 
+#include <DataTypes/DataTypeProvider.hpp>
 #include <Identifiers/Identifiers.hpp>
 #include <Operators/LogicalOperator.hpp>
 #include <Traits/Trait.hpp>
@@ -111,13 +112,15 @@ EquiWidthHistogramProbeLogicalOperator::withInferredSchema(const std::vector<Sch
     copy.outputSchema.addField(copy.statisticEndTsField);
     copy.outputSchema.addField(copy.statisticNumberOfSeenTuplesField);
 
-    auto start = Schema::Field(copy.binStartFieldName, DataType{startEndType});
+    auto start
+        = Schema::Field(copy.binStartFieldName, DataTypeProvider::provideDataType(startEndType.type, DataType::NULLABLE::NOT_NULLABLE));
     start.addQualifierIfNotExists(newQualifierForSystemField);
     copy.outputSchema.addField(start);
-    auto counter = Schema::Field(copy.binCounterFieldName, DataType{counterType});
+    auto counter
+        = Schema::Field(copy.binCounterFieldName, DataTypeProvider::provideDataType(counterType.type, DataType::NULLABLE::NOT_NULLABLE));
     counter.addQualifierIfNotExists(newQualifierForSystemField);
     copy.outputSchema.addField(counter);
-    auto end = Schema::Field(copy.binEndFieldName, DataType{startEndType});
+    auto end = Schema::Field(copy.binEndFieldName, DataTypeProvider::provideDataType(startEndType.type, DataType::NULLABLE::NOT_NULLABLE));
     end.addQualifierIfNotExists(newQualifierForSystemField);
     copy.outputSchema.addField(end);
 
@@ -173,8 +176,8 @@ Reflected Reflector<EquiWidthHistogramProbeLogicalOperator>::operator()(const Eq
 {
     return reflect(detail::ReflectedEquiWidthHistogramProbeLogicalOperator{
         .statisticHash = op.statisticHash,
-        .counterTypeValue = static_cast<uint8_t>(op.counterType.type),
-        .startEndTypeValue = static_cast<uint8_t>(op.startEndType.type),
+        .counterTypeValue = op.counterType,
+        .startEndTypeValue = op.startEndType,
         .binStartFieldName = op.binStartFieldName,
         .binEndFieldName = op.binEndFieldName,
         .binCounterFieldName = op.binCounterFieldName});
@@ -185,8 +188,8 @@ EquiWidthHistogramProbeLogicalOperator Unreflector<EquiWidthHistogramProbeLogica
     auto data = unreflect<detail::ReflectedEquiWidthHistogramProbeLogicalOperator>(reflected);
     return EquiWidthHistogramProbeLogicalOperator{
         data.statisticHash,
-        DataType{static_cast<DataType::Type>(data.counterTypeValue)},
-        DataType{static_cast<DataType::Type>(data.startEndTypeValue)},
+        data.counterTypeValue,
+        data.startEndTypeValue,
         std::move(data.binStartFieldName),
         std::move(data.binEndFieldName),
         std::move(data.binCounterFieldName),

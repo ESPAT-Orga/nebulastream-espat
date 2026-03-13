@@ -34,7 +34,7 @@ HashFunction::HashValue H3HashFunction::init() const
 
 HashFunction::HashValue H3HashFunction::calculate(HashValue& hash, const VarVal& value) const
 {
-    auto operatingValue = value.cast<HashValue>();
+    auto operatingValue = value.getRawValueAs<HashValue>();
     for (nautilus::static_val<uint64_t> keyBit = 0; keyBit < numberOfBitsInKey; ++keyBit)
     {
         auto isBitSet = (operatingValue & 1) == 1;

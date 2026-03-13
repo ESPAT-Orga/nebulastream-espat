@@ -38,14 +38,14 @@ VarVal ZstdCompressPhysicalFunction::execute(const Record& record, ArenaRef& are
     nautilus::val<size_t> valueSize{0};
     if (type.type == DataType::Type::VARSIZED)
     {
-        auto varSizedValueInput = value.cast<VariableSizedData>();
+        auto varSizedValueInput = value.getRawValueAs<VariableSizedData>();
         valueMem = varSizedValueInput.getContent();
         valueSize = varSizedValueInput.getSize();
     }
     else
     {
         auto typedValue = value.castToType(type.type);
-        valueSize = nautilus::val<uint32_t>(type.getSizeInBytes());
+        valueSize = nautilus::val<uint32_t>(type.getSizeInBytesWithoutNull());
         valueMem = arena.allocateMemory(valueSize);
         typedValue.writeToMemory(valueMem);
     }

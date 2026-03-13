@@ -40,7 +40,7 @@ nautilus::val<uint64_t> getRecordDataSizeForSample(const Record& record, const T
         auto type = types[i];
         if (type.isSameDataType<VariableSizedData>())
         {
-            const auto textValue = record.read(names[i]).cast<VariableSizedData>();
+            const auto textValue = record.read(names[i]).getRawValueAs<VariableSizedData>();
             recordDataSize += textValue.getSize() + nautilus::val<uint64_t>{4};
         }
     }
@@ -153,7 +153,7 @@ ReservoirSamplePhysicalFunction::lower(nautilus::val<AggregationState*> aggregat
             /// As we store varsized data directly in the sample area, we need to handle it ourselves.
             if (type.isSameDataType<VariableSizedData>())
             {
-                const auto varSizedValue = value.cast<VariableSizedData>();
+                const auto varSizedValue = value.getRawValueAs<VariableSizedData>();
                 const auto contentSize = varSizedValue.getSize();
                 /// Write the size prefix as uint32_t followed by the content
                 VarVal{static_cast<nautilus::val<uint32_t>>(contentSize)}.writeToMemory(sampleTuplesMemArea);
@@ -166,7 +166,7 @@ ReservoirSamplePhysicalFunction::lower(nautilus::val<AggregationState*> aggregat
                 if (const auto storeFunction = storeValueFunctionMap.find(type.type); storeFunction != storeValueFunctionMap.end())
                 {
                     auto _ = storeFunction->second(value, sampleTuplesMemArea);
-                    sampleTuplesMemArea += type.getSizeInBytes();
+                    sampleTuplesMemArea += type.getSizeInBytesWithoutNull();
                 }
                 else
                 {

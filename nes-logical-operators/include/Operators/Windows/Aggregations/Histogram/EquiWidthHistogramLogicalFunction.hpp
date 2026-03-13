@@ -71,6 +71,8 @@ public:
     [[nodiscard]] EquiWidthHistogramLogicalFunction withOnField(FieldAccessLogicalFunction onField) const;
     [[nodiscard]] EquiWidthHistogramLogicalFunction withAsField(FieldAccessLogicalFunction asField) const;
 
+    [[nodiscard]] static bool shallIncludeNullValues() noexcept;
+
     [[nodiscard]] bool operator==(const EquiWidthHistogramLogicalFunction& rhs) const;
 
     uint64_t numBuckets;

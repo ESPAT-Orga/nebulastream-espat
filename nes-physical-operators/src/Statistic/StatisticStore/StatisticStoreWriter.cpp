@@ -80,11 +80,12 @@ void StatisticStoreWriter::execute(ExecutionContext& executionCtx, Record& recor
     auto operatorHandlerMemRef = executionCtx.getGlobalOperatorHandler(operatorHandlerId);
     const nautilus::val<Statistic::StatisticHash> statisticHashVal{statisticHash};
     const nautilus::val<Statistic::StatisticType> statisticTypeVal{statisticType};
-    const nautilus::val<Timestamp> startTs{record.read(inputStatisticStartTsFieldName).cast<nautilus::val<Timestamp::Underlying>>()};
-    const nautilus::val<Timestamp> endTs{record.read(inputStatisticEndTsFieldName).cast<nautilus::val<Timestamp::Underlying>>()};
-    const auto statisticData = record.read(inputStatisticDataFieldName).cast<VariableSizedData>().getContent();
-    const auto totalSizeOfStatisticData = record.read(inputStatisticDataFieldName).cast<VariableSizedData>().getSize();
-    const auto numberOfSeenTuples = record.read(inputStatisticNumberOfSeenTuplesFieldName).cast<nautilus::val<uint64_t>>();
+    const nautilus::val<Timestamp> startTs{
+        record.read(inputStatisticStartTsFieldName).getRawValueAs<nautilus::val<Timestamp::Underlying>>()};
+    const nautilus::val<Timestamp> endTs{record.read(inputStatisticEndTsFieldName).getRawValueAs<nautilus::val<Timestamp::Underlying>>()};
+    const auto statisticData = record.read(inputStatisticDataFieldName).getRawValueAs<VariableSizedData>().getContent();
+    const auto totalSizeOfStatisticData = record.read(inputStatisticDataFieldName).getRawValueAs<VariableSizedData>().getSize();
+    const auto numberOfSeenTuples = record.read(inputStatisticNumberOfSeenTuplesFieldName).getRawValueAs<nautilus::val<uint64_t>>();
     invoke(
         insertStatisticIntoStoreProxy,
         operatorHandlerMemRef,

@@ -64,6 +64,8 @@ public:
     [[nodiscard]] ReservoirSampleLogicalFunction withOnField(FieldAccessLogicalFunction onField) const;
     [[nodiscard]] ReservoirSampleLogicalFunction withAsField(FieldAccessLogicalFunction asField) const;
 
+    [[nodiscard]] static bool shallIncludeNullValues() noexcept;
+
     [[nodiscard]] bool operator==(const ReservoirSampleLogicalFunction& rhs) const;
 
     /// Selects which fields get projected into the sample.

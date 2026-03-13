@@ -29,7 +29,7 @@ Record CountMinIteratorImpl::operator*()
     record.write(countMinProviderArgs.rowFieldName, counterRow);
     record.write(countMinProviderArgs.columnFieldName, counterCol);
     record.write(
-        countMinProviderArgs.counterFieldName, VarVal::readVarValFromMemory(curCounter, countMinProviderArgs.counterDataType.type));
+        countMinProviderArgs.counterFieldName, VarVal::readNonNullableVarValFromMemory(curCounter, countMinProviderArgs.counterDataType));
     return record;
 }
 
@@ -43,7 +43,7 @@ StatisticProviderIteratorImpl& CountMinIteratorImpl::operator++()
     }
 
     /// As the full 2-D array lies consequetively in memory, we can simply increment the curCounter
-    curCounter += countMinProviderArgs.counterDataType.getSizeInBytes();
+    curCounter += countMinProviderArgs.counterDataType.getSizeInBytesWithoutNull();
 
     return *this;
 }

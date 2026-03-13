@@ -104,8 +104,8 @@ namespace detail
 struct ReflectedEquiWidthHistogramProbeLogicalOperator
 {
     uint64_t statisticHash;
-    uint8_t counterTypeValue;
-    uint8_t startEndTypeValue;
+    DataType counterTypeValue;
+    DataType startEndTypeValue;
     std::string binStartFieldName;
     std::string binEndFieldName;
     std::string binCounterFieldName;

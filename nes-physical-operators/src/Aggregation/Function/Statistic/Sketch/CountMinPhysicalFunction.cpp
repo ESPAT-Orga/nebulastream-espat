@@ -37,7 +37,7 @@ CountMinPhysicalFunction::CountMinPhysicalFunction(
     , counterType(resultType)
     , numberOfCols(numberOfCols)
     , numberOfRows(numberOfRows)
-    , totalSizeOfSketchInBytes(numberOfRows * numberOfCols * counterType.getSizeInBytes())
+    , totalSizeOfSketchInBytes(numberOfRows * numberOfCols * counterType.getSizeInBytesWithoutNull())
     , numberOfBitsInKey(sizeof(HashFunction::HashValue::raw_type) * 8)
     , sizeOfSingleSeed(sizeof(HashFunction::HashValue::raw_type) * 8)
     , sizeOfSeedsForOneCol(numberOfBitsInKey * sizeOfSingleSeed)
@@ -57,8 +57,8 @@ void CountMinPhysicalFunction::lift(
         H3HashFunction h3HashFunction{sizeOfSingleSeed, numberOfBitsInKey, seedsRef};
         auto hash = h3HashFunction.HashFunction::calculate(value);
         auto row = hash % numberOfRows;
-        auto counterRef = firstCounterRef + counterType.getSizeInBytes() * (col * numberOfRows + row);
-        auto counter = VarVal::readVarValFromMemory(counterRef, counterType.type);
+        auto counterRef = firstCounterRef + counterType.getSizeInBytesWithoutNull() * (col * numberOfRows + row);
+        auto counter = VarVal::readNonNullableVarValFromMemory(counterRef, counterType);
         counter = counter + nautilus::val<uint64_t>{1};
         counter.writeToMemory(counterRef);
     }
@@ -80,13 +80,13 @@ void CountMinPhysicalFunction::combine(
     auto counterRightRef = static_cast<nautilus::val<int8_t*>>(aggregationState2);
     for (nautilus::static_val<uint64_t> counterIdx = 0; counterIdx < numberOfCols * numberOfRows; ++counterIdx)
     {
-        auto counterLeft = VarVal::readVarValFromMemory(counterLeftRef, counterType.type);
-        auto counterRight = VarVal::readVarValFromMemory(counterRightRef, counterType.type);
+        auto counterLeft = VarVal::readNonNullableVarValFromMemory(counterLeftRef, counterType);
+        auto counterRight = VarVal::readNonNullableVarValFromMemory(counterRightRef, counterType);
         counterLeft = counterLeft + counterRight;
         counterLeft.writeToMemory(counterLeftRef);
 
-        counterLeftRef += counterType.getSizeInBytes();
-        counterRightRef += counterType.getSizeInBytes();
+        counterLeftRef += counterType.getSizeInBytesWithoutNull();
+        counterRightRef += counterType.getSizeInBytesWithoutNull();
     }
 
     /// Combining the number of seen tuples of both histograms
@@ -156,7 +156,7 @@ void CountMinPhysicalFunction::cleanup(nautilus::val<AggregationState*>)
 size_t CountMinPhysicalFunction::getSizeOfStateInBytes() const
 {
     /// Last u64 is for storing the number of seen tuples
-    return counterType.getSizeInBytes() * numberOfCols * numberOfRows + sizeOfSeedsForOneCol * numberOfCols + sizeof(uint64_t);
+    return counterType.getSizeInBytesWithoutNull() * numberOfCols * numberOfRows + sizeOfSeedsForOneCol * numberOfCols + sizeof(uint64_t);
 }
 
 AggregationPhysicalFunctionRegistryReturnType

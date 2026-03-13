@@ -76,9 +76,9 @@ void StatisticStoreReader::execute(ExecutionContext& executionCtx, Record& recor
 {
     /// Read statistics and call the child with the generated tuples
     auto operatorHandlerMemRef = executionCtx.getGlobalOperatorHandler(operatorHandlerId);
-    const auto statisticHash = record.read(statisticHashFieldName).cast<nautilus::val<Statistic::StatisticHash>>();
-    const nautilus::val<Timestamp> startTs{record.read(statisticStartTsFieldName).cast<nautilus::val<Timestamp::Underlying>>()};
-    const nautilus::val<Timestamp> endTs{record.read(statisticEndTsFieldName).cast<nautilus::val<Timestamp::Underlying>>()};
+    const auto statisticHash = record.read(statisticHashFieldName).getRawValueAs<nautilus::val<Statistic::StatisticHash>>();
+    const nautilus::val<Timestamp> startTs{record.read(statisticStartTsFieldName).getRawValueAs<nautilus::val<Timestamp::Underlying>>()};
+    const nautilus::val<Timestamp> endTs{record.read(statisticEndTsFieldName).getRawValueAs<nautilus::val<Timestamp::Underlying>>()};
     const auto numberOfSeenTuples = invoke(getNumberOfSeenTuplesOfStatistic, operatorHandlerMemRef, statisticHash, startTs, endTs);
     const auto statisticMemArea = invoke(getStatisticDataProxy, operatorHandlerMemRef, statisticHash, startTs, endTs);
     for (auto statisticIterator = statisticProvider.begin(statisticMemArea); statisticIterator != statisticProvider.end(statisticMemArea);

@@ -31,7 +31,7 @@ Record ReservoirSampleIteratorImpl::operator*()
     for (const auto& [fieldIdentifier, type, fieldOffset] : nautilus::static_iterable(sampleFields))
     {
         nautilus::val<uint64_t> currFieldOffset = 0;
-        if (type == DataType{DataType::Type::VARSIZED})
+        if (type.type == DataType::Type::VARSIZED)
         {
             auto dataSize = readValueFromMemRef<uint32_t>(fieldAddress);
             VariableSizedData varSizedData{fieldAddress + nautilus::val<uint64_t>{4}, nautilus::val<uint64_t>{dataSize}};
@@ -40,10 +40,10 @@ Record ReservoirSampleIteratorImpl::operator*()
         }
         else
         {
-            const auto varVal = VarVal::readVarValFromMemory(fieldAddress, type.type);
+            const auto varVal = VarVal::readNonNullableVarValFromMemory(fieldAddress, type);
             record.write(fieldIdentifier, varVal);
         }
-        fieldAddress = fieldAddress + type.getSizeInBytes();
+        fieldAddress = fieldAddress + type.getSizeInBytesWithoutNull();
     }
 
     return record;

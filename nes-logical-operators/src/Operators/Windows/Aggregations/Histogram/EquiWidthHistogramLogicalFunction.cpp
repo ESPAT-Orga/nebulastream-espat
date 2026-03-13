@@ -19,6 +19,7 @@
 #include <string_view>
 #include <utility>
 #include <DataTypes/DataType.hpp>
+#include <DataTypes/DataTypeProvider.hpp>
 #include <DataTypes/Schema.hpp>
 #include <Functions/FieldAccessLogicalFunction.hpp>
 #include <Functions/LogicalFunction.hpp>
@@ -44,8 +45,8 @@ EquiWidthHistogramLogicalFunction::EquiWidthHistogramLogicalFunction(
     , statisticHash(statisticHash)
     , counterType(counterType)
     , inputStamp(onField.getDataType())
-    , partialAggregateStamp(DataType::Type::UNDEFINED)
-    , finalAggregateStamp(DataType::Type::VARSIZED)
+    , partialAggregateStamp(DataTypeProvider::provideDataType(DataType::Type::UNDEFINED, DataType::NULLABLE::NOT_NULLABLE))
+    , finalAggregateStamp(DataTypeProvider::provideDataType(DataType::Type::VARSIZED, DataType::NULLABLE::NOT_NULLABLE))
     , onField(onField)
     , asField(onField)
 {
@@ -65,8 +66,8 @@ EquiWidthHistogramLogicalFunction::EquiWidthHistogramLogicalFunction(
     , statisticHash(statisticHash)
     , counterType(counterType)
     , inputStamp(onField.getDataType())
-    , partialAggregateStamp(DataType::Type::UNDEFINED)
-    , finalAggregateStamp(DataType::Type::VARSIZED)
+    , partialAggregateStamp(DataTypeProvider::provideDataType(DataType::Type::UNDEFINED, DataType::NULLABLE::NOT_NULLABLE))
+    , finalAggregateStamp(DataTypeProvider::provideDataType(DataType::Type::VARSIZED, DataType::NULLABLE::NOT_NULLABLE))
     , onField(onField)
     , asField(asField)
 {
@@ -199,6 +200,11 @@ EquiWidthHistogramLogicalFunction EquiWidthHistogramLogicalFunction::withAsField
     auto copy = *this;
     copy.asField = std::move(newAsField);
     return copy;
+}
+
+bool EquiWidthHistogramLogicalFunction::shallIncludeNullValues() noexcept
+{
+    return true;
 }
 
 bool EquiWidthHistogramLogicalFunction::operator==(const EquiWidthHistogramLogicalFunction& rhs) const

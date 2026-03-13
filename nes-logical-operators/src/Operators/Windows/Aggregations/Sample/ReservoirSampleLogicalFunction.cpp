@@ -19,6 +19,7 @@
 #include <string_view>
 #include <utility>
 #include <DataTypes/DataType.hpp>
+#include <DataTypes/DataTypeProvider.hpp>
 #include <DataTypes/Schema.hpp>
 #include <Functions/FieldAccessLogicalFunction.hpp>
 #include <Functions/LogicalFunction.hpp>
@@ -40,8 +41,8 @@ ReservoirSampleLogicalFunction::ReservoirSampleLogicalFunction(
     , reservoirSize(reservoirSize)
     , sampleHash(sampleHash)
     , inputStamp(onField.getDataType())
-    , partialAggregateStamp(DataType::Type::UNDEFINED)
-    , finalAggregateStamp(DataType::Type::VARSIZED)
+    , partialAggregateStamp(DataTypeProvider::provideDataType(DataType::Type::UNDEFINED, DataType::NULLABLE::NOT_NULLABLE))
+    , finalAggregateStamp(DataTypeProvider::provideDataType(DataType::Type::VARSIZED, DataType::NULLABLE::NOT_NULLABLE))
     , onField(onField)
     , asField(onField)
 {
@@ -57,8 +58,8 @@ ReservoirSampleLogicalFunction::ReservoirSampleLogicalFunction(
     , reservoirSize(reservoirSize)
     , sampleHash(sampleHash)
     , inputStamp(onField.getDataType())
-    , partialAggregateStamp(DataType::Type::UNDEFINED)
-    , finalAggregateStamp(DataType::Type::VARSIZED)
+    , partialAggregateStamp(DataTypeProvider::provideDataType(DataType::Type::UNDEFINED, DataType::NULLABLE::NOT_NULLABLE))
+    , finalAggregateStamp(DataTypeProvider::provideDataType(DataType::Type::VARSIZED, DataType::NULLABLE::NOT_NULLABLE))
     , onField(onField)
     , asField(asField)
 {
@@ -181,6 +182,11 @@ ReservoirSampleLogicalFunction ReservoirSampleLogicalFunction::withAsField(Field
     auto copy = *this;
     copy.asField = std::move(newAsField);
     return copy;
+}
+
+bool ReservoirSampleLogicalFunction::shallIncludeNullValues() noexcept
+{
+    return true;
 }
 
 bool ReservoirSampleLogicalFunction::operator==(const ReservoirSampleLogicalFunction& rhs) const

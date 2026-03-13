@@ -495,7 +495,7 @@ void AntlrSQLQueryPlanCreator::exitPrimaryQuery(AntlrSQLParser::PrimaryQueryCont
     }
 
     auto statisticAggs = std::initializer_list<std::string>{"ReservoirSample", "EquiWidthHistogram", "CountMinSketch"};
-    if (helpers.top().windowType != nullptr && helpers.top().joinKeyRelationHelper.empty()
+    if (helpers.top().windowType != nullptr && helpers.top().joinKeyRelationHelper.empty() and not helpers.top().windowAggs.empty()
         and std::ranges::find(statisticAggs, helpers.top().windowAggs.front().get()->getName()) != std::end(statisticAggs))
     {
         /// This is actually a statistic operation, not an aggregation
@@ -535,6 +535,12 @@ void AntlrSQLQueryPlanCreator::exitPrimaryQuery(AntlrSQLParser::PrimaryQueryCont
     else if (helpers.top().isInAggFunction())
     {
         /// Plain old windowed aggregation
+        queryPlan = LogicalPlanBuilder::addWindowAggregation(
+            queryPlan, helpers.top().windowType, helpers.top().windowAggs, helpers.top().groupByFields);
+    }
+    else if (helpers.top().windowType != nullptr && helpers.top().joinKeyRelationHelper.empty())
+    {
+        /// Window without aggregation function
         queryPlan = LogicalPlanBuilder::addWindowAggregation(
             queryPlan, helpers.top().windowType, helpers.top().windowAggs, helpers.top().groupByFields);
     }

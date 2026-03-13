@@ -34,8 +34,8 @@ ATTACH INLINE
 1,20,20000
 1,21,21000
 
-CREATE SINK sinkStream(stream.statisticStart UINT64, stream.statisticEnd UINT64, stream.binStart UINT64, stream.binCounter UINT64, stream.binEnd UINT64) TYPE File;
-CREATE SINK sinkStreamBuild(stream.statisticHash UINT64, stream.statisticStart UINT64, stream.statisticEnd UINT64, stream.statisticNumberOfSeenTuples UINT64) TYPE File;
+CREATE SINK sinkStream(stream.statisticStart UINT64 NOT NULL, stream.statisticEnd UINT64 NOT NULL, stream.binStart UINT64 NOT NULL, stream.binCounter UINT64 NOT NULL, stream.binEnd UINT64 NOT NULL) TYPE File;
+CREATE SINK sinkStreamBuild(stream.statisticHash UINT64 NOT NULL, stream.statisticStart UINT64 NOT NULL, stream.statisticEnd UINT64 NOT NULL, stream.statisticNumberOfSeenTuples UINT64 NOT NULL) TYPE File;
 
 # Solely build operator
 # equi width histogram arguments:

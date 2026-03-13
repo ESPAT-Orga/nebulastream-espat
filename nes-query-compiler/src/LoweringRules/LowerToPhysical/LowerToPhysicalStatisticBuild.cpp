@@ -228,7 +228,7 @@ LoweringRuleResultSubgraph LowerToPhysicalStatisticBuild::apply(LogicalOperator 
             INVARIANT(fieldReplaceSuccess, "Expect to change the type of {} for {}", nodeFunctionKey.getFieldName(), newInputSchema);
         }
         keyFunctions.emplace_back(QueryCompilation::FunctionProvider::lowerFunction(nodeFunctionKey));
-        keySize += DataTypeProvider::provideDataType(loweredFunctionType.type).getSizeInBytes();
+        keySize += DataTypeProvider::provideDataType(loweredFunctionType.type).getSizeInBytesWithoutNull();
     }
     const auto entrySize = sizeof(ChainedHashMapEntry) + keySize + valueSize;
     const auto numberOfBuckets = conf.numberOfPartitions.getValue();

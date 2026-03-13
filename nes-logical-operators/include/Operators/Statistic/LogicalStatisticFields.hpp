@@ -15,6 +15,7 @@
 #pragma once
 #include <Configurations/Descriptor.hpp>
 #include <DataTypes/DataType.hpp>
+#include <DataTypes/DataTypeProvider.hpp>
 #include <DataTypes/Schema.hpp>
 
 namespace NES
@@ -25,12 +26,18 @@ class LogicalStatisticFields
 {
 public:
     /// The fields need to be in upper case. Otherwise, the parsing of the field names in the SLT of the sink does not work
-    Schema::Field statisticNumberOfSeenTuplesField = {"STATISTICNUMBEROFSEENTUPLES", DataType{DataType::Type::UINT64}};
-    Schema::Field statisticHashField = {"STATISTICHASH", DataType{DataType::Type::UINT64}};
-    Schema::Field statisticStartTsField = {"STATISTICSTART", DataType{DataType::Type::UINT64}};
-    Schema::Field statisticEndTsField = {"STATISTICEND", DataType{DataType::Type::UINT64}};
-    Schema::Field statisticDataField = {"STATISTICDATA", DataType{DataType::Type::VARSIZED}};
-    Schema::Field statisticTypeField = {"STATISTICTYPE", DataType{DataType::Type::UINT64}};
+    Schema::Field statisticNumberOfSeenTuplesField
+        = {"STATISTICNUMBEROFSEENTUPLES", DataTypeProvider::provideDataType(DataType::Type::UINT64, DataType::NULLABLE::NOT_NULLABLE)};
+    Schema::Field statisticHashField
+        = {"STATISTICHASH", DataTypeProvider::provideDataType(DataType::Type::UINT64, DataType::NULLABLE::NOT_NULLABLE)};
+    Schema::Field statisticStartTsField
+        = {"STATISTICSTART", DataTypeProvider::provideDataType(DataType::Type::UINT64, DataType::NULLABLE::NOT_NULLABLE)};
+    Schema::Field statisticEndTsField
+        = {"STATISTICEND", DataTypeProvider::provideDataType(DataType::Type::UINT64, DataType::NULLABLE::NOT_NULLABLE)};
+    Schema::Field statisticDataField
+        = {"STATISTICDATA", DataTypeProvider::provideDataType(DataType::Type::VARSIZED, DataType::NULLABLE::NOT_NULLABLE)};
+    Schema::Field statisticTypeField
+        = {"STATISTICTYPE", DataTypeProvider::provideDataType(DataType::Type::UINT64, DataType::NULLABLE::NOT_NULLABLE)};
 
     LogicalStatisticFields() = default;
     bool operator==(const LogicalStatisticFields&) const = default;

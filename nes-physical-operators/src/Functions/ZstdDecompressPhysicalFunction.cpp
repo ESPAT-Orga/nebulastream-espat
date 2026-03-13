@@ -34,7 +34,7 @@ VarVal ZstdDecompressPhysicalFunction::execute(const Record& record, ArenaRef& a
     const auto value = childPhysicalFunction.execute(record, arena);
     nautilus::val<size_t> decompressedSize{0};
     nautilus::val<int8_t*> memDecompressed{nullptr};
-    const auto varSizedValueCompressed = value.cast<VariableSizedData>();
+    const auto varSizedValueCompressed = value.getRawValueAs<VariableSizedData>();
 
     if (type.type == DataType::Type::VARSIZED)
     {
@@ -56,7 +56,7 @@ VarVal ZstdDecompressPhysicalFunction::execute(const Record& record, ArenaRef& a
     }
     else
     {
-        decompressedSize = nautilus::val<size_t>(type.getSizeInBytes());
+        decompressedSize = nautilus::val<size_t>(type.getSizeInBytesWithoutNull());
 
         memDecompressed = arena.allocateMemory(decompressedSize);
         nautilus::invoke(
@@ -66,7 +66,7 @@ VarVal ZstdDecompressPhysicalFunction::execute(const Record& record, ArenaRef& a
             decompressedSize,
             memDecompressed);
 
-        return VarVal::readVarValFromMemory(memDecompressed, type.type);
+        return VarVal::readVarValFromMemory(memDecompressed, type, nautilus::val<bool>(false));
     }
 }
 

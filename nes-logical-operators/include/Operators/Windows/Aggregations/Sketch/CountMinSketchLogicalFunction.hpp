@@ -58,6 +58,8 @@ public:
     [[nodiscard]] CountMinSketchLogicalFunction withOnField(FieldAccessLogicalFunction onField) const;
     [[nodiscard]] CountMinSketchLogicalFunction withAsField(FieldAccessLogicalFunction asField) const;
 
+    [[nodiscard]] static bool shallIncludeNullValues() noexcept;
+
     [[nodiscard]] bool operator==(const CountMinSketchLogicalFunction& rhs) const;
 
     uint64_t columns;

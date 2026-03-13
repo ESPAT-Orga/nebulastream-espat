@@ -19,6 +19,7 @@
 #include <string_view>
 #include <utility>
 #include <vector>
+#include <DataTypes/DataTypeProvider.hpp>
 #include <Identifiers/Identifiers.hpp>
 #include <Operators/LogicalOperator.hpp>
 #include <Traits/Trait.hpp>
@@ -168,7 +169,8 @@ ReservoirProbeLogicalOperator Unreflector<ReservoirProbeLogicalOperator>::operat
     Schema sampleSchema;
     for (const auto& field : sampleFields)
     {
-        sampleSchema.addField(field.name, DataType{static_cast<DataType::Type>(field.dataType)});
+        sampleSchema.addField(
+            field.name, DataTypeProvider::provideDataType(static_cast<DataType::Type>(field.dataType), DataType::NULLABLE::NOT_NULLABLE));
     }
     return ReservoirProbeLogicalOperator{statisticHash, sampleSchema};
 }

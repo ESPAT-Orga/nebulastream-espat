@@ -25,12 +25,12 @@ EquiWidthHistogramIteratorImpl::EquiWidthHistogramIteratorImpl(
 Record EquiWidthHistogramIteratorImpl::operator*()
 {
     /// Reading the current bin into VarVals
-    nautilus::val<uint64_t> dataTypeStartEndVal{equiWidthHistogramArgs.dataTypeStartEnd.getSizeInBytes()};
+    nautilus::val<uint64_t> dataTypeStartEndVal{equiWidthHistogramArgs.dataTypeStartEnd.getSizeInBytesWithoutNull()};
     const auto binCounterMemRef = binMemRef + dataTypeStartEndVal;
     const auto binEndMemRef = binMemRef + dataTypeStartEndVal * 2;
-    const auto binStart = VarVal::readVarValFromMemory(binMemRef, equiWidthHistogramArgs.dataTypeStartEnd.type);
-    const auto binCounter = VarVal::readVarValFromMemory(binCounterMemRef, equiWidthHistogramArgs.dataTypeCounter.type);
-    const auto binEnd = VarVal::readVarValFromMemory(binEndMemRef, equiWidthHistogramArgs.dataTypeStartEnd.type);
+    const auto binStart = VarVal::readNonNullableVarValFromMemory(binMemRef, equiWidthHistogramArgs.dataTypeStartEnd);
+    const auto binCounter = VarVal::readNonNullableVarValFromMemory(binCounterMemRef, equiWidthHistogramArgs.dataTypeCounter);
+    const auto binEnd = VarVal::readNonNullableVarValFromMemory(binEndMemRef, equiWidthHistogramArgs.dataTypeStartEnd);
 
     /// Create a record out of the histogram bin
     Record record;

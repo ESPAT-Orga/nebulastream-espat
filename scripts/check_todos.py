@@ -116,7 +116,11 @@ def main():
     diff = run_cmd(["git", "diff", f"HEAD~{distance_main}", "--",
                     # Ignore patch files in our vcpkg & nix ports
                     ":!vcpkg/vcpkg-registry/**/*.patch",
-                    ":!.nix/**/patches/*.patch"
+                    ":!.nix/**/patches/*.patch",
+                    # Ignore Jupyter notebooks
+                    ":!*.ipynb",
+                    # Ignore template files
+                    ":!*.template"
                     ])
 
     added_lines = get_added_lines_from_diff(diff)

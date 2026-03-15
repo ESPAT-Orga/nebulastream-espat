@@ -57,6 +57,9 @@ public:
     bool start(SourceReturnType::EmitFunction&& emitFunction) const;
     void stop() const;
 
+    /// If applicable, setups the source. This function is called after the source has been lowered
+    bool setup() const;
+
     /// Tries to stop the source within a given timeout.
     [[nodiscard]] NES::SourceReturnType::TryStopResult tryStop(std::chrono::milliseconds timeout) const;
 

@@ -1,0 +1,16 @@
+# name: benchmark_statistic_build/StatisticBuild.test
+# description: Benchmark for reservoir sampling and equiwidth histogram build operators over LinearRoadBenchmark
+# groups: [benchmark, large, Synopsis, Aggregation]
+
+CREATE LOGICAL SOURCE lrb(creationTS UINT64, vehicle INT16, speed FLOAT32, highway INT16, lane INT16, direction INT16, position INT32);
+CREATE PHYSICAL SOURCE FOR lrb TYPE Memory;
+ATTACH FILE large/lrb/linear_road_benchmark_560K.csv
+
+# Reservoir build
+SELECT RESERVOIR(100, highway, direction, position, 1000) FROM lrb WINDOW TUMBLING(creationTS, size 10 sec) INTO DISCARD();
+----
+
+
+# Equiwidth histogram build
+SELECT EQUIWIDTHHISTOGRAM(200, vehicle, 100, 0, 1000000, uint64) FROM lrb WINDOW TUMBLING(creationTS, size 10 sec) INTO DISCARD();
+----

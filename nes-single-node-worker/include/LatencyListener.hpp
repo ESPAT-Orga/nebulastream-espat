@@ -19,8 +19,8 @@
 #include <queue>
 #include <thread>
 #include <Time/Timestamp.hpp>
-#include <QueryEngineStatisticListener.hpp>
 #include <folly/Synchronized.h>
+#include <QueryEngineStatisticListener.hpp>
 
 namespace NES
 {

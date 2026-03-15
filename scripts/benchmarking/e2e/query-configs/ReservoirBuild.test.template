@@ -1,0 +1,10 @@
+# name: benchmark_statistic_build/ReservoirBuild.test
+# description: Benchmark for reservoir build operator over Nexmark bid data
+# groups: [benchmark, large, Synopsis, Aggregation]
+
+CREATE LOGICAL SOURCE bid(timestamp UINT64, auctionId INT32, bidder INT32, price FLOAT64);
+CREATE PHYSICAL SOURCE FOR bid TYPE Memory;
+ATTACH FILE large/nexmark/bid_6GB.csv
+
+SELECT RESERVOIR(100, auctionId, bidder, price, {reservoir_size}) FROM bid WINDOW TUMBLING(timestamp, size 10 sec) INTO Discard();
+----

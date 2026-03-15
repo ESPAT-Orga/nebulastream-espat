@@ -1,5 +1,5 @@
 /*
-Licensed under the Apache License, Version 2.0 (the "License");
+    Licensed under the Apache License, Version 2.0 (the "License");
     you may not use this file except in compliance with the License.
     You may obtain a copy of the License at
 
@@ -11,16 +11,16 @@ Licensed under the Apache License, Version 2.0 (the "License");
     See the License for the specific language governing permissions and
     limitations under the License.
 */
+#include <LatencyListener.hpp>
 
 #include <iostream>
 #include <queue>
 #include <Time/Timestamp.hpp>
 #include <Util/Logger/Logger.hpp>
 #include <Util/Overloaded.hpp>
-#include <Thread.hpp>
 #include <folly/Synchronized.h>
 #include <ErrorHandling.hpp>
-#include <LatencyListener.hpp>
+#include <Thread.hpp>
 
 namespace NES
 {
@@ -42,10 +42,7 @@ struct TaskIntermediateStore
     {
     }
 
-    explicit TaskIntermediateStore()
-        : queryId(INVALID_QUERY_ID), numberOfTuples(0), startTimePoint(std::chrono::system_clock::now())
-    {
-    }
+    explicit TaskIntermediateStore() : queryId(INVALID_QUERY_ID), numberOfTuples(0), startTimePoint(std::chrono::system_clock::now()) { }
 
     QueryId queryId;
     uint64_t numberOfTuples;
@@ -100,9 +97,7 @@ void threadRoutine(
                     }
 
                     intermediateStore.insert(
-                        {taskEmit.taskId,
-                         TaskIntermediateStore{
-                             taskEmit.queryId, taskEmit.numberOfTuples, taskEmit.timestamp}});
+                        {taskEmit.taskId, TaskIntermediateStore{taskEmit.queryId, taskEmit.numberOfTuples, taskEmit.timestamp}});
                 },
                 [&](const TaskExecutionComplete& taskExecutionCompleted)
                 {
@@ -172,8 +167,7 @@ LatencyListener::~LatencyListener()
             std::cout << fmt::format(
                 "Queue in LatencyListener still contains {} elements but could not finish in {}.", events.rlock()->size(), timeout)
                       << std::endl;
-            NES_WARNING(
-                "Queue in LatencyListener still contains {} elements but could not finish in {}.", events.rlock()->size(), timeout);
+            NES_WARNING("Queue in LatencyListener still contains {} elements but could not finish in {}.", events.rlock()->size(), timeout);
         }
     }
 }

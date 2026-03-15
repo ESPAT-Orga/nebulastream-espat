@@ -26,17 +26,18 @@
 #include <Runtime/TupleBuffer.hpp>
 #include <Sinks/SinkDescriptor.hpp>
 #include <Util/Logger/Logger.hpp>
+#include <magic_enum/magic_enum.hpp>
 #include <ErrorHandling.hpp>
 #include <PipelineExecutionContext.hpp>
 #include <SinkRegistry.hpp>
 #include <SinkValidationRegistry.hpp>
-#include <magic_enum/magic_enum.hpp>
 
 namespace NES
 {
 
 DiscardSink::DiscardSink(BackpressureController backpressureController, const SinkDescriptor& sinkDescriptor)
-    : Sink(std::move(backpressureController)), outputFilePath(sinkDescriptor.getFromConfig(SinkDescriptor::FILE_PATH))
+    : Sink(std::move(backpressureController))
+    , outputFilePath(sinkDescriptor.getFromConfig(SinkDescriptor::FILE_PATH))
     , schema(sinkDescriptor.getSchema())
 {
 }

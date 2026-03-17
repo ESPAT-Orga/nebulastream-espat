@@ -59,9 +59,7 @@ allExecutionModes = ["COMPILER"]
 allNumberOfWorkerThreads = [24]
 allJoinStrategies = ["HASH_JOIN"]
 allNumberOfEntriesSliceCaches = [10]
-allSliceCacheTypes = ["SECOND_CHANCE"]
 allPageSizes = [8192]
-allResourceAssignments = ["WORK_STEALING", "WORK_DEALING_NEW_QUEUE_AND_THREAD"]
 
 
 #### Queries
@@ -366,28 +364,25 @@ if __name__ == "__main__":
             len(allNumberOfBuffersInGlobalBufferManagers) *
             len(allJoinStrategies) *
             len(allNumberOfEntriesSliceCaches) *
-            len(allSliceCacheTypes) *
             len(allBufferSizes) *
             len(allPageSizes) *
-            len(allResourceAssignments) *
             len(allQueries)
     )
     combinations = itertools.product(allExecutionModes, allNumberOfWorkerThreads,
                                      allNumberOfBuffersInGlobalBufferManagers, allJoinStrategies,
-                                     allNumberOfEntriesSliceCaches, allSliceCacheTypes, allBufferSizes,
-                                     allPageSizes, allResourceAssignments, allQueries)
+                                     allNumberOfEntriesSliceCaches, allBufferSizes,
+                                     allPageSizes, allQueries)
 
     counter = 0
     new_folders = []
     for [executionMode, numberOfWorkerThreads, buffersInGlobalBufferManager, joinStrategy,
-         numberOfEntriesSliceCaches,
-         sliceCacheType, bufferSizeInBytes, pageSize, resourceAssignment, query] in combinations:
+         numberOfEntriesSliceCaches, bufferSizeInBytes, pageSize, query] in combinations:
         try:
             counter += 1
             print(f"Running combination [{counter}/{no_combinations}]")
 
             # Creating new output folder for this benchmark run and writing the current combination to a file
-            folder_name = create_output_folder(resourceAssignment + "_" + query)
+            folder_name = create_output_folder(query)
             new_folders.append(folder_name)
             with (open(os.path.join(folder_name, config_file), 'w') as file):
                 # Write the combination to the file
@@ -397,10 +392,8 @@ if __name__ == "__main__":
                     "buffersInGlobalBufferManager": buffersInGlobalBufferManager,
                     "joinStrategy": joinStrategy,
                     "numberOfEntriesSliceCaches": numberOfEntriesSliceCaches,
-                    "sliceCacheType": sliceCacheType,
                     "bufferSizeInBytes": bufferSizeInBytes,
                     "pageSize": pageSize,
-                    "resourceAssignment": resourceAssignment,
                     "query": query
                 }
                 yaml.dump(config, file, default_flow_style=False)

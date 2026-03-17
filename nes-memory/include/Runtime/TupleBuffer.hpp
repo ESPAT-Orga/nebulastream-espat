@@ -145,6 +145,8 @@ public:
 
     [[nodiscard]] uint64_t getNumberOfTuples() const noexcept;
     void setNumberOfTuples(uint64_t numberOfTuples) const noexcept;
+    [[nodiscard]] uint64_t getNumberOfProcessedTuples() const noexcept;
+    void setNumberOfProcessedTuples(uint64_t numberOfProcessedTuples) const noexcept;
 
     [[nodiscard]] Timestamp getWatermark() const noexcept;
     void setWatermark(Timestamp value) noexcept;

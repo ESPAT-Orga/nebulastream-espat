@@ -12,11 +12,12 @@
     limitations under the License.
 */
 
+#include <Watermark/IngestionTimeWatermarkAssignerPhysicalOperator.hpp>
+
 #include <optional>
 #include <utility>
 #include <Nautilus/Interface/Record.hpp>
 #include <Nautilus/Interface/RecordBuffer.hpp>
-#include <Watermark/IngestionTimeWatermarkAssignerPhysicalOperator.hpp>
 #include <Watermark/TimeFunction.hpp>
 #include <ExecutionContext.hpp>
 #include <PhysicalOperator.hpp>
@@ -27,9 +28,10 @@ namespace NES
 IngestionTimeWatermarkAssignerPhysicalOperator::IngestionTimeWatermarkAssignerPhysicalOperator(IngestionTimeFunction timeFunction)
     : timeFunction(std::move(timeFunction)) { };
 
-void IngestionTimeWatermarkAssignerPhysicalOperator::open(ExecutionContext& executionCtx, RecordBuffer& recordBuffer) const
+nautilus::val<uint64_t>
+IngestionTimeWatermarkAssignerPhysicalOperator::open(ExecutionContext& executionCtx, RecordBuffer& recordBuffer) const
 {
-    openChild(executionCtx, recordBuffer);
+    auto result = openChild(executionCtx, recordBuffer);
     timeFunction.open(executionCtx, recordBuffer);
     auto emptyRecord = Record();
     const auto tsField = [this](ExecutionContext& executionCtx)
@@ -41,6 +43,7 @@ void IngestionTimeWatermarkAssignerPhysicalOperator::open(ExecutionContext& exec
     {
         executionCtx.watermarkTs = tsField;
     }
+    return result;
 }
 
 void IngestionTimeWatermarkAssignerPhysicalOperator::execute(ExecutionContext& executionCtx, Record& record) const

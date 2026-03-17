@@ -72,9 +72,10 @@ CompiledExecutablePipelineStage::compilePipeline() const
                                    nautilus::val<const Arena*> arenaRef)
         {
             auto ctx = ExecutionContext(pipelineExecutionContext, arenaRef);
-            RecordBuffer recordBuffer(recordBufferRef);
+            RecordBuffer recordBuffer{recordBufferRef};
 
-            pipeline->getRootOperator().open(ctx, recordBuffer);
+            const auto processedNumberOfTuples = pipeline->getRootOperator().open(ctx, recordBuffer);
+            recordBuffer.setNumberOfProcessedTuples(processedNumberOfTuples);
             switch (ctx.getOpenReturnState())
             {
                 case OpenReturnState::CONTINUE: {

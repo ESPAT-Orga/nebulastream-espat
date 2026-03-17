@@ -48,7 +48,7 @@ HashMap* getHashMapPtrProxy(const EmittedAggregationWindow* emittedAggregationWi
     return emittedAggregationWindow->hashMaps[currentHashMapVal];
 }
 
-void AggregationProbePhysicalOperator::open(ExecutionContext& executionCtx, RecordBuffer& recordBuffer) const
+nautilus::val<uint64_t> AggregationProbePhysicalOperator::open(ExecutionContext& executionCtx, RecordBuffer& recordBuffer) const
 {
     /// As this operator functions as a scan, we have to set the execution context for this pipeline
     executionCtx.watermarkTs = recordBuffer.getWatermarkTs();
@@ -167,6 +167,7 @@ void AggregationProbePhysicalOperator::open(ExecutionContext& executionCtx, Reco
             emittedAggregationWindow->finalHashMap.reset();
         },
         aggregationWindowRef);
+    return recordBuffer.getNumRecords();
 }
 
 AggregationProbePhysicalOperator::AggregationProbePhysicalOperator(

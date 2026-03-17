@@ -157,7 +157,7 @@ void GoogleEventTracePrinter::threadRoutine(const std::stop_token& token)
         file.close();
     };
 
-    // TODO #19 currently this vector grows without garbage collection. Will crash for long running queries
+    /// TODO #19 currently this vector grows without garbage collection. Will crash for long running queries
     std::vector<BufferManagerChange> pooledBufferChanges;
     std::vector<BufferManagerChange> unpooledBufferChanges;
 

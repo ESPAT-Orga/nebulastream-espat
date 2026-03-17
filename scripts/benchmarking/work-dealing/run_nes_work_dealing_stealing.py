@@ -102,7 +102,6 @@ def start_single_node_worker(file_path_stdout):
 
 
 def submitting_query(query_file):
-    # TODO submitting still necessary?
     cmd = f"{nebuli_executable} -t {query_file} start"
     print(f"Submitting the query via {cmd}...")
     try:

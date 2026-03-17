@@ -41,6 +41,21 @@ void inline NES_Memory_TupleBuffer_setNumberOfTuples(TupleBuffer* tupleBuffer, c
     tupleBuffer->setNumberOfTuples(numberOfTuples);
 }
 
+inline uint64_t NES_Memory_TupleBuffer_getNumberOfProcessedTuples(const TupleBuffer* tupleBuffer)
+{
+    return tupleBuffer->getNumberOfProcessedTuples();
+};
+
+void inline NES_Memory_TupleBuffer_setNumberOfProcessedTuples(TupleBuffer* tupleBuffer, const uint64_t numberOfProcessedTuples)
+{
+    tupleBuffer->setNumberOfProcessedTuples(numberOfProcessedTuples);
+}
+
+void inline NES_Memory_TupleBuffer_incrementNumberOfProcessedTuples(const TupleBuffer* tupleBuffer)
+{
+    tupleBuffer->setNumberOfProcessedTuples(tupleBuffer->getNumberOfProcessedTuples() + 1);
+}
+
 inline OriginId NES_Memory_TupleBuffer_getOriginId(const TupleBuffer* tupleBuffer)
 {
     return tupleBuffer->getOriginId();

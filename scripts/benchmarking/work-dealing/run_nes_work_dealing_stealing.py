@@ -107,7 +107,7 @@ def start_single_node_worker(file_path_stdout):
     return process
 
 
-def submitting_query(query_file):
+def submitting_query(query_file, cli_log_file):
     # TODO submitting still necessary?
     cmd = f"{nebuli_executable} -t {query_file} start"
     print(f"Submitting the query via {cmd}...")
@@ -116,27 +116,37 @@ def submitting_query(query_file):
                                 stderr=subprocess.PIPE,  # Capture standard error
                                 text=True  # Decode output to a string
                                 )
-        # print(f"Submitted the query with the following output: {result.stdout.strip()} and error: {result.stderr.strip()}")
         query_id = result.stdout.strip()
+        cli_log_file.write(f"=== Submit query: {cmd} ===\n")
+        cli_log_file.write(f"stdout: {result.stdout}\n")
+        cli_log_file.write(f"stderr: {result.stderr}\n")
+        cli_log_file.flush()
         print(f"Submitted the query with id {query_id}")
         return query_id
     except subprocess.CalledProcessError as e:
+        cli_log_file.write(f"=== Submit query FAILED: {cmd} ===\n")
+        cli_log_file.write(f"exit status: {e.returncode}\n")
+        cli_log_file.write(f"stdout: {e.stdout}\n")
+        cli_log_file.write(f"stderr: {e.stderr}\n")
+        cli_log_file.flush()
         print("Command failed with exit status:", e.returncode)
         print("Standard output:", e.stdout)
         print("Error output:", e.stderr)
         exit(1)
 
-def start_query(query_id):
+def start_query(query_id, cli_log_file):
     cmd = f"{nebuli_executable} start {query_id}"
-    # print(f"Stopping the query via {cmd}...")
-    process = subprocess.Popen(cmd.split(" "), stdout=subprocess.DEVNULL)
+    cli_log_file.write(f"=== Start query: {cmd} ===\n")
+    cli_log_file.flush()
+    process = subprocess.Popen(cmd.split(" "), stdout=cli_log_file, stderr=cli_log_file)
     return process
 
 
-def stop_query(query_id):
+def stop_query(query_id, cli_log_file):
     cmd = f"{nebuli_executable} stop {query_id}"
-    # print(f"Stopping the query via {cmd}...")
-    process = subprocess.Popen(cmd.split(" "), stdout=subprocess.DEVNULL)
+    cli_log_file.write(f"=== Stop query: {cmd} ===\n")
+    cli_log_file.flush()
+    process = subprocess.Popen(cmd.split(" "), stdout=cli_log_file, stderr=cli_log_file)
     return process
 
 
@@ -399,6 +409,10 @@ if __name__ == "__main__":
             file_path_stdout = os.path.join(folder_name, "SingleNodeStdout.log")
             stdout_file = open(file_path_stdout, 'w')
             single_node_process = start_single_node_worker(stdout_file)
+
+            # Open a log file for nes-cli output
+            cli_log_path = os.path.join(folder_name, "nes-cli.log")
+            cli_log_file = open(cli_log_path, 'w')
             time.sleep(WAIT_BETWEEN_COMMANDS_LONG)
 
             start_port = [5123]
@@ -411,7 +425,7 @@ if __name__ == "__main__":
                                              f"{query}_{concurrent_query_number}_source",
                                              generatorRateConfig, generatorRateType, args.flush_interval)
                 # Submitting the query
-                query_id = submitting_query(new_query_config_name)
+                query_id = submitting_query(new_query_config_name, cli_log_file)
                 query_ids.append(query_id)
 
                 # Waiting to give the engine time to start the query and for measuring the current throughput
@@ -422,7 +436,7 @@ if __name__ == "__main__":
 
             # Stopping all queries
             for query_id in query_ids:
-                stop_process = stop_query(query_id)
+                stop_process = stop_query(query_id, cli_log_file)
 
         finally:
             time.sleep(WAIT_BEFORE_SIGKILL)  # Wait additional time before cleanup
@@ -433,6 +447,7 @@ if __name__ == "__main__":
                     continue
                 terminate_process_if_exists(proc)
             stdout_file.close()
+            cli_log_file.close()
 
         throughput_full_csv_path = os.path.join(folder_name, throughput_csv_file_path)
         parse_log_to_throughput_csv(file_path_stdout, throughput_full_csv_path)

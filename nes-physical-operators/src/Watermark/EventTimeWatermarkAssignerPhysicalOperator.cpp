@@ -30,11 +30,12 @@ namespace NES
 EventTimeWatermarkAssignerPhysicalOperator::EventTimeWatermarkAssignerPhysicalOperator(EventTimeFunction timeFunction)
     : timeFunction(std::move(timeFunction)) { };
 
-void EventTimeWatermarkAssignerPhysicalOperator::open(ExecutionContext& executionCtx, RecordBuffer& recordBuffer) const
+nautilus::val<uint64_t> EventTimeWatermarkAssignerPhysicalOperator::open(ExecutionContext& executionCtx, RecordBuffer& recordBuffer) const
 {
-    openChild(executionCtx, recordBuffer);
+    auto result = openChild(executionCtx, recordBuffer);
     executionCtx.watermarkTs = nautilus::val<Timestamp>(Timestamp(Timestamp::INITIAL_VALUE));
     timeFunction.open(executionCtx, recordBuffer);
+    return result;
 }
 
 void EventTimeWatermarkAssignerPhysicalOperator::execute(ExecutionContext& ctx, Record& record) const

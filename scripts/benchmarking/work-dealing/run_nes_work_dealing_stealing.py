@@ -312,6 +312,7 @@ if __name__ == "__main__":
     parser.add_argument("--buffer-size", type=int, required=True, help="Buffer size for NebulaStream.")
     parser.add_argument("--number-of-buffers", type=int, required=True, help="Number of buffers in the buffer manager of NebulaStream")
     parser.add_argument("--flush-interval", type=int, default=5, help="Flush Interval for the generator source")
+    parser.add_argument("--remove-build-dir", action="store_true", default=False, help="Remove and recreate the build directory before running")
     args = parser.parse_args()
 
     # Printing all arguments with their parsed values
@@ -326,8 +327,9 @@ if __name__ == "__main__":
     # Checking if the script has been executed from the repository root
     check_repository_root()
 
-    # Create folder
-    # create_folder_and_remove_if_exists(build_dir)
+    # Optionally recreate the build directory
+    if args.remove_build_dir:
+        create_folder_and_remove_if_exists(build_dir)
 
     # Reading generator rates from file
     allGeneratorRatesPerQuery = read_generator_rates(args.generator_rates)

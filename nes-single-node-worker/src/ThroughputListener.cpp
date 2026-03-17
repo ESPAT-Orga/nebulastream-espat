@@ -48,10 +48,7 @@ void threadRoutine(
 
     struct ThroughputWindow
     {
-        explicit ThroughputWindow()
-            : startTime(Timestamp::INVALID_VALUE), endTime(Timestamp::INVALID_VALUE), tuplesProcessed(0)
-        {
-        }
+        explicit ThroughputWindow() : startTime(Timestamp::INVALID_VALUE), endTime(Timestamp::INVALID_VALUE), tuplesProcessed(0) { }
 
         Timestamp startTime;
         Timestamp endTime;

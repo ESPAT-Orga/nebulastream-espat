@@ -500,6 +500,7 @@ bool ThreadPool::WorkerThread::operator()(WorkTask& task) const
     if (auto pipeline = task.pipeline.lock())
     {
         ENGINE_LOG_DEBUG("Handle Task for {}-{}. Tuples: {}", task.queryId, pipeline->id, task.buf.getNumberOfTuples());
+
         DefaultPEC pec(
             pool.numberOfThreads(),
             WorkerThread::id,
@@ -513,14 +514,25 @@ bool ThreadPool::WorkerThread::operator()(WorkTask& task) const
                     pipeline->successors,
                     [&](const auto& successor)
                     {
-                        bool formattingTask = pipeline.get()->stage->formattingTask;
-                        pool.statistic->onEvent(TaskEmit{
-                            id, task.queryId, pipeline->id, successor->id, taskId, tupleBuffer.getNumberOfTuples(), formattingTask});
+                        /// For formatting tasks, we emit a single TaskEmit after execution with the total processed tuple count.
+                        /// For non-formatting tasks, we emit per-buffer TaskEmit events here.
+                        if (not pipeline.get()->stage->formattingTask)
+                        {
+                            pool.statistic->onEvent(
+                                TaskEmit{id, task.queryId, pipeline->id, successor->id, taskId, tupleBuffer.getNumberOfTuples(), false});
+                        }
                         return pool.emitWork(task.queryId, successor, tupleBuffer, TaskCallback{}, continuationPolicy);
                     });
             },
             [&](const TupleBuffer& tupleBuffer, std::chrono::milliseconds duration)
             {
+                /// For formatting tasks, we emit a single TaskEmit after execution with the total processed tuple count.
+                /// For non-formatting tasks, we emit per-buffer TaskEmit events here.
+                if (not pipeline.get()->stage->formattingTask)
+                {
+                    pool.statistic->onEvent(
+                        TaskEmit{id, task.queryId, pipeline->id, pipeline->id, taskId, tupleBuffer.getNumberOfTuples(), false});
+                }
                 if (duration.count() > 0)
                 {
                     pool.delayedTaskSubmitter.submitTaskIn(
@@ -530,14 +542,23 @@ bool ThreadPool::WorkerThread::operator()(WorkTask& task) const
                 {
                     pool.addInternalTask(WorkTask(task.queryId, pipeline->id, pipeline, tupleBuffer, std::move(task.callback)));
                 }
-                bool formattingTask = pipeline.get()->stage->formattingTask;
-                pool.statistic->onEvent(
-                    TaskEmit{id, task.queryId, pipeline->id, pipeline->id, taskId, tupleBuffer.getNumberOfTuples(), formattingTask});
             }
 
         );
         pool.statistic->onEvent(TaskExecutionStart{WorkerThread::id, task.queryId, pipeline->id, taskId, task.buf.getNumberOfTuples()});
         pipeline->stage->execute(task.buf, pec);
+
+        /// After execution, numberOfProcessedTuples is set on the input buffer.
+        /// Emit a TaskEmit event with the total processed tuple count for throughput measurement.
+        if (pipeline->stage->formattingTask)
+        {
+            for (const auto& successor : pipeline->successors)
+            {
+                pool.statistic->onEvent(
+                    TaskEmit{id, task.queryId, pipeline->id, successor->id, taskId, task.buf.getNumberOfProcessedTuples(), true});
+            }
+        }
+
         pool.statistic->onEvent(TaskExecutionComplete{WorkerThread::id, task.queryId, pipeline->id, taskId});
         return true;
     }

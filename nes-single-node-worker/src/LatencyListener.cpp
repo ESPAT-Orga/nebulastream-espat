@@ -97,7 +97,7 @@ void threadRoutine(
                     }
 
                     intermediateStore.insert(
-                        {taskEmit.taskId, TaskIntermediateStore{taskEmit.queryId, taskEmit.numberOfTuples, taskEmit.timestamp}});
+                        {taskEmit.taskId, TaskIntermediateStore{taskEmit.queryId, taskEmit.numberOfProcessedTuples, taskEmit.timestamp}});
                 },
                 [&](const TaskExecutionComplete& taskExecutionCompleted)
                 {

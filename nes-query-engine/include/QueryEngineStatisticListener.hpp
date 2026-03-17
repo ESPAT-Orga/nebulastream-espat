@@ -58,13 +58,13 @@ struct TaskEmit : EventBase
         PipelineId fromPipeline,
         PipelineId toPipeline,
         TaskId taskId,
-        size_t numberOfTuples,
+        size_t numberOfProcessedTuples,
         bool formattingTask)
         : EventBase(threadId, queryId)
         , fromPipeline(fromPipeline)
         , toPipeline(toPipeline)
         , taskId(taskId)
-        , numberOfTuples(numberOfTuples)
+        , numberOfProcessedTuples(numberOfProcessedTuples)
         , formattingTask(formattingTask)
     {
     }
@@ -74,7 +74,7 @@ struct TaskEmit : EventBase
     PipelineId fromPipeline = INVALID<PipelineId>;
     PipelineId toPipeline = INVALID<PipelineId>;
     TaskId taskId = INVALID<TaskId>;
-    size_t numberOfTuples{};
+    size_t numberOfProcessedTuples{};
     bool formattingTask = false;
 };
 

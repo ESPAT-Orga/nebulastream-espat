@@ -58,7 +58,7 @@ HJProbePhysicalOperator::HJProbePhysicalOperator(
 {
 }
 
-void HJProbePhysicalOperator::open(ExecutionContext& executionCtx, RecordBuffer& recordBuffer) const
+nautilus::val<uint64_t> HJProbePhysicalOperator::open(ExecutionContext& executionCtx, RecordBuffer& recordBuffer) const
 {
     /// As this operator functions as a scan, we have to set the execution context for this pipeline
     executionCtx.watermarkTs = recordBuffer.getWatermarkTs();
@@ -77,7 +77,7 @@ void HJProbePhysicalOperator::open(ExecutionContext& executionCtx, RecordBuffer&
         = readValueFromMemRef<uint64_t>(getMemberRef(hashJoinWindowRef, &EmittedHJWindowTrigger::rightNumberOfHashMaps));
     if (leftNumberOfHashMaps == 0 or rightNumberOfHashMaps == 0)
     {
-        return;
+        return recordBuffer.getNumRecords();
     }
 
     /// Getting necessary values from the record buffer
@@ -142,5 +142,6 @@ void HJProbePhysicalOperator::open(ExecutionContext& executionCtx, RecordBuffer&
             }
         }
     }
+    return recordBuffer.getNumRecords();
 }
 }

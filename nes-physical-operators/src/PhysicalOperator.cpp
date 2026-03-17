@@ -48,9 +48,9 @@ void PhysicalOperatorConcept::setup(ExecutionContext& executionCtx, CompilationC
     setupChild(executionCtx, compilationContext);
 }
 
-void PhysicalOperatorConcept::open(ExecutionContext& executionCtx, RecordBuffer& recordBuffer) const
+nautilus::val<uint64_t> PhysicalOperatorConcept::open(ExecutionContext& executionCtx, RecordBuffer& recordBuffer) const
 {
-    openChild(executionCtx, recordBuffer);
+    return openChild(executionCtx, recordBuffer);
 }
 
 void PhysicalOperatorConcept::close(ExecutionContext& executionCtx, RecordBuffer& recordBuffer) const
@@ -74,10 +74,10 @@ void PhysicalOperatorConcept::setupChild(ExecutionContext& executionCtx, Compila
     getChild().value().setup(executionCtx, compilationContext);
 }
 
-void PhysicalOperatorConcept::openChild(ExecutionContext& executionCtx, RecordBuffer& recordBuffer) const
+nautilus::val<uint64_t> PhysicalOperatorConcept::openChild(ExecutionContext& executionCtx, RecordBuffer& recordBuffer) const
 {
     INVARIANT(getChild().has_value(), "Child operator is not set");
-    getChild().value().open(executionCtx, recordBuffer);
+    return getChild().value().open(executionCtx, recordBuffer);
 }
 
 void PhysicalOperatorConcept::closeChild(ExecutionContext& executionCtx, RecordBuffer& recordBuffer) const
@@ -130,9 +130,9 @@ void PhysicalOperator::setup(ExecutionContext& executionCtx, CompilationContext&
     self->setup(executionCtx, compilationContext);
 }
 
-void PhysicalOperator::open(ExecutionContext& executionCtx, RecordBuffer& recordBuffer) const
+nautilus::val<uint64_t> PhysicalOperator::open(ExecutionContext& executionCtx, RecordBuffer& recordBuffer) const
 {
-    self->open(executionCtx, recordBuffer);
+    return self->open(executionCtx, recordBuffer);
 }
 
 void PhysicalOperator::close(ExecutionContext& executionCtx, RecordBuffer& recordBuffer) const

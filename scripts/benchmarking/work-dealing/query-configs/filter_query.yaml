@@ -10,8 +10,8 @@ sinks:
         type: UINT64
     type: Discard
     config:
-      filePath: "/tmp/discard_sink.csv"
-      inputFormat: CSV
+      file_path: "/tmp/discard_sink.csv"
+      input_format: CSV
 logical:
   - name: tcp_source
     schema:
@@ -24,17 +24,17 @@ logical:
 physical:
   - logical: tcp_source
     type: Generator
-    parserConfig:
+    parser_config:
       type: CSV
-    sourceConfig:
-      stopGeneratorWhenSequenceFinishes: ONE
-      maxRuntimeMs: 1000000000
-      flushIntervalMs: TBA
+    source_config:
+      stop_generator_when_sequence_finishes: ONE
+      max_runtime_ms: 1000000000
+      flush_interval_ms: TBA
       seed: 42
-      generatorRateType: TBD
-      generatorRateConfig: |
+      generator_rate_type: TBD
+      generator_rate_config: |
         TBA
-      generatorSchema: |
+      generator_schema: |
         NORMAL_DISTRIBUTION UINT64 0 4999 1666
         NORMAL_DISTRIBUTION UINT64 0 499999 166666
         SEQUENCE UINT64 0 1000000000 1

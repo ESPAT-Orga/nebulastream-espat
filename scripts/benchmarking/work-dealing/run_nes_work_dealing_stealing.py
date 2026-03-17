@@ -101,7 +101,7 @@ def start_single_node_worker(file_path_stdout):
 
     cmd = f"{single_node_executable} {worker_config}"
     print(f"Starting the single node worker with {cmd}")
-    process = subprocess.Popen(cmd.split(" "), stdout=file_path_stdout)
+    process = subprocess.Popen(cmd.split(" "), stdout=file_path_stdout, stderr=subprocess.STDOUT)
     pid = process.pid
     print(f"Started single node worker with pid {pid}")
     return process
@@ -357,7 +357,7 @@ if __name__ == "__main__":
 
     tcp_server_processes = []
     single_node_process = []
-    stop_process = []
+    stop_processes = []
 
     # Iterate over all cross-product combinations
     no_combinations = (
@@ -435,12 +435,17 @@ if __name__ == "__main__":
             time.sleep(args.wait_before_stopping_queries)
 
             # Stopping all queries
+            stop_processes = []
             for query_id in query_ids:
-                stop_process = stop_query(query_id, cli_log_file)
+                stop_processes.append(stop_query(query_id, cli_log_file))
+
+            # Wait for all stop processes to finish so their output is flushed
+            for proc in stop_processes:
+                proc.wait()
 
         finally:
             time.sleep(WAIT_BEFORE_SIGKILL)  # Wait additional time before cleanup
-            all_processes = tcp_server_processes + [single_node_process] + [stop_process]
+            all_processes = tcp_server_processes + [single_node_process] + stop_processes
             for proc in all_processes:
                 print(f"Trying to terminate {proc}")
                 if not proc:

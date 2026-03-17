@@ -57,6 +57,7 @@ allPageSizes = [8192]
 #[4000000] if buffer size is 8192 #[500000] if buffer size is 102400
 allBufferConfigs = [(1048576, 20000)]
 allEnableLatencyListeners = [False]
+throughputListenerInterval = 200
 
 #### Statistic Build Configurations
 allReservoirSizes = [100, 1000, 10000]
@@ -65,6 +66,18 @@ allHistogramConfigs = [
     (10, 0, 1000000, "uint64"),
     (100, 0, 1000000, "uint64"),
     (1000, 0, 1000000, "uint64"),
+]
+allCountMinConfigs = [
+    # (columns, rows, counter_type)
+    (10, 1, "uint64"),
+    (10, 5, "uint64"),
+    (10, 10, "uint64"),
+    (100, 1, "uint64"),
+    (100, 5, "uint64"),
+    (100, 10, "uint64"),
+    (1000, 1, "uint64"),
+    (1000, 5, "uint64"),
+    (1000, 10, "uint64"),
 ]
 
 QUERY_CONFIGS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "query-configs")
@@ -96,6 +109,15 @@ def generate_queries():
         filepath = os.path.join(generated_test_dir, filename)
         with open(filepath, 'w') as f:
             f.write(histogram_template.format(num_buckets=num_buckets, min_value=min_value, max_value=max_value, counter_type=counter_type))
+        queries[name] = f"{filepath}:01"
+
+    count_min_template = load_template("CountMinBuild.test.template")
+    for columns, rows, counter_type in allCountMinConfigs:
+        name = f"CountMinBuild_{columns}_{rows}_{counter_type}"
+        filename = f"{name}.test"
+        filepath = os.path.join(generated_test_dir, filename)
+        with open(filepath, 'w') as f:
+            f.write(count_min_template.format(columns=columns, rows=rows, counter_type=counter_type))
         queries[name] = f"{filepath}:01"
 
     return queries
@@ -154,7 +176,8 @@ def run_benchmark(config, query, queryIdx, workerConfigIdx, enableLatency, no_co
                          f"--worker.query_engine.admission_queue_size=1000000 "
                          f"--worker.default_query_execution.page_size={pageSize} "
                          f"--worker.default_query_execution.operator_buffer_size={bufferSizeInBytes} "
-                         f"--worker.latency_listener={enableLatency}")
+                         f"--worker.latency_listener={enableLatency} "
+                         f"--worker.throughput_listener_interval_in_ms={throughputListenerInterval}")
 
         benchmark_command = f"{systest_executable} -b -t {os.path.abspath(queries[query])} --data {os.path.abspath(test_data_dir)} --workingDir={working_dir} -- {worker_config}"
 

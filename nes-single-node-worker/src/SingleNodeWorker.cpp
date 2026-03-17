@@ -98,7 +98,7 @@ SingleNodeWorker::SingleNodeWorker(const SingleNodeWorkerConfiguration& configur
             callBackParams.windowEnd,
             tuplesPerSecondMessage);
     };
-    constexpr auto timeIntervalInMilliSeconds = 200;
+    const auto timeIntervalInMilliSeconds = configuration.workerConfiguration.throughputListenerInterval.getValue();
     const auto throughputListener = std::make_shared<ThroughputListener>(timeIntervalInMilliSeconds, throughputCallback);
     listener->addQueryEngineListener(throughputListener);
 

@@ -61,3 +61,11 @@ scripts/__pycache__
 # Ignore Claude specific files and all possible combinations of Claude.md
 .claude/
 [Cc][Ll][Aa][Uu][Dd][Ee].md
+
+# Ignore pdf and jupyter notebook checkpoints as well as csv file
+*.pdf
+.ipynb_checkpoints
+*.ipynb
+*.csv
+
+scripts/__pycache__

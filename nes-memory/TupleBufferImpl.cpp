@@ -205,6 +205,7 @@ bool BufferControlBlock::release()
 #endif
         const auto recycler = std::move(owningBufferRecycler);
         numberOfTuples = 0;
+        numberOfProcessedTuples = 0;
         recycleCallback(owner, recycler.get());
         if (recycleStatisticsCallback)
         {
@@ -241,6 +242,16 @@ uint64_t BufferControlBlock::getNumberOfTuples() const noexcept
 void BufferControlBlock::setNumberOfTuples(const uint64_t numberOfTuples)
 {
     this->numberOfTuples = numberOfTuples;
+}
+
+uint64_t BufferControlBlock::getNumberOfProcessedTuples() const noexcept
+{
+    return numberOfProcessedTuples;
+}
+
+void BufferControlBlock::setNumberOfProcessedTuples(const uint64_t numberOfProcessedTuples)
+{
+    this->numberOfProcessedTuples = numberOfProcessedTuples;
 }
 
 Timestamp BufferControlBlock::getWatermark() const noexcept

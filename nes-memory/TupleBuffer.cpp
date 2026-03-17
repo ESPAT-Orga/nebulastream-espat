@@ -225,6 +225,16 @@ uint64_t TupleBuffer::getNumberOfTuples() const noexcept
     return controlBlock->getNumberOfTuples();
 }
 
+uint64_t TupleBuffer::getNumberOfProcessedTuples() const noexcept
+{
+    return controlBlock->getNumberOfProcessedTuples();
+}
+
+void TupleBuffer::setNumberOfProcessedTuples(const uint64_t numberOfProcessedTuples) const noexcept
+{
+    controlBlock->setNumberOfProcessedTuples(numberOfProcessedTuples);
+}
+
 OriginId TupleBuffer::getOriginId() const noexcept
 {
     return controlBlock->getOriginId();

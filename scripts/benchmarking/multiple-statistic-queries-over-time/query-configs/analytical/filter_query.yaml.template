@@ -10,18 +10,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-query: SELECT AVG(value) AS avg_value FROM tcp_source WINDOW TUMBLING (timestamp, size 10 sec) INTO discard_sink
+query: SELECT * FROM {source_name} WHERE id > UINT64(123456789) INTO void_sink
 sinks:
-  - name: discard_sink
+  - name: void_sink
     schema:
-      - name: tcp_source$avg_value
-        type: FLOAT64
-    type: Discard
+      - name: {source_name}$id
+        type: UINT64
+      - name: {source_name}$value
+        type: UINT64
+      - name: {source_name}$timestamp
+        type: UINT64
+    type: Void
     config:
-      filePath: "/tmp/discard_sink.csv"
-      inputFormat: CSV
+      file_path: "/tmp/discard_sink.csv"
 logical:
-  - name: tcp_source
+  - name: {source_name}
     schema:
       - name: id
         type: UINT64
@@ -30,18 +33,18 @@ logical:
       - name: timestamp
         type: UINT64
 physical:
-  - logical: tcp_source
+  - logical: {source_name}
     type: Generator
     parser_config:
       type: CSV
     source_config:
       stop_generator_when_sequence_finishes: ONE
       max_runtime_ms: 1000000000
-      flush_interval_ms: TBA
+      flush_interval_ms: {flush_interval}
       seed: 42
-      generator_rate_type: TBD
+      generator_rate_type: {generator_rate_type}
       generator_rate_config: |
-        TBA
+        {generator_rate_config}
       generator_schema: |
         NORMAL_DISTRIBUTION UINT64 0 4999 1666
         NORMAL_DISTRIBUTION UINT64 0 499999 166666

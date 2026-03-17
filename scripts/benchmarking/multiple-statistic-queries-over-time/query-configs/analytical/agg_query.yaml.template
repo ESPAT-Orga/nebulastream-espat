@@ -10,22 +10,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-query: SELECT * FROM tcp_source WHERE id > UINT64(123456789) INTO discard_sink
+query: SELECT AVG(value) AS avg_value FROM {source_name} WINDOW TUMBLING (timestamp, size 10 sec) INTO void_sink;
 sinks:
-  - name: discard_sink
+  - name: void_sink
     schema:
-      - name: tcp_source$id
-        type: UINT64
-      - name: tcp_source$value
-        type: UINT64
-      - name: tcp_source$timestamp
-        type: UINT64
-    type: Discard
+      - name: {source_name}$avg_value
+        type: FLOAT64
+    type: Void
     config:
-      filePath: "/tmp/discard_sink.csv"
-      inputFormat: CSV
+      file_path: "/tmp/discard_sink.csv"
 logical:
-  - name: tcp_source
+  - name: {source_name}
     schema:
       - name: id
         type: UINT64
@@ -34,19 +29,19 @@ logical:
       - name: timestamp
         type: UINT64
 physical:
-  - logical: tcp_source
+  - logical: {source_name}
     type: Generator
-    parserConfig:
+    parser_config:
       type: CSV
-    sourceConfig:
-      stopGeneratorWhenSequenceFinishes: ONE
-      maxRuntimeMs: 1000000000
-      flushIntervalMs: TBA
+    source_config:
+      stop_generator_when_sequence_finishes: ONE
+      max_runtime_ms: 1000000000
+      flush_interval_ms: {flush_interval}
       seed: 42
-      generatorRateType: TBD
-      generatorRateConfig: |
-        TBA
-      generatorSchema: |
+      generator_rate_type: {generator_rate_type}
+      generator_rate_config: |
+        {generator_rate_config}
+      generator_schema: |
         NORMAL_DISTRIBUTION UINT64 0 4999 1666
         NORMAL_DISTRIBUTION UINT64 0 499999 166666
         SEQUENCE UINT64 0 1000000000 1

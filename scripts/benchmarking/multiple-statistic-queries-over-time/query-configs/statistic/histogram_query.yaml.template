@@ -1,0 +1,41 @@
+query: SELECT EQUIWIDTHHISTOGRAM(200, value, {num_buckets}, {min_value}, {max_value}, {counter_type}) FROM {source_name} WINDOW TUMBLING(timestamp, size 1 sec) INTO void_sink;
+sinks:
+  - name: void_sink
+    schema:
+      - name: {source_name}$statistichash
+        type: UINT64
+      - name: {source_name}$statisticstart
+        type: UINT64
+      - name: {source_name}$statisticend
+        type: UINT64
+      - name: {source_name}$statisticnumberofseentuples
+        type: UINT64
+    type: Void
+    config:
+      file_path: "/tmp/discard_sink.csv"
+logical:
+  - name: {source_name}
+    schema:
+      - name: id
+        type: UINT64
+      - name: value
+        type: UINT64
+      - name: timestamp
+        type: UINT64
+physical:
+  - logical: {source_name}
+    type: Generator
+    parser_config:
+      type: CSV
+    source_config:
+      stop_generator_when_sequence_finishes: ONE
+      max_runtime_ms: 1000000000
+      flush_interval_ms: {flush_interval}
+      seed: 42
+      generator_rate_type: {generator_rate_type}
+      generator_rate_config: |
+        {generator_rate_config}
+      generator_schema: |
+        NORMAL_DISTRIBUTION UINT64 0 4999 1666
+        NORMAL_DISTRIBUTION UINT64 0 499999 166666
+        SEQUENCE UINT64 0 1000000000 1

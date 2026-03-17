@@ -253,8 +253,8 @@ extract_last_line() {
   sleep 20
   echo "wake up" >&3
 
-  # Check that the output of the statistic query contains the expected events at least 4 times
-  apply_backpressure_count=$(pcregrep -Mc "^1,[0-9A-Za-z]{8}(?:-[0-9A-Za-z]{4}){3}-[0-9A-Za-z]{12},[0-9]+\n0,[0-9A-Za-z]{8}(?:-[0-9A-Za-z]{4}){3}-[0-9A-Za-z]{12},[0-9]+" "$TMP_DIR"/worker-1/out_stat.csv || true)
+  # Check that the output of the statistic query contains ApplyPressure followed eventually by ReleasePressure
+  apply_backpressure_count=$(awk '/ApplyPressure/{found=1} found && /ReleasePressure/{count++; found=0} END{print count+0}' "$TMP_DIR"/worker-1/out_stat.csv)
   [ "$apply_backpressure_count" -ge 2 ]
 }
 

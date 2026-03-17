@@ -29,7 +29,13 @@ import pandas as pd
 from scripts.benchmarking.utils import *
 
 #### Benchmark Configurations
+debug = True
 build_dir = os.path.join(".", "build_dir")
+build_type = "Release"
+if debug:
+    build_dir = os.path.join(".", "build_dir_debug")
+    build_type = "Debug"
+
 working_dir = os.path.join(build_dir, "working_dir")
 latency_csv_file_path = "latency_results_nebulastream.csv"
 throughput_csv_file_path = "throughput_results_nebulastream.csv"
@@ -37,7 +43,7 @@ config_file = "config.yaml"
 single_node_executable = os.path.join(build_dir, "nes-single-node-worker/nes-single-node-worker")
 nebuli_executable = os.path.join(build_dir, "nes-frontend/apps/nes-cli") + " --debug"
 cmake_flags = ("-G Ninja "
-               "-DCMAKE_BUILD_TYPE=Release "
+               f"-DCMAKE_BUILD_TYPE={build_type} "
                f"-DCMAKE_TOOLCHAIN_FILE={get_vcpkg_dir()} "
                "-DUSE_LIBCXX_IF_AVAILABLE:BOOL=OFF "
                "-DENABLE_LARGE_TESTS=1 "

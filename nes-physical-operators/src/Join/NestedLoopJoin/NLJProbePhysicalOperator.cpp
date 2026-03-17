@@ -138,7 +138,7 @@ void NLJProbePhysicalOperator::performNLJ(
     }
 }
 
-void NLJProbePhysicalOperator::open(ExecutionContext& executionCtx, RecordBuffer& recordBuffer) const
+nautilus::val<uint64_t> NLJProbePhysicalOperator::open(ExecutionContext& executionCtx, RecordBuffer& recordBuffer) const
 {
     /// As this operator functions as a scan, we have to set the execution context for this pipeline
     executionCtx.watermarkTs = recordBuffer.getWatermarkTs();
@@ -217,6 +217,7 @@ void NLJProbePhysicalOperator::open(ExecutionContext& executionCtx, RecordBuffer
             windowStart,
             windowEnd);
     }
+    return recordBuffer.getNumRecords();
 }
 
 }

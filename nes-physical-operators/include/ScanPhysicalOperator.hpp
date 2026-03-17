@@ -32,7 +32,7 @@ class ScanPhysicalOperator final : public PhysicalOperatorConcept
 public:
     explicit ScanPhysicalOperator(std::shared_ptr<TupleBufferRef> bufferRef, std::vector<Record::RecordFieldIdentifier> projections);
 
-    void open(ExecutionContext& executionCtx, RecordBuffer& recordBuffer) const override;
+    nautilus::val<uint64_t> open(ExecutionContext& executionCtx, RecordBuffer& recordBuffer) const override;
     [[nodiscard]] std::optional<PhysicalOperator> getChild() const override;
     void setChild(PhysicalOperator child) override;
     bool getIsRawScan() const;
@@ -43,7 +43,7 @@ private:
     std::optional<PhysicalOperator> child;
     bool isRawScan = false;
 
-    void rawScan(ExecutionContext& executionCtx, RecordBuffer& recordBuffer) const;
+    nautilus::val<uint64_t> rawScan(ExecutionContext& executionCtx, RecordBuffer& recordBuffer) const;
 };
 
 }

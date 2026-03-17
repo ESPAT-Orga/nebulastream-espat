@@ -1,0 +1,10 @@
+bufferSizeInBytes: 8192
+buffersInGlobalBufferManager: 4000000
+executionMode: COMPILER
+joinStrategy: HASH_JOIN
+numberOfEntriesSliceCaches: 10
+numberOfWorkerThreads: 24
+pageSize: 8192
+query: filter
+resourceAssignment: WORK_DEALING_NEW_QUEUE_AND_THREAD
+sliceCacheType: SECOND_CHANCE

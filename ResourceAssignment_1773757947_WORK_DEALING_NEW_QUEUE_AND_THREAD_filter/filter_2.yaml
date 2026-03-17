@@ -1,0 +1,39 @@
+query: SELECT AVG(value) AS avg_value FROM filter_2_source WINDOW TUMBLING (timestamp,
+  size 10 sec) INTO discard_sink
+sinks:
+- name: discard_sink
+  schema:
+  - name: filter_2_source$avg_value
+    type: FLOAT64
+  type: Discard
+  config:
+    file_path: /tmp/discard_sink.csv
+    input_format: CSV
+logical:
+- name: filter_2_source
+  schema:
+  - name: id
+    type: UINT64
+  - name: value
+    type: UINT64
+  - name: timestamp
+    type: UINT64
+physical:
+- logical: filter_2_source
+  type: Generator
+  parser_config:
+    type: CSV
+  source_config:
+    stop_generator_when_sequence_finishes: ONE
+    max_runtime_ms: 1000000000
+    flush_interval_ms: 100
+    seed: 42
+    generator_rate_type: FIXED
+    generator_rate_config: emit_rate 1000
+    generator_schema: 'NORMAL_DISTRIBUTION UINT64 0 4999 1666
+
+      NORMAL_DISTRIBUTION UINT64 0 499999 166666
+
+      SEQUENCE UINT64 0 1000000000 1
+
+      '

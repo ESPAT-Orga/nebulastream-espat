@@ -17,6 +17,7 @@
 #include <fstream>
 #include <queue>
 #include <thread>
+#include <Time/Timestamp.hpp>
 #include <folly/Synchronized.h>
 #include <QueryEngineStatisticListener.hpp>
 

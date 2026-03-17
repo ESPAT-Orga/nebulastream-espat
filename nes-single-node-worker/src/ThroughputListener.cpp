@@ -11,13 +11,14 @@
     See the License for the specific language governing permissions and
     limitations under the License.
 */
+#include <ThroughputListener.hpp>
+
 #include <map>
 #include <unordered_map>
 #include <utility>
 #include <SliceStore/SliceAssigner.hpp>
 #include <Util/Overloaded.hpp>
 #include <Thread.hpp>
-#include <ThroughputListener.hpp>
 
 namespace NES
 {
@@ -89,7 +90,6 @@ void threadRoutine(
                         return;
                     }
                     const auto numberOfTuples = taskEmit.numberOfTuples;
-                    // const auto bytes = taskEmit.bytesInTupleBuffer;
                     const auto queryId = taskEmit.queryId;
                     const auto endTime = convertToTimeStamp(taskEmit.timestamp);
                     const auto windowStart = sliceAssigner.getSliceStartTs(endTime);

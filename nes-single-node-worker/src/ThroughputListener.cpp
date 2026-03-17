@@ -85,16 +85,16 @@ void threadRoutine(
                 {
                     /// We define the throughput to be the performance of the formatting steps, i.e., the throughput of emitting work from the formatting
                     /// If this task did not belong to a formatting task, we ignore it and return
-                    if (not taskEmit.formattingTask or taskEmit.fromPipeline == taskEmit.toPipeline)
+                    if (not taskEmit.formattingTask)
                     {
                         return;
                     }
-                    const auto numberOfTuples = taskEmit.numberOfTuples;
+                    const auto numberOfProcessedTuples = taskEmit.numberOfProcessedTuples;
                     const auto queryId = taskEmit.queryId;
                     const auto endTime = convertToTimeStamp(taskEmit.timestamp);
                     const auto windowStart = sliceAssigner.getSliceStartTs(endTime);
                     const auto windowEnd = sliceAssigner.getSliceEndTs(endTime);
-                    queryIdToThroughputWindowMap[queryId][windowEnd].tuplesProcessed += numberOfTuples;
+                    queryIdToThroughputWindowMap[queryId][windowEnd].tuplesProcessed += numberOfProcessedTuples;
                     queryIdToThroughputWindowMap[queryId][windowEnd].startTime = windowStart;
                     queryIdToThroughputWindowMap[queryId][windowEnd].endTime = windowEnd;
 

@@ -2,15 +2,24 @@
 # description: Benchmark for reservoir sampling and equiwidth histogram build operators over LinearRoadBenchmark
 # groups: [benchmark, large, Synopsis, Aggregation]
 
-CREATE LOGICAL SOURCE lrb(creationTS UINT64, vehicle INT16, speed FLOAT32, highway INT16, lane INT16, direction INT16, position INT32);
-CREATE PHYSICAL SOURCE FOR lrb TYPE Memory;
-ATTACH FILE large/lrb/linear_road_benchmark_560K.csv
+CREATE LOGICAL SOURCE bid(timestamp UINT64 NOT NULL, auctionId INT32 NOT NULL, bidder INT32 NOT NULL, price FLOAT64 NOT NULL);
+CREATE PHYSICAL SOURCE FOR bid TYPE File;
+ATTACH FILE large/nexmark/bid_6GB.csv
+
+CREATE LOGICAL SOURCE monitoringClusterData(creationTS UINT64 NOT NULL, jobId UINT64 NOT NULL, taskId UINT64 NOT NULL, machineId INT64 NOT NULL, eventType INT16 NOT NULL, userId INT16 NOT NULL, category INT16 NOT NULL, priority INT16 NOT NULL, cpu FLOAT64 NOT NULL, ram FLOAT64 NOT NULL, disk FLOAT64 NOT NULL, constraints BOOLEAN NOT NULL);
+CREATE PHYSICAL SOURCE FOR monitoringClusterData TYPE File;
+ATTACH FILE large/cluster_monitoring/google-cluster-data-original_1G.csv
+
+
+SELECT RESERVOIR(100, auctionId, bidder, price, 1000) FROM bid WINDOW TUMBLING(timestamp, size 10 sec) INTO Discard();
+----
 
 # Reservoir build
-SELECT RESERVOIR(100, highway, direction, position, 1000) FROM lrb WINDOW TUMBLING(creationTS, size 10 sec) INTO DISCARD();
+SELECT RESERVOIR(100, jobId, eventId, 1000) FROM monitoringClusterData WINDOW TUMBLING(creationTS, size 10 sec) INTO DISCARD();
 ----
 
 
 # Equiwidth histogram build
-SELECT EQUIWIDTHHISTOGRAM(200, vehicle, 100, 0, 1000000, uint64) FROM lrb WINDOW TUMBLING(creationTS, size 10 sec) INTO DISCARD();
+SELECT EQUIWIDTHHISTOGRAM(200, jobId, 100, 0, 1000000, uint64) FROM monitoringClusterData WINDOW TUMBLING(creationTS, size 10 sec) INTO DISCARD();
 ----
+

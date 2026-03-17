@@ -73,7 +73,8 @@ public:
         std::unreachable();
     }
 
-    void readBuffer(ExecutionContext& executionCtx, const RecordBuffer& recordBuffer, const ExecuteChildFn& executeChild) const;
+    nautilus::val<uint64_t>
+    readBuffer(ExecutionContext& executionCtx, const RecordBuffer& recordBuffer, const ExecuteChildFn& executeChild) const;
 
     void
     writeRecord(nautilus::val<uint64_t>&, const RecordBuffer&, const Record&, const nautilus::val<AbstractBufferProvider*>&) const override
@@ -90,8 +91,8 @@ public:
     struct InputFormatterConcept
     {
         virtual ~InputFormatterConcept() = default;
-        virtual void readBuffer(ExecutionContext& executionCtx, const RecordBuffer& recordBuffer, const ExecuteChildFn& executeChild) const
-            = 0;
+        virtual nautilus::val<uint64_t>
+        readBuffer(ExecutionContext& executionCtx, const RecordBuffer& recordBuffer, const ExecuteChildFn& executeChild) const = 0;
         virtual nautilus::val<bool> indexBuffer(RecordBuffer&, ArenaRef&) const = 0;
         virtual std::ostream& toString(std::ostream& os) const = 0;
     };
@@ -109,7 +110,8 @@ public:
 
         std::ostream& toString(std::ostream& os) const override { return InputFormatter.toString(os); }
 
-        void readBuffer(ExecutionContext& executionCtx, const RecordBuffer& recordBuffer, const ExecuteChildFn& executeChild) const override
+        nautilus::val<uint64_t>
+        readBuffer(ExecutionContext& executionCtx, const RecordBuffer& recordBuffer, const ExecuteChildFn& executeChild) const override
         {
             return InputFormatter.readBuffer(executionCtx, recordBuffer, executeChild);
         }

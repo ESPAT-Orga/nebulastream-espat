@@ -19,7 +19,6 @@ namespace NES
 
 constexpr static uint64_t ROW_FIELD_SIZE = sizeof(uint64_t);
 
-
 CountMinSketchIteratorImpl::CountMinSketchIteratorImpl(
     const nautilus::val<int8_t*>& statisticMemArea, CountMinSketchProviderArguments& countMinProviderArguments)
     : StatisticProviderIteratorImpl(std::move(statisticMemArea)), countMinProviderArgs(std::move(countMinProviderArguments))

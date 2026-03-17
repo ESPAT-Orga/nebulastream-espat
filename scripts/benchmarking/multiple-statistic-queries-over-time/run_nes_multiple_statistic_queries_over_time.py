@@ -29,7 +29,13 @@ import pandas as pd
 from scripts.benchmarking.utils import *
 
 #### Benchmark Configurations
+debug = False
 build_dir = os.path.join(".", "build_dir")
+build_type = "Release"
+if debug:
+    build_dir = os.path.join(".", "build_dir_debug")
+    build_type = "Debug"
+
 working_dir = os.path.join(build_dir, "working_dir")
 latency_csv_file_path = "latency_results_nebulastream.csv"
 throughput_csv_file_path = "throughput_results_nebulastream.csv"
@@ -37,7 +43,7 @@ config_file = "config.yaml"
 single_node_executable = os.path.join(build_dir, "nes-single-node-worker/nes-single-node-worker")
 nebuli_executable = os.path.join(build_dir, "nes-frontend/apps/nes-cli") + " --debug"
 cmake_flags = ("-G Ninja "
-               "-DCMAKE_BUILD_TYPE=Release "
+               f"-DCMAKE_BUILD_TYPE={build_type} "
                f"-DCMAKE_TOOLCHAIN_FILE={get_vcpkg_dir()} "
                "-DUSE_LIBCXX_IF_AVAILABLE:BOOL=OFF "
                "-DENABLE_LARGE_TESTS=1 "
@@ -50,23 +56,34 @@ WAIT_BEFORE_SIGKILL = 10
 
 #### Worker Configurations
 allExecutionModes = ["COMPILER"]
-allNumberOfWorkerThreads = [24]
+allNumberOfWorkerThreads = [24, 12]
 allJoinStrategies = ["HASH_JOIN"]
 allNumberOfEntriesSliceCaches = [10]
-allSliceCacheTypes = ["SECOND_CHANCE"]
 allPageSizes = [8192]
-allResourceAssignments = ["WORK_STEALING", "WORK_DEALING_NEW_QUEUE_AND_THREAD"]
 
+#### Statistic Build Configurations
+allReservoirSizes = [100, 1000, 10000]
+allHistogramConfigs = [
+    # (num_buckets, min_value, max_value, counter_type)
+    (10, 0, 1000000, "uint64"),
+    (100, 0, 1000000, "uint64"),
+    (1000, 0, 1000000, "uint64"),
+]
 
 #### Queries
-allQueries = {
-    "aggregation": "scripts/benchmarking/work-dealing/query-configs/agg_query.yaml",
-    "filter": "scripts/benchmarking/work-dealing/query-configs/agg_query.yaml"}
+statisticQueries = {
+    "histogram": "scripts/benchmarking/multiple-statistic-queries-over-time/query-configs/statistic/histogram_query.yaml.template",
+    "reservoir": "scripts/benchmarking/multiple-statistic-queries-over-time/query-configs/statistic/reservoir_query.yaml.template"}
+analyticalQueries = {
+    "aggregation": "scripts/benchmarking/multiple-statistic-queries-over-time/query-configs/analytical/agg_query.yaml.template",
+    "filter": "scripts/benchmarking/multiple-statistic-queries-over-time/query-configs/analytical/filter_query.yaml.template"}
 
+statistics_query_ids = []
+analytical_query_ids = []
 
 def create_output_folder(appendix):
     timestamp = int(time.time())
-    folder_name = f"ResourceAssignment_{timestamp}_{appendix}"
+    folder_name = f"RunBenchmark_{timestamp}_{appendix}"
     create_folder_and_remove_if_exists(folder_name)
     print(f"Created folder {folder_name}...")
     return folder_name
@@ -95,13 +112,13 @@ def start_single_node_worker(file_path_stdout):
 
     cmd = f"{single_node_executable} {worker_config}"
     print(f"Starting the single node worker with {cmd}")
-    process = subprocess.Popen(cmd.split(" "), stdout=file_path_stdout)
+    process = subprocess.Popen(cmd.split(" "), stdout=file_path_stdout, stderr=subprocess.STDOUT)
     pid = process.pid
     print(f"Started single node worker with pid {pid}")
     return process
 
 
-def submitting_query(query_file):
+def submitting_query(query_file, cli_log_file):
     cmd = f"{nebuli_executable} -t {query_file} start"
     print(f"Submitting the query via {cmd}...")
     try:
@@ -109,57 +126,64 @@ def submitting_query(query_file):
                                 stderr=subprocess.PIPE,  # Capture standard error
                                 text=True  # Decode output to a string
                                 )
-        # print(f"Submitted the query with the following output: {result.stdout.strip()} and error: {result.stderr.strip()}")
         query_id = result.stdout.strip()
+        cli_log_file.write(f"=== Submit query: {cmd} ===\n")
+        cli_log_file.write(f"stdout: {result.stdout}\n")
+        cli_log_file.write(f"stderr: {result.stderr}\n")
+        cli_log_file.flush()
         print(f"Submitted the query with id {query_id}")
         return query_id
     except subprocess.CalledProcessError as e:
+        cli_log_file.write(f"=== Submit query FAILED: {cmd} ===\n")
+        cli_log_file.write(f"exit status: {e.returncode}\n")
+        cli_log_file.write(f"stdout: {e.stdout}\n")
+        cli_log_file.write(f"stderr: {e.stderr}\n")
+        cli_log_file.flush()
         print("Command failed with exit status:", e.returncode)
         print("Standard output:", e.stdout)
         print("Error output:", e.stderr)
         exit(1)
 
-def start_query(query_id):
+def start_query(query_id, cli_log_file):
     cmd = f"{nebuli_executable} start {query_id}"
-    # print(f"Stopping the query via {cmd}...")
-    process = subprocess.Popen(cmd.split(" "), stdout=subprocess.DEVNULL)
+    cli_log_file.write(f"=== Start query: {cmd} ===\n")
+    cli_log_file.flush()
+    process = subprocess.Popen(cmd.split(" "), stdout=cli_log_file, stderr=cli_log_file)
     return process
 
 
-def stop_query(query_id):
+def stop_query(query_id, cli_log_file):
     cmd = f"{nebuli_executable} stop {query_id}"
-    # print(f"Stopping the query via {cmd}...")
-    process = subprocess.Popen(cmd.split(" "), stdout=subprocess.DEVNULL)
+    cli_log_file.write(f"=== Stop query: {cmd} ===\n")
+    cli_log_file.flush()
+    process = subprocess.Popen(cmd.split(" "), stdout=cli_log_file, stderr=cli_log_file)
     return process
 
 
-def copy_and_modify_query_config(old_config, new_config, new_source_name, generator_rate_config, generator_type, flush_interval):
-    # Loading the yaml file
-    with open(old_config, 'r') as input_yaml_file:
-        yaml_query_config = yaml.safe_load(input_yaml_file)
+def copy_and_modify_query_config(old_config, new_config, new_source_name, generator_rate_config, generator_type, flush_interval, histogram_config=None, reservoir_size=None):
+    # Reading the template file as a string
+    with open(old_config, 'r') as input_file:
+        template = input_file.read()
 
-    # Update the logical name in the logical section
-    yaml_query_config['logical'][0]['name'] = new_source_name
+    # Build the format arguments
+    # The template indents {generator_rate_config} by 8 spaces under a YAML block scalar (|).
+    # When the rate config contains newlines, subsequent lines need the same indentation.
+    indented_rate_config = generator_rate_config.replace("\n", "\n        ")
+    format_args = {
+        "source_name": new_source_name,
+        "generator_rate_config": indented_rate_config,
+        "generator_rate_type": generator_type,
+        "flush_interval": flush_interval,
+    }
+    if histogram_config is not None:
+        num_buckets, min_value, max_value, counter_type = histogram_config
+        format_args.update(num_buckets=num_buckets, min_value=min_value, max_value=max_value, counter_type=counter_type)
+    if reservoir_size is not None:
+        format_args["reservoir_size"] = reservoir_size
 
-    # Update the query to use the new logical name
-    old_logical_name = "tcp_source"  # Assuming the old name is tcp_source
-    yaml_query_config['query'] = yaml_query_config['query'].replace(old_logical_name, new_source_name)
-    yaml_query_config['query'] = yaml_query_config['query'].replace(old_logical_name, new_source_name)
-    for field in yaml_query_config['sinks'][0]['schema']:
-        field['name'] = field['name'].replace(old_logical_name, new_source_name)
-
-
-    # Update the physical logical reference to use the new logical name
-    yaml_query_config['physical'][0]['logical'] = new_source_name
-
-    # Update the generator rate type
-    yaml_query_config['physical'][0]['source_config']['generator_rate_config'] = generator_rate_config
-    yaml_query_config['physical'][0]['source_config']['generator_rate_type'] = generator_type
-    yaml_query_config['physical'][0]['source_config']['flush_interval_ms'] = flush_interval
-
-    # Save the updated content back to the YAML file
+    # Apply all format placeholders and write the result
     with open(new_config, 'w') as file:
-        yaml.dump(yaml_query_config, file, sort_keys=False)
+        file.write(template.format(**format_args))
 
 
 def parse_log_to_latency_csv(log_file_path, csv_file_path):
@@ -184,9 +208,16 @@ def parse_log_to_latency_csv(log_file_path, csv_file_path):
                 latency_value = float(match.group(5))
                 unit_prefix = match.group(6)
                 latency_value = convert_unit_prefix(latency_value, unit_prefix)
+                query_type = "UNDEFINED"
+                if query_id in statistics_query_ids:
+                    query_type = "STATISTICS"
+                else:
+                    assert query_id in analytical_query_ids, "Query ID not found in analytical_query_ids."
+                    query_type = "ANALYTICAL"
+
 
                 # Append the extracted data to the list
-                data.append((query_id, number_of_tasks, start_timestamp, end_timestamp, latency_value))
+                data.append((query_id, number_of_tasks, start_timestamp, end_timestamp, latency_value, query_type))
 
     # Calculate average of the query
     if len(data) == 0:
@@ -200,13 +231,13 @@ def parse_log_to_latency_csv(log_file_path, csv_file_path):
         writer = csv.writer(csv_file)
         # Write the header
         writer.writerow(
-            ['query_id', 'number_of_tasks', 'normalized_start_timestamp', 'normalized_end_timestamp', 'latency'])
+            ['query_id', 'number_of_tasks', 'normalized_start_timestamp', 'normalized_end_timestamp', 'latency', 'query_type'])
         # Write the normalized data to the CSV file
-        for query_id, number_of_tasks, start_timestamp, end_timestamp, latency_value in data:
+        for query_id, number_of_tasks, start_timestamp, end_timestamp, latency_value, query_type in data:
             normalized_start_timestamp = start_timestamp - min_timestamp
             normalized_end_timestamp = end_timestamp - min_timestamp
             writer.writerow(
-                [query_id, number_of_tasks, normalized_start_timestamp, normalized_end_timestamp, latency_value])
+                [query_id, number_of_tasks, normalized_start_timestamp, normalized_end_timestamp, latency_value, query_type])
 
 
 def parse_log_to_throughput_csv(log_file_path, csv_file_path):
@@ -229,9 +260,15 @@ def parse_log_to_throughput_csv(log_file_path, csv_file_path):
                 throughput_value = float(match.group(4))
                 unit_prefix = match.group(5)
                 throughput_value = convert_unit_prefix(throughput_value, unit_prefix)
+                query_type = "UNDEFINED"
+                if query_id in statistics_query_ids:
+                    query_type = "STATISTICS"
+                else:
+                    assert query_id in analytical_query_ids, "Query ID not found in analytical_query_ids."
+                    query_type = "ANALYTICAL"
 
                 # Append the extracted data to the list
-                data.append((start_timestamp, query_id, throughput_value))
+                data.append((start_timestamp, query_id, throughput_value, query_type))
 
     # Calculate average of the query
     if len(data) == 0:
@@ -244,11 +281,11 @@ def parse_log_to_throughput_csv(log_file_path, csv_file_path):
     with open(csv_file_path, mode='w', newline='') as csv_file:
         writer = csv.writer(csv_file)
         # Write the header
-        writer.writerow(['normalized_timestamp', 'query_id', 'throughput'])
+        writer.writerow(['normalized_timestamp', 'query_id', 'throughput', 'query_type'])
         # Write the normalized data to the CSV file
-        for start_timestamp, query_id, throughput in data:
+        for start_timestamp, query_id, throughput, query_type in data:
             normalized_timestamp = start_timestamp - min_timestamp
-            writer.writerow([normalized_timestamp, query_id, throughput])
+            writer.writerow([normalized_timestamp, query_id, throughput, query_type])
 
 
 def concatenate_csv_files(folders, output_file, config_file, csv_file_path):
@@ -311,6 +348,9 @@ if __name__ == "__main__":
     parser.add_argument("--buffer-size", type=int, required=True, help="Buffer size for NebulaStream.")
     parser.add_argument("--number-of-buffers", type=int, required=True, help="Number of buffers in the buffer manager of NebulaStream")
     parser.add_argument("--flush-interval", type=int, default=5, help="Flush Interval for the generator source")
+    parser.add_argument("--statistics-generator-rates", type=str, required=True, help="Path to yaml file containing the generator rates of the statistics queries.")
+    parser.add_argument("--number-of-statistics-query-starts", type=int, required=True, help="Number of times to start a batch of statistics queries.")
+    parser.add_argument("--statistics-queries-per-start", type=int, required=True, help="Number of statistics queries to start per batch.")
     parser.add_argument("--remove-build-dir", action="store_true", default=False, help="Remove and recreate the build directory before running")
     args = parser.parse_args()
 
@@ -337,12 +377,20 @@ if __name__ == "__main__":
     else:
         allGeneratorRatesPerQuery = allGeneratorRatesPerQuery + [allGeneratorRatesPerQuery[-1]] * (args.number_of_queries - len(allGeneratorRatesPerQuery))
 
+    # Reading statistics generator rates from file
+    allStatisticsGeneratorRates = read_generator_rates(args.statistics_generator_rates)
+    totalStatisticsQueries = args.number_of_statistics_query_starts * args.statistics_queries_per_start
+    if len(allStatisticsGeneratorRates) >= totalStatisticsQueries:
+        allStatisticsGeneratorRates = allStatisticsGeneratorRates[:totalStatisticsQueries]
+    else:
+        allStatisticsGeneratorRates = allStatisticsGeneratorRates + [allStatisticsGeneratorRates[-1]] * (totalStatisticsQueries - len(allStatisticsGeneratorRates))
+
     # Build NebulaStream
     compile_nebulastream(cmake_flags, build_dir)
 
     tcp_server_processes = []
     single_node_process = []
-    stop_process = []
+    stop_processes = []
 
     # Iterate over all cross-product combinations
     no_combinations = (
@@ -351,28 +399,25 @@ if __name__ == "__main__":
             len(allNumberOfBuffersInGlobalBufferManagers) *
             len(allJoinStrategies) *
             len(allNumberOfEntriesSliceCaches) *
-            len(allSliceCacheTypes) *
             len(allBufferSizes) *
             len(allPageSizes) *
-            len(allResourceAssignments) *
-            len(allQueries)
+            len(analyticalQueries)
     )
     combinations = itertools.product(allExecutionModes, allNumberOfWorkerThreads,
                                      allNumberOfBuffersInGlobalBufferManagers, allJoinStrategies,
-                                     allNumberOfEntriesSliceCaches, allSliceCacheTypes, allBufferSizes,
-                                     allPageSizes, allResourceAssignments, allQueries)
+                                     allNumberOfEntriesSliceCaches, allBufferSizes,
+                                     allPageSizes, analyticalQueries)
 
     counter = 0
     new_folders = []
     for [executionMode, numberOfWorkerThreads, buffersInGlobalBufferManager, joinStrategy,
-         numberOfEntriesSliceCaches,
-         sliceCacheType, bufferSizeInBytes, pageSize, resourceAssignment, query] in combinations:
+         numberOfEntriesSliceCaches, bufferSizeInBytes, pageSize, analyticalQuery] in combinations:
         try:
             counter += 1
             print(f"Running combination [{counter}/{no_combinations}]")
 
             # Creating new output folder for this benchmark run and writing the current combination to a file
-            folder_name = create_output_folder(resourceAssignment + "_" + query)
+            folder_name = create_output_folder(analyticalQuery)
             new_folders.append(folder_name)
             with (open(os.path.join(folder_name, config_file), 'w') as file):
                 # Write the combination to the file
@@ -382,11 +427,9 @@ if __name__ == "__main__":
                     "buffersInGlobalBufferManager": buffersInGlobalBufferManager,
                     "joinStrategy": joinStrategy,
                     "numberOfEntriesSliceCaches": numberOfEntriesSliceCaches,
-                    "sliceCacheType": sliceCacheType,
                     "bufferSizeInBytes": bufferSizeInBytes,
                     "pageSize": pageSize,
-                    "resourceAssignment": resourceAssignment,
-                    "query": query
+                    "query": analyticalQuery
                 }
                 yaml.dump(config, file, default_flow_style=False)
 
@@ -394,20 +437,45 @@ if __name__ == "__main__":
             file_path_stdout = os.path.join(folder_name, "SingleNodeStdout.log")
             stdout_file = open(file_path_stdout, 'w')
             single_node_process = start_single_node_worker(stdout_file)
+
+            # Open a log file for nes-cli output
+            cli_log_path = os.path.join(folder_name, "nes-cli.log")
+            cli_log_file = open(cli_log_path, 'w')
             time.sleep(WAIT_BETWEEN_COMMANDS_LONG)
 
-            start_port = [5123]
-            query_ids = []
-            for concurrent_query_number, (generatorRateType, generatorRateConfig) in enumerate(
+            # Starting analytical queries
+            for analytical_query_number, (generatorRateType, generatorRateConfig) in enumerate(
                     allGeneratorRatesPerQuery):
-                # Changing the query yaml file to the new ports etc.
-                new_query_config_name = os.path.join(folder_name, f"{query}_{concurrent_query_number}.yaml")
-                copy_and_modify_query_config(allQueries[query], new_query_config_name,
-                                             f"{query}_{concurrent_query_number}_source",
+                new_query_config_name = os.path.join(folder_name, f"analytical_{analyticalQuery}_{analytical_query_number}.yaml")
+                copy_and_modify_query_config(analyticalQueries[analyticalQuery], new_query_config_name,
+                                             f"analytical_{analyticalQuery}_{analytical_query_number}_source",
                                              generatorRateConfig, generatorRateType, args.flush_interval)
-                # Submitting the query
-                query_id = submitting_query(new_query_config_name)
-                query_ids.append(query_id)
+                query_id = submitting_query(new_query_config_name, cli_log_file)
+                analytical_query_ids.append(query_id)
+
+            # Waiting to give the engine time to start the queries and for measuring the current throughput
+            time.sleep(args.wait_between_queries)
+
+            for concurrent_query_number in range(args.number_of_statistics_query_starts):
+                for start_num in range(args.statistics_queries_per_start):
+                    query_num = concurrent_query_number * args.statistics_queries_per_start + start_num
+                    (statGeneratorRateType, statGeneratorRateConfig) = allStatisticsGeneratorRates[query_num]
+                    print(f'query num = {query_num}')
+                    # Changing the query yaml file to the new ports etc.
+                    random_stat_query = random.choice(list(statisticQueries.keys()))
+                    histogramConfig = None
+                    if random_stat_query == "histogram":
+                        histogramConfig = random.choice(allHistogramConfigs)
+                    reservoirSize = None
+                    if random_stat_query == "reservoir":
+                        reservoirSize = random.choice(allReservoirSizes)
+                    new_query_config_name = os.path.join(folder_name, f"statistics_{random_stat_query}_{query_num}.yaml")
+                    copy_and_modify_query_config(statisticQueries[random_stat_query], new_query_config_name,
+                                                 f"statistics_{random_stat_query}_{query_num}_source",
+                                                 statGeneratorRateConfig, statGeneratorRateType, args.flush_interval, histogram_config=histogramConfig, reservoir_size=reservoirSize)
+                    # Submitting the query
+                    query_id = submitting_query(new_query_config_name, cli_log_file)
+                    statistics_query_ids.append(query_id)
 
                 # Waiting to give the engine time to start the query and for measuring the current throughput
                 time.sleep(args.wait_between_queries)
@@ -416,18 +484,24 @@ if __name__ == "__main__":
             time.sleep(args.wait_before_stopping_queries)
 
             # Stopping all queries
-            for query_id in query_ids:
-                stop_process = stop_query(query_id)
+            stop_processes = []
+            for query_id in statistics_query_ids + analytical_query_ids:
+                stop_processes.append(stop_query(query_id, cli_log_file))
+
+            # Wait for all stop processes to finish so their output is flushed
+            for proc in stop_processes:
+                proc.wait()
 
         finally:
             time.sleep(WAIT_BEFORE_SIGKILL)  # Wait additional time before cleanup
-            all_processes = tcp_server_processes + [single_node_process] + [stop_process]
+            all_processes = tcp_server_processes + [single_node_process] + stop_processes
             for proc in all_processes:
                 print(f"Trying to terminate {proc}")
                 if not proc:
                     continue
                 terminate_process_if_exists(proc)
             stdout_file.close()
+            cli_log_file.close()
 
         throughput_full_csv_path = os.path.join(folder_name, throughput_csv_file_path)
         parse_log_to_throughput_csv(file_path_stdout, throughput_full_csv_path)

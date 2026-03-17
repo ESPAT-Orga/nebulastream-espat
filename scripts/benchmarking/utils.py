@@ -94,6 +94,8 @@ def get_vcpkg_dir():
         vcpkg_dir = "/vcpkg"
     elif hostname == "beaver":
         vcpkg_dir = "/home/tdietzel/vcpkg/scripts/buildsystems/vcpkg.cmake"
+    elif hostname == "p3-x6xc":
+        vcpkg_dir = "/home/flang/vcpkg/scripts/buildsystems/vcpkg.cmake"
     else:
         raise ValueError(f"Unknown hostname: {hostname}. Cannot determine vcpkg directory.")
 

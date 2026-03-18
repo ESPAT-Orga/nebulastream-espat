@@ -53,6 +53,7 @@ NUM_RUNS_PER_EXPERIMENT = 1
 WAIT_BETWEEN_COMMANDS_SHORT = 2
 WAIT_BETWEEN_COMMANDS_LONG = 5
 WAIT_BEFORE_SIGKILL = 10
+NUM_STATISTICS_QUERIES = 10
 
 #### Worker Configurations
 allExecutionModes = ["COMPILER"]
@@ -355,6 +356,9 @@ if __name__ == "__main__":
     else:
         allGeneratorRatesPerQuery = allGeneratorRatesPerQuery + [allGeneratorRatesPerQuery[-1]] * (args.number_of_queries - len(allGeneratorRatesPerQuery))
 
+    # TODO: change this
+    (generatorRateType, generatorRateConfig) = allGeneratorRatesPerQuery[0]
+
     # Build NebulaStream
     compile_nebulastream(cmake_flags, build_dir)
 
@@ -371,23 +375,24 @@ if __name__ == "__main__":
             len(allNumberOfEntriesSliceCaches) *
             len(allBufferSizes) *
             len(allPageSizes) *
-            len(allQueries)
+            len(analyticalQueries)
     )
     combinations = itertools.product(allExecutionModes, allNumberOfWorkerThreads,
                                      allNumberOfBuffersInGlobalBufferManagers, allJoinStrategies,
                                      allNumberOfEntriesSliceCaches, allBufferSizes,
-                                     allPageSizes, allQueries)
+                                     allPageSizes, analyticalQueries)
 
     counter = 0
     new_folders = []
+    #TODO: right now we only start one analytical query. Should we give the option to run multiple queries?
     for [executionMode, numberOfWorkerThreads, buffersInGlobalBufferManager, joinStrategy,
-         numberOfEntriesSliceCaches, bufferSizeInBytes, pageSize, query] in combinations:
+         numberOfEntriesSliceCaches, bufferSizeInBytes, pageSize, analyticalQuery] in combinations:
         try:
             counter += 1
             print(f"Running combination [{counter}/{no_combinations}]")
 
             # Creating new output folder for this benchmark run and writing the current combination to a file
-            folder_name = create_output_folder(query)
+            folder_name = create_output_folder(analyticalQuery)
             new_folders.append(folder_name)
             with (open(os.path.join(folder_name, config_file), 'w') as file):
                 # Write the combination to the file
@@ -399,7 +404,7 @@ if __name__ == "__main__":
                     "numberOfEntriesSliceCaches": numberOfEntriesSliceCaches,
                     "bufferSizeInBytes": bufferSizeInBytes,
                     "pageSize": pageSize,
-                    "query": query
+                    "query": analyticalQuery
                 }
                 yaml.dump(config, file, default_flow_style=False)
 
@@ -414,17 +419,33 @@ if __name__ == "__main__":
             time.sleep(WAIT_BETWEEN_COMMANDS_LONG)
 
             start_port = [5123]
-            query_ids = []
-            for concurrent_query_number, (generatorRateType, generatorRateConfig) in enumerate(
-                    allGeneratorRatesPerQuery):
+            analytical_query_ids = []
+            # TODO: remove this if we are sure, that we just need one analytical query
+            concurrent_query_number = 1
+            new_query_config_name = os.path.join(folder_name, f"analytical_{analyticalQuery}_{concurrent_query_number}.yaml")
+            copy_and_modify_query_config(analyticalQueries[analyticalQuery], new_query_config_name,
+                                         f"analytical_{analyticalQuery}_{concurrent_query_number}_source",
+                                         generatorRateConfig, generatorRateType, args.flush_interval)
+            # Submitting the query
+            query_id = submitting_query(new_query_config_name, cli_log_file)
+            analytical_query_ids.append(query_id)
+
+            # Waiting to give the engine time to start the query and for measuring the current throughput
+            time.sleep(args.wait_between_queries)
+
+            statistics_query_ids = []
+            #TODO: before we were iterating over different generator rates here
+            for concurrent_query_number in range(NUM_STATISTICS_QUERIES):
                 # Changing the query yaml file to the new ports etc.
-                new_query_config_name = os.path.join(folder_name, f"{query}_{concurrent_query_number}.yaml")
-                copy_and_modify_query_config(allQueries[query], new_query_config_name,
-                                             f"{query}_{concurrent_query_number}_source",
+                random_stat_query = random.choice(list(statisticQueries.keys()))
+                #random_stat_query = random.choice(list(statisticQueries.values()))
+                new_query_config_name = os.path.join(folder_name, f"statistics_{random_stat_query}_{concurrent_query_number}.yaml")
+                copy_and_modify_query_config(statisticQueries[random_stat_query], new_query_config_name,
+                                             f"statistics_{random_stat_query}_{concurrent_query_number}_source",
                                              generatorRateConfig, generatorRateType, args.flush_interval)
                 # Submitting the query
                 query_id = submitting_query(new_query_config_name, cli_log_file)
-                query_ids.append(query_id)
+                statistics_query_ids.append(query_id)
 
                 # Waiting to give the engine time to start the query and for measuring the current throughput
                 time.sleep(args.wait_between_queries)
@@ -434,7 +455,7 @@ if __name__ == "__main__":
 
             # Stopping all queries
             stop_processes = []
-            for query_id in query_ids:
+            for query_id in statistics_query_ids + analytical_query_ids:
                 stop_processes.append(stop_query(query_id, cli_log_file))
 
             # Wait for all stop processes to finish so their output is flushed

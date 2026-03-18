@@ -62,6 +62,14 @@ allJoinStrategies = ["HASH_JOIN"]
 allNumberOfEntriesSliceCaches = [10]
 allPageSizes = [8192]
 
+#### Statistic Build Configurations
+allReservoirSizes = [100, 1000, 10000]
+allHistogramConfigs = [
+    # (num_buckets, min_value, max_value, counter_type)
+    (10, 0, 1000000, "uint64"),
+    (100, 0, 1000000, "uint64"),
+    (1000, 0, 1000000, "uint64"),
+]
 
 #### Queries
 statisticQueries = {
@@ -154,7 +162,7 @@ def stop_query(query_id, cli_log_file):
     return process
 
 
-def copy_and_modify_query_config(old_config, new_config, new_source_name, generator_rate_config, generator_type, flush_interval):
+def copy_and_modify_query_config(old_config, new_config, new_source_name, generator_rate_config, generator_type, flush_interval, histogram_config=None):
     # Loading the yaml file
     with open(old_config, 'r') as input_yaml_file:
         yaml_query_config = yaml.safe_load(input_yaml_file)
@@ -179,8 +187,12 @@ def copy_and_modify_query_config(old_config, new_config, new_source_name, genera
     yaml_query_config['physical'][0]['source_config']['flush_interval_ms'] = flush_interval
 
     # Save the updated content back to the YAML file
+    dumped = yaml.dump(yaml_query_config, sort_keys=False)
+    if histogram_config is not None:
+        num_buckets, min_value, max_value, counter_type = histogramConfig
+        dumped = dumped.format(num_buckets=num_buckets, min_value=min_value, max_value=max_value, counter_type=counter_type)
     with open(new_config, 'w') as file:
-        yaml.dump(yaml_query_config, file, sort_keys=False)
+        file.write(dumped)
 
 
 def parse_log_to_latency_csv(log_file_path, csv_file_path):
@@ -438,11 +450,14 @@ if __name__ == "__main__":
             for concurrent_query_number in range(NUM_STATISTICS_QUERIES):
                 # Changing the query yaml file to the new ports etc.
                 random_stat_query = random.choice(list(statisticQueries.keys()))
+                histogramConfig = None
+                if random_stat_query == "histogram":
+                    histogramConfig = random.choice(allHistogramConfigs)
                 #random_stat_query = random.choice(list(statisticQueries.values()))
                 new_query_config_name = os.path.join(folder_name, f"statistics_{random_stat_query}_{concurrent_query_number}.yaml")
                 copy_and_modify_query_config(statisticQueries[random_stat_query], new_query_config_name,
                                              f"statistics_{random_stat_query}_{concurrent_query_number}_source",
-                                             generatorRateConfig, generatorRateType, args.flush_interval)
+                                             generatorRateConfig, generatorRateType, args.flush_interval, histogram_config=histogramConfig)
                 # Submitting the query
                 query_id = submitting_query(new_query_config_name, cli_log_file)
                 statistics_query_ids.append(query_id)

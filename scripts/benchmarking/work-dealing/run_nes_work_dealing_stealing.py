@@ -79,8 +79,8 @@ analyticalQueries = {
     "aggregation": "scripts/benchmarking/work-dealing/query-configs/analytical/agg_query.yaml.template",
     "filter": "scripts/benchmarking/work-dealing/query-configs/analytical/filter_query.yaml.template"}
 
-# TODO: check use of all queries everywhere
-
+statistics_query_ids = []
+analytical_query_ids = []
 
 def create_output_folder(appendix):
     timestamp = int(time.time())
@@ -219,9 +219,16 @@ def parse_log_to_latency_csv(log_file_path, csv_file_path):
                 latency_value = float(match.group(5))
                 unit_prefix = match.group(6)
                 latency_value = convert_unit_prefix(latency_value, unit_prefix)
+                query_type = "UNDEFINED"
+                if query_id in statistics_query_ids:
+                    query_type = "STATISTICS"
+                else:
+                    assert query_id in analytical_query_ids, "Query ID not found in analytical_query_ids."
+                    query_type = "ANALYTICAL"
+
 
                 # Append the extracted data to the list
-                data.append((query_id, number_of_tasks, start_timestamp, end_timestamp, latency_value))
+                data.append((query_id, number_of_tasks, start_timestamp, end_timestamp, latency_value, query_type))
 
     # Calculate average of the query
     if len(data) == 0:
@@ -235,13 +242,13 @@ def parse_log_to_latency_csv(log_file_path, csv_file_path):
         writer = csv.writer(csv_file)
         # Write the header
         writer.writerow(
-            ['query_id', 'number_of_tasks', 'normalized_start_timestamp', 'normalized_end_timestamp', 'latency'])
+            ['query_id', 'number_of_tasks', 'normalized_start_timestamp', 'normalized_end_timestamp', 'latency', 'query_type'])
         # Write the normalized data to the CSV file
-        for query_id, number_of_tasks, start_timestamp, end_timestamp, latency_value in data:
+        for query_id, number_of_tasks, start_timestamp, end_timestamp, latency_value, query_type in data:
             normalized_start_timestamp = start_timestamp - min_timestamp
             normalized_end_timestamp = end_timestamp - min_timestamp
             writer.writerow(
-                [query_id, number_of_tasks, normalized_start_timestamp, normalized_end_timestamp, latency_value])
+                [query_id, number_of_tasks, normalized_start_timestamp, normalized_end_timestamp, latency_value, query_type])
 
 
 def parse_log_to_throughput_csv(log_file_path, csv_file_path):
@@ -264,9 +271,15 @@ def parse_log_to_throughput_csv(log_file_path, csv_file_path):
                 throughput_value = float(match.group(4))
                 unit_prefix = match.group(5)
                 throughput_value = convert_unit_prefix(throughput_value, unit_prefix)
+                query_type = "UNDEFINED"
+                if query_id in statistics_query_ids:
+                    query_type = "STATISTICS"
+                else:
+                    assert query_id in analytical_query_ids, "Query ID not found in analytical_query_ids."
+                    query_type = "ANALYTICAL"
 
                 # Append the extracted data to the list
-                data.append((start_timestamp, query_id, throughput_value))
+                data.append((start_timestamp, query_id, throughput_value, query_type))
 
     # Calculate average of the query
     if len(data) == 0:
@@ -279,11 +292,11 @@ def parse_log_to_throughput_csv(log_file_path, csv_file_path):
     with open(csv_file_path, mode='w', newline='') as csv_file:
         writer = csv.writer(csv_file)
         # Write the header
-        writer.writerow(['normalized_timestamp', 'query_id', 'throughput'])
+        writer.writerow(['normalized_timestamp', 'query_id', 'throughput', 'query_type'])
         # Write the normalized data to the CSV file
-        for start_timestamp, query_id, throughput in data:
+        for start_timestamp, query_id, throughput, query_type in data:
             normalized_timestamp = start_timestamp - min_timestamp
-            writer.writerow([normalized_timestamp, query_id, throughput])
+            writer.writerow([normalized_timestamp, query_id, throughput, query_type])
 
 
 def concatenate_csv_files(folders, output_file, config_file, csv_file_path):
@@ -433,7 +446,6 @@ if __name__ == "__main__":
             time.sleep(WAIT_BETWEEN_COMMANDS_LONG)
 
             start_port = [5123]
-            analytical_query_ids = []
             # TODO: remove this if we are sure, that we just need one analytical query
             concurrent_query_number = 1
             new_query_config_name = os.path.join(folder_name, f"analytical_{analyticalQuery}_{concurrent_query_number}.yaml")
@@ -447,7 +459,6 @@ if __name__ == "__main__":
             # Waiting to give the engine time to start the query and for measuring the current throughput
             time.sleep(args.wait_between_queries)
 
-            statistics_query_ids = []
             #TODO: before we were iterating over different generator rates here
             for concurrent_query_number in range(NUM_STATISTICS_QUERIES):
                 # Changing the query yaml file to the new ports etc.

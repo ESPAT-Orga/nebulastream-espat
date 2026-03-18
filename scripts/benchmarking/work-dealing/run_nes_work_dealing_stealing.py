@@ -63,9 +63,14 @@ allPageSizes = [8192]
 
 
 #### Queries
-allQueries = {
+statisticQueries = {
     "aggregation": "scripts/benchmarking/work-dealing/query-configs/agg_query.yaml",
     "filter": "scripts/benchmarking/work-dealing/query-configs/agg_query.yaml"}
+analyticalQueries = {
+    "aggregation": "scripts/benchmarking/work-dealing/query-configs/agg_query.yaml",
+    "filter": "scripts/benchmarking/work-dealing/query-configs/agg_query.yaml"}
+
+# TODO: check use of all queries everywhere
 
 
 def create_output_folder(appendix):

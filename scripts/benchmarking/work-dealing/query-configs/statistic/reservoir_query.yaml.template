@@ -1,12 +1,15 @@
-query: SELECT * FROM tcp_source WHERE id > UINT64(123456789) INTO discard_sink
+#query: SELECT * FROM tcp_source WHERE id > UINT64(123456789) INTO discard_sink
+query: SELECT RESERVOIR(100, id, value, {reservoir_size}) FROM tcp_source WINDOW TUMBLING(timestamp, size 10 sec) INTO discard_sink;
 sinks:
   - name: discard_sink
     schema:
-      - name: tcp_source$id
+      - name: tcp_source$statistichash
         type: UINT64
-      - name: tcp_source$value
+      - name: tcp_source$statisticstart
         type: UINT64
-      - name: tcp_source$timestamp
+      - name: tcp_source$statisticend
+        type: UINT64
+      - name: tcp_source$statisticnumberofseentuples
         type: UINT64
     type: Discard
     config:

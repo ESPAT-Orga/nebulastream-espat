@@ -74,10 +74,10 @@ allHistogramConfigs = [
 #### Queries
 statisticQueries = {
     "histogram": "scripts/benchmarking/work-dealing/query-configs/statistic/histogram_query.yaml.template",
-    "filter": "scripts/benchmarking/work-dealing/query-configs/statistic/filter_query.yaml.template"}
+    "reservoir": "scripts/benchmarking/work-dealing/query-configs/statistic/reservoir_query.yaml.template"}
 analyticalQueries = {
     "aggregation": "scripts/benchmarking/work-dealing/query-configs/analytical/agg_query.yaml.template",
-    "filter": "scripts/benchmarking/work-dealing/query-configs/analytical/agg_query.yaml.template"}
+    "filter": "scripts/benchmarking/work-dealing/query-configs/analytical/filter_query.yaml.template"}
 
 # TODO: check use of all queries everywhere
 
@@ -162,7 +162,7 @@ def stop_query(query_id, cli_log_file):
     return process
 
 
-def copy_and_modify_query_config(old_config, new_config, new_source_name, generator_rate_config, generator_type, flush_interval, histogram_config=None):
+def copy_and_modify_query_config(old_config, new_config, new_source_name, generator_rate_config, generator_type, flush_interval, histogram_config=None, reservoir_size=None):
     # Loading the yaml file
     with open(old_config, 'r') as input_yaml_file:
         yaml_query_config = yaml.safe_load(input_yaml_file)
@@ -191,6 +191,8 @@ def copy_and_modify_query_config(old_config, new_config, new_source_name, genera
     if histogram_config is not None:
         num_buckets, min_value, max_value, counter_type = histogramConfig
         dumped = dumped.format(num_buckets=num_buckets, min_value=min_value, max_value=max_value, counter_type=counter_type)
+    if reservoir_size is not None:
+        dumped = dumped.format(reservoir_size=reservoir_size)
     with open(new_config, 'w') as file:
         file.write(dumped)
 
@@ -453,11 +455,14 @@ if __name__ == "__main__":
                 histogramConfig = None
                 if random_stat_query == "histogram":
                     histogramConfig = random.choice(allHistogramConfigs)
+                reservoirSize = None
+                if random_stat_query == "reservoir":
+                    reservoirSize = random.choice(allReservoirSizes)
                 #random_stat_query = random.choice(list(statisticQueries.values()))
                 new_query_config_name = os.path.join(folder_name, f"statistics_{random_stat_query}_{concurrent_query_number}.yaml")
                 copy_and_modify_query_config(statisticQueries[random_stat_query], new_query_config_name,
                                              f"statistics_{random_stat_query}_{concurrent_query_number}_source",
-                                             generatorRateConfig, generatorRateType, args.flush_interval, histogram_config=histogramConfig)
+                                             generatorRateConfig, generatorRateType, args.flush_interval, histogram_config=histogramConfig, reservoir_size=reservoirSize)
                 # Submitting the query
                 query_id = submitting_query(new_query_config_name, cli_log_file)
                 statistics_query_ids.append(query_id)

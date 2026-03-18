@@ -1,9 +1,17 @@
-query: SELECT AVG(value) AS avg_value FROM tcp_source WINDOW TUMBLING (timestamp, size 10 sec) INTO discard_sink
+#query: SELECT AVG(value) AS avg_value FROM tcp_source WINDOW TUMBLING (timestamp, size 10 sec) INTO discard_sink
+#query: SELECT EQUIWIDTHHISTOGRAM(200, price, {num_buckets}, {min_value}, {max_value}, {counter_type}) FROM bid WINDOW TUMBLING(timestamp, size 10 sec) INTO Discard();
+query: SELECT EQUIWIDTHHISTOGRAM(200, value, 10, 0, 1000000, uint64) FROM tcp_source WINDOW TUMBLING(timestamp, size 1 sec) INTO discard_sink;
 sinks:
   - name: discard_sink
     schema:
-      - name: tcp_source$avg_value
-        type: FLOAT64
+      - name: tcp_source$statistichash
+        type: UINT64
+      - name: tcp_source$statisticstart
+        type: UINT64
+      - name: tcp_source$statisticend
+        type: UINT64
+      - name: tcp_source$statisticnumberofseentuples
+        type: UINT64
     type: Discard
     config:
       file_path: "/tmp/discard_sink.csv"

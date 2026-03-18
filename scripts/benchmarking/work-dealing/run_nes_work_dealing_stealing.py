@@ -65,8 +65,8 @@ allPageSizes = [8192]
 
 #### Queries
 statisticQueries = {
-    "aggregation": "scripts/benchmarking/work-dealing/query-configs/statistic/agg_query.yaml.template",
-    "filter": "scripts/benchmarking/work-dealing/query-configs/statistic/agg_query.yaml.template"}
+    "histogram": "scripts/benchmarking/work-dealing/query-configs/statistic/histogram_query.yaml.template",
+    "filter": "scripts/benchmarking/work-dealing/query-configs/statistic/filter_query.yaml.template"}
 analyticalQueries = {
     "aggregation": "scripts/benchmarking/work-dealing/query-configs/analytical/agg_query.yaml.template",
     "filter": "scripts/benchmarking/work-dealing/query-configs/analytical/agg_query.yaml.template"}
@@ -76,7 +76,7 @@ analyticalQueries = {
 
 def create_output_folder(appendix):
     timestamp = int(time.time())
-    folder_name = f"ResourceAssignment_{timestamp}_{appendix}"
+    folder_name = f"RunBenchmark_{timestamp}_{appendix}"
     create_folder_and_remove_if_exists(folder_name)
     print(f"Created folder {folder_name}...")
     return folder_name

@@ -162,13 +162,26 @@ def stop_query(query_id, cli_log_file):
     return process
 
 
-def copy_and_modify_query_config(old_config, new_config, new_source_name, generator_rate_config, generator_type, flush_interval, histogram_config=None, reservoir_size=None):
+def copy_and_modify_query_config(old_config, new_config, new_source_name, generator_rate_config, generator_type, flush_interval, histogram_config=None, reservoir_size=None, use_own_source=True):
     # Loading the yaml file
     with open(old_config, 'r') as input_yaml_file:
         yaml_query_config = yaml.safe_load(input_yaml_file)
 
-    # Update the logical name in the logical section
-    yaml_query_config['logical'][0]['name'] = new_source_name
+    if use_own_source:
+        # Update the logical name in the logical section
+        yaml_query_config['logical'][0]['name'] = new_source_name
+        # Update the physical logical reference to use the new logical name
+        yaml_query_config['physical'][0]['logical'] = new_source_name
+
+        # Update the generator rate type
+        yaml_query_config['physical'][0]['source_config']['generator_rate_config'] = generator_rate_config
+        yaml_query_config['physical'][0]['source_config']['generator_rate_type'] = generator_type
+        yaml_query_config['physical'][0]['source_config']['flush_interval_ms'] = flush_interval
+    else:
+        #yaml_query_config['logical'] = []
+        yaml_query_config['logical'][0]['name'] = new_source_name
+        yaml_query_config['physical'] = []
+
 
     # Update the query to use the new logical name
     old_logical_name = "tcp_source"  # Assuming the old name is tcp_source
@@ -177,14 +190,6 @@ def copy_and_modify_query_config(old_config, new_config, new_source_name, genera
     for field in yaml_query_config['sinks'][0]['schema']:
         field['name'] = field['name'].replace(old_logical_name, new_source_name)
 
-
-    # Update the physical logical reference to use the new logical name
-    yaml_query_config['physical'][0]['logical'] = new_source_name
-
-    # Update the generator rate type
-    yaml_query_config['physical'][0]['source_config']['generator_rate_config'] = generator_rate_config
-    yaml_query_config['physical'][0]['source_config']['generator_rate_type'] = generator_type
-    yaml_query_config['physical'][0]['source_config']['flush_interval_ms'] = flush_interval
 
     # Save the updated content back to the YAML file
     dumped = yaml.dump(yaml_query_config, sort_keys=False)
@@ -449,8 +454,9 @@ if __name__ == "__main__":
             # TODO: remove this if we are sure, that we just need one analytical query
             concurrent_query_number = 1
             new_query_config_name = os.path.join(folder_name, f"analytical_{analyticalQuery}_{concurrent_query_number}.yaml")
+            new_source_name = f"analytical_{analyticalQuery}_{concurrent_query_number}_source"
             copy_and_modify_query_config(analyticalQueries[analyticalQuery], new_query_config_name,
-                                         f"analytical_{analyticalQuery}_{concurrent_query_number}_source",
+                                         new_source_name,
                                          generatorRateConfig, generatorRateType, args.flush_interval)
             # Submitting the query
             query_id = submitting_query(new_query_config_name, cli_log_file)
@@ -472,8 +478,8 @@ if __name__ == "__main__":
                 #random_stat_query = random.choice(list(statisticQueries.values()))
                 new_query_config_name = os.path.join(folder_name, f"statistics_{random_stat_query}_{concurrent_query_number}.yaml")
                 copy_and_modify_query_config(statisticQueries[random_stat_query], new_query_config_name,
-                                             f"statistics_{random_stat_query}_{concurrent_query_number}_source",
-                                             generatorRateConfig, generatorRateType, args.flush_interval, histogram_config=histogramConfig, reservoir_size=reservoirSize)
+                                             new_source_name,
+                                             generatorRateConfig, generatorRateType, args.flush_interval, histogram_config=histogramConfig, reservoir_size=reservoirSize, use_own_source=False)
                 # Submitting the query
                 query_id = submitting_query(new_query_config_name, cli_log_file)
                 statistics_query_ids.append(query_id)

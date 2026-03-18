@@ -65,11 +65,11 @@ allPageSizes = [8192]
 
 #### Queries
 statisticQueries = {
-    "aggregation": "scripts/benchmarking/work-dealing/query-configs/agg_query.yaml",
-    "filter": "scripts/benchmarking/work-dealing/query-configs/agg_query.yaml"}
+    "aggregation": "scripts/benchmarking/work-dealing/query-configs/statistic/agg_query.yaml.template",
+    "filter": "scripts/benchmarking/work-dealing/query-configs/statistic/agg_query.yaml.template"}
 analyticalQueries = {
-    "aggregation": "scripts/benchmarking/work-dealing/query-configs/agg_query.yaml",
-    "filter": "scripts/benchmarking/work-dealing/query-configs/agg_query.yaml"}
+    "aggregation": "scripts/benchmarking/work-dealing/query-configs/analytical/agg_query.yaml.template",
+    "filter": "scripts/benchmarking/work-dealing/query-configs/analytical/agg_query.yaml.template"}
 
 # TODO: check use of all queries everywhere
 

@@ -34,7 +34,7 @@ from scripts.benchmarking.utils import *
 #### Benchmark Configurations
 build_dir = os.path.join(".", "build_dir")
 working_dir = os.path.join(build_dir, "working_dir")
-csv_file_path = "results_nebulastream.csv"
+csv_file_path = "plots/results_nebulastream.csv"
 benchmark_json_file = os.path.abspath(os.path.join(working_dir, "BenchmarkResults.json"))
 systest_executable = os.path.join(build_dir, "nes-systests/systest/systest")
 test_data_dir = os.path.abspath(os.path.join(build_dir, "nes-systests/testdata"))

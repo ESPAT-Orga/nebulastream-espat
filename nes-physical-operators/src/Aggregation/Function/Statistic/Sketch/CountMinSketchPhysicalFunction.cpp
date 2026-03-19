@@ -54,7 +54,8 @@ void CountMinSketchPhysicalFunction::lift(
     const auto value = inputFunction.execute(record, pipelineMemoryProvider.arena);
     const auto firstCounterRef = static_cast<nautilus::val<int8_t*>>(aggregationState);
     const auto firstSeedsRef = static_cast<nautilus::val<int8_t*>>(aggregationState) + nautilus::val<uint64_t>{totalSizeOfSketchInBytes};
-    for (nautilus::static_val<uint64_t> col = 0; col < numberOfCols; ++col)
+    /// This should be a val<>, as with a static_val<> the compilation times shoots through the roof
+    for (nautilus::val<uint64_t> col = 0; col < numberOfCols; ++col)
     {
         const auto seedsRef = firstSeedsRef + nautilus::val<uint64_t>{col * sizeOfSingleSeed};
         H3HashFunction h3HashFunction{sizeOfSingleSeed, numberOfBitsInKey, seedsRef};
@@ -83,7 +84,8 @@ void CountMinSketchPhysicalFunction::combine(
     auto counter2RefTemp = aggregationState2;
     auto counter1Ref = static_cast<nautilus::val<int8_t*>>(counter1RefTemp);
     auto counter2Ref = static_cast<nautilus::val<int8_t*>>(counter2RefTemp);
-    for (nautilus::static_val<uint64_t> counterIdx = 0; counterIdx < numberOfCols * numberOfRows; ++counterIdx)
+    /// This should be a val<>, as with a static_val<> the compilation times shoots through the roof
+    for (nautilus::val<uint64_t> counterIdx = 0; counterIdx < numberOfCols * numberOfRows; ++counterIdx)
     {
         auto counter1 = VarVal::readNonNullableVarValFromMemory(counter1Ref, counterType);
         auto counter2 = VarVal::readNonNullableVarValFromMemory(counter2Ref, counterType);

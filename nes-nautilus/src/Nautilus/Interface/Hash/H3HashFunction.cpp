@@ -14,6 +14,7 @@
 #include <Nautilus/Interface/Hash/H3HashFunction.hpp>
 
 #include <Nautilus/DataTypes/DataTypesUtil.hpp>
+#include <select.hpp>
 
 namespace NES
 {
@@ -37,14 +38,11 @@ HashFunction::HashValue H3HashFunction::calculate(HashValue& hash, const VarVal&
     auto operatingValue = value.getRawValueAs<HashValue>();
     for (nautilus::static_val<uint64_t> keyBit = 0; keyBit < numberOfBitsInKey; ++keyBit)
     {
-        auto isBitSet = (operatingValue & 1) == 1;
+        const auto isBitSet = (operatingValue & 1) == 1;
         operatingValue >>= 1;
-        if (isBitSet)
-        {
-            auto seedRef = seeds + nautilus::val<uint64_t>{keyBit * sizeSeedInBytes};
-            auto seedValue = readValueFromMemRef<HashValue::raw_type>(seedRef);
-            hash = hash ^ seedValue;
-        }
+        auto seedRef = seeds + nautilus::val<uint64_t>{keyBit * sizeSeedInBytes};
+        auto seedValue = readValueFromMemRef<HashValue::raw_type>(seedRef);
+        hash = nautilus::select(isBitSet, hash ^ seedValue, hash);
     }
 
     return hash;

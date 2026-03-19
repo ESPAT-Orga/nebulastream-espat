@@ -21,8 +21,35 @@ from typing import Optional, Tuple
 
 
 
+#### Colored Print Helpers
+class _Colors:
+    RESET = "\033[0m"
+    WHITE = "\033[97m"
+    CYAN = "\033[96m"
+    RED = "\033[91m"
+    GREEN = "\033[92m"
+
+def printInfo(*args, **kwargs):
+    """Print an informational message in cyan."""
+    print(f"{_Colors.CYAN}", end="")
+    print(*args, **kwargs)
+    print(_Colors.RESET, end="", flush=True)
+
+def printError(*args, **kwargs):
+    """Print an error message in red."""
+    print(f"{_Colors.RED}", end="")
+    print(*args, **kwargs)
+    print(_Colors.RESET, end="", flush=True)
+
+def printSuccess(*args, **kwargs):
+    """Print a success message in green."""
+    print(f"{_Colors.GREEN}", end="")
+    print(*args, **kwargs)
+    print(_Colors.RESET, end="", flush=True)
+
+
 #### General Util Methods
-def create_folder_and_remove_if_exists(folder_path):
+def create_folder_and_remove_if_exists(folder_path, indent=""):
     """
     Create a folder and remove it if it already exists.
     :param folder_path: Path of the folder to create.
@@ -31,11 +58,11 @@ def create_folder_and_remove_if_exists(folder_path):
     if os.path.exists(folder_path):
         # Remove the folder and all its contents
         shutil.rmtree(folder_path)
-        print(f"Removed existing folder: {folder_path}")
+        print(f"{indent}Removed existing folder: {folder_path}")
 
     # Create the folder
     os.makedirs(folder_path)
-    print(f"Created folder: {folder_path}")
+    printSuccess(f"{indent}Created folder: {folder_path}")
 
 
 def check_repository_root():
@@ -54,7 +81,7 @@ def get_vcpkg_dir():
     # Get the hostname
     hostname = socket.gethostname()
 
-    print(f'Getting vcpkg directory for hostname: {hostname}')
+    printInfo(f'Getting vcpkg directory for hostname: {hostname}')
 
     # Determine the vcpkg directory based on the hostname
     if hostname == "nschubert-thinkstation":
@@ -72,8 +99,8 @@ def get_vcpkg_dir():
 
     return vcpkg_dir
 
-def run_command(command, cwd=None):
-    print(f"Running {command}")
+def run_command(command, cwd=None, indent=""):
+    print(f"{indent}Running {command}")
     result = subprocess.run(command, cwd=cwd, shell=True, check=True, text=True, capture_output=True)
     return result.stdout
 
@@ -148,7 +175,7 @@ def compile_nebulastream(cmake_flags, build_dir):
     build_command = f"{cmake_path} --build {build_dir}"
 
     print(f"Using cmake at: {cmake_path}")
-    print("Running cmake...")
+    printInfo("Running cmake...")
     run_command(cmake_command)
-    print("Building the project...")
+    printInfo("Building the project...")
     run_command(build_command)

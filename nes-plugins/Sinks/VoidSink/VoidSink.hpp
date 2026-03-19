@@ -45,12 +45,16 @@ public:
 
 protected:
     std::ostream& toString(std::ostream& os) const override { return os << "VoidSink"; }
+
+private:
+    std::string outputFilePath;
+    std::shared_ptr<const Schema> schema;
 };
 
 struct ConfigParametersVoid
 {
     static inline std::unordered_map<std::string, DescriptorConfig::ConfigParameterContainer> parameterMap
-        = DescriptorConfig::createConfigParameterContainerMap();
+        = DescriptorConfig::createConfigParameterContainerMap(SinkDescriptor::FILE_PATH);
 };
 }
 

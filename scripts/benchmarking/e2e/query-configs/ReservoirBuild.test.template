@@ -6,5 +6,5 @@ CREATE LOGICAL SOURCE bid(timestamp UINT64 NOT NULL, auctionId INT32 NOT NULL, b
 CREATE PHYSICAL SOURCE FOR bid TYPE Memory;
 ATTACH FILE large/nexmark/bid_6GB.csv
 
-SELECT RESERVOIR(100, auctionId, bidder, price, {reservoir_size}) FROM bid WINDOW TUMBLING(timestamp, size 10 sec) INTO Discard();
+SELECT RESERVOIR(100, auctionId, bidder, price, {reservoir_size}) FROM bid WINDOW TUMBLING(timestamp, size 10 sec) INTO Void();
 ----

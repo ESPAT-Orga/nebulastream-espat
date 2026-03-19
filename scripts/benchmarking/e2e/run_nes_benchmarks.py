@@ -34,7 +34,7 @@ from scripts.benchmarking.utils import *
 #### Benchmark Configurations
 build_dir = os.path.join(".", "build_dir")
 working_dir = os.path.join(build_dir, "working_dir")
-csv_file_path = "results_nebulastream.csv"
+csv_file_path = "plots/results_nebulastream.csv"
 benchmark_json_file = os.path.abspath(os.path.join(working_dir, "BenchmarkResults.json"))
 systest_executable = os.path.join(build_dir, "nes-systests/systest/systest")
 test_data_dir = os.path.abspath(os.path.join(build_dir, "nes-systests/testdata"))
@@ -49,7 +49,7 @@ NUM_RUNS_PER_EXPERIMENT = 1
 
 #### Worker Configurations
 allExecutionModes = ["COMPILER"]  # ["COMPILER", "INTERPRETER"]
-allNumberOfWorkerThreads = ['4', '16']  # ['1', '4', '8', '16', '24'] #['4', '16']
+allNumberOfWorkerThreads = ['1', '4', '16']  # ['1', '4', '8', '16', '24'] #['4', '16']
 allJoinStrategies = ["HASH_JOIN"]
 allNumberOfEntriesSliceCaches = [10]
 allSliceCacheTypes = ["NONE", "SECOND_CHANCE", "LRU", "ALWAYS_MISS"]
@@ -141,7 +141,7 @@ def initialize_csv_file():
         ]
         writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
         writer.writeheader()
-        print("CSV file initialized with headers.")
+        printSuccess("CSV file initialized with headers.")
 
 
 def parse_average_throughput_from_throughput_listener(console_output):
@@ -173,7 +173,7 @@ def parse_average_throughput_from_throughput_listener(console_output):
 
 def run_benchmark(config, query, queryIdx, workerConfigIdx, enableLatency, no_combinations, no_queries):
     # Create the working directory
-    create_folder_and_remove_if_exists(working_dir)
+    create_folder_and_remove_if_exists(working_dir, indent="    ")
 
     try:
         # Running the query with a particular worker configuration
@@ -189,21 +189,25 @@ def run_benchmark(config, query, queryIdx, workerConfigIdx, enableLatency, no_co
 
         benchmark_command = f"{systest_executable} -b -t {os.path.abspath(queries[query])} --data {os.path.abspath(test_data_dir)} --workingDir={working_dir} -- {worker_config}"
 
-        print(
+        print()
+        printInfo(
             f"Running {query} [{queryIdx}/{no_queries}] for worker configuration [{workerConfigIdx}/{no_combinations}]...")
-        stdout = run_command(benchmark_command)
+        stdout = run_command(benchmark_command, indent="    ")
 
         # Parse and save benchmark results
         with open(benchmark_json_file, 'r') as file:
             content = file.read()
             benchmark_results = json.loads(content)
+            if not benchmark_results:
+                printError(f"    WARNING: No benchmark results found in {benchmark_json_file}")
+                benchmark_results = []
     except json.JSONDecodeError as e:
-        print(f"Failed to parse benchmark output as JSON from {benchmark_json_file}")
-        print(f"Error details: {e}")
+        printError(f"Failed to parse benchmark output as JSON from {benchmark_json_file}")
+        printError(f"Error details: {e}")
         benchmark_results = []
         exit(1)
     except Exception as e:
-        print(f"An unexpected error occurred: {e}")
+        printError(f"An unexpected error occurred: {e}")
         benchmark_results = []
         exit(1)
 
@@ -220,7 +224,7 @@ def run_benchmark(config, query, queryIdx, workerConfigIdx, enableLatency, no_co
             result['query_name'] = query
             result['tuplesPerSecond_listener'] = average_throughput
             writer.writerow({**result, **config})
-        print(f"Results for config {config} written to CSV.")
+        print(f"    Results for config {config} written to CSV.")
 
 
 def estimate_eta(start_time, end_time, completed_runs, total_runs):
@@ -356,14 +360,14 @@ if __name__ == "__main__":
                 run_end = time.time()
                 completed_runs += 1
                 eta_h, eta_m, eta_s, eta_time = estimate_eta(start_time, run_end, completed_runs, total_runs)
-                print(f"  [{completed_runs}/{total_runs}] took {run_end - run_start:.1f}s | "
-                      f"ETA: {eta_h}h {eta_m}m {eta_s:.0f}s remaining "
-                      f"(~{eta_time.strftime('%H:%M:%S')})")
+                printInfo(f"    [{completed_runs}/{total_runs}] took {run_end - run_start:.1f}s | "
+                         f"ETA: {eta_h}h {eta_m}m {eta_s:.0f}s remaining "
+                         f"(~{eta_time.strftime('%H:%M:%S')})")
 
     elapsed = time.time() - start_time
     hours, remainder = divmod(elapsed, 3600)
     minutes, seconds = divmod(remainder, 60)
-    print(f"\n\nAll experiment runs completed in {int(hours)}h {int(minutes)}m {seconds:.1f}s")
+    printInfo(f"\n\nAll experiment runs completed in {int(hours)}h {int(minutes)}m {seconds:.1f}s")
 
     abs_csv_path = os.path.abspath(csv_file_path)
-    print(f"CSV Measurement file can be found in {abs_csv_path}")
+    printInfo(f"CSV Measurement file can be found in {abs_csv_path}")

@@ -19,7 +19,6 @@ include(${PROJECT_SOURCE_DIR}/cmake/PluginRegistrationUtil.cmake)
 activate_optional_plugin("Sources/TCPSource" ON)
 activate_optional_plugin("Sources/GeneratorSource" ON)
 activate_optional_plugin("Sinks/VoidSink" ON)
-activate_optional_plugin("Sinks/DiscardSink" ON)
 activate_optional_plugin("InputFormatters/JSONInputFormatter" ON)
 
 if (NES_ENABLES_TESTS)

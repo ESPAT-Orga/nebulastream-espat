@@ -28,13 +28,45 @@
 
 namespace NES
 {
-VoidSink::VoidSink(BackpressureController backpressureController, const SinkDescriptor&) : Sink(std::move(backpressureController))
+VoidSink::VoidSink(BackpressureController backpressureController, const SinkDescriptor& sinkDescriptor)
+    : Sink(std::move(backpressureController))
+    , outputFilePath(sinkDescriptor.getFromConfig(SinkDescriptor::FILE_PATH))
+    , schema(sinkDescriptor.getSchema())
+
 {
 }
 
 void VoidSink::start(PipelineExecutionContext&)
 {
     NES_DEBUG("Setting up void sink: {}", *this);
+
+    if (std::filesystem::exists(outputFilePath))
+    {
+        std::error_code ec;
+        if (!std::filesystem::remove(outputFilePath, ec))
+        {
+            throw CannotOpenSink("Could not remove existing output file: filePath={} ", outputFilePath);
+        }
+    }
+
+    /// Write the schema header so the result checker can parse the file
+    std::ofstream outputFileStream{outputFilePath, std::ofstream::binary};
+    if (!outputFileStream.is_open() || !outputFileStream.good())
+    {
+        throw CannotOpenSink("Could not open output file: filePath={}", outputFilePath);
+    }
+
+    std::stringstream ss;
+    ss << schema->getFields().front().name << ":" << magic_enum::enum_name(schema->getFields().front().dataType.type) << ":"
+       << magic_enum::enum_name(
+              schema->getFields().front().dataType.nullable ? DataType::NULLABLE::IS_NULLABLE : DataType::NULLABLE::NOT_NULLABLE);
+    for (const auto& field : schema->getFields() | std::views::drop(1))
+    {
+        ss << ',' << field.name << ':' << magic_enum::enum_name(field.dataType.type) << ":"
+           << magic_enum::enum_name(field.dataType.nullable ? DataType::NULLABLE::IS_NULLABLE : DataType::NULLABLE::NOT_NULLABLE);
+    }
+    outputFileStream << ss.str() << '\n';
+    outputFileStream.close();
 }
 
 void VoidSink::stop(PipelineExecutionContext&)

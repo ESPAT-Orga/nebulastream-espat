@@ -2,7 +2,7 @@
 # description: Test different sketch types
 # groups: [Synopsis, Aggregation, WindowOperators]
 
-CREATE LOGICAL SOURCE stream(id UINT64, value UINT64, timestamp UINT64);
+CREATE LOGICAL SOURCE stream(id UINT64 NOT NULL, value UINT64 NOT NULL, timestamp UINT64 NOT NULL);
 CREATE PHYSICAL SOURCE FOR stream TYPE File;
 ATTACH INLINE
 1,1,1000
@@ -38,7 +38,6 @@ CREATE SINK sinkStream(stream.statisticStart UINT64 NOT NULL, stream.statisticEn
 CREATE SINK sinkStreamBuild(stream.statisticHash UINT64 NOT NULL, stream.statisticStart UINT64 NOT NULL, stream.statisticEnd UINT64 NOT NULL, stream.statisticNumberOfSeenTuples UINT64 NOT NULL) TYPE File;
 
 # Solely build operator
-# WARNING: If you increase the row count, you might also have to increase the countMinAggregationHashMapPageSize in the query execution config!
 # arguments: statisticHash, field to estimate, columns, rows, counter datatype, seed for hash functions
 SELECT COUNTMINSKETCH(46, value, 9, 4, uint64, 42) FROM stream WINDOW TUMBLING(timestamp, size 5 sec) INTO sinkStreamBuild;
 ----

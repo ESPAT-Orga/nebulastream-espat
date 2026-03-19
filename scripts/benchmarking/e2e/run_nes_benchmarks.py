@@ -26,10 +26,10 @@ import shutil
 import itertools
 import socket
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
+import time
 
 from scripts.benchmarking.utils import *
-
 
 #### Benchmark Configurations
 build_dir = os.path.join(".", "build_dir")
@@ -49,18 +49,20 @@ NUM_RUNS_PER_EXPERIMENT = 1
 
 #### Worker Configurations
 allExecutionModes = ["COMPILER"]  # ["COMPILER", "INTERPRETER"]
-allNumberOfWorkerThreads = ['4', '16'] #['1', '4', '8', '16', '24'] #['4', '16']
+allNumberOfWorkerThreads = ['4', '16']  # ['1', '4', '8', '16', '24'] #['4', '16']
 allJoinStrategies = ["HASH_JOIN"]
 allNumberOfEntriesSliceCaches = [10]
 allSliceCacheTypes = ["NONE", "SECOND_CHANCE", "LRU", "ALWAYS_MISS"]
 allPageSizes = [8192]
-#[4000000] if buffer size is 8192 #[500000] if buffer size is 102400
+# [4000000] if buffer size is 8192 #[500000] if buffer size is 102400
 allBufferConfigs = [(1048576, 20000)]
 allEnableLatencyListeners = [False]
 throughputListenerInterval = 200
 
 #### Statistic Build Configurations
-allReservoirSizes = [100, 1000, 10000]
+allReservoirSizes = [
+    100, 1000, 10000
+]
 allHistogramConfigs = [
     # (num_buckets, min_value, max_value, counter_type)
     (10, 0, 1000000, "uint64"),
@@ -81,13 +83,16 @@ allCountMinConfigs = [
 ]
 
 QUERY_CONFIGS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "query-configs")
-generated_test_dir = os.path.join("nes-systests", f"benchmark_statistic_build_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+generated_test_dir = os.path.join("nes-systests",
+                                  f"benchmark_statistic_build_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+
 
 def load_template(name):
     """Load a query template from the query-configs directory."""
     template_path = os.path.join(QUERY_CONFIGS_DIR, name)
     with open(template_path, 'r') as f:
         return f.read()
+
 
 def generate_queries():
     """Generate query dict and .test files from statistic build configurations."""
@@ -108,7 +113,8 @@ def generate_queries():
         filename = f"{name}.test"
         filepath = os.path.join(generated_test_dir, filename)
         with open(filepath, 'w') as f:
-            f.write(histogram_template.format(num_buckets=num_buckets, min_value=min_value, max_value=max_value, counter_type=counter_type))
+            f.write(histogram_template.format(num_buckets=num_buckets, min_value=min_value, max_value=max_value,
+                                              counter_type=counter_type))
         queries[name] = f"{filepath}:01"
 
     count_min_template = load_template("CountMinBuild.test.template")
@@ -121,6 +127,7 @@ def generate_queries():
         queries[name] = f"{filepath}:01"
 
     return queries
+
 
 def initialize_csv_file():
     """Initialize the CSV file with headers."""
@@ -135,6 +142,7 @@ def initialize_csv_file():
         writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
         writer.writeheader()
         print("CSV file initialized with headers.")
+
 
 def parse_average_throughput_from_throughput_listener(console_output):
     # Regular expression to parse each log line
@@ -214,6 +222,18 @@ def run_benchmark(config, query, queryIdx, workerConfigIdx, enableLatency, no_co
             writer.writerow({**result, **config})
         print(f"Results for config {config} written to CSV.")
 
+
+def estimate_eta(start_time, end_time, completed_runs, total_runs):
+    """Estimate remaining time based on average run duration so far."""
+    elapsed = end_time - start_time
+    avg_per_run = elapsed / completed_runs
+    eta_seconds = avg_per_run * (total_runs - completed_runs)
+    eta_time = datetime.now() + timedelta(seconds=eta_seconds)
+    eta_h, eta_rem = divmod(eta_seconds, 3600)
+    eta_m, eta_s = divmod(eta_rem, 60)
+    return int(eta_h), int(eta_m), eta_s, eta_time
+
+
 def parse_buffer_config(config_strings):
     """Parse a list of buffer config strings into a list of tuples."""
     result = []
@@ -228,6 +248,7 @@ def parse_buffer_config(config_strings):
             raise ValueError(f"Invalid tuple format: {s}. Expected format like '(1234, 100)'") from e
     return result
 
+
 if __name__ == "__main__":
     # Initialize argument parser
     parser = argparse.ArgumentParser(description="Run NebulaStream queries.")
@@ -235,7 +256,8 @@ if __name__ == "__main__":
     parser.add_argument("-q", "--queries", nargs="+", help="List of queries to run.")
     parser.add_argument("-s", "--slice-cache-type", nargs="+", help="List of slice cache types to run the queries.")
     parser.add_argument("-w", "--worker-threads", nargs="+", help="Number of worker threads to run the queries.")
-    parser.add_argument("-b", "--buffer-config", nargs="+", help="List of buffer configurations as tuples and buffer size is first, e.g., '(1234, 100) (128, 40)'.")
+    parser.add_argument("-b", "--buffer-config", nargs="+",
+                        help="List of buffer configurations as tuples and buffer size is first, e.g., '(1234, 100) (128, 40)'.")
     args = parser.parse_args()
 
     # Generate query .test files from templates
@@ -251,7 +273,8 @@ if __name__ == "__main__":
     # Determine which slice caches to run
     slice_caches_to_run = allSliceCacheTypes
     if args.slice_cache_type:
-        slice_caches_to_run = [slice_cache for slice_cache in allSliceCacheTypes if slice_cache in args.slice_cache_type]
+        slice_caches_to_run = [slice_cache for slice_cache in allSliceCacheTypes if
+                               slice_cache in args.slice_cache_type]
 
     # Determine the number of worker threads to run with
     number_of_worker_threads_to_run = allNumberOfWorkerThreads
@@ -281,6 +304,8 @@ if __name__ == "__main__":
     # Init csv files
     initialize_csv_file()
 
+    start_time = time.time()
+
     # Iterate over all cross-product combinations for each query
     no_combinations = (
             len(allExecutionModes) *
@@ -293,6 +318,8 @@ if __name__ == "__main__":
             len(allEnableLatencyListeners)
     )
     no_queries = len(queries_to_run)
+    total_runs = no_queries * no_combinations * NUM_RUNS_PER_EXPERIMENT
+    completed_runs = 0
     for queryIdx, query in enumerate(queries_to_run):
         workerConfigIdx = 0
 
@@ -324,7 +351,19 @@ if __name__ == "__main__":
             }
 
             for i in range(NUM_RUNS_PER_EXPERIMENT):
+                run_start = time.time()
                 run_benchmark(config, query, queryIdx + 1, workerConfigIdx, enableLatency, no_combinations, no_queries)
+                run_end = time.time()
+                completed_runs += 1
+                eta_h, eta_m, eta_s, eta_time = estimate_eta(start_time, run_end, completed_runs, total_runs)
+                print(f"  [{completed_runs}/{total_runs}] took {run_end - run_start:.1f}s | "
+                      f"ETA: {eta_h}h {eta_m}m {eta_s:.0f}s remaining "
+                      f"(~{eta_time.strftime('%H:%M:%S')})")
+
+    elapsed = time.time() - start_time
+    hours, remainder = divmod(elapsed, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    print(f"\n\nAll experiment runs completed in {int(hours)}h {int(minutes)}m {seconds:.1f}s")
 
     abs_csv_path = os.path.abspath(csv_file_path)
     print(f"CSV Measurement file can be found in {abs_csv_path}")

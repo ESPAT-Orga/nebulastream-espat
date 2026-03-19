@@ -50,7 +50,7 @@ protected:
 struct ConfigParametersVoid
 {
     static inline std::unordered_map<std::string, DescriptorConfig::ConfigParameterContainer> parameterMap
-        = DescriptorConfig::createConfigParameterContainerMap(SinkDescriptor::FILE_PATH);
+        = DescriptorConfig::createConfigParameterContainerMap();
 };
 }
 

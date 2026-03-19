@@ -42,7 +42,6 @@ public:
     virtual void stop(PipelineExecutionContext& pipelineExecutionContext) = 0;
 
     friend std::ostream& operator<<(std::ostream& os, const ExecutablePipelineStage& eps) { return eps.toString(os); }
-    bool formattingTask = false;
 
     bool formattingTask = false;
 

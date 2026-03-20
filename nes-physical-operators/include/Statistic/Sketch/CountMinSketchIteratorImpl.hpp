@@ -22,15 +22,15 @@ namespace NES
 struct CountMinSketchProviderArguments final : StatisticProviderArguments
 {
     DataType counterDataType;
-    std::string columnFieldName;
     std::string rowFieldName;
+    std::string columnFieldName;
     std::string counterFieldName;
 
     explicit CountMinSketchProviderArguments(
-        DataType counterDataType, std::string columnFieldName, std::string rowFieldName, std::string counterFieldName)
+        DataType counterDataType, std::string rowFieldName, std::string columnFieldName, std::string counterFieldName)
         : counterDataType(std::move(counterDataType))
-        , columnFieldName(std::move(columnFieldName))
         , rowFieldName(std::move(rowFieldName))
+        , columnFieldName(std::move(columnFieldName))
         , counterFieldName(std::move(counterFieldName))
     {
     }
@@ -41,7 +41,7 @@ struct CountMinSketchProviderArguments final : StatisticProviderArguments
 };
 
 /// |       ------ Meta-Data ------        |       --- Statistics Area ---       |
-/// | No. Rows (64bit) No. Columns (64it)  |    Count Min 2-D Array[rows][col]   |
+/// | No. Columns (64bit) No. Rows (64it)  |    Count Min 2-D Array[rows][col]   |
 class CountMinSketchIteratorImpl final : public StatisticProviderIteratorImpl
 {
 public:
@@ -61,10 +61,10 @@ private:
     CountMinSketchProviderArguments countMinProviderArgs;
 
     /// Set by each statistic
-    nautilus::val<uint64_t> numberOfRows;
     nautilus::val<uint64_t> numberOfColumns;
-    nautilus::val<uint64_t> counterRow;
+    nautilus::val<uint64_t> numberOfRows;
     nautilus::val<uint64_t> counterCol;
+    nautilus::val<uint64_t> counterRow;
     nautilus::val<int8_t*> curCounter;
 };
 

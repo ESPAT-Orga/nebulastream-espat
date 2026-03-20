@@ -34,7 +34,7 @@ from scripts.benchmarking.utils import *
 #### Benchmark Configurations
 build_dir = os.path.join(".", "build_dir")
 working_dir = os.path.join(build_dir, "working_dir")
-csv_file_path = "plots/results_nebulastream.csv"
+csv_file_path = "results_nebulastream.csv"
 benchmark_json_file = os.path.abspath(os.path.join(working_dir, "BenchmarkResults.json"))
 systest_executable = os.path.join(build_dir, "nes-systests/systest/systest")
 test_data_dir = os.path.abspath(os.path.join(build_dir, "nes-systests/testdata"))
@@ -262,6 +262,8 @@ if __name__ == "__main__":
     parser.add_argument("-w", "--worker-threads", nargs="+", help="Number of worker threads to run the queries.")
     parser.add_argument("-b", "--buffer-config", nargs="+",
                         help="List of buffer configurations as tuples and buffer size is first, e.g., '(1234, 100) (128, 40)'.")
+    parser.add_argument("--clean", action="store_true",
+                        help="Remove and recreate the build directory before building.")
     args = parser.parse_args()
 
     # Generate query .test files from templates
@@ -299,8 +301,9 @@ if __name__ == "__main__":
     # Checking if the script has been executed from the repository root
     check_repository_root()
 
-    # Create folder
-    # create_folder_and_remove_if_exists(build_dir)
+    # Optionally clean the build directory
+    if args.clean:
+        create_folder_and_remove_if_exists(build_dir)
 
     # Build NebulaStream
     compile_nebulastream(cmake_flags, build_dir)

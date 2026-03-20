@@ -32,18 +32,18 @@ CountMinSketchPhysicalFunction::CountMinSketchPhysicalFunction(
     Record::RecordFieldIdentifier resultFieldIdentifier,
     const std::string_view numberOfSeenTuplesFieldName,
     DataType counterType,
-    const uint64_t numberOfCols,
-    const uint64_t numberOfRows,
+    const NumberOfRows numberOfRows,
+    const NumberOfCols numberOfCols,
     const uint64_t seed)
     : AggregationPhysicalFunction(std::move(inputType), std::move(resultType), std::move(inputFunction), std::move(resultFieldIdentifier))
     , numberOfSeenTuplesFieldName(numberOfSeenTuplesFieldName)
     , counterType(counterType)
-    , numberOfCols(numberOfCols)
     , numberOfRows(numberOfRows)
-    , totalSizeOfSketchInBytes(numberOfRows * numberOfCols * counterType.getSizeInBytesWithoutNull())
+    , numberOfCols(numberOfCols)
+    , totalSizeOfSketchInBytes(numberOfRows.getRawValue() * numberOfCols.getRawValue() * counterType.getSizeInBytesWithoutNull())
     , numberOfBitsInKey(sizeof(HashFunction::HashValue::raw_type) * 8)
     , sizeOfSingleSeed(sizeof(HashFunction::HashValue::raw_type))
-    , totalSizeOfSeeds(numberOfBitsInKey * sizeOfSingleSeed * numberOfRows)
+    , totalSizeOfSeeds(numberOfBitsInKey * sizeOfSingleSeed * numberOfRows.getRawValue())
     , seed(seed)
 {
 }
@@ -55,13 +55,13 @@ void CountMinSketchPhysicalFunction::lift(
     const auto firstCounterRef = static_cast<nautilus::val<int8_t*>>(aggregationState);
     const auto firstSeedsRef = static_cast<nautilus::val<int8_t*>>(aggregationState) + nautilus::val<uint64_t>{totalSizeOfSketchInBytes};
     /// This should be a val<>, as with a static_val<> the compilation times shoots through the roof
-    for (nautilus::val<uint64_t> col = 0; col < numberOfCols; ++col)
+    for (nautilus::val<uint64_t> row = 0; row < numberOfRows.getRawValue(); ++row)
     {
-        const auto seedsRef = firstSeedsRef + nautilus::val<uint64_t>{col * sizeOfSingleSeed};
+        const auto seedsRef = firstSeedsRef + nautilus::val<uint64_t>{row * sizeOfSingleSeed};
         H3HashFunction h3HashFunction{sizeOfSingleSeed, numberOfBitsInKey, seedsRef};
         auto hash = h3HashFunction.HashFunction::calculate(value);
-        auto row = hash % numberOfRows;
-        auto counterRef = firstCounterRef + counterType.getSizeInBytesWithoutNull() * (col * numberOfRows + row);
+        auto col = hash % numberOfCols.getRawValue();
+        auto counterRef = firstCounterRef + counterType.getSizeInBytesWithoutNull() * (row * numberOfCols.getRawValue() + col);
         auto counter = VarVal::readNonNullableVarValFromMemory(counterRef, counterType);
         counter = counter + nautilus::val<uint64_t>{1};
         counter.writeToMemory(counterRef);
@@ -85,7 +85,7 @@ void CountMinSketchPhysicalFunction::combine(
     auto counter1Ref = static_cast<nautilus::val<int8_t*>>(counter1RefTemp);
     auto counter2Ref = static_cast<nautilus::val<int8_t*>>(counter2RefTemp);
     /// This should be a val<>, as with a static_val<> the compilation times shoots through the roof
-    for (nautilus::val<uint64_t> counterIdx = 0; counterIdx < numberOfCols * numberOfRows; ++counterIdx)
+    for (nautilus::val<uint64_t> counterIdx = 0; counterIdx < numberOfRows.getRawValue() * numberOfCols.getRawValue(); ++counterIdx)
     {
         auto counter1 = VarVal::readNonNullableVarValFromMemory(counter1Ref, counterType);
         auto counter2 = VarVal::readNonNullableVarValFromMemory(counter2Ref, counterType);
@@ -116,9 +116,9 @@ CountMinSketchPhysicalFunction::lower(nautilus::val<AggregationState*> aggregati
     const nautilus::val<uint32_t> sizeOfVariableSizedData{countMinSize};
     VarVal{sizeOfVariableSizedData}.writeToMemory(countMinMemory);
     VarVal{loweredMetaDataSize}.writeToMemory(countMinMemory + nautilus::val<uint64_t>{StatisticProviderIteratorImpl::sizeOfTotalAreaSize});
-    VarVal{numberOfRows}.writeToMemory(countMinMemory + nautilus::val<uint64_t>{loweredHeaderSize});
-    VarVal{numberOfCols}.writeToMemory(
-        countMinMemory + nautilus::val<uint64_t>{loweredHeaderSize} + nautilus::val<uint64_t>{sizeof(numberOfRows)});
+    VarVal{numberOfCols.getRawValue()}.writeToMemory(countMinMemory + nautilus::val<uint64_t>{loweredHeaderSize});
+    VarVal{numberOfRows.getRawValue()}.writeToMemory(
+        countMinMemory + nautilus::val<uint64_t>{loweredHeaderSize} + nautilus::val<uint64_t>{sizeof(uint64_t)});
     /// Copying all counters to the newly acquired memory and adding the size of the variable sized data (count min sketch)
     const auto dataOffset = nautilus::val<uint64_t>{loweredHeaderSize + loweredMetaDataSize};
     nautilus::memcpy(countMinMemory + dataOffset, aggregationState, totalSizeOfSketchInBytes);
@@ -140,7 +140,7 @@ void CountMinSketchPhysicalFunction::reset(nautilus::val<AggregationState*> aggr
     /// Resetting all counters, seeds and the number of seen tuples to 0
     nautilus::memset(aggregationState, 0, totalSizeOfSketchInBytes + totalSizeOfSeeds + sizeof(uint64_t));
 
-    /// Creating seeds for the number of columns
+    /// Creating seeds for the number of rows
     nautilus::invoke(
         +[](int8_t* seedsMemArea, const uint64_t numberOfRandomBytes, const uint64_t seedVal)
         {
@@ -185,8 +185,8 @@ AggregationPhysicalFunctionGeneratedRegistrar::RegisterCountMinSketchAggregation
         arguments.resultFieldIdentifier,
         arguments.numberOfSeenTuplesFieldName.value(),
         arguments.counterType.value(),
-        arguments.columns.value(),
         arguments.rows.value(),
+        arguments.columns.value(),
         arguments.seed.value());
 }
 }

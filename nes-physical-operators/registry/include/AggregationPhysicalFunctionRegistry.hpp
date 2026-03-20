@@ -20,6 +20,7 @@
 #include <Aggregation/Function/AggregationPhysicalFunction.hpp>
 #include <DataTypes/DataType.hpp>
 #include <Functions/PhysicalFunction.hpp>
+#include <Identifiers/SketchDimensions.hpp>
 #include <Nautilus/Interface/BufferRef/TupleBufferRef.hpp>
 #include <Nautilus/Interface/Record.hpp>
 #include <Util/Registry.hpp>
@@ -48,8 +49,8 @@ struct AggregationPhysicalFunctionRegistryArguments
     std::optional<uint64_t> minValue{};
     std::optional<uint64_t> maxValue{};
     /// CountMinSketch:
-    std::optional<uint64_t> columns{};
-    std::optional<uint64_t> rows{};
+    std::optional<NumberOfCols> columns{};
+    std::optional<NumberOfRows> rows{};
 
     AggregationPhysicalFunctionRegistryArguments(
         const DataType inputType,

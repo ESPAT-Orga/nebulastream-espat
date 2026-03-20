@@ -34,8 +34,8 @@ namespace NES
 
 CountMinSketchLogicalFunction::CountMinSketchLogicalFunction(
     const FieldAccessLogicalFunction& onField,
-    const uint64_t columns,
-    const uint64_t rows,
+    const NumberOfCols columns,
+    const NumberOfRows rows,
     const uint64_t seed,
     const DataType counterType,
     const Statistic::StatisticHash statisticHash)
@@ -55,8 +55,8 @@ CountMinSketchLogicalFunction::CountMinSketchLogicalFunction(
 CountMinSketchLogicalFunction::CountMinSketchLogicalFunction(
     const FieldAccessLogicalFunction& onField,
     const FieldAccessLogicalFunction& asField,
-    const uint64_t columns,
-    const uint64_t rows,
+    const NumberOfCols columns,
+    const NumberOfRows rows,
     const uint64_t seed,
     const DataType counterType,
     const Statistic::StatisticHash statisticHash)
@@ -80,7 +80,8 @@ std::string_view CountMinSketchLogicalFunction::getName() const noexcept
 
 std::string CountMinSketchLogicalFunction::toString() const
 {
-    return fmt::format("CountMinSketch: onField={} asField={} columns={} rows={}", onField, asField, columns, rows);
+    return fmt::format(
+        "CountMinSketch: onField={} asField={} columns={} rows={}", onField, asField, columns.getRawValue(), rows.getRawValue());
 }
 
 Reflected CountMinSketchLogicalFunction::reflect() const
@@ -94,8 +95,8 @@ Reflected Reflector<CountMinSketchLogicalFunction>::operator()(const CountMinSke
         .statisticHash = op.statisticHash,
         .onField = op.getOnField(),
         .asField = op.getAsField(),
-        .columns = op.columns,
-        .rows = op.rows,
+        .columns = op.columns.getRawValue(),
+        .rows = op.rows.getRawValue(),
         .seed = op.seed,
         .counterType = op.counterType});
 }
@@ -104,7 +105,7 @@ CountMinSketchLogicalFunction Unreflector<CountMinSketchLogicalFunction>::operat
 {
     auto data = unreflect<detail::ReflectedCountMinSketchLogicalFunction>(reflected);
     return CountMinSketchLogicalFunction{
-        data.onField, data.asField, data.columns, data.rows, data.seed, data.counterType, data.statisticHash};
+        data.onField, data.asField, NumberOfCols{data.columns}, NumberOfRows{data.rows}, data.seed, data.counterType, data.statisticHash};
 }
 
 CountMinSketchLogicalFunction CountMinSketchLogicalFunction::withInferredStamp(const Schema& schema) const

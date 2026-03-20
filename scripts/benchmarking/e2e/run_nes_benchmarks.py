@@ -61,25 +61,29 @@ throughputListenerInterval = 200
 
 #### Statistic Build Configurations
 allReservoirSizes = [
-    100, 1000, 10000
+    100,
+    #1000,
+    10000
 ]
 allHistogramConfigs = [
     # (num_buckets, min_value, max_value, counter_type)
     (10, 0, 1000000, "uint64"),
-    (100, 0, 1000000, "uint64"),
+    # (100, 0, 1000000, "uint64"),
     (1000, 0, 1000000, "uint64"),
 ]
 allCountMinConfigs = [
-    # (columns, rows, counter_type)
-    (10, 1, "uint64"),
-    (10, 5, "uint64"),
-    (10, 10, "uint64"),
-    (100, 1, "uint64"),
-    (100, 5, "uint64"),
-    (100, 10, "uint64"),
-    (1000, 1, "uint64"),
-    (1000, 5, "uint64"),
-    (1000, 10, "uint64"),
+    # (rows, cols, counter_type)
+    (1, 10, "uint64"),
+    (2, 100, "uint64"),
+    (5, 1000, "uint64"),
+
+    (1, 10, "uint64"),
+    (2, 100, "uint64"),
+    (5, 1000, "uint64"),
+
+    (1, 10, "uint64"),
+    (2, 100, "uint64"),
+    (5, 1000, "uint64"),
 ]
 
 QUERY_CONFIGS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "query-configs")

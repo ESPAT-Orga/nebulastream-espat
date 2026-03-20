@@ -50,6 +50,7 @@
 #include <Functions/FieldAccessLogicalFunction.hpp>
 #include <Functions/LogicalFunction.hpp>
 #include <Functions/LogicalFunctionProvider.hpp>
+#include <Identifiers/SketchDimensions.hpp>
 #include <Operators/Windows/Aggregations/AvgAggregationLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/CountAggregationLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/Histogram/EquiWidthHistogramLogicalFunction.hpp>
@@ -1201,7 +1202,7 @@ void AntlrSQLQueryPlanCreator::exitFunctionCall(AntlrSQLParser::FunctionCallCont
                 const auto asFieldIfNotOverwritten = FieldAccessLogicalFunction{
                     LogicalStatisticFields().statisticDataField.dataType, LogicalStatisticFields().statisticDataField.name};
                 helpers.top().windowAggs.push_back(std::make_shared<WindowAggregationLogicalFunction>(CountMinSketchLogicalFunction{
-                    fieldName, asFieldIfNotOverwritten, columns, rows, seed, counterDatatype, statisticHash}));
+                    fieldName, asFieldIfNotOverwritten, NumberOfCols{columns}, NumberOfRows{rows}, seed, counterDatatype, statisticHash}));
                 break;
             }
             else if (funcName == "COUNTMIN_PROBE")

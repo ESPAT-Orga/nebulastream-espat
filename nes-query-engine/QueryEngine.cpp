@@ -340,6 +340,7 @@ public:
         };
 
         auto task = WorkTask(qid, node->id, node, std::move(buffer), std::move(wrappedCallback));
+        task.creationTime = ChronoClock::now();
         if (WorkerThread::id == INVALID<WorkerThreadId>)
         {
             /// Non-WorkerThread
@@ -558,8 +559,8 @@ bool ThreadPool::WorkerThread::operator()(WorkTask& task) const
                     TaskEmit{id, task.queryId, pipeline->id, successor->id, taskId, task.buf.getNumberOfProcessedTuples(), true});
             }
         }
-
-        pool.statistic->onEvent(TaskExecutionComplete{WorkerThread::id, task.queryId, pipeline->id, taskId});
+        INVARIANT(task.creationTime, "Task was completed without creation time having been set");
+        pool.statistic->onEvent(TaskExecutionComplete{WorkerThread::id, task.queryId, pipeline->id, taskId, task.creationTime.value(), pipeline->stage->formattingTask, task.buf.getNumberOfTuples()});
         return true;
     }
 

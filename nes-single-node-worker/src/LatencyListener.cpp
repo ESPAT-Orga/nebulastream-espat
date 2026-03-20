@@ -35,20 +35,6 @@ Timestamp convertToTimeStamp(const ChronoClock::time_point& timePoint)
     return Timestamp(milliSecondsSinceEpoch);
 }
 
-struct TaskIntermediateStore
-{
-    TaskIntermediateStore(QueryId queryId, const uint64_t numberOfTuples, ChronoClock::time_point startTimePoint)
-        : queryId(queryId), numberOfTuples(numberOfTuples), startTimePoint(startTimePoint)
-    {
-    }
-
-    explicit TaskIntermediateStore() : queryId(INVALID_QUERY_ID), numberOfTuples(0), startTimePoint(std::chrono::system_clock::now()) { }
-
-    QueryId queryId;
-    uint64_t numberOfTuples;
-    ChronoClock::time_point startTimePoint;
-};
-
 struct TimestampAndLatencies
 {
     explicit TimestampAndLatencies() : firstTimePoint(std::chrono::system_clock::now()) { }
@@ -65,7 +51,6 @@ void threadRoutine(
 {
     Thread::setThreadName("LatencyCalculator");
 
-    std::unordered_map<TaskId, TaskIntermediateStore> intermediateStore;
     std::unordered_map<QueryId, TimestampAndLatencies> averageLatency;
 
     while (!token.stop_requested())
@@ -87,48 +72,33 @@ void threadRoutine(
 
         std::visit(
             Overloaded{
-                [&](const TaskEmit& taskEmit)
+                [&](const TaskEmit&)
                 {
-                    /// We want to measure the latency from the ingestion timestamp to the time the task gets picked up
-                    /// If this task did not belong to a formatting task, we ignore it and return
-                    if (not taskEmit.formattingTask or taskEmit.fromPipeline == taskEmit.toPipeline)
-                    {
-                        return;
-                    }
-
-                    intermediateStore.insert(
-                        {taskEmit.taskId, TaskIntermediateStore{taskEmit.queryId, taskEmit.numberOfProcessedTuples, taskEmit.timestamp}});
                 },
                 [&](const TaskExecutionComplete& taskExecutionCompleted)
                 {
-                    const auto taskId = taskExecutionCompleted.taskId;
-                    if (const auto intermediateStoredTask = intermediateStore.find(taskId);
-                        intermediateStoredTask != intermediateStore.end())
+                    const auto latency = taskExecutionCompleted.timestamp - taskExecutionCompleted.creationTime;
+                    auto& [firstTimestamp, latencies] = averageLatency[taskExecutionCompleted.queryId];
+                    latencies.emplace_back(latency);
+                    if (latencies.size() == 1)
                     {
-                        const auto latency = taskExecutionCompleted.timestamp - intermediateStoredTask->second.startTimePoint;
-                        auto& [firstTimestamp, latencies] = averageLatency[taskExecutionCompleted.queryId];
-                        latencies.emplace_back(latency);
-                        if (latencies.size() == 1)
-                        {
-                            firstTimestamp = intermediateStoredTask->second.startTimePoint;
-                        }
+                        firstTimestamp = taskExecutionCompleted.creationTime;
+                    }
 
-                        /// If this is the first tasks that gets completed
-                        firstTimestamp = std::min(firstTimestamp, intermediateStoredTask->second.startTimePoint);
+                    /// If this is the first tasks that gets completed
+                    firstTimestamp = std::min(firstTimestamp, taskExecutionCompleted.creationTime);
 
-                        /// Once we have seen enough number of tasks, we call the callBack with the params
-                        if (latencies.size() >= numberOfTasks)
-                        {
-                            const LatencyListener::CallBackParams callBackParams{
-                                convertToTimeStamp(firstTimestamp),
-                                convertToTimeStamp(taskExecutionCompleted.timestamp),
-                                taskExecutionCompleted.queryId,
-                                latencies.size(),
-                                latency};
-                            callBack(callBackParams);
-                            averageLatency.erase(taskExecutionCompleted.queryId);
-                        }
-                        intermediateStore.erase(intermediateStoredTask);
+                    /// Once we have seen enough number of tasks, we call the callBack with the params
+                    if (latencies.size() >= numberOfTasks)
+                    {
+                        const LatencyListener::CallBackParams callBackParams{
+                            convertToTimeStamp(firstTimestamp),
+                            convertToTimeStamp(taskExecutionCompleted.timestamp),
+                            taskExecutionCompleted.queryId,
+                            latencies.size(),
+                            latency};
+                        callBack(callBackParams);
+                        averageLatency.erase(taskExecutionCompleted.queryId);
                     }
                 },
                 [](auto) {}},

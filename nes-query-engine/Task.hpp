@@ -21,6 +21,7 @@
 #include <variant>
 #include <Identifiers/Identifiers.hpp>
 #include <Identifiers/NESStrongType.hpp>
+#include <Runtime/BufferManagerStatisticListener.hpp>
 #include <Runtime/TupleBuffer.hpp>
 #include <Util/Logger/Logger.hpp>
 #include <Util/TypeTraits.hpp>
@@ -132,6 +133,7 @@ struct WorkTask : BaseTask
     std::weak_ptr<RunningQueryPlanNode> pipeline;
     PipelineId pipelineId = INVALID<PipelineId>;
     TupleBuffer buf;
+    std::optional<ChronoClock::time_point> creationTime;
 };
 
 struct StartPipelineTask : BaseTask

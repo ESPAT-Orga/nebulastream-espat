@@ -79,8 +79,8 @@ struct TaskEmit : EventBase
 
 struct TaskExecutionComplete : EventBase
 {
-    TaskExecutionComplete(WorkerThreadId threadId, QueryId queryId, PipelineId pipelineId, TaskId taskId)
-        : EventBase(threadId, queryId), pipelineId(pipelineId), taskId(taskId)
+    TaskExecutionComplete(WorkerThreadId threadId, QueryId queryId, PipelineId pipelineId, TaskId taskId, ChronoClock::time_point creationTime, bool formattingTask, size_t numberOfProcessedTuples)
+        : EventBase(threadId, queryId), pipelineId(pipelineId), taskId(taskId), creationTime(creationTime), formattingTask(formattingTask), numberOfProcessedTuples(numberOfProcessedTuples)
     {
     }
 
@@ -89,6 +89,9 @@ struct TaskExecutionComplete : EventBase
 
     PipelineId pipelineId = INVALID<PipelineId>;
     TaskId taskId = INVALID<TaskId>;
+    ChronoClock::time_point creationTime;
+    bool formattingTask = false;
+    size_t numberOfProcessedTuples{};
 };
 
 struct TaskExpired : EventBase

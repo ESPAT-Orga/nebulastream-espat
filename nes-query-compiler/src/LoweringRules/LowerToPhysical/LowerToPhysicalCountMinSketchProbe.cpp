@@ -32,7 +32,7 @@ StatisticProvider
 getStatisticProvider(const DataType counterType, std::string columnFieldName, std::string rowFieldName, std::string counterFieldName)
 {
     auto statisticProviderArguments
-        = std::make_unique<CountMinSketchProviderArguments>(counterType, columnFieldName, rowFieldName, counterFieldName);
+        = std::make_unique<CountMinSketchProviderArguments>(counterType, rowFieldName, columnFieldName, counterFieldName);
     return {Statistic::StatisticType::Count_Min_Sketch, std::move(statisticProviderArguments)};
 }
 }

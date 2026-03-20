@@ -15,6 +15,7 @@
 #pragma once
 #include <Aggregation/Function/AggregationPhysicalFunction.hpp>
 #include <DataTypes/DataType.hpp>
+#include <Identifiers/SketchDimensions.hpp>
 #include <Nautilus/Interface/Hash/HashFunction.hpp>
 
 namespace NES
@@ -32,8 +33,8 @@ public:
         Record::RecordFieldIdentifier resultFieldIdentifier,
         std::string_view numberOfSeenTuplesFieldName,
         DataType counterType,
-        uint64_t numberOfCols,
-        uint64_t numberOfRows,
+        NumberOfRows numberOfRows,
+        NumberOfCols numberOfCols,
         uint64_t seed);
     void lift(
         const nautilus::val<AggregationState*>& aggregationState,
@@ -52,15 +53,15 @@ public:
 private:
     std::string numberOfSeenTuplesFieldName;
     DataType counterType;
-    uint64_t numberOfCols;
-    uint64_t numberOfRows;
+    NumberOfRows numberOfRows;
+    NumberOfCols numberOfCols;
     /// Just the sketch, does not include seeds size!
     uint64_t totalSizeOfSketchInBytes;
     uint64_t numberOfBitsInKey;
     uint64_t sizeOfSingleSeed;
     uint64_t totalSizeOfSeeds;
     uint64_t seed;
-    uint32_t loweredMetaDataSize{sizeof(numberOfCols) + sizeof(numberOfRows)};
+    uint32_t loweredMetaDataSize{sizeof(uint64_t) + sizeof(uint64_t)};
 };
 
 }

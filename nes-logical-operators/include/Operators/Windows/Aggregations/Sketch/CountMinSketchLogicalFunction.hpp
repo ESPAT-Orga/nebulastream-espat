@@ -20,6 +20,7 @@
 #include <DataTypes/DataType.hpp>
 #include <DataTypes/Schema.hpp>
 #include <Functions/FieldAccessLogicalFunction.hpp>
+#include <Identifiers/SketchDimensions.hpp>
 #include <Operators/Windows/Aggregations/WindowAggregationLogicalFunction.hpp>
 #include <Util/Reflection.hpp>
 #include <Statistic.hpp>
@@ -35,8 +36,8 @@ class CountMinSketchLogicalFunction
 public:
     CountMinSketchLogicalFunction(
         const FieldAccessLogicalFunction& onField,
-        uint64_t columns,
-        uint64_t rows,
+        NumberOfCols columns,
+        NumberOfRows rows,
         uint64_t seed,
         DataType counterType,
         Statistic::StatisticHash statisticHash);
@@ -49,8 +50,8 @@ public:
     CountMinSketchLogicalFunction(
         const FieldAccessLogicalFunction& onField,
         const FieldAccessLogicalFunction& asField,
-        uint64_t columns,
-        uint64_t rows,
+        NumberOfCols columns,
+        NumberOfRows rows,
         uint64_t seed,
         DataType counterType,
         Statistic::StatisticHash statisticHash);
@@ -77,8 +78,8 @@ public:
 
     [[nodiscard]] bool operator==(const CountMinSketchLogicalFunction& rhs) const;
 
-    uint64_t columns;
-    uint64_t rows;
+    NumberOfCols columns;
+    NumberOfRows rows;
     uint64_t seed;
 
     DataType counterType;

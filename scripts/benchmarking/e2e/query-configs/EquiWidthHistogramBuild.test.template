@@ -1,4 +1,4 @@
-# name: benchmark_statistic_build/HistogramBuild.test
+# name: benchmark_statistic_build/EquiWidthHistogramBuild.test
 # description: Benchmark for equiwidth histogram build operator over Nexmark bid data
 # groups: [benchmark, large, Synopsis, Aggregation]
 

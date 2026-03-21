@@ -63,7 +63,7 @@ allPageSizes = [8192]
 
 #### Statistic Build Configurations
 allReservoirSizes = [100, 1000, 10000]
-allHistogramConfigs = [
+allEquiWidthHistogramConfigs = [
     # (num_buckets, min_value, max_value, counter_type)
     (10, 0, 1000000, "uint64"),
     (100, 0, 1000000, "uint64"),
@@ -72,7 +72,7 @@ allHistogramConfigs = [
 
 #### Queries
 statisticQueries = {
-    "histogram": "scripts/benchmarking/multiple-statistic-queries-over-time/query-configs/statistic/histogram_query.yaml.template",
+    "equi_width_histogram": "scripts/benchmarking/multiple-statistic-queries-over-time/query-configs/statistic/equi_width_histogram_query.yaml.template",
     "reservoir": "scripts/benchmarking/multiple-statistic-queries-over-time/query-configs/statistic/reservoir_query.yaml.template"}
 analyticalQueries = {
     "aggregation": "scripts/benchmarking/multiple-statistic-queries-over-time/query-configs/analytical/agg_query.yaml.template",
@@ -160,7 +160,7 @@ def stop_query(query_id, cli_log_file):
     return process
 
 
-def copy_and_modify_query_config(old_config, new_config, new_source_name, generator_rate_config, generator_type, flush_interval, histogram_config=None, reservoir_size=None):
+def copy_and_modify_query_config(old_config, new_config, new_source_name, generator_rate_config, generator_type, flush_interval, equi_width_histogram_config=None, reservoir_size=None):
     # Reading the template file as a string
     with open(old_config, 'r') as input_file:
         template = input_file.read()
@@ -175,8 +175,8 @@ def copy_and_modify_query_config(old_config, new_config, new_source_name, genera
         "generator_rate_type": generator_type,
         "flush_interval": flush_interval,
     }
-    if histogram_config is not None:
-        num_buckets, min_value, max_value, counter_type = histogram_config
+    if equi_width_histogram_config is not None:
+        num_buckets, min_value, max_value, counter_type = equi_width_histogram_config
         format_args.update(num_buckets=num_buckets, min_value=min_value, max_value=max_value, counter_type=counter_type)
     if reservoir_size is not None:
         format_args["reservoir_size"] = reservoir_size
@@ -463,16 +463,16 @@ if __name__ == "__main__":
                     print(f'query num = {query_num}')
                     # Changing the query yaml file to the new ports etc.
                     random_stat_query = random.choice(list(statisticQueries.keys()))
-                    histogramConfig = None
-                    if random_stat_query == "histogram":
-                        histogramConfig = random.choice(allHistogramConfigs)
+                    equiWidthHistogramConfig = None
+                    if random_stat_query == "equi_width_histogram":
+                        equiWidthHistogramConfig = random.choice(allEquiWidthHistogramConfigs)
                     reservoirSize = None
                     if random_stat_query == "reservoir":
                         reservoirSize = random.choice(allReservoirSizes)
                     new_query_config_name = os.path.join(folder_name, f"statistics_{random_stat_query}_{query_num}.yaml")
                     copy_and_modify_query_config(statisticQueries[random_stat_query], new_query_config_name,
                                                  f"statistics_{random_stat_query}_{query_num}_source",
-                                                 statGeneratorRateConfig, statGeneratorRateType, args.flush_interval, histogram_config=histogramConfig, reservoir_size=reservoirSize)
+                                                 statGeneratorRateConfig, statGeneratorRateType, args.flush_interval, equi_width_histogram_config=equiWidthHistogramConfig, reservoir_size=reservoirSize)
                     # Submitting the query
                     query_id = submitting_query(new_query_config_name, cli_log_file)
                     statistics_query_ids.append(query_id)

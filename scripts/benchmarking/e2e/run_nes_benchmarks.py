@@ -43,6 +43,7 @@ cmake_flags = ("-G Ninja "
                f"-DCMAKE_TOOLCHAIN_FILE={get_vcpkg_dir()} "
                "-DUSE_LIBCXX_IF_AVAILABLE:BOOL=OFF "
                "-DENABLE_LARGE_TESTS=1 "
+               "-DNES_BUILD_NATIVE:BOOL=ON "
                "-DNES_LOG_LEVEL:STRING=LEVEL_NONE "
                "-DNES_BUILD_NATIVE:BOOL=ON")
 NUM_RUNS_PER_EXPERIMENT = 1

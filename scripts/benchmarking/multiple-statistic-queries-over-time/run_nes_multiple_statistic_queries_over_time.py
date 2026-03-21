@@ -46,7 +46,8 @@ cmake_flags = ("-G Ninja "
                f"-DCMAKE_BUILD_TYPE={build_type} "
                f"-DCMAKE_TOOLCHAIN_FILE={get_vcpkg_dir()} "
                "-DUSE_LIBCXX_IF_AVAILABLE:BOOL=OFF "
-               "-DENABLE_LARGE_TESTS=1 "
+               "-DENABLE_LARGE_TESTS=0 "
+               "-DNES_BUILD_NATIVE:BOOL=ON "
                "-DNES_LOG_LEVEL:STRING=LEVEL_NONE "
                "-DNES_BUILD_NATIVE:BOOL=ON")
 NUM_RUNS_PER_EXPERIMENT = 1
@@ -85,7 +86,7 @@ def create_output_folder(appendix):
     timestamp = int(time.time())
     folder_name = f"RunBenchmark_{timestamp}_{appendix}"
     create_folder_and_remove_if_exists(folder_name)
-    print(f"Created folder {folder_name}...")
+    printSuccess(f"Created folder {folder_name}...")
     return folder_name
 
 
@@ -93,12 +94,12 @@ def terminate_process_if_exists(process):
     try:
         process.terminate()
         process.wait(timeout=5)
-        print(f"Process with PID {process.pid} terminated.")
+        printInfo(f"Process with PID {process.pid} terminated.")
     except subprocess.TimeoutExpired:
-        print(f"Process with PID {process.pid} did not terminate within timeout. Sending SIGKILL.")
+        printError(f"Process with PID {process.pid} did not terminate within timeout. Sending SIGKILL.")
         process.kill()
         process.wait()
-        print(f"Process with PID {process.pid} forcefully killed.")
+        printError(f"Process with PID {process.pid} forcefully killed.")
 
 
 def start_single_node_worker(file_path_stdout):
@@ -111,16 +112,16 @@ def start_single_node_worker(file_path_stdout):
                      f"--worker.default_query_execution.operator_buffer_size={bufferSizeInBytes}")
 
     cmd = f"{single_node_executable} {worker_config}"
-    print(f"Starting the single node worker with {cmd}")
+    printInfo(f"Starting the single node worker with {cmd}")
     process = subprocess.Popen(cmd.split(" "), stdout=file_path_stdout, stderr=subprocess.STDOUT)
     pid = process.pid
-    print(f"Started single node worker with pid {pid}")
+    printSuccess(f"Started single node worker with pid {pid}")
     return process
 
 
 def submitting_query(query_file, cli_log_file):
     cmd = f"{nebuli_executable} -t {query_file} start"
-    print(f"Submitting the query via {cmd}...")
+    printInfo(f"Submitting the query via {cmd}...")
     try:
         result = subprocess.run(cmd.split(" "), check=True, stdout=subprocess.PIPE,  # Capture standard output
                                 stderr=subprocess.PIPE,  # Capture standard error
@@ -131,7 +132,7 @@ def submitting_query(query_file, cli_log_file):
         cli_log_file.write(f"stdout: {result.stdout}\n")
         cli_log_file.write(f"stderr: {result.stderr}\n")
         cli_log_file.flush()
-        print(f"Submitted the query with id {query_id}")
+        printSuccess(f"Submitted the query with id {query_id}")
         return query_id
     except subprocess.CalledProcessError as e:
         cli_log_file.write(f"=== Submit query FAILED: {cmd} ===\n")
@@ -139,9 +140,9 @@ def submitting_query(query_file, cli_log_file):
         cli_log_file.write(f"stdout: {e.stdout}\n")
         cli_log_file.write(f"stderr: {e.stderr}\n")
         cli_log_file.flush()
-        print("Command failed with exit status:", e.returncode)
-        print("Standard output:", e.stdout)
-        print("Error output:", e.stderr)
+        printError("Command failed with exit status:", e.returncode)
+        printError("Standard output:", e.stdout)
+        printError("Error output:", e.stderr)
         exit(1)
 
 def start_query(query_id, cli_log_file):
@@ -317,9 +318,9 @@ def concatenate_csv_files(folders, output_file, config_file, csv_file_path):
 
         # Write the concatenated DataFrame to a new CSV file
         concatenated_df.to_csv(output_file, index=False)
-        print(f"Concatenated CSV file saved to {output_file}")
+        printSuccess(f"Concatenated CSV file saved to {output_file}")
     else:
-        print("No CSV files found.")
+        printError("No CSV files found.")
 
 
 def read_generator_rates(yaml_file_path):
@@ -331,11 +332,11 @@ def read_generator_rates(yaml_file_path):
         list_of_tuples = [(item['type'], item['rate']) for item in data]
         return list_of_tuples
     except yaml.YAMLError as exc:
-        print(f"YAML Error: {exc}")
+        printError(f"YAML Error: {exc}")
     except KeyError as exc:
-        print(f"Key error: {exc}. Ensure the YAML structure matches the expected format.")
+        printError(f"Key error: {exc}. Ensure the YAML structure matches the expected format.")
     except FileNotFoundError:
-        print(f"File not found: {yaml_file_path}")
+        printError(f"File not found: {yaml_file_path}")
 
 
 if __name__ == "__main__":
@@ -355,9 +356,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Printing all arguments with their parsed values
-    print("Parsed arguments:")
+    printInfo("Parsed arguments:")
     for arg, value in vars(args).items():
-        print(f"- {arg}: {value}")
+        printInfo(f"  {arg}: {value}")
     print()
 
     allBufferSizes = [args.buffer_size]
@@ -414,7 +415,7 @@ if __name__ == "__main__":
          numberOfEntriesSliceCaches, bufferSizeInBytes, pageSize, analyticalQuery] in combinations:
         try:
             counter += 1
-            print(f"Running combination [{counter}/{no_combinations}]")
+            printInfo(f"\nRunning combination [{counter}/{no_combinations}]")
 
             # Creating new output folder for this benchmark run and writing the current combination to a file
             folder_name = create_output_folder(analyticalQuery)
@@ -443,6 +444,7 @@ if __name__ == "__main__":
             cli_log_file = open(cli_log_path, 'w')
             time.sleep(WAIT_BETWEEN_COMMANDS_LONG)
 
+            printInfo("=" * 60)
             # Starting analytical queries
             for analytical_query_number, (generatorRateType, generatorRateConfig) in enumerate(
                     allGeneratorRatesPerQuery):
@@ -456,13 +458,15 @@ if __name__ == "__main__":
             # Waiting to give the engine time to start the queries and for measuring the current throughput
             time.sleep(args.wait_between_queries)
 
+            printInfo("=" * 60)
             for concurrent_query_number in range(args.number_of_statistics_query_starts):
+                printInfo("-" * 40)
                 for start_num in range(args.statistics_queries_per_start):
                     query_num = concurrent_query_number * args.statistics_queries_per_start + start_num
                     (statGeneratorRateType, statGeneratorRateConfig) = allStatisticsGeneratorRates[query_num]
-                    print(f'query num = {query_num}')
                     # Changing the query yaml file to the new ports etc.
                     random_stat_query = random.choice(list(statisticQueries.keys()))
+                    printInfo(f"    Submitting statistics query [{query_num}] ({random_stat_query})...")
                     equiWidthHistogramConfig = None
                     if random_stat_query == "equi_width_histogram":
                         equiWidthHistogramConfig = random.choice(allEquiWidthHistogramConfigs)
@@ -483,6 +487,7 @@ if __name__ == "__main__":
             # Waiting to take measurements
             time.sleep(args.wait_before_stopping_queries)
 
+            printInfo("=" * 60)
             # Stopping all queries
             stop_processes = []
             for query_id in statistics_query_ids + analytical_query_ids:
@@ -494,9 +499,10 @@ if __name__ == "__main__":
 
         finally:
             time.sleep(WAIT_BEFORE_SIGKILL)  # Wait additional time before cleanup
+            printInfo("=" * 60)
             all_processes = tcp_server_processes + [single_node_process] + stop_processes
             for proc in all_processes:
-                print(f"Trying to terminate {proc}")
+                printInfo(f"Terminating {proc}...")
                 if not proc:
                     continue
                 terminate_process_if_exists(proc)
@@ -518,5 +524,5 @@ if __name__ == "__main__":
 
     latency_abs_csv_path = os.path.abspath(latency_concat_file_name)
     throughput_abs_csv_path = os.path.abspath(throughput_concat_file_name)
-    print(f"CSV Measurement file can be found in {latency_abs_csv_path}")
-    print(f"CSV Measurement file can be found in {throughput_abs_csv_path}")
+    printInfo(f"CSV Measurement file can be found in {latency_abs_csv_path}")
+    printInfo(f"CSV Measurement file can be found in {throughput_abs_csv_path}")

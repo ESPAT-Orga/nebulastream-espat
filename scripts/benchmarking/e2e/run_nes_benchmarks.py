@@ -63,13 +63,13 @@ throughputListenerInterval = 200
 #### Statistic Build Configurations
 allReservoirSizes = [
     100,
-    #1000,
+    1000,
     10000
 ]
-allHistogramConfigs = [
+allEquiWidthHistogramConfigs = [
     # (num_buckets, min_value, max_value, counter_type)
     (10, 0, 1000000, "uint64"),
-    # (100, 0, 1000000, "uint64"),
+    (100, 0, 1000000, "uint64"),
     (1000, 0, 1000000, "uint64"),
 ]
 allCountMinConfigs = [
@@ -103,7 +103,7 @@ def generate_queries():
     """Generate query dict and .test files from statistic build configurations."""
     os.makedirs(generated_test_dir, exist_ok=True)
     reservoir_template = load_template("ReservoirBuild.test.template")
-    histogram_template = load_template("HistogramBuild.test.template")
+    equi_width_histogram_template = load_template("EquiWidthHistogramBuild.test.template")
     queries = {}
     for reservoir_size in allReservoirSizes:
         name = f"ReservoirBuild_{reservoir_size}"
@@ -113,12 +113,12 @@ def generate_queries():
             f.write(reservoir_template.format(reservoir_size=reservoir_size))
         queries[name] = f"{filepath}:01"
 
-    for num_buckets, min_value, max_value, counter_type in allHistogramConfigs:
-        name = f"HistogramBuild_{num_buckets}_{min_value}_{max_value}_{counter_type}"
+    for num_buckets, min_value, max_value, counter_type in allEquiWidthHistogramConfigs:
+        name = f"EquiWidthHistogramBuild_{num_buckets}_{min_value}_{max_value}_{counter_type}"
         filename = f"{name}.test"
         filepath = os.path.join(generated_test_dir, filename)
         with open(filepath, 'w') as f:
-            f.write(histogram_template.format(num_buckets=num_buckets, min_value=min_value, max_value=max_value,
+            f.write(equi_width_histogram_template.format(num_buckets=num_buckets, min_value=min_value, max_value=max_value,
                                               counter_type=counter_type))
         queries[name] = f"{filepath}:01"
 

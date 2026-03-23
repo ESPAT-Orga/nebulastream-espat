@@ -80,16 +80,16 @@ SingleNodeWorker::SingleNodeWorker(const SingleNodeWorkerConfiguration& configur
         /// Helper function to format throughput in SI units
         auto formatThroughput = [](double throughput, const std::string_view suffix)
         {
-            constexpr std::array<const char*, 5> units = {"", "k", "M", "G", "T"};
-            int unitIndex = 0;
+            constexpr std::array UNITS_THROUGHPUT = {std::to_array<const char*>({"", "k", "M", "G", "T"})};
+            uint64_t unitIndex = 0;
 
-            while (throughput >= 1000 && unitIndex < 4)
+            while (throughput >= 1000 && unitIndex < UNITS_THROUGHPUT.size() - 1)
             {
                 throughput /= 1000;
                 ++unitIndex;
             }
 
-            return fmt::format("{:.3f} {}{}/s", throughput, units[unitIndex], suffix);
+            return fmt::format("{:.3f} {}{}/s", throughput, UNITS_THROUGHPUT[unitIndex], suffix);
         };
 
         const auto tuplesPerSecondMessage = formatThroughput(callBackParams.throughputInTuplesPerSec, "Tup");
@@ -111,17 +111,17 @@ SingleNodeWorker::SingleNodeWorker(const SingleNodeWorkerConfiguration& configur
             /// Helper function to format latency in SI units
             auto formatLatency = [](const std::chrono::duration<double> latency)
             {
+                constexpr std::array UNITS_LATENCY = {std::to_array<const char*>({"", "m", "u", "n"})};
                 auto latencyCount = latency.count();
-                constexpr std::array<const char*, 5> units = {"", "m", "u", "n"};
-                int unitIndex = 0;
+                uint64_t unitIndex = 0;
 
-                while (latencyCount <= 1 && unitIndex < 4)
+                while (latencyCount <= 1 && unitIndex < UNITS_LATENCY.size() - 1)
                 {
                     latencyCount *= 1000;
                     ++unitIndex;
                 }
 
-                return fmt::format("{:.3f} {}s", latencyCount, units[unitIndex]);
+                return fmt::format("{:.3f} {}s", latencyCount, UNITS_LATENCY[unitIndex]);
             };
 
             const auto latencyMessage = formatLatency(callBackParams.averageLatency);

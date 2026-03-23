@@ -11,4 +11,4 @@
 # limitations under the License.
 
 - type: "FIXED"
-  rate: "emit_rate 1000"
+  rate: "emit_rate 100000"

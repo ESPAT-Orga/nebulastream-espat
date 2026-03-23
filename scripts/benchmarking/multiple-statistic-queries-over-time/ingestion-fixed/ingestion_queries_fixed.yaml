@@ -11,4 +11,5 @@
 # limitations under the License.
 
 - type: "FIXED"
+  # this one shows latency spike around 110000 ms
   rate: "emit_rate 100000"

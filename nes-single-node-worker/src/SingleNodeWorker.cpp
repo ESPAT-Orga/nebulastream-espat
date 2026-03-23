@@ -111,10 +111,10 @@ SingleNodeWorker::SingleNodeWorker(const SingleNodeWorkerConfiguration& configur
             auto formatLatency = [](const std::chrono::duration<double> latency)
             {
                 auto latencyCount = latency.count();
-                constexpr std::array<const char*, 5> units = {"", "m", "u", "n"};
+                constexpr std::array<const char*, 4> units = {"", "m", "u", "n"};
                 int unitIndex = 0;
 
-                while (latencyCount <= 1 && unitIndex < 4)
+                while (latencyCount <= 1 && unitIndex < 3)
                 {
                     latencyCount *= 1000;
                     ++unitIndex;

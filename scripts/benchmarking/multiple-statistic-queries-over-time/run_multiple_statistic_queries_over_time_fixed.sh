@@ -19,7 +19,7 @@ python3 -m venv myenv
 source myenv/bin/activate
 pip install argparse requests pandas pyyaml
 
-myenv/bin/python3 -m scripts.benchmarking.multiple-statistic-queries-over-time.run_nes_multiple_statistic_queries_over_time --wait-between-queries 1 --wait-before-stopping-queries 5 --generator-rates scripts/benchmarking/multiple-statistic-queries-over-time/ingestion-fixed/ingestion_queries_fixed.yaml --number-of-queries 4 --statistics-generator-rates scripts/benchmarking/multiple-statistic-queries-over-time/ingestion-fixed/ingestion_queries_fixed.yaml --number-of-statistics-query-starts 100 --statistics-queries-per-start 1 --buffer-size 8192 --number-of-buffers 4000000 --flush-interval 100
+myenv/bin/python3 -m scripts.benchmarking.multiple-statistic-queries-over-time.run_nes_multiple_statistic_queries_over_time --wait-between-queries 1 --wait-before-stopping-queries 5 --generator-rates scripts/benchmarking/multiple-statistic-queries-over-time/ingestion-fixed/ingestion_queries_fixed.yaml --number-of-queries 4 --statistics-generator-rates scripts/benchmarking/multiple-statistic-queries-over-time/ingestion-fixed/ingestion_queries_fixed.yaml --number-of-statistics-query-starts 200 --statistics-queries-per-start 1 --buffer-size 8192 --number-of-buffers 4000000 --flush-interval 100
 
 # Deactivate the virtual environment
 deactivate

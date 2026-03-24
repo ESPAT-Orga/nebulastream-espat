@@ -41,6 +41,9 @@ from scripts.benchmarking.utils import *
 BUILD_DATASET_PATH = "nes-systests/testdata/large/nexmark/bid_6GB.csv"
 BUILD_WINDOW_SIZE_SEC = 10
 NUM_PROBE_TUPLES = 10
+# Number of times to repeat the probe tuples so the probe query runs long enough
+# for the throughput listener to capture measurements
+NUM_PROBE_REPETITIONS = 100000
 
 # Statistic hashes used in build queries (must match the hash in the SQL template)
 STATISTIC_HASHES = {
@@ -106,21 +109,41 @@ def load_template(name):
         return f.read()
 
 
-def generate_probe_csv(probe_csv_path, statistic_hash, num_probes=NUM_PROBE_TUPLES,
+def generate_probe_csv(probe_csv_path, statistic_hash, build_dataset_path,
+                       num_probes=NUM_PROBE_TUPLES,
+                       num_repetitions=NUM_PROBE_REPETITIONS,
                        window_size_ms=BUILD_WINDOW_SIZE_SEC * 1000):
     """Generate a probe CSV file with probe tuples.
 
     Schema: STATISTICHASH, STATISTICSTART, STATISTICEND, STATISTICNUMBEROFSEENTUPLES
     Each row probes a different window of the statistic.
+
+    Window boundaries are derived from the first timestamp in the build dataset
+    to match the tumbling windows created during the build phase. The set of
+    probe tuples is repeated ``num_repetitions`` times so that the probe query
+    runs long enough for the throughput listener to capture measurements.
     """
+    # Read the first timestamp from the build dataset to compute correct window boundaries
+    with open(build_dataset_path, 'r') as f:
+        first_line = f.readline().strip()
+        first_timestamp = int(first_line.split(',')[0])
+    first_window_start = (first_timestamp // window_size_ms) * window_size_ms
+    printInfo(f"First data timestamp: {first_timestamp}, first window start: {first_window_start}")
+
+    # Build the base set of probe tuples
+    probe_rows = []
+    for i in range(num_probes):
+        start_ts = first_window_start + i * window_size_ms
+        end_ts = start_ts + window_size_ms
+        probe_rows.append([statistic_hash, start_ts, end_ts, 0])
+
+    total_rows = num_probes * num_repetitions
     os.makedirs(os.path.dirname(probe_csv_path), exist_ok=True)
     with open(probe_csv_path, 'w', newline='') as f:
         writer = csv.writer(f)
-        for i in range(num_probes):
-            start_ts = i * window_size_ms
-            end_ts = start_ts + window_size_ms
-            writer.writerow([statistic_hash, start_ts, end_ts, 0])
-    printSuccess(f"Generated probe CSV with {num_probes} tuples at {probe_csv_path}")
+        for _ in range(num_repetitions):
+            writer.writerows(probe_rows)
+    printSuccess(f"Generated probe CSV with {total_rows} tuples ({num_probes} x {num_repetitions}) at {probe_csv_path}")
 
 
 def generate_build_query(statistic_type, config, output_dir, build_dataset_path):
@@ -300,12 +323,14 @@ def parse_average_throughput_from_throughput_listener(log_file_path, query_id=No
                     throughput_value = convert_unit_prefix(throughput_value, unit_prefix)
                     data.append(throughput_value)
     except FileNotFoundError:
+        printError(f"Log file {log_file_path} not found.")
         return -1
 
     # Drop the last measurement (may be partial)
     data = data[:-1]
 
     if len(data) == 0:
+        printError(f"No throughput measurements found in {log_file_path}.")
         return -1
     return sum(data) / len(data)
 
@@ -391,7 +416,7 @@ def run_experiment(statistic_type, statistic_config, worker_config, build_datase
     # Generate probe CSV
     statistic_hash = STATISTIC_HASHES[statistic_type]
     probe_csv_path = os.path.abspath(os.path.join(output_dir, f"probe_tuples_{build_name}.csv"))
-    generate_probe_csv(probe_csv_path, statistic_hash)
+    generate_probe_csv(probe_csv_path, statistic_hash, build_dataset_path)
 
     # Generate probe query
     probe_query_path, probe_name = generate_probe_query(
@@ -499,7 +524,7 @@ def estimate_eta(start_time, end_time, completed_runs, total_runs):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Benchmark statistic probe queries.")
     parser.add_argument("--all", action="store_true", help="Run all statistic configurations.")
-    parser.add_argument("--build-dataset", type=str, default=BUILD_DATASET_PATH,
+    parser.add_argument("--build-dataset", type=str, default=f'{build_dir}/{BUILD_DATASET_PATH}',
                         help="Path to the build dataset CSV file.")
     parser.add_argument("-w", "--worker-threads", nargs="+",
                         help="Number of worker threads to run the queries.")

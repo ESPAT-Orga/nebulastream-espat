@@ -55,7 +55,12 @@ std::vector<std::shared_ptr<Statistic>> DefaultStatisticStore::getStatistics(
 {
     std::vector<std::shared_ptr<Statistic>> returnStatisticsVector;
     const auto statisticsLocked = statistics.rlock();
-    auto& statisticsVec = statisticsLocked->at(statisticHash);
+    const auto hashIt = statisticsLocked->find(statisticHash);
+    if (hashIt == statisticsLocked->end())
+    {
+        return returnStatisticsVector;
+    }
+    auto& statisticsVec = hashIt->second;
 
     std::ranges::copy_if(
         statisticsVec,
@@ -68,7 +73,12 @@ std::optional<std::shared_ptr<Statistic>> DefaultStatisticStore::getSingleStatis
     const Statistic::StatisticHash& statisticHash, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs)
 {
     const auto statisticsLocked = statistics.rlock();
-    auto& statisticsVec = statisticsLocked->at(statisticHash);
+    const auto hashIt = statisticsLocked->find(statisticHash);
+    if (hashIt == statisticsLocked->end())
+    {
+        return std::nullopt;
+    }
+    auto& statisticsVec = hashIt->second;
 
     const auto it = std::ranges::find_if(
         statisticsVec,

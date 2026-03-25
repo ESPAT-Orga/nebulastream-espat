@@ -31,6 +31,7 @@ sinks:
     type: Void
     config:
       file_path: "/tmp/discard_probe_sink.csv"
+    parser_config: {{ }}
 logical:
   - name: probe_source
     schema:

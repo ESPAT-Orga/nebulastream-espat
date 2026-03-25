@@ -25,6 +25,7 @@ Experiment mechanics come from run_nes_multiple_statistic_queries_over_time.py.
 """
 
 import argparse
+import socket
 import subprocess
 import os
 import csv
@@ -42,7 +43,7 @@ BUILD_DATASET_PATH = "nes-systests/testdata/large/nexmark/bid_6GB.csv"
 BUILD_WINDOW_SIZE_SEC = 10
 NUM_PROBE_TUPLES = 10
 # Number of times to repeat the probe tuples so the probe query runs long enough
-# for the throughput listener to capture measurements
+# for the throughput listener to capture measurements.
 NUM_PROBE_REPETITIONS = 100000
 
 # Statistic hashes used in build queries (must match the hash in the SQL template)
@@ -57,7 +58,7 @@ build_dir = os.path.join(".", "build_dir")
 working_dir = os.path.join(build_dir, "working_dir")
 csv_file_path = "results_statistic_probe.csv"
 single_node_executable = os.path.join(build_dir, "nes-single-node-worker/nes-single-node-worker")
-nebuli_executable = os.path.join(build_dir, "nes-frontend/apps/nes-cli") + " --debug"
+nebuli_executable = [os.path.join(build_dir, "nes-frontend/apps/nes-cli"), "--debug"]
 cmake_flags = ("-G Ninja "
                "-DCMAKE_BUILD_TYPE=Release "
                f"-DCMAKE_TOOLCHAIN_FILE={get_vcpkg_dir()} "
@@ -212,13 +213,21 @@ def generate_probe_query(statistic_type, config, output_dir, probe_csv_path):
 def terminate_process_if_exists(process):
     try:
         process.terminate()
-        process.wait(timeout=5)
+        process.wait(timeout=10)
         printInfo(f"Process with PID {process.pid} terminated.")
     except subprocess.TimeoutExpired:
         printError(f"Process with PID {process.pid} did not terminate within timeout. Sending SIGKILL.")
         process.kill()
         process.wait()
         printError(f"Process with PID {process.pid} forcefully killed.")
+    # Wait until the gRPC port is free before starting a new worker
+    for _ in range(30):
+        with socket.socket(socket.AF_INET6, socket.SOCK_STREAM) as s:
+            if s.connect_ex(('::1', 8080)) != 0:
+                break
+        time.sleep(1)
+    else:
+        printError("Port 8080 still in use after 30s")
 
 
 def start_single_node_worker(file_path_stdout, numberOfWorkerThreads, executionMode,
@@ -237,57 +246,87 @@ def start_single_node_worker(file_path_stdout, numberOfWorkerThreads, executionM
     process = subprocess.Popen(cmd.split(" "), stdout=file_path_stdout, stderr=subprocess.STDOUT)
     pid = process.pid
     printSuccess(f"Started single node worker with pid {pid}")
+
+    # Verify the worker is still alive after startup
+    time.sleep(3)
+    if process.poll() is not None:
+        raise RuntimeError(f"Worker process exited immediately with code {process.returncode}")
+
     return process
 
 
-def submit_query(query_file, cli_log_file):
+def submit_query(query_file, cli_log_file, retries=3, retry_delay=5):
     """Submit a query via nes-cli and return the query id."""
-    cmd = f"{nebuli_executable} -t {query_file} start"
-    printInfo(f"Submitting query via {cmd}...")
-    try:
-        result = subprocess.run(cmd.split(" "), check=True, stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE, text=True)
-        query_id = result.stdout.strip()
-        cli_log_file.write(f"=== Submit query: {cmd} ===\n")
-        cli_log_file.write(f"stdout: {result.stdout}\n")
-        cli_log_file.write(f"stderr: {result.stderr}\n")
-        cli_log_file.flush()
-        printSuccess(f"Submitted query with id {query_id}")
-        return query_id
-    except subprocess.CalledProcessError as e:
-        cli_log_file.write(f"=== Submit query FAILED: {cmd} ===\n")
-        cli_log_file.write(f"exit status: {e.returncode}\n")
-        cli_log_file.write(f"stdout: {e.stdout}\n")
-        cli_log_file.write(f"stderr: {e.stderr}\n")
-        cli_log_file.flush()
-        printError(f"Command failed with exit status: {e.returncode}")
-        printError(f"Standard output: {e.stdout}")
-        printError(f"Error output: {e.stderr}")
-        exit(1)
+    cmd = nebuli_executable + ["-t", query_file, "start"]
+    printInfo(f"Submitting query via {' '.join(cmd)}...")
+    last_error = None
+    for attempt in range(1, retries + 1):
+        try:
+            result = subprocess.run(cmd, check=True, stdout=subprocess.PIPE,
+                                    stderr=subprocess.PIPE, text=True)
+            query_id = result.stdout.strip()
+            cli_log_file.write(f"=== Submit query: {cmd} ===\n")
+            cli_log_file.write(f"stdout: {result.stdout}\n")
+            cli_log_file.write(f"stderr: {result.stderr}\n")
+            cli_log_file.flush()
+            printSuccess(f"Submitted query with id {query_id}")
+            return query_id
+        except subprocess.CalledProcessError as e:
+            last_error = e
+            cli_log_file.write(f"=== Submit query FAILED (attempt {attempt}/{retries}): {cmd} ===\n")
+            cli_log_file.write(f"exit status: {e.returncode}\n")
+            cli_log_file.write(f"stdout: {e.stdout}\n")
+            cli_log_file.write(f"stderr: {e.stderr}\n")
+            cli_log_file.flush()
+            if attempt < retries:
+                printError(f"Submit attempt {attempt}/{retries} failed, retrying in {retry_delay}s...")
+                time.sleep(retry_delay)
+            else:
+                printError(f"Command failed with exit status: {e.returncode}")
+                printError(f"Standard output: {e.stdout}")
+                printError(f"Error output: {e.stderr}")
+                raise RuntimeError(f"nes-cli submit failed for {query_file}")
 
 
 def stop_query(query_id, query_file, cli_log_file):
     """Stop a query via nes-cli."""
-    cmd = f"{nebuli_executable} -t {query_file} stop {query_id}"
-    cli_log_file.write(f"=== Stop query: {cmd} ===\n")
+    cmd = nebuli_executable + ["-t", query_file, "stop", query_id]
+    cli_log_file.write(f"=== Stop query: {' '.join(cmd)} ===\n")
     cli_log_file.flush()
-    process = subprocess.Popen(cmd.split(" "), stdout=cli_log_file, stderr=cli_log_file)
+    process = subprocess.Popen(cmd, stdout=cli_log_file, stderr=cli_log_file)
     return process
 
 
-def wait_for_query_to_finish(log_file_path, timeout, poll_interval=2):
+def wait_for_query_to_finish(log_file_path, timeout, query_id=None, poll_interval=2,
+                             max_wait=300, worker_process=None):
     """Wait until no new throughput lines appear for `timeout` seconds.
 
-    Returns True if the query finished (throughput stopped), False on error.
+    Returns a (success, reason) tuple:
+      (True, "ok")           — query finished normally
+      (False, "crashed:N")   — worker exited with signal/code N
+      (False, "timeout")     — max_wait exceeded
     """
     last_line_count = 0
     stable_since = time.time()
-    printInfo(f"Waiting for query to finish (timeout={timeout}s)...")
+    wait_start = time.time()
+    query_id_str = str(query_id) if query_id is not None else None
+    printInfo(f"Waiting for query to finish (timeout={timeout}s, max_wait={max_wait}s, queryId={query_id_str})...")
 
     while True:
+        elapsed = time.time() - wait_start
+        if elapsed > max_wait:
+            printError(f"Max wait time ({max_wait}s) exceeded with {last_line_count} measurements. Giving up.")
+            return False, "timeout"
+
+        if worker_process is not None and worker_process.poll() is not None:
+            printError(f"Worker process exited with code {worker_process.returncode} (likely crashed).")
+            return False, f"crashed:{worker_process.returncode}"
+
         try:
             with open(log_file_path, 'r') as f:
                 lines = [l for l in f.readlines() if 'Throughput for queryId' in l]
+                if query_id_str is not None:
+                    lines = [l for l in lines if f'queryId {query_id_str} ' in l]
             current_count = len(lines)
         except FileNotFoundError:
             time.sleep(poll_interval)
@@ -296,11 +335,23 @@ def wait_for_query_to_finish(log_file_path, timeout, poll_interval=2):
         if current_count > last_line_count:
             last_line_count = current_count
             stable_since = time.time()
-        elif current_count > 0 and time.time() - stable_since > timeout:
+        elif time.time() - stable_since > timeout:
             printSuccess(f"Query finished (no new throughput for {timeout}s, total {current_count} measurements)")
-            return True
+            return True, "ok"
 
         time.sleep(poll_interval)
+
+
+def check_log_for_buffer_exhaustion(log_file_path):
+    """Check if the worker log contains buffer exhaustion markers."""
+    try:
+        with open(log_file_path, 'r') as f:
+            for line in f:
+                if 'BUFFER_EXHAUSTION' in line:
+                    return True
+    except FileNotFoundError:
+        pass
+    return False
 
 
 def parse_average_throughput_from_throughput_listener(log_file_path, query_id=None):
@@ -326,8 +377,9 @@ def parse_average_throughput_from_throughput_listener(log_file_path, query_id=No
         printError(f"Log file {log_file_path} not found.")
         return -1
 
-    # Drop the last measurement (may be partial)
-    data = data[:-1]
+    # Drop the last measurement (may be partial), but keep at least one
+    if len(data) > 1:
+        data = data[:-1]
 
     if len(data) == 0:
         printError(f"No throughput measurements found in {log_file_path}.")
@@ -368,7 +420,9 @@ def parse_log_to_throughput_csv(log_file_path, csv_file_path):
 
 def create_output_folder(appendix):
     timestamp = int(time.time())
-    folder_name = f"RunBenchmarkProbe_{timestamp}_{appendix}"
+    # Sanitize appendix to remove shell-hostile characters (parens, commas, spaces, quotes)
+    safe_appendix = str(appendix).replace("(", "").replace(")", "").replace(",", "_").replace(" ", "").replace("'", "")
+    folder_name = f"RunBenchmarkProbe_{timestamp}_{safe_appendix}"
     create_folder_and_remove_if_exists(folder_name)
     printSuccess(f"Created folder {folder_name}...")
     return folder_name
@@ -405,7 +459,11 @@ def generate_all_experiments():
 
 def run_experiment(statistic_type, statistic_config, worker_config, build_dataset_path,
                    output_dir, cli_log_file):
-    """Run a single build+probe experiment. Returns a result dict."""
+    """Run a single build+probe experiment. Returns a (result_dict, issues) tuple.
+
+    ``issues`` is a list of strings describing non-fatal problems observed
+    during the experiment (e.g. buffer exhaustion, worker crash, timeout).
+    """
     executionMode, numberOfWorkerThreads, bufferSizeInBytes, \
         buffersInGlobalBufferManager, joinStrategy, pageSize = worker_config
 
@@ -431,6 +489,7 @@ def run_experiment(statistic_type, statistic_config, worker_config, build_datase
 
     time.sleep(WAIT_BETWEEN_COMMANDS_LONG)
 
+    issues = []
     build_query_id = None
     probe_query_id = None
     try:
@@ -441,17 +500,27 @@ def run_experiment(statistic_type, statistic_config, worker_config, build_datase
         build_query_id = submit_query(build_query_path, cli_log_file)
 
         # Wait for build query to stop by itself (file source exhausted)
-        wait_for_query_to_finish(log_file_path, timeout=BUILD_DONE_TIMEOUT)
+        build_ok, build_reason = wait_for_query_to_finish(
+            log_file_path, timeout=BUILD_DONE_TIMEOUT,
+            query_id=build_query_id, worker_process=single_node_process)
         build_end_time = time.time()
         build_duration = build_end_time - build_start_time
         printInfo(f"Build phase completed in {build_duration:.1f}s")
 
-        # Parse build throughput
+        if not build_ok:
+            issues.append(f"build:{build_reason}")
+
+        # Stop the build query to flush remaining throughput windows via QueryStop,
+        # then parse the throughput from the complete log.
+        stop_proc = stop_query(build_query_id, build_query_path, cli_log_file)
+        try:
+            stop_proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            printError("Build query stop timed out")
+        time.sleep(WAIT_BETWEEN_COMMANDS_SHORT)
+
         build_throughput = parse_average_throughput_from_throughput_listener(log_file_path, build_query_id)
         printInfo(f"Build average throughput: {build_throughput:.2f} Tup/s")
-
-        # Small pause between build and probe
-        time.sleep(WAIT_BETWEEN_COMMANDS_SHORT)
 
         # === Phase 2: Probe ===
         printInfo("=" * 60)
@@ -460,14 +529,42 @@ def run_experiment(statistic_type, statistic_config, worker_config, build_datase
         probe_query_id = submit_query(probe_query_path, cli_log_file)
 
         # Wait for probe query to stop by itself (file source exhausted)
-        wait_for_query_to_finish(log_file_path, timeout=PROBE_DONE_TIMEOUT)
+        probe_ok, probe_reason = wait_for_query_to_finish(
+            log_file_path, timeout=PROBE_DONE_TIMEOUT,
+            query_id=probe_query_id, worker_process=single_node_process)
         probe_end_time = time.time()
         probe_duration = probe_end_time - probe_start_time
         printInfo(f"Probe phase completed in {probe_duration:.1f}s")
 
-        # Parse probe throughput
+        if not probe_ok:
+            issues.append(f"probe:{probe_reason}")
+
+        # Stop the probe query to flush remaining throughput windows via QueryStop,
+        # then parse the throughput from the complete log.
+        stop_proc = stop_query(probe_query_id, probe_query_path, cli_log_file)
+        try:
+            stop_proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            pass
+        time.sleep(WAIT_BETWEEN_COMMANDS_SHORT)
+
         probe_throughput = parse_average_throughput_from_throughput_listener(log_file_path, probe_query_id)
         printInfo(f"Probe average throughput: {probe_throughput:.2f} Tup/s")
+
+        # Check for buffer exhaustion in the worker log (after both queries have run).
+        # Buffer exhaustion can cause SIGSEGV when the thrown exception propagates
+        if check_log_for_buffer_exhaustion(log_file_path):
+            issues = [i for i in issues if "crashed" not in i]
+            issues.append("buffer_exhaustion")
+
+        # Record missing measurements as issues (but only if not already
+        # explained by buffer exhaustion or a crash)
+        has_buffer_exhaustion = "buffer_exhaustion" in issues
+        has_crash = any("crashed" in i for i in issues)
+        if build_throughput < 0 and not has_buffer_exhaustion and not has_crash:
+            issues.append("build:no_measurements")
+        if probe_throughput < 0 and not has_buffer_exhaustion and not has_crash:
+            issues.append("probe:no_measurements")
 
         # Parse full throughput log to CSV
         throughput_csv_path = os.path.join(output_dir, f"throughput_{build_name}.csv")
@@ -487,7 +584,7 @@ def run_experiment(statistic_type, statistic_config, worker_config, build_datase
             'joinStrategy': joinStrategy,
             'bufferSizeInBytes': bufferSizeInBytes,
             'pageSize': pageSize,
-        }
+        }, issues
 
     finally:
         time.sleep(WAIT_BEFORE_SIGKILL)
@@ -597,6 +694,8 @@ if __name__ == "__main__":
 
     total_runs = len(experiments) * len(worker_combinations) * NUM_RUNS_PER_EXPERIMENT
     completed_runs = 0
+    failed_experiments = []       # hard failures (submit failed, exception)
+    problematic_experiments = []  # crashes, timeouts, buffer exhaustion
     start_time = time.time()
 
     printInfo(f"Total experiments: {len(experiments)}")
@@ -623,16 +722,25 @@ if __name__ == "__main__":
                 cli_log_path = os.path.join(run_folder, "nes-cli.log")
                 cli_log_file = open(cli_log_path, 'w')
 
+                experiment_desc = (f"{statistic_type} config={statistic_config} "
+                                   f"threads={numberOfWorkerThreads} run={run_idx}")
+
                 try:
                     printInfo(f"\n{'=' * 80}")
-                    printInfo(f"Experiment [{completed_runs + 1}/{total_runs}]: "
-                              f"{statistic_type} config={statistic_config} "
-                              f"threads={numberOfWorkerThreads}")
+                    printInfo(f"Experiment [{completed_runs + 1}/{total_runs}]: {experiment_desc}")
                     printInfo(f"{'=' * 80}")
 
-                    result = run_experiment(
+                    result, issues = run_experiment(
                         statistic_type, statistic_config, worker_config,
                         build_dataset_path, run_folder, cli_log_file)
+
+                    if issues:
+                        for issue in issues:
+                            problematic_experiments.append({
+                                'description': experiment_desc,
+                                'issue': issue,
+                                'output_folder': run_folder,
+                            })
 
                     if result:
                         # Write result to CSV
@@ -651,6 +759,11 @@ if __name__ == "__main__":
 
                 except Exception as e:
                     printError(f"Experiment failed: {e}")
+                    failed_experiments.append({
+                        'description': experiment_desc,
+                        'error': str(e),
+                        'output_folder': run_folder,
+                    })
                 finally:
                     cli_log_file.close()
 
@@ -671,3 +784,54 @@ if __name__ == "__main__":
 
     abs_csv_path = os.path.abspath(csv_file_path)
     printInfo(f"CSV Measurement file can be found in {abs_csv_path}")
+
+    # --- Report problematic experiments (crashes, timeouts, buffer exhaustion) ---
+    if problematic_experiments:
+        # Split into buffer exhaustion vs crashes/timeouts
+        buffer_issues = [p for p in problematic_experiments if p['issue'] == 'buffer_exhaustion']
+        crash_timeout_issues = [p for p in problematic_experiments if p['issue'] != 'buffer_exhaustion']
+
+        if crash_timeout_issues:
+            printError(f"\n{'=' * 80}")
+            printError(f"CRASHES / TIMEOUTS: {len(crash_timeout_issues)}")
+            printError(f"{'=' * 80}")
+            ct_file = "crashes_and_timeouts.txt"
+            with open(ct_file, 'w') as f:
+                for i, entry in enumerate(crash_timeout_issues, 1):
+                    msg = (f"[{i}] {entry['description']}\n"
+                           f"    Issue: {entry['issue']}\n"
+                           f"    Output: {entry['output_folder']}\n")
+                    printError(msg)
+                    f.write(msg + "\n")
+            printError(f"Written to {os.path.abspath(ct_file)}")
+
+        if buffer_issues:
+            printError(f"\n{'=' * 80}")
+            printError(f"BUFFER EXHAUSTION: {len(buffer_issues)}")
+            printError(f"{'=' * 80}")
+            be_file = "buffer_exhaustion.txt"
+            with open(be_file, 'w') as f:
+                for i, entry in enumerate(buffer_issues, 1):
+                    msg = (f"[{i}] {entry['description']}\n"
+                           f"    Output: {entry['output_folder']}\n")
+                    printError(msg)
+                    f.write(msg + "\n")
+            printError(f"Written to {os.path.abspath(be_file)}")
+
+    # --- Report hard failures (submit failed, exceptions) ---
+    if failed_experiments:
+        printError(f"\n{'=' * 80}")
+        printError(f"FAILED EXPERIMENTS: {len(failed_experiments)} out of {total_runs}")
+        printError(f"{'=' * 80}")
+        failures_file = "failed_experiments.txt"
+        with open(failures_file, 'w') as f:
+            for i, failure in enumerate(failed_experiments, 1):
+                msg = (f"[{i}] {failure['description']}\n"
+                       f"    Error: {failure['error']}\n"
+                       f"    Output: {failure['output_folder']}\n")
+                printError(msg)
+                f.write(msg + "\n")
+        printError(f"Written to {os.path.abspath(failures_file)}")
+
+    if not failed_experiments and not problematic_experiments:
+        printSuccess(f"All {total_runs} experiments completed successfully.")

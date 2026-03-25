@@ -25,6 +25,7 @@ sinks:
     type: Void
     config:
       file_path: "/tmp/discard_build_sink.csv"
+    parser_config: {{ }}
 logical:
   - name: build_source
     schema:

@@ -57,7 +57,7 @@ build_dir = os.path.join(".", "build_dir")
 working_dir = os.path.join(build_dir, "working_dir")
 csv_file_path = "results_statistic_probe.csv"
 single_node_executable = os.path.join(build_dir, "nes-single-node-worker/nes-single-node-worker")
-nebuli_executable = os.path.join(build_dir, "nes-frontend/apps/nes-cli") + " --debug"
+nebuli_executable = [os.path.join(build_dir, "nes-frontend/apps/nes-cli"), "--debug"]
 cmake_flags = ("-G Ninja "
                "-DCMAKE_BUILD_TYPE=Release "
                f"-DCMAKE_TOOLCHAIN_FILE={get_vcpkg_dir()} "
@@ -242,10 +242,10 @@ def start_single_node_worker(file_path_stdout, numberOfWorkerThreads, executionM
 
 def submit_query(query_file, cli_log_file):
     """Submit a query via nes-cli and return the query id."""
-    cmd = f"{nebuli_executable} -t {query_file} start"
-    printInfo(f"Submitting query via {cmd}...")
+    cmd = nebuli_executable + ["-t", query_file, "start"]
+    printInfo(f"Submitting query via {' '.join(cmd)}...")
     try:
-        result = subprocess.run(cmd.split(" "), check=True, stdout=subprocess.PIPE,
+        result = subprocess.run(cmd, check=True, stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE, text=True)
         query_id = result.stdout.strip()
         cli_log_file.write(f"=== Submit query: {cmd} ===\n")
@@ -268,10 +268,10 @@ def submit_query(query_file, cli_log_file):
 
 def stop_query(query_id, query_file, cli_log_file):
     """Stop a query via nes-cli."""
-    cmd = f"{nebuli_executable} -t {query_file} stop {query_id}"
-    cli_log_file.write(f"=== Stop query: {cmd} ===\n")
+    cmd = nebuli_executable + ["-t", query_file, "stop", query_id]
+    cli_log_file.write(f"=== Stop query: {' '.join(cmd)} ===\n")
     cli_log_file.flush()
-    process = subprocess.Popen(cmd.split(" "), stdout=cli_log_file, stderr=cli_log_file)
+    process = subprocess.Popen(cmd, stdout=cli_log_file, stderr=cli_log_file)
     return process
 
 
@@ -368,7 +368,9 @@ def parse_log_to_throughput_csv(log_file_path, csv_file_path):
 
 def create_output_folder(appendix):
     timestamp = int(time.time())
-    folder_name = f"RunBenchmarkProbe_{timestamp}_{appendix}"
+    # Sanitize appendix to remove shell-hostile characters (parens, commas, spaces, quotes)
+    safe_appendix = str(appendix).replace("(", "").replace(")", "").replace(",", "_").replace(" ", "").replace("'", "")
+    folder_name = f"RunBenchmarkProbe_{timestamp}_{safe_appendix}"
     create_folder_and_remove_if_exists(folder_name)
     printSuccess(f"Created folder {folder_name}...")
     return folder_name

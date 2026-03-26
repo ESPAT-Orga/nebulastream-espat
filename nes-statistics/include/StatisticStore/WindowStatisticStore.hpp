@@ -14,8 +14,10 @@
 
 #pragma once
 
+#include <functional>
 #include <StatisticStore/AbstractStatisticStore.hpp>
 #include <folly/Synchronized.h>
+#include <Statistic.hpp>
 
 namespace NES
 {
@@ -26,12 +28,12 @@ class WindowStatisticStore final : public AbstractStatisticStore
 {
     struct StatisticKey
     {
-        Statistic::StatisticHash statisticHash;
+        Statistic::StatisticId statisticId;
         Windowing::TimeMeasure startTs;
 
         bool operator==(const StatisticKey& other) const
         {
-            return this->statisticHash == other.statisticHash && this->startTs == other.startTs;
+            return this->statisticId == other.statisticId && this->startTs == other.startTs;
         }
     };
 
@@ -39,7 +41,7 @@ class WindowStatisticStore final : public AbstractStatisticStore
     {
         size_t operator()(const StatisticKey& key) const
         {
-            const auto h1 = std::hash<Statistic::StatisticHash>{}(key.statisticHash);
+            const auto h1 = std::hash<Statistic::StatisticId>{}(key.statisticId);
             const auto h2 = std::hash<Windowing::TimeMeasure>{}(key.startTs);
             return h1 ^ (h2 << 1);
         }
@@ -54,14 +56,14 @@ class WindowStatisticStore final : public AbstractStatisticStore
 
 public:
     explicit WindowStatisticStore(uint64_t numberOfExpectedConcurrentAccess, Windowing::TimeMeasure windowSize);
-    bool insertStatistic(const Statistic::StatisticHash& statisticHash, Statistic statistic) override;
+    bool insertStatistic(const Statistic::StatisticId& statisticId, Statistic statistic) override;
     bool deleteStatistics(
-        const Statistic::StatisticHash& statisticHash, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs) override;
+        const Statistic::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs) override;
     std::vector<std::shared_ptr<Statistic>> getStatistics(
-        const Statistic::StatisticHash& statisticHash, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs) override;
+        const Statistic::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs) override;
     std::optional<std::shared_ptr<Statistic>> getSingleStatistic(
-        const Statistic::StatisticHash& statisticHash, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs) override;
-    std::vector<HashStatisticPair> getAllStatistics() override;
+        const Statistic::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs) override;
+    std::vector<IdStatisticPair> getAllStatistics() override;
 };
 
 }

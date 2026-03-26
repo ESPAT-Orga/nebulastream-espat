@@ -20,6 +20,7 @@
 #include <utility>
 #include <vector>
 
+#include <DataTypes/DataType.hpp>
 #include <DataTypes/DataTypeProvider.hpp>
 #include <Identifiers/Identifiers.hpp>
 #include <Operators/LogicalOperator.hpp>
@@ -28,18 +29,19 @@
 #include <fmt/format.h>
 #include <ErrorHandling.hpp>
 #include <LogicalOperatorRegistry.hpp>
+#include <Statistic.hpp>
 
 namespace NES
 {
 
 EquiWidthHistogramProbeLogicalOperator::EquiWidthHistogramProbeLogicalOperator(
-    const uint64_t statisticHash, DataType counterType, DataType startEndType)
-    : statisticHash(statisticHash), counterType(counterType), startEndType(startEndType)
+    const Statistic::StatisticId statisticId, DataType counterType, DataType startEndType)
+    : statisticId(statisticId), counterType(counterType), startEndType(startEndType)
 {
 }
 
 EquiWidthHistogramProbeLogicalOperator::EquiWidthHistogramProbeLogicalOperator(
-    uint64_t stashHash,
+    Statistic::StatisticId stashHash,
     DataType counterType,
     DataType startEndType,
     std::string binStartFieldName,
@@ -47,7 +49,7 @@ EquiWidthHistogramProbeLogicalOperator::EquiWidthHistogramProbeLogicalOperator(
     std::string binCounterFieldName,
     LogicalStatisticFields logicalStatisticFields)
     : LogicalStatisticFields(std::move(logicalStatisticFields))
-    , statisticHash(stashHash)
+    , statisticId(stashHash)
     , counterType(counterType)
     , startEndType(startEndType)
     , binStartFieldName(std::move(binStartFieldName))
@@ -63,7 +65,7 @@ std::string_view EquiWidthHistogramProbeLogicalOperator::getName() const noexcep
 
 bool EquiWidthHistogramProbeLogicalOperator::operator==(const EquiWidthHistogramProbeLogicalOperator& rhs) const
 {
-    return statisticHash == rhs.statisticHash and counterType == rhs.counterType and startEndType == rhs.startEndType
+    return statisticId == rhs.statisticId and counterType == rhs.counterType and startEndType == rhs.startEndType
         and inputSchema == rhs.inputSchema and outputSchema == rhs.outputSchema and inputOriginIds == rhs.inputOriginIds
         and outputOriginIds == rhs.outputOriginIds;
 };
@@ -86,10 +88,10 @@ EquiWidthHistogramProbeLogicalOperator::withInferredSchema(const std::vector<Sch
     copy.inputSchema = firstSchema;
     if (not copy.inputSchema.getFieldByName(copy.statisticStartTsField.name).has_value()
         or not copy.inputSchema.getFieldByName(copy.statisticEndTsField.name).has_value()
-        or not copy.inputSchema.getFieldByName(copy.statisticHashField.name).has_value())
+        or not copy.inputSchema.getFieldByName(copy.statisticIdField.name).has_value())
     {
         std::stringstream expectedFields;
-        expectedFields << copy.statisticStartTsField << ", " << copy.statisticEndTsField << ", " << copy.statisticHashField;
+        expectedFields << copy.statisticStartTsField << ", " << copy.statisticEndTsField << ", " << copy.statisticIdField;
         throw FieldNotFound("Expected the following fields {} to be in the schema {}.", expectedFields.str(), copy.inputSchema);
     }
 
@@ -102,12 +104,12 @@ EquiWidthHistogramProbeLogicalOperator::withInferredSchema(const std::vector<Sch
     copy.binCounterFieldName = addIfMissing(this->binCounterFieldName, newQualifierForSystemField);
 
     copy.outputSchema = Schema{};
-    copy.statisticHashField.addQualifierIfNotExists(newQualifierForSystemField);
+    copy.statisticIdField.addQualifierIfNotExists(newQualifierForSystemField);
     copy.statisticStartTsField.addQualifierIfNotExists(newQualifierForSystemField);
     copy.statisticEndTsField.addQualifierIfNotExists(newQualifierForSystemField);
     copy.statisticNumberOfSeenTuplesField.addQualifierIfNotExists(newQualifierForSystemField);
 
-    copy.outputSchema.addField(copy.statisticHashField);
+    copy.outputSchema.addField(copy.statisticIdField);
     copy.outputSchema.addField(copy.statisticStartTsField);
     copy.outputSchema.addField(copy.statisticEndTsField);
     copy.outputSchema.addField(copy.statisticNumberOfSeenTuplesField);
@@ -167,15 +169,15 @@ std::string EquiWidthHistogramProbeLogicalOperator::explain(ExplainVerbosity ver
     if (verbosity == ExplainVerbosity::Debug)
     {
         return fmt::format(
-            "EQUIWIDTH_PROBE(opId: {}, statHash: {}, counterType: {}, startEndType: {})", id, statisticHash, counterType, startEndType);
+            "EQUIWIDTH_PROBE(opId: {}, statHash: {}, counterType: {}, startEndType: {})", id, statisticId, counterType, startEndType);
     }
-    return fmt::format("EQUIWIDTH_PROBE()", statisticHash);
+    return fmt::format("EQUIWIDTH_PROBE()", statisticId);
 }
 
 Reflected Reflector<EquiWidthHistogramProbeLogicalOperator>::operator()(const EquiWidthHistogramProbeLogicalOperator& op) const
 {
     return reflect(detail::ReflectedEquiWidthHistogramProbeLogicalOperator{
-        .statisticHash = op.statisticHash,
+        .statisticId = op.statisticId.getRawValue(),
         .counterTypeValue = op.counterType,
         .startEndTypeValue = op.startEndType,
         .binStartFieldName = op.binStartFieldName,
@@ -187,7 +189,7 @@ EquiWidthHistogramProbeLogicalOperator Unreflector<EquiWidthHistogramProbeLogica
 {
     auto data = unreflect<detail::ReflectedEquiWidthHistogramProbeLogicalOperator>(reflected);
     return EquiWidthHistogramProbeLogicalOperator{
-        data.statisticHash,
+        Statistic::StatisticId{data.statisticId},
         data.counterTypeValue,
         data.startEndTypeValue,
         std::move(data.binStartFieldName),

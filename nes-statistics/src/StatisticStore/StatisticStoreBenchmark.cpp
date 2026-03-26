@@ -93,12 +93,12 @@ static void BM_InsertStatistic(benchmark::State& state)
 
     /// Pre-create all statistics before the benchmark loop
     std::mt19937 rng{RNG_SEED};
-    std::uniform_int_distribution<Statistic::StatisticId> idDist{0, static_cast<uint64_t>(numStatisticIds - 1)};
+    std::uniform_int_distribution<uint64_t> idDist{0, static_cast<uint64_t>(numStatisticIds - 1)};
 
     struct PreparedStatistic
     {
         Statistic statistic;
-        Statistic::StatisticHash hash;
+        Statistic::StatisticId hash;
     };
 
     std::vector<PreparedStatistic> preparedStatistics;
@@ -106,11 +106,11 @@ static void BM_InsertStatistic(benchmark::State& state)
     uint64_t curTimestamp = 0;
     for (int i = 0; i < numStatistics; ++i)
     {
-        const Statistic::StatisticId statisticId = idDist(rng);
+        const Statistic::StatisticId statisticId{idDist(rng)};
         const Windowing::TimeMeasure startTs{curTimestamp};
         const Windowing::TimeMeasure endTs{curTimestamp + windowSize};
         auto statistic = createDummyStatistic(statisticId, startTs, endTs, rng, statisticSize);
-        const auto hash = statistic.getHash();
+        const auto hash = statistic.getStatisticId();
         preparedStatistics.push_back({std::move(statistic), hash});
         curTimestamp += windowSize;
     }
@@ -136,7 +136,7 @@ static void BM_GetStatistics(benchmark::State& state)
 {
     const auto storeType = static_cast<StatisticStoreType>(state.range(0));
     const auto windowSize = static_cast<uint64_t>(state.range(1));
-    const auto numStatisticIds = static_cast<int>(state.range(2));
+    const auto numStatisticIds = static_cast<uint64_t>(state.range(2));
     const auto percentAccessExisting = static_cast<int>(state.range(3));
     const auto numStatistics = static_cast<int>(state.range(4));
     const auto statisticSize = static_cast<int>(state.range(5));
@@ -146,16 +146,16 @@ static void BM_GetStatistics(benchmark::State& state)
 
     /// Pre-populate the store and save the hashes of inserted statistics
     std::mt19937 gen{RNG_SEED};
-    std::vector<Statistic::StatisticHash> insertedHashes;
-    for (int id = 0; id < numStatisticIds; ++id)
+    std::vector<Statistic::StatisticId> insertedHashes;
+    for (uint64_t id = 0; id < numStatisticIds; ++id)
     {
         uint64_t curTs = 0;
         for (int i = 0; i < numStatistics; ++i)
         {
             const Windowing::TimeMeasure startTs{curTs};
             const Windowing::TimeMeasure endTs{curTs + windowSize};
-            auto statistic = createDummyStatistic(id, startTs, endTs, gen, statisticSize);
-            const auto hash = statistic.getHash();
+            auto statistic = createDummyStatistic(Statistic::StatisticId{id}, startTs, endTs, gen, statisticSize);
+            const auto hash = statistic.getStatisticId();
             insertedHashes.push_back(hash);
             std::visit([&](auto& s) { s.insertStatistic(hash, std::move(statistic)); }, store);
             curTs += windowSize;
@@ -163,17 +163,18 @@ static void BM_GetStatistics(benchmark::State& state)
     }
 
     /// Create hashes for non-existing statistics (use IDs beyond the inserted range)
-    std::vector<Statistic::StatisticHash> nonExistingHashes;
-    for (int id = numStatisticIds; id < numStatisticIds + 10; ++id)
+    std::vector<Statistic::StatisticId> nonExistingHashes;
+    for (auto id = numStatisticIds; id < numStatisticIds + 10; ++id)
     {
-        auto dummyStatistic = createDummyStatistic(id, Windowing::TimeMeasure{0}, Windowing::TimeMeasure{windowSize}, gen, statisticSize);
-        nonExistingHashes.push_back(dummyStatistic.getHash());
+        auto dummyStatistic = createDummyStatistic(
+            Statistic::StatisticId{id}, Windowing::TimeMeasure{0}, Windowing::TimeMeasure{windowSize}, gen, statisticSize);
+        nonExistingHashes.push_back(dummyStatistic.getStatisticId());
     }
 
     /// Pre-build the lookup hash sequence before the benchmark loop
     const uint64_t maxTs = numStatistics * windowSize;
     const int numLookups = numStatistics * numStatisticIds;
-    std::vector<Statistic::StatisticHash> lookupHashes;
+    std::vector<Statistic::StatisticId> lookupHashes;
     lookupHashes.reserve(numLookups);
     std::uniform_int_distribution<> existingDist{0, static_cast<int>(insertedHashes.size()) - 1};
     std::uniform_int_distribution<> nonExistingDist{0, static_cast<int>(nonExistingHashes.size()) - 1};

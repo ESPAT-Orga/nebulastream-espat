@@ -28,8 +28,8 @@ public:
     /// The fields need to be in upper case. Otherwise, the parsing of the field names in the SLT of the sink does not work
     Schema::Field statisticNumberOfSeenTuplesField
         = {"STATISTICNUMBEROFSEENTUPLES", DataTypeProvider::provideDataType(DataType::Type::UINT64, DataType::NULLABLE::NOT_NULLABLE)};
-    Schema::Field statisticHashField
-        = {"STATISTICHASH", DataTypeProvider::provideDataType(DataType::Type::UINT64, DataType::NULLABLE::NOT_NULLABLE)};
+    Schema::Field statisticIdField
+        = {"STATISTICID", DataTypeProvider::provideDataType(DataType::Type::UINT64, DataType::NULLABLE::NOT_NULLABLE)};
     Schema::Field statisticStartTsField
         = {"STATISTICSTART", DataTypeProvider::provideDataType(DataType::Type::UINT64, DataType::NULLABLE::NOT_NULLABLE)};
     Schema::Field statisticEndTsField
@@ -44,11 +44,11 @@ public:
 
     LogicalStatisticFields(
         Schema::Field statisticNumberOfSeenTuplesField,
-        Schema::Field statisticHashField,
+        Schema::Field statisticIdField,
         Schema::Field statisticStartTsField,
         Schema::Field statisticEndTsField)
         : statisticNumberOfSeenTuplesField(std::move(statisticNumberOfSeenTuplesField))
-        , statisticHashField(std::move(statisticHashField))
+        , statisticIdField(std::move(statisticIdField))
         , statisticStartTsField(std::move(statisticStartTsField))
         , statisticEndTsField(std::move(statisticEndTsField))
     {
@@ -57,7 +57,7 @@ public:
     LogicalStatisticFields& addQualifierName(const std::string_view qualifierName)
     {
         statisticNumberOfSeenTuplesField.addQualifierIfNotExists(qualifierName);
-        statisticHashField.addQualifierIfNotExists(qualifierName);
+        statisticIdField.addQualifierIfNotExists(qualifierName);
         statisticStartTsField.addQualifierIfNotExists(qualifierName);
         statisticEndTsField.addQualifierIfNotExists(qualifierName);
         statisticDataField.addQualifierIfNotExists(qualifierName);
@@ -69,45 +69,40 @@ public:
     {
         static inline const DescriptorConfig::ConfigParameter<std::string> STATISTIC_START_TS{
             "statisticStartTs",
-            std::nullopt,
+            {},
             [](const std::unordered_map<std::string, std::string>& config)
             { return DescriptorConfig::tryGet(STATISTIC_START_TS, config); }};
 
         static inline const DescriptorConfig::ConfigParameter<std::string> STATISTIC_END_TS{
             "statisticEndTs",
-            std::nullopt,
+            {},
             [](const std::unordered_map<std::string, std::string>& config) { return DescriptorConfig::tryGet(STATISTIC_END_TS, config); }};
 
         static inline const DescriptorConfig::ConfigParameter<std::string> STATISTIC_NUMBER_OF_SEEN_TUPLES{
             "statisticNumberOfSeenTuples",
-            std::nullopt,
+            {},
             [](const std::unordered_map<std::string, std::string>& config)
             { return DescriptorConfig::tryGet(STATISTIC_NUMBER_OF_SEEN_TUPLES, config); }};
 
-        static inline const DescriptorConfig::ConfigParameter<std::string> STATISTIC_HASH_FIELD{
-            "statisticHashFieldName",
-            std::nullopt,
+        static inline const DescriptorConfig::ConfigParameter<std::string> STATISTIC_ID_FIELD{
+            "statisticIdFieldName",
+            {},
             [](const std::unordered_map<std::string, std::string>& config)
-            { return DescriptorConfig::tryGet(STATISTIC_HASH_FIELD, config); }};
+            { return DescriptorConfig::tryGet(STATISTIC_ID_FIELD, config); }};
 
         static inline const DescriptorConfig::ConfigParameter<std::string> STATISTIC_DATA{
             "statisticData",
-            std::nullopt,
+            {},
             [](const std::unordered_map<std::string, std::string>& config) { return DescriptorConfig::tryGet(STATISTIC_DATA, config); }};
 
         static inline const DescriptorConfig::ConfigParameter<std::string> STATISTIC_TYPE{
             "statisticType",
-            std::nullopt,
+            {},
             [](const std::unordered_map<std::string, std::string>& config) { return DescriptorConfig::tryGet(STATISTIC_TYPE, config); }};
 
         static inline std::unordered_map<std::string, DescriptorConfig::ConfigParameterContainer> parameterMap
             = DescriptorConfig::createConfigParameterContainerMap(
-                STATISTIC_START_TS,
-                STATISTIC_END_TS,
-                STATISTIC_NUMBER_OF_SEEN_TUPLES,
-                STATISTIC_HASH_FIELD,
-                STATISTIC_DATA,
-                STATISTIC_TYPE);
+                STATISTIC_START_TS, STATISTIC_END_TS, STATISTIC_NUMBER_OF_SEEN_TUPLES, STATISTIC_ID_FIELD, STATISTIC_DATA, STATISTIC_TYPE);
     };
 };
 }

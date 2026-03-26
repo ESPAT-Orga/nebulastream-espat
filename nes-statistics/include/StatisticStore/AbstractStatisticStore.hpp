@@ -16,6 +16,7 @@
 
 #include <memory>
 #include <optional>
+#include <utility>
 #include <vector>
 #include <WindowTypes/Measures/TimeMeasure.hpp>
 #include <Statistic.hpp>
@@ -33,32 +34,31 @@ enum class StatisticStoreType : uint8_t
 class AbstractStatisticStore
 {
 public:
-    using HashStatisticPair = std::pair<Statistic::StatisticHash, std::shared_ptr<Statistic>>;
+    using IdStatisticPair = std::pair<Statistic::StatisticId, std::shared_ptr<Statistic>>;
 
     AbstractStatisticStore() = default;
     virtual ~AbstractStatisticStore() = default;
 
+    /// Inserts a statistic with the statisticId into a StatisticStore. Returns false, if statistic already exists
+    virtual bool insertStatistic(const Statistic::StatisticId& statisticId, Statistic statistic) = 0;
 
-    /// Inserts a statistic with the statisticHash into a StatisticStore. Returns false, if statistic already exists
-    virtual bool insertStatistic(const Statistic::StatisticHash& statisticHash, Statistic statistic) = 0;
-
-    /// Deletes all statistics belonging to the statisticHash in the period of [startTs, endTs]. Returns true, if any statistic was deleted
-    virtual bool deleteStatistics(
-        const Statistic::StatisticHash& statisticHash, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs)
+    /// Deletes all statistics belonging to the statisticId in the period of [startTs, endTs]. Returns true, if any statistic was deleted
+    virtual bool
+    deleteStatistics(const Statistic::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs)
         = 0;
 
-    /// Gets all statistics belonging to the statisticHash in the period of [startTs, endTs]
+    /// Gets all statistics belonging to the statisticId in the period of [startTs, endTs]
     virtual std::vector<std::shared_ptr<Statistic>>
-    getStatistics(const Statistic::StatisticHash& statisticHash, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs)
+    getStatistics(const Statistic::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs)
         = 0;
 
-    /// Gets a single statistic belonging to the statisticHash that has exactly the startTs and endTs
+    /// Gets a single statistic belonging to the statisticId that has exactly the startTs and endTs
     virtual std::optional<std::shared_ptr<Statistic>> getSingleStatistic(
-        const Statistic::StatisticHash& statisticHash, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs)
+        const Statistic::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs)
         = 0;
 
     /// Returns all statistics which are currently saved in this store
-    virtual std::vector<HashStatisticPair> getAllStatistics() = 0;
+    virtual std::vector<IdStatisticPair> getAllStatistics() = 0;
 };
 
 }

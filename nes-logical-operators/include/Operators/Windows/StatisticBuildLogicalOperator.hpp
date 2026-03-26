@@ -83,53 +83,53 @@ public:
     {
         static inline const DescriptorConfig::ConfigParameter<std::string> WINDOW_AGGREGATIONS{
             "windowAggregations",
-            std::nullopt,
+            {},
             [](const std::unordered_map<std::string, std::string>& config)
             { return DescriptorConfig::tryGet(WINDOW_AGGREGATIONS, config); }};
 
         static inline const DescriptorConfig::ConfigParameter<std::string> WINDOW_KEYS{
             "windowKeys",
-            std::nullopt,
+            {},
             [](const std::unordered_map<std::string, std::string>& config) { return DescriptorConfig::tryGet(WINDOW_KEYS, config); }};
 
         static inline const DescriptorConfig::ConfigParameter<std::string> STATISTIC_START_FIELD_NAME{
             "statisticStartFieldName",
-            std::nullopt,
+            {},
             [](const std::unordered_map<std::string, std::string>& config)
             { return DescriptorConfig::tryGet(STATISTIC_START_FIELD_NAME, config); }};
 
         static inline const DescriptorConfig::ConfigParameter<std::string> STATISTIC_END_FIELD_NAME{
             "statisticEndFieldName",
-            std::nullopt,
+            {},
             [](const std::unordered_map<std::string, std::string>& config)
             { return DescriptorConfig::tryGet(STATISTIC_END_FIELD_NAME, config); }};
 
         static inline const DescriptorConfig::ConfigParameter<std::string> WINDOW_INFOS{
             "windowInfos",
-            std::nullopt,
+            {},
             [](const std::unordered_map<std::string, std::string>& config) { return DescriptorConfig::tryGet(WINDOW_INFOS, config); }};
 
         static inline const DescriptorConfig::ConfigParameter<std::string> STATISTIC_DATA_FIELD_NAME{
             "statisticDataFieldName",
-            std::nullopt,
+            {},
             [](const std::unordered_map<std::string, std::string>& config)
             { return DescriptorConfig::tryGet(STATISTIC_DATA_FIELD_NAME, config); }};
 
         static inline const DescriptorConfig::ConfigParameter<std::string> STATISTIC_TYPE_FIELD_NAME{
             "statisticTypeFieldName",
-            std::nullopt,
+            {},
             [](const std::unordered_map<std::string, std::string>& config)
             { return DescriptorConfig::tryGet(STATISTIC_TYPE_FIELD_NAME, config); }};
 
-        static inline const DescriptorConfig::ConfigParameter<std::string> STATISTIC_HASH_FIELD_NAME{
-            "statisticHashFieldName",
-            std::nullopt,
+        static inline const DescriptorConfig::ConfigParameter<std::string> STATISTIC_ID_FIELD_NAME{
+            "statisticIdFieldName",
+            {},
             [](const std::unordered_map<std::string, std::string>& config)
-            { return DescriptorConfig::tryGet(STATISTIC_HASH_FIELD_NAME, config); }};
+            { return DescriptorConfig::tryGet(STATISTIC_ID_FIELD_NAME, config); }};
 
         static inline const DescriptorConfig::ConfigParameter<std::string> STATISTIC_NUMBER_OF_SEEN_TUPLES_FIELD_NAME{
             "statisticNumberOfSeenTuplesFieldName",
-            std::nullopt,
+            {},
             [](const std::unordered_map<std::string, std::string>& config)
             { return DescriptorConfig::tryGet(STATISTIC_NUMBER_OF_SEEN_TUPLES_FIELD_NAME, config); }};
 
@@ -143,7 +143,7 @@ public:
                 STATISTIC_END_FIELD_NAME,
                 STATISTIC_DATA_FIELD_NAME,
                 STATISTIC_TYPE_FIELD_NAME,
-                STATISTIC_HASH_FIELD_NAME,
+                STATISTIC_ID_FIELD_NAME,
                 STATISTIC_NUMBER_OF_SEEN_TUPLES_FIELD_NAME);
     };
 

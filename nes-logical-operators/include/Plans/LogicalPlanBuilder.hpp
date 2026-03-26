@@ -77,7 +77,7 @@ public:
     static LogicalPlan addStatisticStoreWriter(
         const LogicalPlan& queryPlan,
         const std::shared_ptr<LogicalStatisticFields>& inputLogicalStatisticFields,
-        Statistic::StatisticHash statisticHash,
+        Statistic::StatisticId statisticId,
         Statistic::StatisticType statisticType);
 
     /// @brief UnionOperator to combine two query plans

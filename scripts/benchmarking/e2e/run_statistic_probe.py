@@ -42,8 +42,11 @@ BUILD_DATASET_PATH = "nes-systests/testdata/large/nexmark/bid_6GB.csv"
 BUILD_WINDOW_SIZE_SEC = 10
 NUM_PROBE_TUPLES = 10
 # Number of times to repeat the probe tuples so the probe query runs long enough
-# for the throughput listener to capture measurements
-NUM_PROBE_REPETITIONS = 100000
+# for the throughput listener to capture measurements.
+# With 10 probes and a 200ms throughput listener interval, we need enough tuples
+# so the query runs for several seconds even with 16 threads at ~6M Tup/s.
+# 10 probes * 1000000 reps = 10M tuples -> ~1.7s at 6M Tup/s -> ~8 measurements.
+NUM_PROBE_REPETITIONS = 1000000
 
 # Statistic hashes used in build queries (must match the hash in the SQL template)
 STATISTIC_HASHES = {
@@ -263,7 +266,7 @@ def submit_query(query_file, cli_log_file):
         printError(f"Command failed with exit status: {e.returncode}")
         printError(f"Standard output: {e.stdout}")
         printError(f"Error output: {e.stderr}")
-        exit(1)
+        raise RuntimeError(f"nes-cli submit failed for {query_file}")
 
 
 def stop_query(query_id, query_file, cli_log_file):
@@ -275,19 +278,33 @@ def stop_query(query_id, query_file, cli_log_file):
     return process
 
 
-def wait_for_query_to_finish(log_file_path, timeout, poll_interval=2):
+def wait_for_query_to_finish(log_file_path, timeout, query_id=None, poll_interval=2,
+                             max_wait=300, worker_process=None):
     """Wait until no new throughput lines appear for `timeout` seconds.
 
-    Returns True if the query finished (throughput stopped), False on error.
+    Returns True if the query finished (throughput stopped), False on timeout or worker crash.
     """
     last_line_count = 0
     stable_since = time.time()
-    printInfo(f"Waiting for query to finish (timeout={timeout}s)...")
+    wait_start = time.time()
+    query_id_str = str(query_id) if query_id is not None else None
+    printInfo(f"Waiting for query to finish (timeout={timeout}s, max_wait={max_wait}s, queryId={query_id_str})...")
 
     while True:
+        elapsed = time.time() - wait_start
+        if elapsed > max_wait:
+            printError(f"Max wait time ({max_wait}s) exceeded with {last_line_count} measurements. Giving up.")
+            return False
+
+        if worker_process is not None and worker_process.poll() is not None:
+            printError(f"Worker process exited with code {worker_process.returncode} (likely crashed).")
+            return False
+
         try:
             with open(log_file_path, 'r') as f:
                 lines = [l for l in f.readlines() if 'Throughput for queryId' in l]
+                if query_id_str is not None:
+                    lines = [l for l in lines if f'queryId {query_id_str} ' in l]
             current_count = len(lines)
         except FileNotFoundError:
             time.sleep(poll_interval)
@@ -443,7 +460,8 @@ def run_experiment(statistic_type, statistic_config, worker_config, build_datase
         build_query_id = submit_query(build_query_path, cli_log_file)
 
         # Wait for build query to stop by itself (file source exhausted)
-        wait_for_query_to_finish(log_file_path, timeout=BUILD_DONE_TIMEOUT)
+        wait_for_query_to_finish(log_file_path, timeout=BUILD_DONE_TIMEOUT,
+                                 query_id=build_query_id, worker_process=single_node_process)
         build_end_time = time.time()
         build_duration = build_end_time - build_start_time
         printInfo(f"Build phase completed in {build_duration:.1f}s")
@@ -462,7 +480,8 @@ def run_experiment(statistic_type, statistic_config, worker_config, build_datase
         probe_query_id = submit_query(probe_query_path, cli_log_file)
 
         # Wait for probe query to stop by itself (file source exhausted)
-        wait_for_query_to_finish(log_file_path, timeout=PROBE_DONE_TIMEOUT)
+        wait_for_query_to_finish(log_file_path, timeout=PROBE_DONE_TIMEOUT,
+                                 query_id=probe_query_id, worker_process=single_node_process)
         probe_end_time = time.time()
         probe_duration = probe_end_time - probe_start_time
         printInfo(f"Probe phase completed in {probe_duration:.1f}s")
@@ -599,6 +618,7 @@ if __name__ == "__main__":
 
     total_runs = len(experiments) * len(worker_combinations) * NUM_RUNS_PER_EXPERIMENT
     completed_runs = 0
+    failed_experiments = []
     start_time = time.time()
 
     printInfo(f"Total experiments: {len(experiments)}")
@@ -625,11 +645,12 @@ if __name__ == "__main__":
                 cli_log_path = os.path.join(run_folder, "nes-cli.log")
                 cli_log_file = open(cli_log_path, 'w')
 
+                experiment_desc = (f"{statistic_type} config={statistic_config} "
+                                   f"threads={numberOfWorkerThreads} run={run_idx}")
+
                 try:
                     printInfo(f"\n{'=' * 80}")
-                    printInfo(f"Experiment [{completed_runs + 1}/{total_runs}]: "
-                              f"{statistic_type} config={statistic_config} "
-                              f"threads={numberOfWorkerThreads}")
+                    printInfo(f"Experiment [{completed_runs + 1}/{total_runs}]: {experiment_desc}")
                     printInfo(f"{'=' * 80}")
 
                     result = run_experiment(
@@ -653,6 +674,11 @@ if __name__ == "__main__":
 
                 except Exception as e:
                     printError(f"Experiment failed: {e}")
+                    failed_experiments.append({
+                        'description': experiment_desc,
+                        'error': str(e),
+                        'output_folder': run_folder,
+                    })
                 finally:
                     cli_log_file.close()
 
@@ -673,3 +699,19 @@ if __name__ == "__main__":
 
     abs_csv_path = os.path.abspath(csv_file_path)
     printInfo(f"CSV Measurement file can be found in {abs_csv_path}")
+
+    if failed_experiments:
+        printError(f"\n{'=' * 80}")
+        printError(f"FAILED EXPERIMENTS: {len(failed_experiments)} out of {total_runs}")
+        printError(f"{'=' * 80}")
+        failures_file = "failed_experiments.txt"
+        with open(failures_file, 'w') as f:
+            for i, failure in enumerate(failed_experiments, 1):
+                msg = (f"[{i}] {failure['description']}\n"
+                       f"    Error: {failure['error']}\n"
+                       f"    Output: {failure['output_folder']}\n")
+                printError(msg)
+                f.write(msg + "\n")
+        printError(f"Failed experiments written to {os.path.abspath(failures_file)}")
+    else:
+        printSuccess(f"All {total_runs} experiments completed successfully.")

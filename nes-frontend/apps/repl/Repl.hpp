@@ -41,6 +41,7 @@ public:
         SinkStatementHandler sinkStatementHandler,
         TopologyStatementHandler topologyStatementHandler,
         std::shared_ptr<QueryStatementHandler> queryStatementHandler,
+        StatisticRequestHandler statisticRequestHandler,
         StatementBinder binder,
         ErrorBehaviour errorBehaviour,
         StatementOutputFormat defaultOutputFormat,

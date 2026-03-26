@@ -31,7 +31,7 @@ target_include_directories(nes-frontend-lib
         PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/private>)
 
 target_link_libraries(nes-frontend-lib
-        PUBLIC nes-logical-operators nes-sql-parser nes-single-node-worker-interface
+        PUBLIC nes-logical-operators nes-sql-parser nes-single-node-worker-interface nes-statistics
         PRIVATE yaml-cpp::yaml-cpp
 )
 
@@ -44,7 +44,7 @@ target_include_directories(nes-frontend-embedded-lib
         PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/private>)
 
 target_link_libraries(nes-frontend-embedded-lib
-        PUBLIC nes-logical-operators nes-single-node-worker-lib nes-sql-parser nes-single-node-worker-interface
+        PUBLIC nes-logical-operators nes-single-node-worker-lib nes-sql-parser nes-single-node-worker-interface nes-statistics
         PRIVATE nes-sql-parser yaml-cpp::yaml-cpp
 )
 

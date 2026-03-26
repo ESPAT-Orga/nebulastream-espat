@@ -36,6 +36,9 @@
 #include <Util/Pointers.hpp>
 #include <experimental/propagate_const>
 #include <ErrorHandling.hpp>
+#include <Statistic.hpp>
+#include <StatisticCoordinator.hpp>
+#include <StatisticQueryGenerator.hpp>
 #include <WorkerStatus.hpp>
 
 namespace NES
@@ -112,6 +115,13 @@ struct DropQueryStatementResult
     QueryId id;
 };
 
+struct RequestStatisticBuildStatementResult
+{
+    QueryId queryId;
+    Statistic::StatisticId statisticId;
+    bool alreadyExisted;
+};
+
 using StatementResult = std::variant<
     CreateLogicalSourceStatementResult,
     CreatePhysicalSourceStatementResult,
@@ -126,7 +136,8 @@ using StatementResult = std::variant<
     ShowQueriesStatementResult,
     ExplainQueryStatementResult,
     DropQueryStatementResult,
-    WorkerStatusStatementResult>;
+    WorkerStatusStatementResult,
+    RequestStatisticBuildStatementResult>;
 
 /// A bit of CRTP magic for nicer syntax when the object is in a shared ptr
 template <typename HandlerImpl>
@@ -204,6 +215,15 @@ public:
     std::expected<WorkerStatusStatementResult, Exception> operator()(const WorkerStatusStatement& statement);
 };
 
+class StatisticRequestHandler final : public StatementHandler<StatisticRequestHandler>
+{
+    StatisticCoordinator statisticCoordinator;
+
+public:
+    explicit StatisticRequestHandler(StatisticCoordinator statisticCoordinator);
+    std::expected<RequestStatisticBuildStatementResult, Exception> operator()(const RequestStatisticBuildStatement& statement);
+};
+
 template <typename HandlerT>
 bool tryCall(const Statement& statement, HandlerT& handler)
 {
@@ -266,3 +286,4 @@ FMT_OSTREAM(NES::DropQueryStatementResult);
 FMT_OSTREAM(NES::QueryStatementResult);
 FMT_OSTREAM(NES::WorkerStatusStatementResult);
 FMT_OSTREAM(NES::ExplainQueryStatementResult);
+FMT_OSTREAM(NES::RequestStatisticBuildStatementResult);

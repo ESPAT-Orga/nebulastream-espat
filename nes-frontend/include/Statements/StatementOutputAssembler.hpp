@@ -17,6 +17,7 @@
 #include <chrono>
 #include <concepts>
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <ranges>
 #include <string>
@@ -75,6 +76,9 @@ constexpr std::array<std::string_view, 5> sinkDescriptorOutputColumns{"sink_name
 
 using QueryIdOutputRowType = std::tuple<QueryId>;
 constexpr std::array<std::string_view, 1> queryIdOutputColumns{"query_id"};
+
+using RequestStatisticOutputRowType = std::tuple<QueryId, uint64_t, bool>;
+constexpr std::array<std::string_view, 3> requestStatisticOutputColumns{"query_id", "statistic_id", "already_existed"};
 
 using QueryStatusOutputRowType = std::tuple<
     QueryId,
@@ -333,6 +337,19 @@ struct StatementOutputAssembler<WorkerStatusStatementResult>
     }
 };
 
+template <>
+struct StatementOutputAssembler<RequestStatisticBuildStatementResult>
+{
+    using OutputRowType = RequestStatisticOutputRowType;
+
+    auto convert(const RequestStatisticBuildStatementResult& result)
+    {
+        return std::make_pair(
+            requestStatisticOutputColumns,
+            std::vector{std::make_tuple(result.queryId, result.statisticId.getRawValue(), result.alreadyExisted)});
+    }
+};
+
 /// NOLINTEND(readability-convert-member-functions-to-static)
 
 
@@ -349,5 +366,6 @@ static_assert(AssemblembleStatementResult<QueryStatementResult>);
 static_assert(AssemblembleStatementResult<ShowQueriesStatementResult>);
 static_assert(AssemblembleStatementResult<WorkerStatusStatementResult>);
 static_assert(AssemblembleStatementResult<DropQueryStatementResult>);
+static_assert(AssemblembleStatementResult<RequestStatisticBuildStatementResult>);
 
 }

@@ -34,6 +34,7 @@
 #include <Identifiers/Identifiers.hpp>
 #include <Phases/QueryOptimizer.hpp>
 #include <Phases/SemanticAnalyzer.hpp>
+#include <Plans/LogicalPlan.hpp>
 #include <QueryManager/GRPCQuerySubmissionBackend.hpp>
 #include <QueryManager/QueryManager.hpp>
 #include <SQLQueryParser/AntlrSQLQueryParser.hpp>
@@ -55,9 +56,11 @@
 #include <fmt/ranges.h>
 #include <magic_enum/magic_enum.hpp>
 #include <nlohmann/json.hpp>
+#include <DefaultStatisticQueryGenerator.hpp>
 #include <ErrorHandling.hpp>
 #include <QueryOptimizerConfiguration.hpp>
 #include <Repl.hpp>
+#include <StatisticCoordinator.hpp>
 #include <Thread.hpp>
 #include <utils.hpp>
 
@@ -273,16 +276,35 @@ int main(int argc, char** argv)
         auto semanticAnalyser = std::make_shared<NES::SemanticAnalyzer>(sourceCatalog, sinkCatalog);
         auto queryOptimizer = std::make_shared<NES::QueryOptimizer>(queryOptimizerConfig);
         auto queryStatementHandler = std::make_shared<NES::QueryStatementHandler>(queryManager, semanticAnalyser, queryOptimizer);
-        NES::Repl replClient(
+        auto submitQueryFn
+            = [queryManager, semanticAnalyser, queryOptimizer](NES::LogicalPlan plan) -> std::expected<NES::QueryId, NES::Exception>
+        {
+            plan = semanticAnalyser->analyse(plan);
+            plan = queryOptimizer->optimize(plan);
+            return queryManager->registerQuery(plan).and_then(
+                [&queryManager](const auto& queryId)
+                {
+                    return queryManager->start(queryId)
+                        .transform([&queryId] { return queryId; })
+                        .transform_error([](auto error)
+                                         { return NES::QueryStartFailed("Could not start statistic query: {}", error.what()); });
+                });
+        };
+        NES::StatisticCoordinator statisticCoordinator{std::make_unique<NES::DefaultStatisticQueryGenerator>(), submitQueryFn};
+        auto coordinatorAddr = statisticCoordinator.startGrpcServer();
+        NES_INFO("StatisticCoordinator gRPC server listening on {}", coordinatorAddr);
+        NES::StatisticRequestHandler statisticRequestHandler{std::move(statisticCoordinator)};
+        NES::Repl replClient{
             std::move(sourceStatementHandler),
             std::move(sinkStatementHandler),
             std::move(topologyStatementHandler),
             queryStatementHandler,
+            std::move(statisticRequestHandler),
             std::move(binder),
             errorBehaviour,
             defaultOutputFormat,
             interactiveMode,
-            SignalHandler::terminationToken());
+            SignalHandler::terminationToken()};
         replClient.run();
 
         bool hasError = false;

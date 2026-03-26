@@ -34,6 +34,8 @@
 #include <fmt/ostream.h>
 #include <fmt/ranges.h>
 #include <ErrorHandling.hpp>
+#include <StatisticCoordinator.hpp>
+#include <StatisticQueryGenerator.hpp>
 #include <WorkerStatus.hpp>
 
 namespace NES
@@ -307,5 +309,29 @@ std::expected<ShowQueriesStatementResult, Exception> QueryStatementHandler::oper
              .queryId = statement.id.value(),
              .state = QueryState::Failed,
              .metrics = QueryMetrics{.start = {}, .running = {}, .stop = {}, .error = statusOpt.error()}}}}};
+}
+
+StatisticRequestHandler::StatisticRequestHandler(StatisticCoordinator statisticCoordinator)
+    : statisticCoordinator(std::move(statisticCoordinator))
+{
+}
+
+std::expected<RequestStatisticBuildStatementResult, Exception>
+StatisticRequestHandler::operator()(const RequestStatisticBuildStatement& statement)
+{
+    CPPTRACE_TRY
+    {
+        return statisticCoordinator.collectNewStatistic(statement).transform(
+            [](auto result)
+            {
+                return RequestStatisticBuildStatementResult{
+                    .queryId = result.queryId, .statisticId = result.statisticId, .alreadyExisted = result.alreadyExisted};
+            });
+    }
+    CPPTRACE_CATCH(...)
+    {
+        return std::unexpected{wrapExternalException()};
+    }
+    std::unreachable();
 }
 }

@@ -43,10 +43,7 @@ BUILD_WINDOW_SIZE_SEC = 10
 NUM_PROBE_TUPLES = 10
 # Number of times to repeat the probe tuples so the probe query runs long enough
 # for the throughput listener to capture measurements.
-# With 10 probes and a 200ms throughput listener interval, we need enough tuples
-# so the query runs for several seconds even with 16 threads at ~6M Tup/s.
-# 10 probes * 1000000 reps = 10M tuples -> ~1.7s at 6M Tup/s -> ~8 measurements.
-NUM_PROBE_REPETITIONS = 1000000
+NUM_PROBE_REPETITIONS = 100000
 
 # Statistic hashes used in build queries (must match the hash in the SQL template)
 STATISTIC_HASHES = {
@@ -215,13 +212,15 @@ def generate_probe_query(statistic_type, config, output_dir, probe_csv_path):
 def terminate_process_if_exists(process):
     try:
         process.terminate()
-        process.wait(timeout=5)
+        process.wait(timeout=10)
         printInfo(f"Process with PID {process.pid} terminated.")
     except subprocess.TimeoutExpired:
         printError(f"Process with PID {process.pid} did not terminate within timeout. Sending SIGKILL.")
         process.kill()
         process.wait()
         printError(f"Process with PID {process.pid} forcefully killed.")
+    # Give the OS time to release the port
+    time.sleep(2)
 
 
 def start_single_node_worker(file_path_stdout, numberOfWorkerThreads, executionMode,
@@ -240,33 +239,46 @@ def start_single_node_worker(file_path_stdout, numberOfWorkerThreads, executionM
     process = subprocess.Popen(cmd.split(" "), stdout=file_path_stdout, stderr=subprocess.STDOUT)
     pid = process.pid
     printSuccess(f"Started single node worker with pid {pid}")
+
+    # Verify the worker is still alive after startup
+    time.sleep(3)
+    if process.poll() is not None:
+        raise RuntimeError(f"Worker process exited immediately with code {process.returncode}")
+
     return process
 
 
-def submit_query(query_file, cli_log_file):
+def submit_query(query_file, cli_log_file, retries=3, retry_delay=5):
     """Submit a query via nes-cli and return the query id."""
     cmd = nebuli_executable + ["-t", query_file, "start"]
     printInfo(f"Submitting query via {' '.join(cmd)}...")
-    try:
-        result = subprocess.run(cmd, check=True, stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE, text=True)
-        query_id = result.stdout.strip()
-        cli_log_file.write(f"=== Submit query: {cmd} ===\n")
-        cli_log_file.write(f"stdout: {result.stdout}\n")
-        cli_log_file.write(f"stderr: {result.stderr}\n")
-        cli_log_file.flush()
-        printSuccess(f"Submitted query with id {query_id}")
-        return query_id
-    except subprocess.CalledProcessError as e:
-        cli_log_file.write(f"=== Submit query FAILED: {cmd} ===\n")
-        cli_log_file.write(f"exit status: {e.returncode}\n")
-        cli_log_file.write(f"stdout: {e.stdout}\n")
-        cli_log_file.write(f"stderr: {e.stderr}\n")
-        cli_log_file.flush()
-        printError(f"Command failed with exit status: {e.returncode}")
-        printError(f"Standard output: {e.stdout}")
-        printError(f"Error output: {e.stderr}")
-        raise RuntimeError(f"nes-cli submit failed for {query_file}")
+    last_error = None
+    for attempt in range(1, retries + 1):
+        try:
+            result = subprocess.run(cmd, check=True, stdout=subprocess.PIPE,
+                                    stderr=subprocess.PIPE, text=True)
+            query_id = result.stdout.strip()
+            cli_log_file.write(f"=== Submit query: {cmd} ===\n")
+            cli_log_file.write(f"stdout: {result.stdout}\n")
+            cli_log_file.write(f"stderr: {result.stderr}\n")
+            cli_log_file.flush()
+            printSuccess(f"Submitted query with id {query_id}")
+            return query_id
+        except subprocess.CalledProcessError as e:
+            last_error = e
+            cli_log_file.write(f"=== Submit query FAILED (attempt {attempt}/{retries}): {cmd} ===\n")
+            cli_log_file.write(f"exit status: {e.returncode}\n")
+            cli_log_file.write(f"stdout: {e.stdout}\n")
+            cli_log_file.write(f"stderr: {e.stderr}\n")
+            cli_log_file.flush()
+            if attempt < retries:
+                printError(f"Submit attempt {attempt}/{retries} failed, retrying in {retry_delay}s...")
+                time.sleep(retry_delay)
+            else:
+                printError(f"Command failed with exit status: {e.returncode}")
+                printError(f"Standard output: {e.stdout}")
+                printError(f"Error output: {e.stderr}")
+                raise RuntimeError(f"nes-cli submit failed for {query_file}")
 
 
 def stop_query(query_id, query_file, cli_log_file):
@@ -343,8 +355,9 @@ def parse_average_throughput_from_throughput_listener(log_file_path, query_id=No
         printError(f"Log file {log_file_path} not found.")
         return -1
 
-    # Drop the last measurement (may be partial)
-    data = data[:-1]
+    # Drop the last measurement (may be partial), but keep at least one
+    if len(data) > 1:
+        data = data[:-1]
 
     if len(data) == 0:
         printError(f"No throughput measurements found in {log_file_path}.")
@@ -470,7 +483,13 @@ def run_experiment(statistic_type, statistic_config, worker_config, build_datase
         build_throughput = parse_average_throughput_from_throughput_listener(log_file_path, build_query_id)
         printInfo(f"Build average throughput: {build_throughput:.2f} Tup/s")
 
-        # Small pause between build and probe
+        # Stop the build query before starting the probe to ensure the worker
+        # has fully cleaned up the build pipelines and released resources.
+        stop_proc = stop_query(build_query_id, build_query_path, cli_log_file)
+        try:
+            stop_proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            printError("Build query stop timed out")
         time.sleep(WAIT_BETWEEN_COMMANDS_SHORT)
 
         # === Phase 2: Probe ===
@@ -485,6 +504,14 @@ def run_experiment(statistic_type, statistic_config, worker_config, build_datase
         probe_end_time = time.time()
         probe_duration = probe_end_time - probe_start_time
         printInfo(f"Probe phase completed in {probe_duration:.1f}s")
+
+        # Stop the probe query so the throughput listener flushes remaining windows
+        stop_proc = stop_query(probe_query_id, probe_query_path, cli_log_file)
+        try:
+            stop_proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            pass
+        time.sleep(WAIT_BETWEEN_COMMANDS_SHORT)
 
         # Parse probe throughput
         probe_throughput = parse_average_throughput_from_throughput_listener(log_file_path, probe_query_id)

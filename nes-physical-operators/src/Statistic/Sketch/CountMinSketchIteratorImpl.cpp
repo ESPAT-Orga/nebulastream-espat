@@ -76,7 +76,7 @@ void CountMinSketchIteratorImpl::advanceToBegin()
 
 void CountMinSketchIteratorImpl::advanceToEnd()
 {
-    numberOfColumns = readValueFromMemRef<uint64_t>(statisticMemArea + nautilus::val<uint8_t>(sizeOfTotalAreaSize + sizeOfMetaDataSize));
+    numberOfColumns = readValueFromMemRef<uint64_t>(statisticMemArea + nautilus::val<uint64_t>(sizeOfTotalAreaSize + sizeOfMetaDataSize));
     numberOfRows = readValueFromMemRef<uint64_t>(
         statisticMemArea + nautilus::val<uint64_t>{sizeOfTotalAreaSize + sizeOfMetaDataSize} + nautilus::val<uint64_t>{COL_FIELD_SIZE});
 

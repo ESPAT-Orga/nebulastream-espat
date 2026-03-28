@@ -301,7 +301,10 @@ def wait_for_query_to_finish(log_file_path, timeout, query_id=None, poll_interva
                              max_wait=300, worker_process=None):
     """Wait until no new throughput lines appear for `timeout` seconds.
 
-    Returns True if the query finished (throughput stopped), False on timeout or worker crash.
+    Returns a (success, reason) tuple:
+      (True, "ok")           — query finished normally
+      (False, "crashed:N")   — worker exited with signal/code N
+      (False, "timeout")     — max_wait exceeded
     """
     last_line_count = 0
     stable_since = time.time()
@@ -313,11 +316,11 @@ def wait_for_query_to_finish(log_file_path, timeout, query_id=None, poll_interva
         elapsed = time.time() - wait_start
         if elapsed > max_wait:
             printError(f"Max wait time ({max_wait}s) exceeded with {last_line_count} measurements. Giving up.")
-            return False
+            return False, "timeout"
 
         if worker_process is not None and worker_process.poll() is not None:
             printError(f"Worker process exited with code {worker_process.returncode} (likely crashed).")
-            return False
+            return False, f"crashed:{worker_process.returncode}"
 
         try:
             with open(log_file_path, 'r') as f:
@@ -334,9 +337,21 @@ def wait_for_query_to_finish(log_file_path, timeout, query_id=None, poll_interva
             stable_since = time.time()
         elif current_count > 0 and time.time() - stable_since > timeout:
             printSuccess(f"Query finished (no new throughput for {timeout}s, total {current_count} measurements)")
-            return True
+            return True, "ok"
 
         time.sleep(poll_interval)
+
+
+def check_log_for_buffer_exhaustion(log_file_path):
+    """Check if the worker log contains buffer exhaustion markers."""
+    try:
+        with open(log_file_path, 'r') as f:
+            for line in f:
+                if 'BUFFER_EXHAUSTION' in line:
+                    return True
+    except FileNotFoundError:
+        pass
+    return False
 
 
 def parse_average_throughput_from_throughput_listener(log_file_path, query_id=None):
@@ -444,7 +459,11 @@ def generate_all_experiments():
 
 def run_experiment(statistic_type, statistic_config, worker_config, build_dataset_path,
                    output_dir, cli_log_file):
-    """Run a single build+probe experiment. Returns a result dict."""
+    """Run a single build+probe experiment. Returns a (result_dict, issues) tuple.
+
+    ``issues`` is a list of strings describing non-fatal problems observed
+    during the experiment (e.g. buffer exhaustion, worker crash, timeout).
+    """
     executionMode, numberOfWorkerThreads, bufferSizeInBytes, \
         buffersInGlobalBufferManager, joinStrategy, pageSize = worker_config
 
@@ -470,6 +489,7 @@ def run_experiment(statistic_type, statistic_config, worker_config, build_datase
 
     time.sleep(WAIT_BETWEEN_COMMANDS_LONG)
 
+    issues = []
     build_query_id = None
     probe_query_id = None
     try:
@@ -480,11 +500,15 @@ def run_experiment(statistic_type, statistic_config, worker_config, build_datase
         build_query_id = submit_query(build_query_path, cli_log_file)
 
         # Wait for build query to stop by itself (file source exhausted)
-        wait_for_query_to_finish(log_file_path, timeout=BUILD_DONE_TIMEOUT,
-                                 query_id=build_query_id, worker_process=single_node_process)
+        build_ok, build_reason = wait_for_query_to_finish(
+            log_file_path, timeout=BUILD_DONE_TIMEOUT,
+            query_id=build_query_id, worker_process=single_node_process)
         build_end_time = time.time()
         build_duration = build_end_time - build_start_time
         printInfo(f"Build phase completed in {build_duration:.1f}s")
+
+        if not build_ok:
+            issues.append(f"build:{build_reason}")
 
         # Parse build throughput
         build_throughput = parse_average_throughput_from_throughput_listener(log_file_path, build_query_id)
@@ -506,11 +530,15 @@ def run_experiment(statistic_type, statistic_config, worker_config, build_datase
         probe_query_id = submit_query(probe_query_path, cli_log_file)
 
         # Wait for probe query to stop by itself (file source exhausted)
-        wait_for_query_to_finish(log_file_path, timeout=PROBE_DONE_TIMEOUT,
-                                 query_id=probe_query_id, worker_process=single_node_process)
+        probe_ok, probe_reason = wait_for_query_to_finish(
+            log_file_path, timeout=PROBE_DONE_TIMEOUT,
+            query_id=probe_query_id, worker_process=single_node_process)
         probe_end_time = time.time()
         probe_duration = probe_end_time - probe_start_time
         printInfo(f"Probe phase completed in {probe_duration:.1f}s")
+
+        if not probe_ok:
+            issues.append(f"probe:{probe_reason}")
 
         # Stop the probe query so the throughput listener flushes remaining windows
         stop_proc = stop_query(probe_query_id, probe_query_path, cli_log_file)
@@ -519,6 +547,10 @@ def run_experiment(statistic_type, statistic_config, worker_config, build_datase
         except subprocess.TimeoutExpired:
             pass
         time.sleep(WAIT_BETWEEN_COMMANDS_SHORT)
+
+        # Check for buffer exhaustion in the worker log
+        if check_log_for_buffer_exhaustion(log_file_path):
+            issues.append("buffer_exhaustion")
 
         # Parse probe throughput
         probe_throughput = parse_average_throughput_from_throughput_listener(log_file_path, probe_query_id)
@@ -542,7 +574,7 @@ def run_experiment(statistic_type, statistic_config, worker_config, build_datase
             'joinStrategy': joinStrategy,
             'bufferSizeInBytes': bufferSizeInBytes,
             'pageSize': pageSize,
-        }
+        }, issues
 
     finally:
         time.sleep(WAIT_BEFORE_SIGKILL)
@@ -652,7 +684,8 @@ if __name__ == "__main__":
 
     total_runs = len(experiments) * len(worker_combinations) * NUM_RUNS_PER_EXPERIMENT
     completed_runs = 0
-    failed_experiments = []
+    failed_experiments = []       # hard failures (submit failed, exception)
+    problematic_experiments = []  # crashes, timeouts, buffer exhaustion
     start_time = time.time()
 
     printInfo(f"Total experiments: {len(experiments)}")
@@ -687,9 +720,17 @@ if __name__ == "__main__":
                     printInfo(f"Experiment [{completed_runs + 1}/{total_runs}]: {experiment_desc}")
                     printInfo(f"{'=' * 80}")
 
-                    result = run_experiment(
+                    result, issues = run_experiment(
                         statistic_type, statistic_config, worker_config,
                         build_dataset_path, run_folder, cli_log_file)
+
+                    if issues:
+                        for issue in issues:
+                            problematic_experiments.append({
+                                'description': experiment_desc,
+                                'issue': issue,
+                                'output_folder': run_folder,
+                            })
 
                     if result:
                         # Write result to CSV
@@ -734,6 +775,40 @@ if __name__ == "__main__":
     abs_csv_path = os.path.abspath(csv_file_path)
     printInfo(f"CSV Measurement file can be found in {abs_csv_path}")
 
+    # --- Report problematic experiments (crashes, timeouts, buffer exhaustion) ---
+    if problematic_experiments:
+        # Split into buffer exhaustion vs crashes/timeouts
+        buffer_issues = [p for p in problematic_experiments if p['issue'] == 'buffer_exhaustion']
+        crash_timeout_issues = [p for p in problematic_experiments if p['issue'] != 'buffer_exhaustion']
+
+        if crash_timeout_issues:
+            printError(f"\n{'=' * 80}")
+            printError(f"CRASHES / TIMEOUTS: {len(crash_timeout_issues)}")
+            printError(f"{'=' * 80}")
+            ct_file = "crashes_and_timeouts.txt"
+            with open(ct_file, 'w') as f:
+                for i, entry in enumerate(crash_timeout_issues, 1):
+                    msg = (f"[{i}] {entry['description']}\n"
+                           f"    Issue: {entry['issue']}\n"
+                           f"    Output: {entry['output_folder']}\n")
+                    printError(msg)
+                    f.write(msg + "\n")
+            printError(f"Written to {os.path.abspath(ct_file)}")
+
+        if buffer_issues:
+            printError(f"\n{'=' * 80}")
+            printError(f"BUFFER EXHAUSTION: {len(buffer_issues)}")
+            printError(f"{'=' * 80}")
+            be_file = "buffer_exhaustion.txt"
+            with open(be_file, 'w') as f:
+                for i, entry in enumerate(buffer_issues, 1):
+                    msg = (f"[{i}] {entry['description']}\n"
+                           f"    Output: {entry['output_folder']}\n")
+                    printError(msg)
+                    f.write(msg + "\n")
+            printError(f"Written to {os.path.abspath(be_file)}")
+
+    # --- Report hard failures (submit failed, exceptions) ---
     if failed_experiments:
         printError(f"\n{'=' * 80}")
         printError(f"FAILED EXPERIMENTS: {len(failed_experiments)} out of {total_runs}")
@@ -746,6 +821,7 @@ if __name__ == "__main__":
                        f"    Output: {failure['output_folder']}\n")
                 printError(msg)
                 f.write(msg + "\n")
-        printError(f"Failed experiments written to {os.path.abspath(failures_file)}")
-    else:
+        printError(f"Written to {os.path.abspath(failures_file)}")
+
+    if not failed_experiments and not problematic_experiments:
         printSuccess(f"All {total_runs} experiments completed successfully.")

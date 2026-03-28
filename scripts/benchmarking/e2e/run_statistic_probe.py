@@ -25,6 +25,7 @@ Experiment mechanics come from run_nes_multiple_statistic_queries_over_time.py.
 """
 
 import argparse
+import socket
 import subprocess
 import os
 import csv
@@ -219,8 +220,14 @@ def terminate_process_if_exists(process):
         process.kill()
         process.wait()
         printError(f"Process with PID {process.pid} forcefully killed.")
-    # Give the OS time to release the port
-    time.sleep(2)
+    # Wait until the gRPC port is free before starting a new worker
+    for _ in range(30):
+        with socket.socket(socket.AF_INET6, socket.SOCK_STREAM) as s:
+            if s.connect_ex(('::1', 8080)) != 0:
+                break
+        time.sleep(1)
+    else:
+        printError("Port 8080 still in use after 30s")
 
 
 def start_single_node_worker(file_path_stdout, numberOfWorkerThreads, executionMode,

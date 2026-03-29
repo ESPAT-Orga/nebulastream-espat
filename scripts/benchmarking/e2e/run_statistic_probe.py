@@ -548,17 +548,20 @@ def run_experiment(statistic_type, statistic_config, worker_config, build_datase
             pass
         time.sleep(WAIT_BETWEEN_COMMANDS_SHORT)
 
-        # Check for buffer exhaustion in the worker log
-        if check_log_for_buffer_exhaustion(log_file_path):
-            issues.append("buffer_exhaustion")
-
         probe_throughput = parse_average_throughput_from_throughput_listener(log_file_path, probe_query_id)
         printInfo(f"Probe average throughput: {probe_throughput:.2f} Tup/s")
 
-        # Record missing measurements as issues
-        if build_throughput < 0:
+        # Check for buffer exhaustion in the worker log (after both queries have run)
+        if check_log_for_buffer_exhaustion(log_file_path):
+            issues.append("buffer_exhaustion")
+
+        # Record missing measurements as issues (but only if not already
+        # explained by buffer exhaustion or a crash)
+        has_buffer_exhaustion = "buffer_exhaustion" in issues
+        has_crash = any("crashed" in i for i in issues)
+        if build_throughput < 0 and not has_buffer_exhaustion and not has_crash:
             issues.append("build:no_measurements")
-        if probe_throughput < 0:
+        if probe_throughput < 0 and not has_buffer_exhaustion and not has_crash:
             issues.append("probe:no_measurements")
 
         # Parse full throughput log to CSV

@@ -551,8 +551,10 @@ def run_experiment(statistic_type, statistic_config, worker_config, build_datase
         probe_throughput = parse_average_throughput_from_throughput_listener(log_file_path, probe_query_id)
         printInfo(f"Probe average throughput: {probe_throughput:.2f} Tup/s")
 
-        # Check for buffer exhaustion in the worker log (after both queries have run)
+        # Check for buffer exhaustion in the worker log (after both queries have run).
+        # Buffer exhaustion can cause SIGSEGV when the thrown exception propagates
         if check_log_for_buffer_exhaustion(log_file_path):
+            issues = [i for i in issues if "crashed" not in i]
             issues.append("buffer_exhaustion")
 
         # Record missing measurements as issues (but only if not already

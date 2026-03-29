@@ -335,7 +335,7 @@ def wait_for_query_to_finish(log_file_path, timeout, query_id=None, poll_interva
         if current_count > last_line_count:
             last_line_count = current_count
             stable_since = time.time()
-        elif current_count > 0 and time.time() - stable_since > timeout:
+        elif time.time() - stable_since > timeout:
             printSuccess(f"Query finished (no new throughput for {timeout}s, total {current_count} measurements)")
             return True, "ok"
 
@@ -510,18 +510,17 @@ def run_experiment(statistic_type, statistic_config, worker_config, build_datase
         if not build_ok:
             issues.append(f"build:{build_reason}")
 
-        # Parse build throughput
-        build_throughput = parse_average_throughput_from_throughput_listener(log_file_path, build_query_id)
-        printInfo(f"Build average throughput: {build_throughput:.2f} Tup/s")
-
-        # Stop the build query before starting the probe to ensure the worker
-        # has fully cleaned up the build pipelines and released resources.
+        # Stop the build query to flush remaining throughput windows via QueryStop,
+        # then parse the throughput from the complete log.
         stop_proc = stop_query(build_query_id, build_query_path, cli_log_file)
         try:
             stop_proc.wait(timeout=10)
         except subprocess.TimeoutExpired:
             printError("Build query stop timed out")
         time.sleep(WAIT_BETWEEN_COMMANDS_SHORT)
+
+        build_throughput = parse_average_throughput_from_throughput_listener(log_file_path, build_query_id)
+        printInfo(f"Build average throughput: {build_throughput:.2f} Tup/s")
 
         # === Phase 2: Probe ===
         printInfo("=" * 60)
@@ -540,7 +539,8 @@ def run_experiment(statistic_type, statistic_config, worker_config, build_datase
         if not probe_ok:
             issues.append(f"probe:{probe_reason}")
 
-        # Stop the probe query so the throughput listener flushes remaining windows
+        # Stop the probe query to flush remaining throughput windows via QueryStop,
+        # then parse the throughput from the complete log.
         stop_proc = stop_query(probe_query_id, probe_query_path, cli_log_file)
         try:
             stop_proc.wait(timeout=10)
@@ -552,9 +552,14 @@ def run_experiment(statistic_type, statistic_config, worker_config, build_datase
         if check_log_for_buffer_exhaustion(log_file_path):
             issues.append("buffer_exhaustion")
 
-        # Parse probe throughput
         probe_throughput = parse_average_throughput_from_throughput_listener(log_file_path, probe_query_id)
         printInfo(f"Probe average throughput: {probe_throughput:.2f} Tup/s")
+
+        # Record missing measurements as issues
+        if build_throughput < 0:
+            issues.append("build:no_measurements")
+        if probe_throughput < 0:
+            issues.append("probe:no_measurements")
 
         # Parse full throughput log to CSV
         throughput_csv_path = os.path.join(output_dir, f"throughput_{build_name}.csv")

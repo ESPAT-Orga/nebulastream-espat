@@ -110,20 +110,25 @@ def load_template(name):
         return f.read()
 
 
-def generate_probe_csv(probe_csv_path, statistic_id, build_dataset_path,
+def generate_probe_csv(probe_csv_path, statistic_ids, build_dataset_path,
                        num_probes=NUM_PROBE_TUPLES,
                        num_repetitions=NUM_PROBE_REPETITIONS,
                        window_size_ms=BUILD_WINDOW_SIZE_SEC * 1000):
     """Generate a probe CSV file with probe tuples.
 
     Schema: STATISTICID, STATISTICSTART, STATISTICEND, STATISTICNUMBEROFSEENTUPLES
-    Each row probes a different window of the statistic.
+
+    *statistic_ids* is a list of IDs to probe.  For each ID, *num_probes*
+    windows are generated, so the base tuple set has
+    ``len(statistic_ids) * num_probes`` rows.  This set is repeated
+    *num_repetitions* times.
 
     Window boundaries are derived from the first timestamp in the build dataset
-    to match the tumbling windows created during the build phase. The set of
-    probe tuples is repeated ``num_repetitions`` times so that the probe query
-    runs long enough for the throughput listener to capture measurements.
+    to match the tumbling windows created during the build phase.
     """
+    if isinstance(statistic_ids, int):
+        statistic_ids = [statistic_ids]
+
     # Read the first timestamp from the build dataset to compute correct window boundaries
     with open(build_dataset_path, 'r') as f:
         first_line = f.readline().strip()
@@ -131,29 +136,48 @@ def generate_probe_csv(probe_csv_path, statistic_id, build_dataset_path,
     first_window_start = (first_timestamp // window_size_ms) * window_size_ms
     printInfo(f"First data timestamp: {first_timestamp}, first window start: {first_window_start}")
 
-    # Build the base set of probe tuples
+    # Build the base set of probe tuples — one set of windows per statistic ID
     probe_rows = []
-    for i in range(num_probes):
-        start_ts = first_window_start + i * window_size_ms
-        end_ts = start_ts + window_size_ms
-        probe_rows.append([statistic_id, start_ts, end_ts, 0])
+    for sid in statistic_ids:
+        for i in range(num_probes):
+            start_ts = first_window_start + i * window_size_ms
+            end_ts = start_ts + window_size_ms
+            probe_rows.append([sid, start_ts, end_ts, 0])
 
-    total_rows = num_probes * num_repetitions
+    total_rows = len(probe_rows) * num_repetitions
     os.makedirs(os.path.dirname(probe_csv_path), exist_ok=True)
     with open(probe_csv_path, 'w', newline='') as f:
         writer = csv.writer(f)
         for _ in range(num_repetitions):
             writer.writerows(probe_rows)
-    printSuccess(f"Generated probe CSV with {total_rows} tuples ({num_probes} x {num_repetitions}) at {probe_csv_path}")
+    printSuccess(f"Generated probe CSV with {total_rows} tuples "
+                 f"({len(statistic_ids)} ids x {num_probes} windows x {num_repetitions} reps) "
+                 f"at {probe_csv_path}")
 
 
-def generate_build_query(statistic_type, config, output_dir, build_dataset_path):
-    """Generate a build query yaml file and return its path."""
+def get_build_statistic_ids(statistic_type, num_build_queries):
+    """Return a list of statistic IDs for the given number of build queries.
+
+    Each concurrent build query needs a unique ID so the statistics don't
+    collide in the store.  IDs are base_id, base_id+1, ...
+    """
+    base_id = STATISTIC_IDS[statistic_type]
+    return [base_id + i for i in range(num_build_queries)]
+
+
+def generate_build_query(statistic_type, config, output_dir, build_dataset_path,
+                         num_build_queries=1):
+    """Generate a build query yaml file and return (path, name, [statistic_ids]).
+
+    When *num_build_queries* > 1 the YAML contains multiple SQL statements
+    under the ``query`` key, each building a statistic with a distinct ID.
+    """
     template = load_template(f"{statistic_type}Build.yaml.template")
-    statistic_id = STATISTIC_IDS[statistic_type]
+    base_id = STATISTIC_IDS[statistic_type]
+    statistic_ids = get_build_statistic_ids(statistic_type, num_build_queries)
 
     format_args = {
-        "statistic_id": statistic_id,
+        "statistic_id": base_id,
         "window_size": BUILD_WINDOW_SIZE_SEC,
         "build_dataset_path": build_dataset_path,
     }
@@ -173,11 +197,28 @@ def generate_build_query(statistic_type, config, output_dir, build_dataset_path)
     else:
         raise ValueError(f"Unknown statistic type: {statistic_type}")
 
-    filepath = os.path.join(output_dir, f"{name}.yaml")
-    with open(filepath, 'w') as f:
-        f.write(template.format(**format_args))
+    if num_build_queries == 1:
+        filepath = os.path.join(output_dir, f"{name}.yaml")
+        with open(filepath, 'w') as f:
+            f.write(template.format(**format_args))
+    else:
+        # Generate one SQL statement per build query, each with a unique ID.
+        # Parse the single-query template to extract the SQL and re-emit as a
+        # YAML list under the ``query`` key.
+        single_yaml = template.format(**format_args)
+        doc = yaml.safe_load(single_yaml)
+        single_sql = doc['query']
 
-    return filepath, name
+        queries = []
+        for sid in statistic_ids:
+            queries.append(single_sql.replace(str(base_id), str(sid), 1))
+        doc['query'] = queries
+
+        filepath = os.path.join(output_dir, f"{name}.yaml")
+        with open(filepath, 'w') as f:
+            yaml.dump(doc, f, default_flow_style=False, sort_keys=False)
+
+    return filepath, name, statistic_ids
 
 
 def generate_probe_query(statistic_type, config, output_dir, probe_csv_path):
@@ -256,7 +297,11 @@ def start_single_node_worker(file_path_stdout, numberOfWorkerThreads, executionM
 
 
 def submit_query(query_file, cli_log_file, retries=3, retry_delay=5):
-    """Submit a query via nes-cli and return the query id."""
+    """Submit queries via nes-cli and return a list of query ids.
+
+    The YAML file may contain multiple queries.  The CLI returns one query id
+    per line.
+    """
     cmd = nebuli_executable + ["-t", query_file, "start"]
     printInfo(f"Submitting query via {' '.join(cmd)}...")
     last_error = None
@@ -264,13 +309,13 @@ def submit_query(query_file, cli_log_file, retries=3, retry_delay=5):
         try:
             result = subprocess.run(cmd, check=True, stdout=subprocess.PIPE,
                                     stderr=subprocess.PIPE, text=True)
-            query_id = result.stdout.strip()
+            query_ids = [qid for qid in result.stdout.strip().split('\n') if qid]
             cli_log_file.write(f"=== Submit query: {cmd} ===\n")
             cli_log_file.write(f"stdout: {result.stdout}\n")
             cli_log_file.write(f"stderr: {result.stderr}\n")
             cli_log_file.flush()
-            printSuccess(f"Submitted query with id {query_id}")
-            return query_id
+            printSuccess(f"Submitted {len(query_ids)} query(ies) with ids {query_ids}")
+            return query_ids
         except subprocess.CalledProcessError as e:
             last_error = e
             cli_log_file.write(f"=== Submit query FAILED (attempt {attempt}/{retries}): {cmd} ===\n")
@@ -288,18 +333,22 @@ def submit_query(query_file, cli_log_file, retries=3, retry_delay=5):
                 raise RuntimeError(f"nes-cli submit failed for {query_file}")
 
 
-def stop_query(query_id, query_file, cli_log_file):
-    """Stop a query via nes-cli."""
-    cmd = nebuli_executable + ["-t", query_file, "stop", query_id]
-    cli_log_file.write(f"=== Stop query: {' '.join(cmd)} ===\n")
-    cli_log_file.flush()
-    process = subprocess.Popen(cmd, stdout=cli_log_file, stderr=cli_log_file)
-    return process
+def stop_queries(query_ids, query_file, cli_log_file):
+    """Stop one or more queries via nes-cli.  Returns list of Popen processes."""
+    processes = []
+    for qid in query_ids:
+        cmd = nebuli_executable + ["-t", query_file, "stop", qid]
+        cli_log_file.write(f"=== Stop query: {' '.join(cmd)} ===\n")
+        cli_log_file.flush()
+        processes.append(subprocess.Popen(cmd, stdout=cli_log_file, stderr=cli_log_file))
+    return processes
 
 
-def wait_for_query_to_finish(log_file_path, timeout, query_id=None, poll_interval=2,
+def wait_for_query_to_finish(log_file_path, timeout, query_ids=None, poll_interval=2,
                              max_wait=300, worker_process=None):
     """Wait until no new throughput lines appear for `timeout` seconds.
+
+    *query_ids* may be a single id string or a list of id strings.
 
     Returns a (success, reason) tuple:
       (True, "ok")           — query finished normally
@@ -309,8 +358,13 @@ def wait_for_query_to_finish(log_file_path, timeout, query_id=None, poll_interva
     last_line_count = 0
     stable_since = time.time()
     wait_start = time.time()
-    query_id_str = str(query_id) if query_id is not None else None
-    printInfo(f"Waiting for query to finish (timeout={timeout}s, max_wait={max_wait}s, queryId={query_id_str})...")
+    if query_ids is not None:
+        if isinstance(query_ids, str):
+            query_ids = [query_ids]
+        id_set = set(str(qid) for qid in query_ids)
+    else:
+        id_set = None
+    printInfo(f"Waiting for query to finish (timeout={timeout}s, max_wait={max_wait}s, queryIds={id_set})...")
 
     while True:
         elapsed = time.time() - wait_start
@@ -325,8 +379,8 @@ def wait_for_query_to_finish(log_file_path, timeout, query_id=None, poll_interva
         try:
             with open(log_file_path, 'r') as f:
                 lines = [l for l in f.readlines() if 'Throughput for queryId' in l]
-                if query_id_str is not None:
-                    lines = [l for l in lines if f'queryId {query_id_str} ' in l]
+                if id_set is not None:
+                    lines = [l for l in lines if any(f'queryId {qid} ' in l for qid in id_set)]
             current_count = len(lines)
         except FileNotFoundError:
             time.sleep(poll_interval)
@@ -354,8 +408,20 @@ def check_log_for_buffer_exhaustion(log_file_path):
     return False
 
 
-def parse_average_throughput_from_throughput_listener(log_file_path, query_id=None):
-    """Parse throughput from the worker log file for a specific query id."""
+def parse_average_throughput_from_throughput_listener(log_file_path, query_ids=None):
+    """Parse throughput from the worker log file for one or more query ids.
+
+    *query_ids* may be a single id string or a list.  When multiple ids are
+    given the throughput measurements of all matching queries are combined
+    (summed per window, then averaged across windows).
+    """
+    if query_ids is not None:
+        if isinstance(query_ids, str):
+            query_ids = [query_ids]
+        id_set = set(str(qid) for qid in query_ids)
+    else:
+        id_set = None
+
     log_pattern = re.compile(
         r'Throughput for queryId (\d+) in window (\d+)-(\d+) is (\d+\.\d+) (\w*)Tup/s'
     )
@@ -367,7 +433,7 @@ def parse_average_throughput_from_throughput_listener(log_file_path, query_id=No
                 match = log_pattern.match(line)
                 if match:
                     matched_query_id = match.group(1)
-                    if query_id is not None and matched_query_id != str(query_id):
+                    if id_set is not None and matched_query_id not in id_set:
                         continue
                     throughput_value = float(match.group(4))
                     unit_prefix = match.group(5)
@@ -458,7 +524,7 @@ def generate_all_experiments():
 
 
 def run_experiment(statistic_type, statistic_config, worker_config, build_dataset_path,
-                   output_dir, cli_log_file):
+                   output_dir, cli_log_file, num_build_queries=1):
     """Run a single build+probe experiment. Returns a (result_dict, issues) tuple.
 
     ``issues`` is a list of strings describing non-fatal problems observed
@@ -467,14 +533,14 @@ def run_experiment(statistic_type, statistic_config, worker_config, build_datase
     executionMode, numberOfWorkerThreads, bufferSizeInBytes, \
         buffersInGlobalBufferManager, joinStrategy, pageSize = worker_config
 
-    # Generate build query
-    build_query_path, build_name = generate_build_query(
-        statistic_type, statistic_config, output_dir, build_dataset_path)
+    # Generate build query (may contain multiple SQL statements)
+    build_query_path, build_name, statistic_ids = generate_build_query(
+        statistic_type, statistic_config, output_dir, build_dataset_path,
+        num_build_queries=num_build_queries)
 
-    # Generate probe CSV
-    statistic_id = STATISTIC_IDS[statistic_type]
+    # Generate probe CSV — probes all statistic IDs from the build
     probe_csv_path = os.path.abspath(os.path.join(output_dir, f"probe_tuples_{build_name}.csv"))
-    generate_probe_csv(probe_csv_path, statistic_id, build_dataset_path)
+    generate_probe_csv(probe_csv_path, statistic_ids, build_dataset_path)
 
     # Generate probe query
     probe_query_path, probe_name = generate_probe_query(
@@ -490,19 +556,19 @@ def run_experiment(statistic_type, statistic_config, worker_config, build_datase
     time.sleep(WAIT_BETWEEN_COMMANDS_LONG)
 
     issues = []
-    build_query_id = None
-    probe_query_id = None
+    build_query_ids = []
+    probe_query_ids = []
     try:
         # === Phase 1: Build ===
         printInfo("=" * 60)
-        printInfo(f"Phase 1: Build ({build_name})")
+        printInfo(f"Phase 1: Build ({build_name}, {num_build_queries} query/queries)")
         build_start_time = time.time()
-        build_query_id = submit_query(build_query_path, cli_log_file)
+        build_query_ids = submit_query(build_query_path, cli_log_file)
 
-        # Wait for build query to stop by itself (file source exhausted)
+        # Wait for build queries to stop by themselves (file source exhausted)
         build_ok, build_reason = wait_for_query_to_finish(
             log_file_path, timeout=BUILD_DONE_TIMEOUT,
-            query_id=build_query_id, worker_process=single_node_process)
+            query_ids=build_query_ids, worker_process=single_node_process)
         build_end_time = time.time()
         build_duration = build_end_time - build_start_time
         printInfo(f"Build phase completed in {build_duration:.1f}s")
@@ -510,28 +576,29 @@ def run_experiment(statistic_type, statistic_config, worker_config, build_datase
         if not build_ok:
             issues.append(f"build:{build_reason}")
 
-        # Stop the build query to flush remaining throughput windows via QueryStop,
+        # Stop the build queries to flush remaining throughput windows via QueryStop,
         # then parse the throughput from the complete log.
-        stop_proc = stop_query(build_query_id, build_query_path, cli_log_file)
-        try:
-            stop_proc.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            printError("Build query stop timed out")
+        stop_procs = stop_queries(build_query_ids, build_query_path, cli_log_file)
+        for proc in stop_procs:
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                printError("Build query stop timed out")
         time.sleep(WAIT_BETWEEN_COMMANDS_SHORT)
 
-        build_throughput = parse_average_throughput_from_throughput_listener(log_file_path, build_query_id)
+        build_throughput = parse_average_throughput_from_throughput_listener(log_file_path, build_query_ids)
         printInfo(f"Build average throughput: {build_throughput:.2f} Tup/s")
 
         # === Phase 2: Probe ===
         printInfo("=" * 60)
         printInfo(f"Phase 2: Probe ({probe_name})")
         probe_start_time = time.time()
-        probe_query_id = submit_query(probe_query_path, cli_log_file)
+        probe_query_ids = submit_query(probe_query_path, cli_log_file)
 
         # Wait for probe query to stop by itself (file source exhausted)
         probe_ok, probe_reason = wait_for_query_to_finish(
             log_file_path, timeout=PROBE_DONE_TIMEOUT,
-            query_id=probe_query_id, worker_process=single_node_process)
+            query_ids=probe_query_ids, worker_process=single_node_process)
         probe_end_time = time.time()
         probe_duration = probe_end_time - probe_start_time
         printInfo(f"Probe phase completed in {probe_duration:.1f}s")
@@ -541,14 +608,15 @@ def run_experiment(statistic_type, statistic_config, worker_config, build_datase
 
         # Stop the probe query to flush remaining throughput windows via QueryStop,
         # then parse the throughput from the complete log.
-        stop_proc = stop_query(probe_query_id, probe_query_path, cli_log_file)
-        try:
-            stop_proc.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            pass
+        stop_procs = stop_queries(probe_query_ids, probe_query_path, cli_log_file)
+        for proc in stop_procs:
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                pass
         time.sleep(WAIT_BETWEEN_COMMANDS_SHORT)
 
-        probe_throughput = parse_average_throughput_from_throughput_listener(log_file_path, probe_query_id)
+        probe_throughput = parse_average_throughput_from_throughput_listener(log_file_path, probe_query_ids)
         printInfo(f"Probe average throughput: {probe_throughput:.2f} Tup/s")
 
         # Check for buffer exhaustion in the worker log (after both queries have run).
@@ -574,6 +642,7 @@ def run_experiment(statistic_type, statistic_config, worker_config, build_datase
             'statistic_type': statistic_type,
             'statistic_config': str(statistic_config),
             'query_name': build_name,
+            'num_build_queries': num_build_queries,
             'probe_throughput_listener': probe_throughput,
             'probe_duration_s': probe_duration,
             'build_throughput_listener': build_throughput,
@@ -593,10 +662,10 @@ def run_experiment(statistic_type, statistic_config, worker_config, build_datase
 
         # Stop queries if still running
         stop_processes = []
-        if build_query_id is not None:
-            stop_processes.append(stop_query(build_query_id, build_query_path, cli_log_file))
-        if probe_query_id is not None:
-            stop_processes.append(stop_query(probe_query_id, probe_query_path, cli_log_file))
+        if build_query_ids:
+            stop_processes.extend(stop_queries(build_query_ids, build_query_path, cli_log_file))
+        if probe_query_ids:
+            stop_processes.extend(stop_queries(probe_query_ids, probe_query_path, cli_log_file))
         for proc in stop_processes:
             try:
                 proc.wait(timeout=5)
@@ -631,6 +700,8 @@ if __name__ == "__main__":
                         help="Remove and recreate the build directory before building.")
     parser.add_argument("--num-probe-tuples", type=int, default=NUM_PROBE_TUPLES,
                         help="Number of probe tuples to generate.")
+    parser.add_argument("--num-build-queries", type=int, default=1,
+                        help="Number of concurrent build queries per experiment (each builds a statistic with a distinct ID).")
     args = parser.parse_args()
 
     # Printing all arguments
@@ -732,7 +803,8 @@ if __name__ == "__main__":
 
                     result, issues = run_experiment(
                         statistic_type, statistic_config, worker_config,
-                        build_dataset_path, run_folder, cli_log_file)
+                        build_dataset_path, run_folder, cli_log_file,
+                        num_build_queries=args.num_build_queries)
 
                     if issues:
                         for issue in issues:
@@ -747,6 +819,7 @@ if __name__ == "__main__":
                         with open(csv_file_path, mode='a', newline='') as csv_out:
                             fieldnames = [
                                 'statistic_type', 'statistic_config', 'query_name',
+                                'num_build_queries',
                                 'probe_throughput_listener', 'probe_duration_s',
                                 'build_throughput_listener', 'build_duration_s',
                                 'executionMode', 'numberOfWorkerThreads',

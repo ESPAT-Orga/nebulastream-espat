@@ -104,6 +104,22 @@ allCountMinConfigs = [
     (5, 1000, "uint64"),
 ]
 
+#### Dataset Configurations
+# Each dataset lists which statistic types to benchmark and the path to the build dataset.
+# Templates are named {StatisticType}Build_{DatasetName}.yaml.template
+allDatasets = [
+    {
+        "name": "Nexmark",
+        "path": "nes-systests/testdata/large/nexmark/bid_6GB.csv",
+        "statistics": ["Reservoir", "EquiWidthHistogram", "CountMin"],
+    },
+    {
+        "name": "YSB",
+        "path": "nes-systests/testdata/large/ysb/ysb10k_with_varsized_3GB.csv",
+        "statistics": ["Reservoir", "EquiWidthHistogram", "CountMin"],
+    },
+]
+
 QUERY_CONFIGS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "query-configs")
 
 

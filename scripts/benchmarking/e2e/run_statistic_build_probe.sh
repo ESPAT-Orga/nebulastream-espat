@@ -21,7 +21,7 @@ pip3 install argparse requests pandas pyyaml
 
 #myenv/bin/python3 -m scripts.benchmarking.e2e.run_statistic_build --all -s SECOND_CHANCE
 
-myenv/bin/python3 -m scripts.benchmarking.e2e.run_statistic_probe --all
+myenv/bin/python3 -m scripts.benchmarking.e2e.run_statistic_probe --all --num-build-queries 3
 
 # Deactivate the virtual environment
 deactivate

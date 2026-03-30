@@ -38,8 +38,6 @@ from datetime import datetime, timedelta
 from scripts.benchmarking.utils import *
 
 #### Configuration Constants
-# Fixed dataset for the build phase (path relative to build_dir testdata or absolute)
-BUILD_DATASET_PATH = "nes-systests/testdata/large/nexmark/bid_6GB.csv"
 BUILD_WINDOW_SIZE_SEC = 10
 # Number of build windows covered by a single probe window.
 # probe_window_size = BUILD_WINDOW_SIZE_SEC * build_windows_per_probe_window
@@ -82,7 +80,7 @@ allNumberOfWorkerThreads = ['1', '4', '16']
 allJoinStrategies = ["HASH_JOIN"]
 allPageSizes = [8192]
 allBufferConfigs = [(1048576, 20000)]
-allNumBuildQueries = [1, 5]
+allNumStatisticQueries = [1, 5]
 throughputListenerInterval = 200
 
 #### Statistic Build Configurations
@@ -192,13 +190,25 @@ def get_build_statistic_ids(statistic_type, num_build_queries):
 
 
 def generate_build_query(statistic_type, config, output_dir, build_dataset_path,
-                         num_build_queries=1):
+                         num_build_queries=1, dataset_name=None):
     """Generate a build query yaml file and return (path, name, [statistic_ids]).
 
     When *num_build_queries* > 1 the YAML contains multiple SQL statements
     under the ``query`` key, each building a statistic with a distinct ID.
+
+    If *dataset_name* is given, the template
+    ``{StatisticType}Build_{DatasetName}.yaml.template`` is tried first,
+    falling back to ``{StatisticType}Build.yaml.template``.
     """
-    template = load_template(f"{statistic_type}Build.yaml.template")
+    if dataset_name:
+        template_name = f"{statistic_type}Build_{dataset_name}.yaml.template"
+        template_path = os.path.join(QUERY_CONFIGS_DIR, template_name)
+        if os.path.exists(template_path):
+            template = load_template(template_name)
+        else:
+            template = load_template(f"{statistic_type}Build.yaml.template")
+    else:
+        template = load_template(f"{statistic_type}Build.yaml.template")
     base_id = STATISTIC_IDS[statistic_type]
     statistic_ids = get_build_statistic_ids(statistic_type, num_build_queries)
 
@@ -247,9 +257,17 @@ def generate_build_query(statistic_type, config, output_dir, build_dataset_path,
     return filepath, name, statistic_ids
 
 
-def generate_probe_query(statistic_type, config, output_dir, probe_csv_path):
+def generate_probe_query(statistic_type, config, output_dir, probe_csv_path, dataset_name=None):
     """Generate a probe query yaml file and return its path."""
-    template = load_template(f"{statistic_type}Probe.yaml.template")
+    if dataset_name:
+        template_name = f"{statistic_type}Probe_{dataset_name}.yaml.template"
+        template_path = os.path.join(QUERY_CONFIGS_DIR, template_name)
+        if os.path.exists(template_path):
+            template = load_template(template_name)
+        else:
+            template = load_template(f"{statistic_type}Probe.yaml.template")
+    else:
+        template = load_template(f"{statistic_type}Probe.yaml.template")
     statistic_id = STATISTIC_IDS[statistic_type]
 
     format_args = {
@@ -525,7 +543,7 @@ def initialize_csv_file():
     printInfo("Initializing CSV file...")
     with open(csv_file_path, mode='w', newline='') as csv_file:
         fieldnames = [
-            'statistic_type', 'statistic_config', 'query_name',
+            'dataset', 'statistic_type', 'statistic_config', 'query_name',
             'num_build_queries', 'build_windows_per_probe_window',
             'probe_throughput_listener', 'probe_duration_s',
             'build_throughput_listener', 'build_duration_s',
@@ -539,20 +557,27 @@ def initialize_csv_file():
 
 
 def generate_all_experiments():
-    """Generate the list of (statistic_type, config) pairs."""
+    """Generate the list of (dataset, statistic_type, config) triples.
+
+    Each dataset entry in *allDatasets* specifies which statistic types to
+    benchmark, so only the matching configs are included.
+    """
+    stat_configs = {
+        "Reservoir": [("Reservoir", s) for s in allReservoirSizes],
+        "EquiWidthHistogram": [("EquiWidthHistogram", c) for c in allEquiWidthHistogramConfigs],
+        "CountMin": [("CountMin", c) for c in allCountMinConfigs],
+    }
     experiments = []
-    for reservoir_size in allReservoirSizes:
-        experiments.append(("Reservoir", reservoir_size))
-    for config in allEquiWidthHistogramConfigs:
-        experiments.append(("EquiWidthHistogram", config))
-    for config in allCountMinConfigs:
-        experiments.append(("CountMin", config))
+    for dataset in allDatasets:
+        for stat_type in dataset["statistics"]:
+            for statistic_type, config in stat_configs.get(stat_type, []):
+                experiments.append((dataset, statistic_type, config))
     return experiments
 
 
 def run_experiment(statistic_type, statistic_config, worker_config, build_dataset_path,
                    output_dir, cli_log_file, num_build_queries=1,
-                   build_windows_per_probe_window=1):
+                   build_windows_per_probe_window=1, dataset_name=None):
     """Run a single build+probe experiment. Returns a (result_dict, issues) tuple.
 
     ``issues`` is a list of strings describing non-fatal problems observed
@@ -564,7 +589,7 @@ def run_experiment(statistic_type, statistic_config, worker_config, build_datase
     # Generate build query (may contain multiple SQL statements)
     build_query_path, build_name, statistic_ids = generate_build_query(
         statistic_type, statistic_config, output_dir, build_dataset_path,
-        num_build_queries=num_build_queries)
+        num_build_queries=num_build_queries, dataset_name=dataset_name)
 
     # Generate probe CSV — probes all statistic IDs from the build
     probe_csv_path = os.path.abspath(os.path.join(output_dir, f"probe_tuples_{build_name}.csv"))
@@ -573,7 +598,8 @@ def run_experiment(statistic_type, statistic_config, worker_config, build_datase
 
     # Generate probe query
     probe_query_path, probe_name = generate_probe_query(
-        statistic_type, statistic_config, output_dir, probe_csv_path)
+        statistic_type, statistic_config, output_dir, probe_csv_path,
+        dataset_name=dataset_name)
 
     # Start single node worker
     log_file_path = os.path.join(output_dir, f"SingleNodeStdout_{build_name}.log")
@@ -668,6 +694,7 @@ def run_experiment(statistic_type, statistic_config, worker_config, build_datase
         parse_log_to_throughput_csv(log_file_path, throughput_csv_path)
 
         return {
+            'dataset': dataset_name or '',
             'statistic_type': statistic_type,
             'statistic_config': str(statistic_config),
             'query_name': build_name,
@@ -720,8 +747,8 @@ def estimate_eta(start_time, end_time, completed_runs, total_runs):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Benchmark statistic probe queries.")
     parser.add_argument("--all", action="store_true", help="Run all statistic configurations.")
-    parser.add_argument("--build-dataset", type=str, default=f'{build_dir}/{BUILD_DATASET_PATH}',
-                        help="Path to the build dataset CSV file.")
+    parser.add_argument("--build-dataset", type=str, default=None,
+                        help="Override the build dataset path (uses allDatasets config if not set).")
     parser.add_argument("-w", "--worker-threads", nargs="+",
                         help="Number of worker threads to run the queries.")
     parser.add_argument("-b", "--buffer-config", nargs="+",
@@ -741,12 +768,23 @@ if __name__ == "__main__":
     # Checking if the script has been executed from the repository root
     check_repository_root()
 
-    # Resolve build dataset path
-    build_dataset_path = os.path.abspath(args.build_dataset)
-    if not os.path.exists(build_dataset_path):
-        printError(f"Build dataset not found: {build_dataset_path}")
-        exit(1)
-    printInfo(f"Using build dataset: {build_dataset_path}")
+    # Resolve build dataset paths — verify all datasets exist
+    if args.build_dataset:
+        # CLI override: use a single dataset for all experiments
+        path = os.path.abspath(args.build_dataset)
+        if not os.path.exists(path):
+            printError(f"Build dataset not found: {path}")
+            exit(1)
+        for ds in allDatasets:
+            ds["path"] = path
+        printInfo(f"Using CLI-overridden build dataset: {path}")
+    else:
+        for ds in allDatasets:
+            ds["path"] = os.path.abspath(os.path.join(build_dir, ds["path"]))
+            if not os.path.exists(ds["path"]):
+                printError(f"Build dataset not found for {ds['name']}: {ds['path']}")
+                exit(1)
+            printInfo(f"Dataset {ds['name']}: {ds['path']}")
 
     # Determine worker threads
     number_of_worker_threads_to_run = allNumberOfWorkerThreads
@@ -792,7 +830,7 @@ if __name__ == "__main__":
     ))
 
     total_runs = (len(experiments) * len(worker_combinations)
-                  * len(allNumBuildQueries) * len(allBuildWindowsPerProbeWindow)
+                  * len(allNumStatisticQueries) * len(allBuildWindowsPerProbeWindow)
                   * NUM_RUNS_PER_EXPERIMENT)
     completed_runs = 0
     failed_experiments = []       # hard failures (submit failed, exception)
@@ -801,12 +839,15 @@ if __name__ == "__main__":
 
     printInfo(f"Total experiments: {len(experiments)}")
     printInfo(f"Total worker configurations: {len(worker_combinations)}")
-    printInfo(f"Build query counts: {allNumBuildQueries}")
+    printInfo(f"Build query counts: {allNumStatisticQueries}")
     printInfo(f"Build windows per probe window: {allBuildWindowsPerProbeWindow}")
     printInfo(f"Total runs: {total_runs}")
     print()
 
-    for exp_idx, (statistic_type, statistic_config) in enumerate(experiments):
+    for exp_idx, (dataset, statistic_type, statistic_config) in enumerate(experiments):
+        dataset_name = dataset["name"]
+        build_dataset_path = dataset["path"]
+
         for wc_idx, (executionMode, numberOfWorkerThreads,
                      (bufferSizeInBytes, buffersInGlobalBufferManager),
                      joinStrategy, pageSize) in enumerate(worker_combinations):
@@ -814,21 +855,24 @@ if __name__ == "__main__":
             worker_config = (executionMode, numberOfWorkerThreads, bufferSizeInBytes,
                              buffersInGlobalBufferManager, joinStrategy, pageSize)
 
-            for num_build_queries in allNumBuildQueries:
+            for num_build_queries in allNumStatisticQueries:
                 for build_windows_per_probe_window in allBuildWindowsPerProbeWindow:
                     for run_idx in range(NUM_RUNS_PER_EXPERIMENT):
                         run_start = time.time()
 
                         # Create per-run output folder
                         run_folder = create_output_folder(
-                            f"{statistic_type}_{statistic_config}_{numberOfWorkerThreads}threads"
-                            f"_{num_build_queries}queries_{build_windows_per_probe_window}xwindow")
+                            f"{dataset_name}_{statistic_type}_{statistic_config}"
+                            f"_{numberOfWorkerThreads}threads"
+                            f"_{num_build_queries}queries"
+                            f"_{build_windows_per_probe_window}xwindow")
 
                         # Open CLI log
                         cli_log_path = os.path.join(run_folder, "nes-cli.log")
                         cli_log_file = open(cli_log_path, 'w')
 
-                        experiment_desc = (f"{statistic_type} config={statistic_config} "
+                        experiment_desc = (f"{dataset_name}/{statistic_type} "
+                                           f"config={statistic_config} "
                                            f"threads={numberOfWorkerThreads} "
                                            f"queries={num_build_queries} "
                                            f"build_windows_per_probe={build_windows_per_probe_window} "
@@ -843,7 +887,8 @@ if __name__ == "__main__":
                                 statistic_type, statistic_config, worker_config,
                                 build_dataset_path, run_folder, cli_log_file,
                                 num_build_queries=num_build_queries,
-                                build_windows_per_probe_window=build_windows_per_probe_window)
+                                build_windows_per_probe_window=build_windows_per_probe_window,
+                                dataset_name=dataset_name)
 
                             if issues:
                                 for issue in issues:
@@ -857,7 +902,7 @@ if __name__ == "__main__":
                                 # Write result to CSV
                                 with open(csv_file_path, mode='a', newline='') as csv_out:
                                     fieldnames = [
-                                        'statistic_type', 'statistic_config', 'query_name',
+                                        'dataset', 'statistic_type', 'statistic_config', 'query_name',
                                         'num_build_queries', 'build_windows_per_probe_window',
                                         'probe_throughput_listener', 'probe_duration_s',
                                         'build_throughput_listener', 'build_duration_s',

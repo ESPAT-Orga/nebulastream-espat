@@ -10,11 +10,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-query: SELECT RESERVOIR({statistic_hash}, auctionId, bidder, price, {reservoir_size}) FROM build_source WINDOW TUMBLING(timestamp, size {window_size} sec) INTO void_sink;
+query: SELECT RESERVOIR({statistic_id}, auctionId, bidder, price, {reservoir_size}) FROM build_source WINDOW TUMBLING(timestamp, size {window_size} sec) INTO void_sink;
 sinks:
   - name: void_sink
     schema:
-      - name: build_source$statistichash
+      - name: build_source$statisticid
         type: UINT64
       - name: build_source$statisticstart
         type: UINT64

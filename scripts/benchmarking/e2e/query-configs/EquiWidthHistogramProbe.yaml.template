@@ -12,7 +12,7 @@
 
 query: |
   SELECT STATISTICSTART, STATISTICEND, binStart, binCounter, binEnd FROM (
-    SELECT EQUIWIDTHHISTOGRAM_PROBE({statistic_hash}, {counter_type}, uint64)
+    SELECT EQUIWIDTHHISTOGRAM_PROBE({statistic_id}, {counter_type}, uint64)
     FROM probe_source
   ) INTO void_sink;
 sinks:
@@ -35,7 +35,7 @@ sinks:
 logical:
   - name: probe_source
     schema:
-      - name: STATISTICHASH
+      - name: STATISTICID
         type: UINT64
       - name: STATISTICSTART
         type: UINT64

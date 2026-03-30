@@ -12,7 +12,7 @@
 
 query: |
   SELECT STATISTICSTART, STATISTICEND, auctionId, bidder, price FROM (
-    SELECT RESERVOIR_PROBE({statistic_hash}, auctionId, int32, bidder, int32, price, float64)
+    SELECT RESERVOIR_PROBE({statistic_id}, auctionId, int32, bidder, int32, price, float64)
     FROM probe_source
   ) INTO void_sink;
 sinks:
@@ -35,7 +35,7 @@ sinks:
 logical:
   - name: probe_source
     schema:
-      - name: STATISTICHASH
+      - name: STATISTICID
         type: UINT64
       - name: STATISTICSTART
         type: UINT64

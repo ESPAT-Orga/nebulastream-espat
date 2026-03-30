@@ -46,8 +46,8 @@ NUM_PROBE_TUPLES = 10
 # for the throughput listener to capture measurements.
 NUM_PROBE_REPETITIONS = 100000
 
-# Statistic hashes used in build queries (must match the hash in the SQL template)
-STATISTIC_HASHES = {
+# Statistic IDs used in build queries (must match the ID in the SQL template)
+STATISTIC_IDS = {
     "Reservoir": 100,
     "EquiWidthHistogram": 200,
     "CountMin": 300,
@@ -110,13 +110,13 @@ def load_template(name):
         return f.read()
 
 
-def generate_probe_csv(probe_csv_path, statistic_hash, build_dataset_path,
+def generate_probe_csv(probe_csv_path, statistic_id, build_dataset_path,
                        num_probes=NUM_PROBE_TUPLES,
                        num_repetitions=NUM_PROBE_REPETITIONS,
                        window_size_ms=BUILD_WINDOW_SIZE_SEC * 1000):
     """Generate a probe CSV file with probe tuples.
 
-    Schema: STATISTICHASH, STATISTICSTART, STATISTICEND, STATISTICNUMBEROFSEENTUPLES
+    Schema: STATISTICID, STATISTICSTART, STATISTICEND, STATISTICNUMBEROFSEENTUPLES
     Each row probes a different window of the statistic.
 
     Window boundaries are derived from the first timestamp in the build dataset
@@ -136,7 +136,7 @@ def generate_probe_csv(probe_csv_path, statistic_hash, build_dataset_path,
     for i in range(num_probes):
         start_ts = first_window_start + i * window_size_ms
         end_ts = start_ts + window_size_ms
-        probe_rows.append([statistic_hash, start_ts, end_ts, 0])
+        probe_rows.append([statistic_id, start_ts, end_ts, 0])
 
     total_rows = num_probes * num_repetitions
     os.makedirs(os.path.dirname(probe_csv_path), exist_ok=True)
@@ -150,10 +150,10 @@ def generate_probe_csv(probe_csv_path, statistic_hash, build_dataset_path,
 def generate_build_query(statistic_type, config, output_dir, build_dataset_path):
     """Generate a build query yaml file and return its path."""
     template = load_template(f"{statistic_type}Build.yaml.template")
-    statistic_hash = STATISTIC_HASHES[statistic_type]
+    statistic_id = STATISTIC_IDS[statistic_type]
 
     format_args = {
-        "statistic_hash": statistic_hash,
+        "statistic_id": statistic_id,
         "window_size": BUILD_WINDOW_SIZE_SEC,
         "build_dataset_path": build_dataset_path,
     }
@@ -183,10 +183,10 @@ def generate_build_query(statistic_type, config, output_dir, build_dataset_path)
 def generate_probe_query(statistic_type, config, output_dir, probe_csv_path):
     """Generate a probe query yaml file and return its path."""
     template = load_template(f"{statistic_type}Probe.yaml.template")
-    statistic_hash = STATISTIC_HASHES[statistic_type]
+    statistic_id = STATISTIC_IDS[statistic_type]
 
     format_args = {
-        "statistic_hash": statistic_hash,
+        "statistic_id": statistic_id,
         "probe_csv_path": probe_csv_path,
     }
 
@@ -472,9 +472,9 @@ def run_experiment(statistic_type, statistic_config, worker_config, build_datase
         statistic_type, statistic_config, output_dir, build_dataset_path)
 
     # Generate probe CSV
-    statistic_hash = STATISTIC_HASHES[statistic_type]
+    statistic_id = STATISTIC_IDS[statistic_type]
     probe_csv_path = os.path.abspath(os.path.join(output_dir, f"probe_tuples_{build_name}.csv"))
-    generate_probe_csv(probe_csv_path, statistic_hash, build_dataset_path)
+    generate_probe_csv(probe_csv_path, statistic_id, build_dataset_path)
 
     # Generate probe query
     probe_query_path, probe_name = generate_probe_query(

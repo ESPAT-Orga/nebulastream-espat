@@ -291,14 +291,8 @@ def terminate_process_if_exists(process):
         process.kill()
         process.wait()
         printError(f"Process with PID {process.pid} forcefully killed.")
-    # Wait until the gRPC port is free before starting a new worker
-    for _ in range(60):
-        with socket.socket(socket.AF_INET6, socket.SOCK_STREAM) as s:
-            s.settimeout(0.5)
-            if s.connect_ex(('::1', 8080)) != 0:
-                break
-    else:
-        printError("Port 8080 still in use after 30s")
+    # Brief pause after process exit to let the OS fully release the port.
+    time.sleep(2)
 
 
 def start_single_node_worker(file_path_stdout, numberOfWorkerThreads, executionMode,

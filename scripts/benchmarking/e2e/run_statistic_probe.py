@@ -80,7 +80,7 @@ allJoinStrategies = ["HASH_JOIN"]
 allPageSizes = [8192]
 allBufferConfigs = [(1048576, 20000)]
 # TODO adjust cli to support this
-allEnableLatencyListeners = [True, False]
+allEnableLatencyListeners = [False, True]
 allNumStatisticIds = [1, 10, 100]
 throughputListenerInterval = 200
 

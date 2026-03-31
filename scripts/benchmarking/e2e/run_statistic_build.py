@@ -46,7 +46,7 @@ cmake_flags = ("-G Ninja "
                "-DNES_BUILD_NATIVE:BOOL=ON "
                "-DNES_LOG_LEVEL:STRING=LEVEL_NONE "
                "-DNES_BUILD_NATIVE:BOOL=ON")
-NUM_RUNS_PER_EXPERIMENT = 1
+NUM_RUNS_PER_EXPERIMENT = 3
 
 #### Worker Configurations
 allExecutionModes = ["COMPILER"]  # ["COMPILER", "INTERPRETER"]

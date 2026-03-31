@@ -112,8 +112,8 @@ allDatasets = [
         "statistics": ["Reservoir", "EquiWidthHistogram", "CountMin"],
     },
     {
-        "name": "YSB",
-        "path": "nes-systests/testdata/large/ysb/ysb10k_with_varsized_3GB.csv",
+        "name": "ClusterMonitoring",
+        "path": "nes-systests/testdata/large/cluster_monitoring/google-cluster-data-original_1G.csv",
         "statistics": ["Reservoir", "EquiWidthHistogram", "CountMin"],
     },
 ]
@@ -190,26 +190,16 @@ def get_build_statistic_ids(statistic_type, num_statistic_ids):
 
 
 def generate_build_query(statistic_type, config, output_dir, build_dataset_path,
-                         num_statistic_ids=1, dataset_name=None,
+                         num_statistic_ids=1, dataset_name="Nexmark",
                          build_window_size_sec=10):
     """Generate a build query yaml file and return (path, name, [statistic_ids]).
 
     When *num_statistic_ids* > 1 the YAML contains multiple SQL statements,
     under the ``query`` key, each building a statistic with a distinct ID.
 
-    If *dataset_name* is given, the template
-    ``{StatisticType}Build_{DatasetName}.yaml.template`` is tried first,
-    falling back to ``{StatisticType}Build.yaml.template``.
+    Templates are named ``{StatisticType}Build_{DatasetName}.yaml.template``.
     """
-    if dataset_name:
-        template_name = f"{statistic_type}Build_{dataset_name}.yaml.template"
-        template_path = os.path.join(QUERY_CONFIGS_DIR, template_name)
-        if os.path.exists(template_path):
-            template = load_template(template_name)
-        else:
-            template = load_template(f"{statistic_type}Build.yaml.template")
-    else:
-        template = load_template(f"{statistic_type}Build.yaml.template")
+    template = load_template(f"{statistic_type}Build_{dataset_name}.yaml.template")
     base_id = STATISTIC_IDS[statistic_type]
     statistic_ids = get_build_statistic_ids(statistic_type, num_statistic_ids)
 
@@ -258,17 +248,12 @@ def generate_build_query(statistic_type, config, output_dir, build_dataset_path,
     return filepath, name, statistic_ids
 
 
-def generate_probe_query(statistic_type, config, output_dir, probe_csv_path, dataset_name=None):
-    """Generate a probe query yaml file and return its path."""
-    if dataset_name:
-        template_name = f"{statistic_type}Probe_{dataset_name}.yaml.template"
-        template_path = os.path.join(QUERY_CONFIGS_DIR, template_name)
-        if os.path.exists(template_path):
-            template = load_template(template_name)
-        else:
-            template = load_template(f"{statistic_type}Probe.yaml.template")
-    else:
-        template = load_template(f"{statistic_type}Probe.yaml.template")
+def generate_probe_query(statistic_type, config, output_dir, probe_csv_path, dataset_name="Nexmark"):
+    """Generate a probe query yaml file and return its path.
+
+    Templates are named ``{StatisticType}Probe_{DatasetName}.yaml.template``.
+    """
+    template = load_template(f"{statistic_type}Probe_{dataset_name}.yaml.template")
     statistic_id = STATISTIC_IDS[statistic_type]
 
     format_args = {

@@ -17,7 +17,7 @@ set -euo pipefail
 # Create a Python virtual environment and install the required python libraries
 python3 -m venv myenv
 source myenv/bin/activate
-pip3 install argparse requests pandas pyyaml
+pip3 install --upgrade argparse requests pandas pyyaml
 
 #myenv/bin/python3 -m scripts.benchmarking.e2e.run_statistic_build --all
 

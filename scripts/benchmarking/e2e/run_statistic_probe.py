@@ -80,7 +80,7 @@ allJoinStrategies = ["HASH_JOIN"]
 allPageSizes = [8192]
 allBufferConfigs = [(1048576, 20000)]
 # TODO adjust cli to support this
-allEnableLatencyListeners = [False]
+allEnableLatencyListeners = [True, False]
 allNumStatisticIds = [1, 10, 100]
 throughputListenerInterval = 200
 
@@ -305,16 +305,17 @@ def terminate_process_if_exists(process):
 
 
 def start_single_node_worker(file_path_stdout, numberOfWorkerThreads, executionMode,
-                             joinStrategy, pageSize, bufferSizeInBytes, enableLatency=False):
+                             joinStrategy, pageSize, bufferSizeInBytes,
+                             buffersInGlobalBufferManager, enableLatency=False):
     """Start the single node worker with the given configuration."""
     worker_config = (f"--worker.query_engine.number_of_worker_threads={numberOfWorkerThreads} "
                      f"--worker.default_query_execution.execution_mode={executionMode} "
+                     f"--worker.number_of_buffers_in_global_buffer_manager={buffersInGlobalBufferManager} "
                      f"--worker.default_query_optimization.join_strategy={joinStrategy} "
                      f"--worker.query_engine.admission_queue_size=1000000 "
                      f"--worker.default_query_execution.page_size={pageSize} "
                      f"--worker.default_query_execution.operator_buffer_size={bufferSizeInBytes} "
-                     # TODO: this is currently not supported by the cli
-                     #f"--worker.latency_listener={enableLatency} "
+                     f"--worker.latency_listener={enableLatency} "
                      f"--worker.throughput_listener_interval_in_ms={throughputListenerInterval}")
 
     cmd = f"{single_node_executable} {worker_config}"
@@ -643,7 +644,8 @@ def run_experiment(statistic_type, statistic_config, worker_config, build_datase
     stdout_file = open(log_file_path, 'w')
     single_node_process = start_single_node_worker(
         stdout_file, numberOfWorkerThreads, executionMode,
-        joinStrategy, pageSize, bufferSizeInBytes, enableLatency)
+        joinStrategy, pageSize, bufferSizeInBytes,
+        buffersInGlobalBufferManager, enableLatency)
 
     time.sleep(WAIT_BETWEEN_COMMANDS_LONG)
 

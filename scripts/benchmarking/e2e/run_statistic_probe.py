@@ -79,7 +79,8 @@ allNumberOfWorkerThreads = ['1', '4', '16']
 allJoinStrategies = ["HASH_JOIN"]
 allPageSizes = [8192]
 allBufferConfigs = [(1048576, 20000)]
-allEnableLatencyListeners = [False, True]
+# TODO adjust cli to support this
+allEnableLatencyListeners = [False]
 allNumStatisticIds = [1, 5]
 throughputListenerInterval = 200
 
@@ -304,7 +305,8 @@ def start_single_node_worker(file_path_stdout, numberOfWorkerThreads, executionM
                      f"--worker.query_engine.admission_queue_size=1000000 "
                      f"--worker.default_query_execution.page_size={pageSize} "
                      f"--worker.default_query_execution.operator_buffer_size={bufferSizeInBytes} "
-                     f"--worker.latency_listener={enableLatency} "
+                     # TODO: this is currently not supported by the cli
+                     #f"--worker.latency_listener={enableLatency} "
                      f"--worker.throughput_listener_interval_in_ms={throughputListenerInterval}")
 
     cmd = f"{single_node_executable} {worker_config}"

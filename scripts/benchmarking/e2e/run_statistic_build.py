@@ -52,8 +52,6 @@ NUM_RUNS_PER_EXPERIMENT = 1
 allExecutionModes = ["COMPILER"]  # ["COMPILER", "INTERPRETER"]
 allNumberOfWorkerThreads = ['1', '4', '16']  # ['1', '4', '8', '16', '24'] #['4', '16']
 allJoinStrategies = ["HASH_JOIN"]
-allNumberOfEntriesSliceCaches = [10]
-allSliceCacheTypes = ["NONE", "SECOND_CHANCE", "LRU", "ALWAYS_MISS"]
 allPageSizes = [8192]
 # [4000000] if buffer size is 8192 #[500000] if buffer size is 102400
 allBufferConfigs = [(1048576, 20000)]
@@ -156,7 +154,7 @@ def initialize_csv_file():
         fieldnames = [
             'dataset', 'bytesPerSecond', 'query_name', 'time', 'tuplesPerSecond', 'tuplesPerSecond_listener',
             'executionMode', 'numberOfWorkerThreads', 'buffersInGlobalBufferManager',
-            'joinStrategy', 'numberOfEntriesSliceCaches', 'sliceCacheType',
+            'joinStrategy',
             'bufferSizeInBytes', 'pageSize'
         ]
         writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
@@ -236,7 +234,7 @@ def run_benchmark(config, dataset_name, query, queryIdx, workerConfigIdx, enable
         writer = csv.DictWriter(csv_file, fieldnames=[
             'dataset', 'bytesPerSecond', 'query_name', 'time', 'tuplesPerSecond', 'tuplesPerSecond_listener',
             'executionMode', 'numberOfWorkerThreads', 'buffersInGlobalBufferManager',
-            'joinStrategy', 'numberOfEntriesSliceCaches', 'sliceCacheType',
+            'joinStrategy',
             'bufferSizeInBytes', 'pageSize'
         ])
         for result in benchmark_results:
@@ -279,7 +277,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run NebulaStream queries.")
     parser.add_argument("--all", action="store_true", help="Run all queries.")
     parser.add_argument("-q", "--queries", nargs="+", help="List of queries to run.")
-    parser.add_argument("-s", "--slice-cache-type", nargs="+", help="List of slice cache types to run the queries.")
     parser.add_argument("-w", "--worker-threads", nargs="+", help="Number of worker threads to run the queries.")
     parser.add_argument("-b", "--buffer-config", nargs="+",
                         help="List of buffer configurations as tuples and buffer size is first, e.g., '(1234, 100) (128, 40)'.")
@@ -297,12 +294,6 @@ if __name__ == "__main__":
         # Filter queries based on the query name (second element of the key tuple)
         queries_to_run = {k: v for k, v in queries.items() if k[1] in args.queries}
 
-    # Determine which slice caches to run
-    slice_caches_to_run = allSliceCacheTypes
-    if args.slice_cache_type:
-        slice_caches_to_run = [slice_cache for slice_cache in allSliceCacheTypes if
-                               slice_cache in args.slice_cache_type]
-
     # Determine the number of worker threads to run with
     number_of_worker_threads_to_run = allNumberOfWorkerThreads
     if args.worker_threads:
@@ -314,7 +305,6 @@ if __name__ == "__main__":
 
     # Print results
     print(",".join(f"{ds}/{qn}" for ds, qn in queries_to_run.keys()))
-    print(",".join(slice_caches_to_run))
     print(",".join(number_of_worker_threads_to_run))
     print(",".join(map(str, allBufferConfigs)))
     print(",".join(map(str, allEnableLatencyListeners)))
@@ -339,8 +329,6 @@ if __name__ == "__main__":
             len(allExecutionModes) *
             len(number_of_worker_threads_to_run) *
             len(allJoinStrategies) *
-            len(allNumberOfEntriesSliceCaches) *
-            len(slice_caches_to_run) *
             len(allPageSizes) *
             len(allBufferConfigs) *
             len(allEnableLatencyListeners)
@@ -353,11 +341,9 @@ if __name__ == "__main__":
 
         combinations = itertools.product(allExecutionModes, number_of_worker_threads_to_run,
                                          allBufferConfigs, allJoinStrategies,
-                                         allNumberOfEntriesSliceCaches, slice_caches_to_run,
                                          allPageSizes, allEnableLatencyListeners)
         for [executionMode, numberOfWorkerThreads, (bufferSizeInBytes, buffersInGlobalBufferManager), joinStrategy,
-             numberOfEntriesSliceCaches,
-             sliceCacheType, pageSize, enableLatency] in combinations:
+             pageSize, enableLatency] in combinations:
             workerConfigIdx += 1
 
             # Otherwise we run out-of-memory / out-of-buffers
@@ -372,8 +358,6 @@ if __name__ == "__main__":
                 'numberOfWorkerThreads': numberOfWorkerThreads,
                 'buffersInGlobalBufferManager': buffersInGlobalBufferManager,
                 'joinStrategy': joinStrategy,
-                'numberOfEntriesSliceCaches': numberOfEntriesSliceCaches,
-                'sliceCacheType': sliceCacheType,
                 'bufferSizeInBytes': bufferSizeInBytes,
                 'pageSize': pageSize
             }

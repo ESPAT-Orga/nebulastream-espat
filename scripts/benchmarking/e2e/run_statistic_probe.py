@@ -29,6 +29,7 @@ import socket
 import subprocess
 import os
 import csv
+import json
 import re
 import itertools
 import time
@@ -68,9 +69,7 @@ cmake_flags = ("-G Ninja "
                "-DNES_LOG_LEVEL:STRING=LEVEL_NONE "
                "-DNES_BUILD_NATIVE:BOOL=ON")
 NUM_RUNS_PER_EXPERIMENT = 1
-WAIT_BETWEEN_COMMANDS_SHORT = 2
 WAIT_BETWEEN_COMMANDS_LONG = 5
-WAIT_BEFORE_SIGKILL = 10
 BUILD_DONE_TIMEOUT = 30  # seconds of no new throughput before considering build done
 PROBE_DONE_TIMEOUT = 15  # seconds of no new throughput before considering probe done
 
@@ -292,11 +291,11 @@ def terminate_process_if_exists(process):
         process.wait()
         printError(f"Process with PID {process.pid} forcefully killed.")
     # Wait until the gRPC port is free before starting a new worker
-    for _ in range(30):
+    for _ in range(60):
         with socket.socket(socket.AF_INET6, socket.SOCK_STREAM) as s:
+            s.settimeout(0.5)
             if s.connect_ex(('::1', 8080)) != 0:
                 break
-        time.sleep(1)
     else:
         printError("Port 8080 still in use after 30s")
 
@@ -372,6 +371,49 @@ def stop_queries(query_ids, query_file, cli_log_file):
         cli_log_file.flush()
         processes.append(subprocess.Popen(cmd, stdout=cli_log_file, stderr=cli_log_file))
     return processes
+
+
+def get_query_status(query_id, query_file):
+    """Query the status of a single query via nes-cli. Returns the status string or None."""
+    cmd = nebuli_executable + ["-t", query_file, "status", query_id]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if result.returncode == 0 and result.stdout.strip():
+            statuses = json.loads(result.stdout)
+            if statuses and len(statuses) > 0:
+                return statuses[0].get("query_status")
+    except (subprocess.TimeoutExpired, json.JSONDecodeError, Exception):
+        pass
+    return None
+
+
+def stop_queries_and_wait(query_ids, query_file, cli_log_file, timeout=30):
+    """Stop queries and poll until all report status 'Stopped'.
+
+    Returns True if all queries stopped within the timeout, False otherwise.
+    """
+    stop_procs = stop_queries(query_ids, cli_log_file=cli_log_file, query_file=query_file)
+    for proc in stop_procs:
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            printError(f"Stop command timed out")
+
+    deadline = time.time() + timeout
+    remaining = set(query_ids)
+    while remaining and time.time() < deadline:
+        for qid in list(remaining):
+            status = get_query_status(qid, query_file)
+            printInfo(f"  Query {qid} status: {status}")
+            if status == "Stopped":
+                remaining.discard(qid)
+        if remaining:
+            time.sleep(1)
+
+    if remaining:
+        printError(f"Queries did not stop within {timeout}s: {remaining}")
+        return False
+    return True
 
 
 def wait_for_query_to_finish(log_file_path, timeout, query_ids=None, poll_interval=2,
@@ -620,15 +662,9 @@ def run_experiment(statistic_type, statistic_config, worker_config, build_datase
         if not build_ok:
             issues.append(f"build:{build_reason}")
 
-        # Stop the build queries to flush remaining throughput windows via QueryStop,
-        # then parse the throughput from the complete log.
-        stop_procs = stop_queries(build_query_ids, build_query_path, cli_log_file)
-        for proc in stop_procs:
-            try:
-                proc.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                printError("Build query stop timed out")
-        time.sleep(WAIT_BETWEEN_COMMANDS_SHORT)
+        # Stop the build queries and wait until they are fully stopped,
+        # which also flushes remaining throughput windows via QueryStop.
+        stop_queries_and_wait(build_query_ids, build_query_path, cli_log_file)
 
         build_throughput = parse_average_throughput_from_throughput_listener(log_file_path, build_query_ids)
         printInfo(f"Build average throughput: {build_throughput:.2f} Tup/s")
@@ -650,15 +686,9 @@ def run_experiment(statistic_type, statistic_config, worker_config, build_datase
         if not probe_ok:
             issues.append(f"probe:{probe_reason}")
 
-        # Stop the probe query to flush remaining throughput windows via QueryStop,
-        # then parse the throughput from the complete log.
-        stop_procs = stop_queries(probe_query_ids, probe_query_path, cli_log_file)
-        for proc in stop_procs:
-            try:
-                proc.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                pass
-        time.sleep(WAIT_BETWEEN_COMMANDS_SHORT)
+        # Stop the probe query and wait until fully stopped,
+        # which also flushes remaining throughput windows via QueryStop.
+        stop_queries_and_wait(probe_query_ids, probe_query_path, cli_log_file)
 
         probe_throughput = parse_average_throughput_from_throughput_listener(log_file_path, probe_query_ids)
         printInfo(f"Probe average throughput: {probe_throughput:.2f} Tup/s")
@@ -703,22 +733,8 @@ def run_experiment(statistic_type, statistic_config, worker_config, build_datase
         }, issues
 
     finally:
-        time.sleep(WAIT_BEFORE_SIGKILL)
         printInfo("=" * 60)
         printInfo("Cleaning up processes...")
-
-        # Stop queries if still running
-        stop_processes = []
-        if build_query_ids:
-            stop_processes.extend(stop_queries(build_query_ids, build_query_path, cli_log_file))
-        if probe_query_ids:
-            stop_processes.extend(stop_queries(probe_query_ids, probe_query_path, cli_log_file))
-        for proc in stop_processes:
-            try:
-                proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                pass
-
         terminate_process_if_exists(single_node_process)
         stdout_file.close()
 

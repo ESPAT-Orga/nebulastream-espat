@@ -6,5 +6,5 @@ CREATE LOGICAL SOURCE bid(timestamp UINT64 NOT NULL, auctionId INT32 NOT NULL, b
 CREATE PHYSICAL SOURCE FOR bid TYPE Memory;
 ATTACH FILE large/nexmark/bid_6GB.csv
 
-SELECT EQUIWIDTHHISTOGRAM(200, price, {num_buckets}, {min_value}, {max_value}, {counter_type}) FROM bid WINDOW TUMBLING(timestamp, size 10 sec) INTO Void();
+SELECT EQUIWIDTHHISTOGRAM(200, price, {num_buckets}, {min_value}, {max_value}, {counter_type}) FROM bid WINDOW TUMBLING(timestamp, size {window_size} sec) INTO Void();
 ----

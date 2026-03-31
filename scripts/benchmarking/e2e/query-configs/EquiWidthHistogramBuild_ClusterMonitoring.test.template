@@ -6,5 +6,5 @@ CREATE LOGICAL SOURCE monitoringClusterData(creationTS UINT64 NOT NULL, jobId UI
 CREATE PHYSICAL SOURCE FOR monitoringClusterData TYPE Memory;
 ATTACH FILE large/cluster_monitoring/google-cluster-data-original_1G.csv
 
-SELECT EQUIWIDTHHISTOGRAM(200, userId, {num_buckets}, {min_value}, {max_value}, {counter_type}) FROM monitoringClusterData WINDOW TUMBLING(creationTS, size 10 sec) INTO Void();
+SELECT EQUIWIDTHHISTOGRAM(200, userId, {num_buckets}, {min_value}, {max_value}, {counter_type}) FROM monitoringClusterData WINDOW TUMBLING(creationTS, size {window_size} sec) INTO Void();
 ----

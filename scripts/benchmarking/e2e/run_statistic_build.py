@@ -56,6 +56,7 @@ allPageSizes = [8192]
 # [4000000] if buffer size is 8192 #[500000] if buffer size is 102400
 allBufferConfigs = [(1048576, 20000)]
 allEnableLatencyListeners = [False, True]
+allBuildWindowSizesSec = [1, 30, 60]
 throughputListenerInterval = 200
 
 #### Statistic Build Configurations
@@ -106,7 +107,7 @@ def load_template(name):
 def generate_queries():
     """Generate query dict and .test files from statistic build configurations.
 
-    Iterates over all datasets in *allDatasets*, using per-dataset templates.
+    Iterates over all datasets and build window sizes, using per-dataset templates.
     Returns a dict mapping ``(dataset_name, query_name)`` to the test file path.
     """
     os.makedirs(generated_test_dir, exist_ok=True)
@@ -116,33 +117,36 @@ def generate_queries():
         dataset_name = dataset["name"]
         stat_types = dataset["statistics"]
 
-        if "Reservoir" in stat_types:
-            template = load_template(f"ReservoirBuild_{dataset_name}.test.template")
-            for reservoir_size in allReservoirSizes:
-                name = f"{dataset_name}_ReservoirBuild_{reservoir_size}"
-                filepath = os.path.join(generated_test_dir, f"{name}.test")
-                with open(filepath, 'w') as f:
-                    f.write(template.format(reservoir_size=reservoir_size))
-                queries[(dataset_name, name)] = f"{filepath}:01"
+        for window_size in allBuildWindowSizesSec:
+            if "Reservoir" in stat_types:
+                template = load_template(f"ReservoirBuild_{dataset_name}.test.template")
+                for reservoir_size in allReservoirSizes:
+                    name = f"{dataset_name}_ReservoirBuild_{reservoir_size}_{window_size}sec"
+                    filepath = os.path.join(generated_test_dir, f"{name}.test")
+                    with open(filepath, 'w') as f:
+                        f.write(template.format(reservoir_size=reservoir_size, window_size=window_size))
+                    queries[(dataset_name, name)] = f"{filepath}:01"
 
-        if "EquiWidthHistogram" in stat_types:
-            template = load_template(f"EquiWidthHistogramBuild_{dataset_name}.test.template")
-            for num_buckets, min_value, max_value, counter_type in allEquiWidthHistogramConfigs:
-                name = f"{dataset_name}_EquiWidthHistogramBuild_{num_buckets}_{min_value}_{max_value}_{counter_type}"
-                filepath = os.path.join(generated_test_dir, f"{name}.test")
-                with open(filepath, 'w') as f:
-                    f.write(template.format(num_buckets=num_buckets, min_value=min_value,
-                                            max_value=max_value, counter_type=counter_type))
-                queries[(dataset_name, name)] = f"{filepath}:01"
+            if "EquiWidthHistogram" in stat_types:
+                template = load_template(f"EquiWidthHistogramBuild_{dataset_name}.test.template")
+                for num_buckets, min_value, max_value, counter_type in allEquiWidthHistogramConfigs:
+                    name = f"{dataset_name}_EquiWidthHistogramBuild_{num_buckets}_{min_value}_{max_value}_{counter_type}_{window_size}sec"
+                    filepath = os.path.join(generated_test_dir, f"{name}.test")
+                    with open(filepath, 'w') as f:
+                        f.write(template.format(num_buckets=num_buckets, min_value=min_value,
+                                                max_value=max_value, counter_type=counter_type,
+                                                window_size=window_size))
+                    queries[(dataset_name, name)] = f"{filepath}:01"
 
-        if "CountMin" in stat_types:
-            template = load_template(f"CountMinBuild_{dataset_name}.test.template")
-            for columns, rows, counter_type in allCountMinConfigs:
-                name = f"{dataset_name}_CountMinBuild_{columns}_{rows}_{counter_type}"
-                filepath = os.path.join(generated_test_dir, f"{name}.test")
-                with open(filepath, 'w') as f:
-                    f.write(template.format(columns=columns, rows=rows, counter_type=counter_type))
-                queries[(dataset_name, name)] = f"{filepath}:01"
+            if "CountMin" in stat_types:
+                template = load_template(f"CountMinBuild_{dataset_name}.test.template")
+                for columns, rows, counter_type in allCountMinConfigs:
+                    name = f"{dataset_name}_CountMinBuild_{columns}_{rows}_{counter_type}_{window_size}sec"
+                    filepath = os.path.join(generated_test_dir, f"{name}.test")
+                    with open(filepath, 'w') as f:
+                        f.write(template.format(columns=columns, rows=rows, counter_type=counter_type,
+                                                window_size=window_size))
+                    queries[(dataset_name, name)] = f"{filepath}:01"
 
     return queries
 

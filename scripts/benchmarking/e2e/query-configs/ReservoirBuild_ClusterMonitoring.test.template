@@ -6,5 +6,5 @@ CREATE LOGICAL SOURCE monitoringClusterData(creationTS UINT64 NOT NULL, jobId UI
 CREATE PHYSICAL SOURCE FOR monitoringClusterData TYPE Memory;
 ATTACH FILE large/cluster_monitoring/google-cluster-data-original_1G.csv
 
-SELECT RESERVOIR(100, jobId, taskId, machineId, eventType, userId, category, priority, cpu, ram, disk, constraints, {reservoir_size}) FROM monitoringClusterData WINDOW TUMBLING(creationTS, size 10 sec) INTO Void();
+SELECT RESERVOIR(100, jobId, taskId, machineId, eventType, userId, category, priority, cpu, ram, disk, constraints, {reservoir_size}) FROM monitoringClusterData WINDOW TUMBLING(creationTS, size {window_size} sec) INTO Void();
 ----

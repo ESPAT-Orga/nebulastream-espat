@@ -39,7 +39,7 @@ from datetime import datetime, timedelta
 from scripts.benchmarking.utils import *
 
 #### Configuration Constants
-allBuildWindowSizesSec = [10, 20]
+allBuildWindowSizesSec = [1, 30, 60]
 # Number of build windows covered by a single probe window.
 # probe_window_size = build_window_size_sec * build_windows_per_probe_window
 allBuildWindowsPerProbeWindow = [1, 5]
@@ -68,7 +68,7 @@ cmake_flags = ("-G Ninja "
                "-DENABLE_LARGE_TESTS=1 "
                "-DNES_LOG_LEVEL:STRING=LEVEL_NONE "
                "-DNES_BUILD_NATIVE:BOOL=ON")
-NUM_RUNS_PER_EXPERIMENT = 1
+NUM_RUNS_PER_EXPERIMENT = 3
 WAIT_BETWEEN_COMMANDS_LONG = 5
 BUILD_DONE_TIMEOUT = 30  # seconds of no new throughput before considering build done
 PROBE_DONE_TIMEOUT = 15  # seconds of no new throughput before considering probe done

@@ -1,0 +1,10 @@
+# name: benchmark_statistic_build/CountMinBuild_ClusterMonitoring.test
+# description: Benchmark for count min sketch build operator over Google Cluster Monitoring data
+# groups: [benchmark, large, Synopsis, Aggregation]
+
+CREATE LOGICAL SOURCE monitoringClusterData(creationTS UINT64 NOT NULL, jobId UINT64 NOT NULL, taskId UINT64 NOT NULL, machineId INT64 NOT NULL, eventType INT16 NOT NULL, userId INT16 NOT NULL, category INT16 NOT NULL, priority INT16 NOT NULL, cpu FLOAT64 NOT NULL, ram FLOAT64 NOT NULL, disk FLOAT64 NOT NULL, constraints BOOLEAN NOT NULL);
+CREATE PHYSICAL SOURCE FOR monitoringClusterData TYPE Memory;
+ATTACH FILE large/cluster_monitoring/google-cluster-data-original_1G.csv
+
+SELECT COUNTMINSKETCH(300, userId, {rows}, {columns}, {counter_type}, 42) FROM monitoringClusterData WINDOW TUMBLING(creationTS, size 10 sec) INTO Void();
+----

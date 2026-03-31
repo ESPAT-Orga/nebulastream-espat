@@ -77,14 +77,20 @@ allCountMinConfigs = [
     (1, 10, "uint64"),
     (2, 100, "uint64"),
     (5, 1000, "uint64"),
+]
 
-    (1, 10, "uint64"),
-    (2, 100, "uint64"),
-    (5, 1000, "uint64"),
-
-    (1, 10, "uint64"),
-    (2, 100, "uint64"),
-    (5, 1000, "uint64"),
+#### Dataset Configurations
+# Each dataset lists which statistic types to benchmark.
+# Templates are named {StatisticType}Build_{DatasetName}.test.template
+allDatasets = [
+    {
+        "name": "Nexmark",
+        "statistics": ["Reservoir", "EquiWidthHistogram", "CountMin"],
+    },
+    {
+        "name": "ClusterMonitoring",
+        "statistics": ["Reservoir", "EquiWidthHistogram", "CountMin"],
+    },
 ]
 
 QUERY_CONFIGS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "query-configs")
@@ -100,36 +106,45 @@ def load_template(name):
 
 
 def generate_queries():
-    """Generate query dict and .test files from statistic build configurations."""
+    """Generate query dict and .test files from statistic build configurations.
+
+    Iterates over all datasets in *allDatasets*, using per-dataset templates.
+    Returns a dict mapping ``(dataset_name, query_name)`` to the test file path.
+    """
     os.makedirs(generated_test_dir, exist_ok=True)
-    reservoir_template = load_template("ReservoirBuild.test.template")
-    equi_width_histogram_template = load_template("EquiWidthHistogramBuild.test.template")
     queries = {}
-    for reservoir_size in allReservoirSizes:
-        name = f"ReservoirBuild_{reservoir_size}"
-        filename = f"{name}.test"
-        filepath = os.path.join(generated_test_dir, filename)
-        with open(filepath, 'w') as f:
-            f.write(reservoir_template.format(reservoir_size=reservoir_size))
-        queries[name] = f"{filepath}:01"
 
-    for num_buckets, min_value, max_value, counter_type in allEquiWidthHistogramConfigs:
-        name = f"EquiWidthHistogramBuild_{num_buckets}_{min_value}_{max_value}_{counter_type}"
-        filename = f"{name}.test"
-        filepath = os.path.join(generated_test_dir, filename)
-        with open(filepath, 'w') as f:
-            f.write(equi_width_histogram_template.format(num_buckets=num_buckets, min_value=min_value, max_value=max_value,
-                                              counter_type=counter_type))
-        queries[name] = f"{filepath}:01"
+    for dataset in allDatasets:
+        dataset_name = dataset["name"]
+        stat_types = dataset["statistics"]
 
-    count_min_template = load_template("CountMinBuild.test.template")
-    for columns, rows, counter_type in allCountMinConfigs:
-        name = f"CountMinBuild_{columns}_{rows}_{counter_type}"
-        filename = f"{name}.test"
-        filepath = os.path.join(generated_test_dir, filename)
-        with open(filepath, 'w') as f:
-            f.write(count_min_template.format(columns=columns, rows=rows, counter_type=counter_type))
-        queries[name] = f"{filepath}:01"
+        if "Reservoir" in stat_types:
+            template = load_template(f"ReservoirBuild_{dataset_name}.test.template")
+            for reservoir_size in allReservoirSizes:
+                name = f"{dataset_name}_ReservoirBuild_{reservoir_size}"
+                filepath = os.path.join(generated_test_dir, f"{name}.test")
+                with open(filepath, 'w') as f:
+                    f.write(template.format(reservoir_size=reservoir_size))
+                queries[(dataset_name, name)] = f"{filepath}:01"
+
+        if "EquiWidthHistogram" in stat_types:
+            template = load_template(f"EquiWidthHistogramBuild_{dataset_name}.test.template")
+            for num_buckets, min_value, max_value, counter_type in allEquiWidthHistogramConfigs:
+                name = f"{dataset_name}_EquiWidthHistogramBuild_{num_buckets}_{min_value}_{max_value}_{counter_type}"
+                filepath = os.path.join(generated_test_dir, f"{name}.test")
+                with open(filepath, 'w') as f:
+                    f.write(template.format(num_buckets=num_buckets, min_value=min_value,
+                                            max_value=max_value, counter_type=counter_type))
+                queries[(dataset_name, name)] = f"{filepath}:01"
+
+        if "CountMin" in stat_types:
+            template = load_template(f"CountMinBuild_{dataset_name}.test.template")
+            for columns, rows, counter_type in allCountMinConfigs:
+                name = f"{dataset_name}_CountMinBuild_{columns}_{rows}_{counter_type}"
+                filepath = os.path.join(generated_test_dir, f"{name}.test")
+                with open(filepath, 'w') as f:
+                    f.write(template.format(columns=columns, rows=rows, counter_type=counter_type))
+                queries[(dataset_name, name)] = f"{filepath}:01"
 
     return queries
 
@@ -139,7 +154,7 @@ def initialize_csv_file():
     print("Initializing CSV file...")
     with open(csv_file_path, mode='w', newline='') as csv_file:
         fieldnames = [
-            'bytesPerSecond', 'query_name', 'time', 'tuplesPerSecond', 'tuplesPerSecond_listener',
+            'dataset', 'bytesPerSecond', 'query_name', 'time', 'tuplesPerSecond', 'tuplesPerSecond_listener',
             'executionMode', 'numberOfWorkerThreads', 'buffersInGlobalBufferManager',
             'joinStrategy', 'numberOfEntriesSliceCaches', 'sliceCacheType',
             'bufferSizeInBytes', 'pageSize'
@@ -176,7 +191,7 @@ def parse_average_throughput_from_throughput_listener(console_output):
     return average_throughput
 
 
-def run_benchmark(config, query, queryIdx, workerConfigIdx, enableLatency, no_combinations, no_queries):
+def run_benchmark(config, dataset_name, query, queryIdx, workerConfigIdx, enableLatency, no_combinations, no_queries):
     # Create the working directory
     create_folder_and_remove_if_exists(working_dir, indent="    ")
 
@@ -192,7 +207,7 @@ def run_benchmark(config, query, queryIdx, workerConfigIdx, enableLatency, no_co
                          f"--worker.latency_listener={enableLatency} "
                          f"--worker.throughput_listener_interval_in_ms={throughputListenerInterval}")
 
-        benchmark_command = f"{systest_executable} -b -t {os.path.abspath(queries[query])} --data {os.path.abspath(test_data_dir)} --workingDir={working_dir} -- {worker_config}"
+        benchmark_command = f"{systest_executable} -b -t {os.path.abspath(queries[(dataset_name, query)])} --data {os.path.abspath(test_data_dir)} --workingDir={working_dir} -- {worker_config}"
 
         print()
         printInfo(
@@ -219,13 +234,14 @@ def run_benchmark(config, query, queryIdx, workerConfigIdx, enableLatency, no_co
     with open(csv_file_path, mode='a', newline='') as csv_file:
         average_throughput = parse_average_throughput_from_throughput_listener(stdout)
         writer = csv.DictWriter(csv_file, fieldnames=[
-            'bytesPerSecond', 'query_name', 'time', 'tuplesPerSecond', 'tuplesPerSecond_listener',
+            'dataset', 'bytesPerSecond', 'query_name', 'time', 'tuplesPerSecond', 'tuplesPerSecond_listener',
             'executionMode', 'numberOfWorkerThreads', 'buffersInGlobalBufferManager',
             'joinStrategy', 'numberOfEntriesSliceCaches', 'sliceCacheType',
             'bufferSizeInBytes', 'pageSize'
         ])
         for result in benchmark_results:
             result.pop('query name', None)
+            result['dataset'] = dataset_name
             result['query_name'] = query
             result['tuplesPerSecond_listener'] = average_throughput
             writer.writerow({**result, **config})
@@ -278,8 +294,8 @@ if __name__ == "__main__":
     queries_to_run = queries
 
     if not args.all and args.queries:
-        # Filter queries based on the provided list
-        queries_to_run = {k: v for k, v in queries.items() if k in args.queries}
+        # Filter queries based on the query name (second element of the key tuple)
+        queries_to_run = {k: v for k, v in queries.items() if k[1] in args.queries}
 
     # Determine which slice caches to run
     slice_caches_to_run = allSliceCacheTypes
@@ -297,7 +313,7 @@ if __name__ == "__main__":
         allBufferConfigs = parse_buffer_config(args.buffer_config)
 
     # Print results
-    print(",".join(queries_to_run.keys()))
+    print(",".join(f"{ds}/{qn}" for ds, qn in queries_to_run.keys()))
     print(",".join(slice_caches_to_run))
     print(",".join(number_of_worker_threads_to_run))
     print(",".join(map(str, allBufferConfigs)))
@@ -332,7 +348,7 @@ if __name__ == "__main__":
     no_queries = len(queries_to_run)
     total_runs = no_queries * no_combinations * NUM_RUNS_PER_EXPERIMENT
     completed_runs = 0
-    for queryIdx, query in enumerate(queries_to_run):
+    for queryIdx, (dataset_name, query) in enumerate(queries_to_run):
         workerConfigIdx = 0
 
         combinations = itertools.product(allExecutionModes, number_of_worker_threads_to_run,
@@ -364,7 +380,7 @@ if __name__ == "__main__":
 
             for i in range(NUM_RUNS_PER_EXPERIMENT):
                 run_start = time.time()
-                run_benchmark(config, query, queryIdx + 1, workerConfigIdx, enableLatency, no_combinations, no_queries)
+                run_benchmark(config, dataset_name, query, queryIdx + 1, workerConfigIdx, enableLatency, no_combinations, no_queries)
                 run_end = time.time()
                 completed_runs += 1
                 eta_h, eta_m, eta_s, eta_time = estimate_eta(start_time, run_end, completed_runs, total_runs)

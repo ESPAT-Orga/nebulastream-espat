@@ -79,6 +79,7 @@ allNumberOfWorkerThreads = ['1', '4', '16']
 allJoinStrategies = ["HASH_JOIN"]
 allPageSizes = [8192]
 allBufferConfigs = [(1048576, 20000)]
+allEnableLatencyListeners = [False, True]
 allNumStatisticIds = [1, 5]
 throughputListenerInterval = 200
 
@@ -301,7 +302,7 @@ def terminate_process_if_exists(process):
 
 
 def start_single_node_worker(file_path_stdout, numberOfWorkerThreads, executionMode,
-                             joinStrategy, pageSize, bufferSizeInBytes):
+                             joinStrategy, pageSize, bufferSizeInBytes, enableLatency=False):
     """Start the single node worker with the given configuration."""
     worker_config = (f"--worker.query_engine.number_of_worker_threads={numberOfWorkerThreads} "
                      f"--worker.default_query_execution.execution_mode={executionMode} "
@@ -309,6 +310,7 @@ def start_single_node_worker(file_path_stdout, numberOfWorkerThreads, executionM
                      f"--worker.query_engine.admission_queue_size=1000000 "
                      f"--worker.default_query_execution.page_size={pageSize} "
                      f"--worker.default_query_execution.operator_buffer_size={bufferSizeInBytes} "
+                     f"--worker.latency_listener={enableLatency} "
                      f"--worker.throughput_listener_interval_in_ms={throughputListenerInterval}")
 
     cmd = f"{single_node_executable} {worker_config}"
@@ -577,7 +579,7 @@ def initialize_csv_file():
             'build_throughput_listener', 'build_duration_s',
             'executionMode', 'numberOfWorkerThreads',
             'buffersInGlobalBufferManager', 'joinStrategy',
-            'bufferSizeInBytes', 'pageSize'
+            'bufferSizeInBytes', 'pageSize', 'enableLatency'
         ]
         writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
         writer.writeheader()
@@ -606,7 +608,7 @@ def generate_all_experiments():
 def run_experiment(statistic_type, statistic_config, worker_config, build_dataset_path,
                    output_dir, cli_log_file, num_statistic_ids=1,
                    build_windows_per_probe_window=1, dataset_name=None,
-                   build_window_size_sec=10):
+                   build_window_size_sec=10, enableLatency=False):
     """Run a single build+probe experiment. Returns a (result_dict, issues) tuple.
 
     ``issues`` is a list of strings describing non-fatal problems observed
@@ -637,7 +639,7 @@ def run_experiment(statistic_type, statistic_config, worker_config, build_datase
     stdout_file = open(log_file_path, 'w')
     single_node_process = start_single_node_worker(
         stdout_file, numberOfWorkerThreads, executionMode,
-        joinStrategy, pageSize, bufferSizeInBytes)
+        joinStrategy, pageSize, bufferSizeInBytes, enableLatency)
 
     time.sleep(WAIT_BETWEEN_COMMANDS_LONG)
 
@@ -730,6 +732,7 @@ def run_experiment(statistic_type, statistic_config, worker_config, build_datase
             'joinStrategy': joinStrategy,
             'bufferSizeInBytes': bufferSizeInBytes,
             'pageSize': pageSize,
+            'enableLatency': enableLatency,
         }, issues
 
     finally:
@@ -832,7 +835,8 @@ if __name__ == "__main__":
     # Cross product of worker configs
     worker_combinations = list(itertools.product(
         allExecutionModes, number_of_worker_threads_to_run,
-        buffer_configs, allJoinStrategies, allPageSizes
+        buffer_configs, allJoinStrategies, allPageSizes,
+        allEnableLatencyListeners
     ))
 
     total_runs = (len(experiments) * len(worker_combinations)
@@ -858,7 +862,7 @@ if __name__ == "__main__":
 
         for wc_idx, (executionMode, numberOfWorkerThreads,
                      (bufferSizeInBytes, buffersInGlobalBufferManager),
-                     joinStrategy, pageSize) in enumerate(worker_combinations):
+                     joinStrategy, pageSize, enableLatency) in enumerate(worker_combinations):
 
             worker_config = (executionMode, numberOfWorkerThreads, bufferSizeInBytes,
                              buffersInGlobalBufferManager, joinStrategy, pageSize)
@@ -900,7 +904,8 @@ if __name__ == "__main__":
                                     num_statistic_ids=num_statistic_ids,
                                     build_windows_per_probe_window=build_windows_per_probe_window,
                                     dataset_name=dataset_name,
-                                    build_window_size_sec=build_window_size_sec)
+                                    build_window_size_sec=build_window_size_sec,
+                                    enableLatency=enableLatency)
 
                                 if issues:
                                     for issue in issues:
@@ -920,7 +925,7 @@ if __name__ == "__main__":
                                             'build_throughput_listener', 'build_duration_s',
                                             'executionMode', 'numberOfWorkerThreads',
                                             'buffersInGlobalBufferManager', 'joinStrategy',
-                                            'bufferSizeInBytes', 'pageSize'
+                                            'bufferSizeInBytes', 'pageSize', 'enableLatency'
                                         ]
                                         writer = csv.DictWriter(csv_out, fieldnames=fieldnames)
                                         writer.writerow(result)

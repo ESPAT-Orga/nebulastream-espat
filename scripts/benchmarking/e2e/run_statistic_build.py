@@ -55,7 +55,7 @@ allJoinStrategies = ["HASH_JOIN"]
 allPageSizes = [8192]
 # [4000000] if buffer size is 8192 #[500000] if buffer size is 102400
 allBufferConfigs = [(1048576, 20000)]
-allEnableLatencyListeners = [False]
+allEnableLatencyListeners = [False, True]
 throughputListenerInterval = 200
 
 #### Statistic Build Configurations

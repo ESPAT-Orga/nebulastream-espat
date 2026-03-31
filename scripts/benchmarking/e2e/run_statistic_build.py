@@ -62,20 +62,28 @@ throughputListenerInterval = 200
 #### Statistic Build Configurations
 allReservoirSizes = [
     100,
-    1000,
-    10000
+    500,
+    1000
 ]
 allEquiWidthHistogramConfigs = [
     # (num_buckets, min_value, max_value, counter_type)
-    (10, 0, 1000000, "uint64"),
-    (100, 0, 1000000, "uint64"),
-    (1000, 0, 1000000, "uint64"),
+    (100, 0, 100 * 1000, "uint64"),
+    (500, 0, 100 * 1000, "uint64"),
+    (1000, 0, 100 * 1000, "uint64"),
 ]
 allCountMinConfigs = [
     # (rows, cols, counter_type)
-    (1, 10, "uint64"),
-    (2, 100, "uint64"),
+    (1, 100, "uint64"),
+    (5, 100, "uint64"),
+    (10, 100, "uint64"),
+
+    (1, 1000, "uint64"),
     (5, 1000, "uint64"),
+    (10, 1000, "uint64"),
+
+    (1, 10000, "uint64"),
+    (5, 10000, "uint64"),
+    (10, 10000, "uint64"),
 ]
 
 #### Dataset Configurations

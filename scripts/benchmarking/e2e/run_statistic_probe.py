@@ -42,7 +42,7 @@ from scripts.benchmarking.utils import *
 allBuildWindowSizesSec = [1, 30, 60]
 # Number of build windows covered by a single probe window.
 # probe_window_size = build_window_size_sec * build_windows_per_probe_window
-allBuildWindowsPerProbeWindow = [1, 5]
+allBuildWindowsPerProbeWindow = [1, 100, 1000]
 NUM_PROBE_TUPLES = 10
 # Number of times to repeat the probe tuples so the probe query runs long enough
 # for the throughput listener to capture measurements.
@@ -81,26 +81,34 @@ allPageSizes = [8192]
 allBufferConfigs = [(1048576, 20000)]
 # TODO adjust cli to support this
 allEnableLatencyListeners = [False]
-allNumStatisticIds = [1, 5]
+allNumStatisticIds = [1, 10, 100]
 throughputListenerInterval = 200
 
 #### Statistic Build Configurations
 allReservoirSizes = [
     100,
-    1000,
-    10000
+    500,
+    1000
 ]
 allEquiWidthHistogramConfigs = [
     # (num_buckets, min_value, max_value, counter_type)
-    (10, 0, 1000000, "uint64"),
-    (100, 0, 1000000, "uint64"),
-    (1000, 0, 1000000, "uint64"),
+    (100, 0, 100 * 1000, "uint64"),
+    (500, 0, 100 * 1000, "uint64"),
+    (1000, 0, 100 * 1000, "uint64"),
 ]
 allCountMinConfigs = [
     # (rows, columns, counter_type)
-    (1, 10, "uint64"),
-    (2, 100, "uint64"),
+    (1, 100, "uint64"),
+    (5, 100, "uint64"),
+    (10, 100, "uint64"),
+
+    (1, 1000, "uint64"),
     (5, 1000, "uint64"),
+    (10, 1000, "uint64"),
+
+    (1, 10000, "uint64"),
+    (5, 10000, "uint64"),
+    (10, 10000, "uint64"),
 ]
 
 #### Dataset Configurations

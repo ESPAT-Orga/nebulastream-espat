@@ -1,0 +1,46 @@
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+query: SELECT COUNTMINSKETCH({statistic_id}, price, {rows}, {columns}, {counter_type}, 42) FROM build_source WINDOW TUMBLING(timestamp, size {window_size} sec) INTO void_sink;
+sinks:
+  - name: void_sink
+    schema:
+      - name: build_source$statisticid
+        type: UINT64
+      - name: build_source$statisticstart
+        type: UINT64
+      - name: build_source$statisticend
+        type: UINT64
+      - name: build_source$statisticnumberofseentuples
+        type: UINT64
+    type: Void
+    config:
+      file_path: "/tmp/discard_build_sink.csv"
+    parser_config: {{ }}
+logical:
+  - name: build_source
+    schema:
+      - name: timestamp
+        type: UINT64
+      - name: auctionId
+        type: INT32
+      - name: bidder
+        type: INT32
+      - name: price
+        type: FLOAT64
+physical:
+  - logical: build_source
+    type: File
+    parser_config:
+      type: CSV
+    source_config:
+      file_path: {build_dataset_path}

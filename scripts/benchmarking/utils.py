@@ -106,6 +106,11 @@ def run_command(command, cwd=None, indent=""):
     result = subprocess.run(command, cwd=cwd, shell=True, check=True, text=True, capture_output=True)
     return result.stdout
 
+def run_command_and_show_output(command, cwd=None, indent=""):
+    print(f"{indent}Running {command}")
+    result = subprocess.run(command, cwd=cwd, shell=True, check=True, text=True)
+    return result
+
 def convert_unit_prefix(value, unit_prefix):
     # Convert throughput based on the unit prefix
     if unit_prefix == 'M':

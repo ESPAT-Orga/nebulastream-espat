@@ -58,6 +58,7 @@ STATISTIC_IDS = {
 #### Benchmark Configurations
 build_dir = os.path.join(".", "build_dir")
 working_dir = os.path.join(build_dir, "working_dir")
+output_dir = "."
 csv_file_path = "results_statistic_probe.csv"
 single_node_executable = os.path.join(build_dir, "nes-single-node-worker/nes-single-node-worker")
 nebuli_executable = [os.path.join(build_dir, "nes-frontend/apps/nes-cli"), "--debug"]
@@ -78,7 +79,7 @@ allExecutionModes = ["COMPILER"]
 allNumberOfWorkerThreads = ['1', '4', '16']
 allJoinStrategies = ["HASH_JOIN"]
 allPageSizes = [8192]
-allBufferConfigs = [(1048576, 20000)]
+allBufferConfigs = [(1048576, 10000)]
 # TODO adjust cli to support this
 allEnableLatencyListeners = [False, True]
 allNumStatisticIds = [1, 10, 100]
@@ -772,7 +773,14 @@ if __name__ == "__main__":
                         help="Remove and recreate the build directory before building.")
     parser.add_argument("--num-probe-tuples", type=int, default=NUM_PROBE_TUPLES,
                         help="Number of probe tuples to generate.")
+    parser.add_argument("--output-dir", type=str, default=None,
+                        help="Directory for output CSV and error files. Created if it does not exist.")
     args = parser.parse_args()
+
+    if args.output_dir:
+        output_dir = args.output_dir
+        os.makedirs(output_dir, exist_ok=True)
+        csv_file_path = os.path.join(output_dir, "results_statistic_probe.csv")
 
     # Printing all arguments
     printInfo("Parsed arguments:")
@@ -975,7 +983,7 @@ if __name__ == "__main__":
             printError(f"\n{'=' * 80}")
             printError(f"CRASHES / TIMEOUTS: {len(crash_timeout_issues)}")
             printError(f"{'=' * 80}")
-            ct_file = "crashes_and_timeouts.txt"
+            ct_file = os.path.join(output_dir, "crashes_and_timeouts.txt")
             with open(ct_file, 'w') as f:
                 for i, entry in enumerate(crash_timeout_issues, 1):
                     msg = (f"[{i}] {entry['description']}\n"
@@ -989,7 +997,7 @@ if __name__ == "__main__":
             printError(f"\n{'=' * 80}")
             printError(f"BUFFER EXHAUSTION: {len(buffer_issues)}")
             printError(f"{'=' * 80}")
-            be_file = "buffer_exhaustion.txt"
+            be_file = os.path.join(output_dir, "buffer_exhaustion.txt")
             with open(be_file, 'w') as f:
                 for i, entry in enumerate(buffer_issues, 1):
                     msg = (f"[{i}] {entry['description']}\n"
@@ -1003,7 +1011,7 @@ if __name__ == "__main__":
         printError(f"\n{'=' * 80}")
         printError(f"FAILED EXPERIMENTS: {len(failed_experiments)} out of {total_runs}")
         printError(f"{'=' * 80}")
-        failures_file = "failed_experiments.txt"
+        failures_file = os.path.join(output_dir, "failed_experiments.txt")
         with open(failures_file, 'w') as f:
             for i, failure in enumerate(failed_experiments, 1):
                 msg = (f"[{i}] {failure['description']}\n"

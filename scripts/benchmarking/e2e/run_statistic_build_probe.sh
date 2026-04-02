@@ -14,14 +14,19 @@
 
 set -euo pipefail
 
+# Create a timestamped output directory for this experiment run
+OUTPUT_DIR="benchmark_run_$(date +%Y%m%d_%H%M%S)"
+mkdir -p "$OUTPUT_DIR"
+echo "Output directory: $(realpath "$OUTPUT_DIR")"
+
 # Create a Python virtual environment and install the required python libraries
 python3 -m venv myenv
 source myenv/bin/activate
 pip3 install argparse requests pandas pyyaml
 
-myenv/bin/python3 -m scripts.benchmarking.e2e.run_statistic_build --all
+myenv/bin/python3 -m scripts.benchmarking.e2e.run_statistic_build --all --output-dir "$OUTPUT_DIR"
 
-myenv/bin/python3 -m scripts.benchmarking.e2e.run_statistic_probe --all
+myenv/bin/python3 -m scripts.benchmarking.e2e.run_statistic_probe --all --output-dir "$OUTPUT_DIR"
 
 # Deactivate the virtual environment
 deactivate

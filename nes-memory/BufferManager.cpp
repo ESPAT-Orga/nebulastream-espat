@@ -30,8 +30,8 @@
 #include <Runtime/BufferRecycler.hpp>
 #include <Runtime/TupleBuffer.hpp>
 #include <Util/Logger/Logger.hpp>
-#include <folly/MPMCQueue.h>
 #include <fmt/core.h>
+#include <folly/MPMCQueue.h>
 #include <ErrorHandling.hpp>
 #include <TupleBufferImpl.hpp>
 
@@ -177,8 +177,8 @@ TupleBuffer BufferManager::getBufferBlocking()
     }
     /// Print to stderr so the benchmark script can detect buffer exhaustion.
     /// NES_ERROR is compiled out at LEVEL_NONE, so we print directly.
-    fmt::print(stderr, "BUFFER_EXHAUSTION: Global buffer pool could not allocate buffer before timeout({}ms)\n",
-               GET_BUFFER_TIMEOUT.count());
+    fmt::print(
+        stderr, "BUFFER_EXHAUSTION: Global buffer pool could not allocate buffer before timeout({}ms)\n", GET_BUFFER_TIMEOUT.count());
     throw BufferAllocationFailure("Global buffer pool could not allocate buffer before timeout({})", GET_BUFFER_TIMEOUT);
 }
 

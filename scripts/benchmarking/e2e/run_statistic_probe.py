@@ -39,7 +39,8 @@ from datetime import datetime, timedelta
 from scripts.benchmarking.utils import *
 
 #### Configuration Constants
-allBuildWindowSizesSec = [1, 30, 60]
+#allBuildWindowSizesSec = [1, 30, 60]
+allBuildWindowSizesSec = [1, 60]
 # Number of build windows covered by a single probe window.
 # probe_window_size = build_window_size_sec * build_windows_per_probe_window
 allBuildWindowsPerProbeWindow = [1, 100, 1000]
@@ -80,7 +81,6 @@ allNumberOfWorkerThreads = ['1', '4', '16']
 allJoinStrategies = ["HASH_JOIN"]
 allPageSizes = [8192]
 allBufferConfigs = [(1048576, 10000)]
-# TODO adjust cli to support this
 allEnableLatencyListeners = [False, True]
 allNumStatisticIds = [1, 10, 100]
 throughputListenerInterval = 200
@@ -88,13 +88,13 @@ throughputListenerInterval = 200
 #### Statistic Build Configurations
 allReservoirSizes = [
     100,
-    500,
+    #500,
     1000
 ]
 allEquiWidthHistogramConfigs = [
     # (num_buckets, min_value, max_value, counter_type)
     (100, 0, 100 * 1000, "uint64"),
-    (500, 0, 100 * 1000, "uint64"),
+    #(500, 0, 100 * 1000, "uint64"),
     (1000, 0, 100 * 1000, "uint64"),
 ]
 allCountMinConfigs = [
@@ -103,9 +103,9 @@ allCountMinConfigs = [
     (5, 100, "uint64"),
     (10, 100, "uint64"),
 
-    (1, 1000, "uint64"),
-    (5, 1000, "uint64"),
-    (10, 1000, "uint64"),
+    #(1, 1000, "uint64"),
+    #(5, 1000, "uint64"),
+    #(10, 1000, "uint64"),
 
     (1, 10000, "uint64"),
     (5, 10000, "uint64"),
@@ -116,11 +116,11 @@ allCountMinConfigs = [
 # Each dataset lists which statistic types to benchmark and the path to the build dataset.
 # Templates are named {StatisticType}Build_{DatasetName}.yaml.template
 allDatasets = [
-    {
-        "name": "Nexmark",
-        "path": "nes-systests/testdata/large/nexmark/bid_6GB.csv",
-        "statistics": ["Reservoir", "EquiWidthHistogram", "CountMin"],
-    },
+    #{
+    #    "name": "Nexmark",
+    #    "path": "nes-systests/testdata/large/nexmark/bid_6GB.csv",
+    #    "statistics": ["Reservoir", "EquiWidthHistogram", "CountMin"],
+    #},
     {
         "name": "ClusterMonitoring",
         "path": "nes-systests/testdata/large/cluster_monitoring/google-cluster-data-original_1G.csv",

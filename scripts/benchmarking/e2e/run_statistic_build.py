@@ -34,6 +34,7 @@ from scripts.benchmarking.utils import *
 #### Benchmark Configurations
 build_dir = os.path.join(".", "build_dir")
 working_dir = os.path.join(build_dir, "working_dir")
+output_dir = "."
 csv_file_path = "results_nebulastream.csv"
 benchmark_json_file = os.path.abspath(os.path.join(working_dir, "BenchmarkResults.json"))
 systest_executable = os.path.join(build_dir, "nes-systests/systest/systest")
@@ -54,7 +55,7 @@ allNumberOfWorkerThreads = ['1', '4', '16']  # ['1', '4', '8', '16', '24'] #['4'
 allJoinStrategies = ["HASH_JOIN"]
 allPageSizes = [8192]
 # [4000000] if buffer size is 8192 #[500000] if buffer size is 102400
-allBufferConfigs = [(1048576, 20000)]
+allBufferConfigs = [(1048576, 10000)]
 allEnableLatencyListeners = [False, True]
 allBuildWindowSizesSec = [1, 30, 60]
 throughputListenerInterval = 200
@@ -294,7 +295,14 @@ if __name__ == "__main__":
                         help="List of buffer configurations as tuples and buffer size is first, e.g., '(1234, 100) (128, 40)'.")
     parser.add_argument("--clean", action="store_true",
                         help="Remove and recreate the build directory before building.")
+    parser.add_argument("--output-dir", type=str, default=None,
+                        help="Directory for output CSV files. Created if it does not exist.")
     args = parser.parse_args()
+
+    if args.output_dir:
+        output_dir = args.output_dir
+        os.makedirs(output_dir, exist_ok=True)
+        csv_file_path = os.path.join(output_dir, "results_nebulastream.csv")
 
     # Generate query .test files from templates
     queries = generate_queries()

@@ -93,7 +93,8 @@ void StatisticStoreReader::execute(ExecutionContext& executionCtx, Record& recor
     const auto statisticMemArea = invoke(getStatisticDataProxy, operatorHandlerMemRef, statisticId, startTs, endTs);
     if (statisticMemArea != nullptr)
     {
-        for (auto statisticIterator = statisticProvider.begin(statisticMemArea); statisticIterator != statisticProvider.end(statisticMemArea);
+        for (auto statisticIterator = statisticProvider.begin(statisticMemArea);
+             statisticIterator != statisticProvider.end(statisticMemArea);
              ++statisticIterator)
         {
             /// Getting a record containing the data from the current statistic, e.g., for a histogram the upper, lower bound and counter

@@ -17,15 +17,9 @@ add_source_files(nes-statistics
         SubStoresStatisticStore.cpp
 )
 
-include(FetchContent)
-FetchContent_Declare(
-        googlebenchmark
-        GIT_REPOSITORY https://github.com/google/benchmark.git
-        GIT_TAG v1.9.1
-)
-set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "" FORCE)
-set(BENCHMARK_ENABLE_GTEST_TESTS OFF CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(googlebenchmark)
-
-add_executable(statistic-store-benchmark StatisticStoreBenchmark.cpp)
-target_link_libraries(statistic-store-benchmark PRIVATE nes-statistics benchmark::benchmark)
+add_executable(statistic-store-benchmark
+    StatisticStoreBenchmark.cpp
+    ProgressTracker.cpp
+    StatisticStoreBenchmarkUtils.cpp)
+target_include_directories(statistic-store-benchmark PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(statistic-store-benchmark PRIVATE nes-statistics)

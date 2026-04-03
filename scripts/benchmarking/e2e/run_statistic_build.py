@@ -55,7 +55,7 @@ allNumberOfWorkerThreads = ['1', '4', '16']  # ['1', '4', '8', '16', '24'] #['4'
 allJoinStrategies = ["HASH_JOIN"]
 allPageSizes = [8192]
 # [4000000] if buffer size is 8192 #[500000] if buffer size is 102400
-allBufferConfigs = [(1048576, 10000)]
+allBufferConfigs = [(1048576, 20000)]
 #allEnableLatencyListeners = [False, True]
 allEnableLatencyListeners = [False]
 #allBuildWindowSizesSec = [1, 30, 60]
@@ -119,7 +119,8 @@ def generate_queries():
     """Generate query dict and .test files from statistic build configurations.
 
     Iterates over all datasets and build window sizes, using per-dataset templates.
-    Returns a dict mapping ``(dataset_name, query_name)`` to the test file path.
+    Returns a dict mapping ``(dataset_name, query_name)`` to a dict with the test
+    file path and query metadata (statistic_type, statistic_config, build_window_size_sec).
     """
     os.makedirs(generated_test_dir, exist_ok=True)
     queries = {}
@@ -136,7 +137,12 @@ def generate_queries():
                     filepath = os.path.join(generated_test_dir, f"{name}.test")
                     with open(filepath, 'w') as f:
                         f.write(template.format(reservoir_size=reservoir_size, window_size=window_size))
-                    queries[(dataset_name, name)] = f"{filepath}:01"
+                    queries[(dataset_name, name)] = {
+                        'test_file': f"{filepath}:01",
+                        'statistic_type': 'Reservoir',
+                        'statistic_config': str(reservoir_size),
+                        'build_window_size_sec': window_size,
+                    }
 
             if "EquiWidthHistogram" in stat_types:
                 template = load_template(f"EquiWidthHistogramBuild_{dataset_name}.test.template")
@@ -147,7 +153,12 @@ def generate_queries():
                         f.write(template.format(num_buckets=num_buckets, min_value=min_value,
                                                 max_value=max_value, counter_type=counter_type,
                                                 window_size=window_size))
-                    queries[(dataset_name, name)] = f"{filepath}:01"
+                    queries[(dataset_name, name)] = {
+                        'test_file': f"{filepath}:01",
+                        'statistic_type': 'EquiWidthHistogram',
+                        'statistic_config': f"({num_buckets}, {min_value}, {max_value}, {counter_type})",
+                        'build_window_size_sec': window_size,
+                    }
 
             if "CountMin" in stat_types:
                 template = load_template(f"CountMinBuild_{dataset_name}.test.template")
@@ -157,7 +168,12 @@ def generate_queries():
                     with open(filepath, 'w') as f:
                         f.write(template.format(columns=columns, rows=rows, counter_type=counter_type,
                                                 window_size=window_size))
-                    queries[(dataset_name, name)] = f"{filepath}:01"
+                    queries[(dataset_name, name)] = {
+                        'test_file': f"{filepath}:01",
+                        'statistic_type': 'CountMin',
+                        'statistic_config': f"({columns}, {rows}, {counter_type})",
+                        'build_window_size_sec': window_size,
+                    }
 
     return queries
 
@@ -167,10 +183,11 @@ def initialize_csv_file():
     print("Initializing CSV file...")
     with open(csv_file_path, mode='w', newline='') as csv_file:
         fieldnames = [
-            'dataset', 'bytesPerSecond', 'query_name', 'time', 'tuplesPerSecond', 'tuplesPerSecond_listener',
+            'dataset', 'statistic_type', 'statistic_config', 'build_window_size_sec',
+            'bytesPerSecond', 'query_name', 'time', 'tuplesPerSecond', 'tuplesPerSecond_listener',
             'executionMode', 'numberOfWorkerThreads', 'buffersInGlobalBufferManager',
             'joinStrategy',
-            'bufferSizeInBytes', 'pageSize'
+            'bufferSizeInBytes', 'pageSize', 'enableLatency'
         ]
         writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
         writer.writeheader()
@@ -204,10 +221,34 @@ def parse_average_throughput_from_throughput_listener(console_output):
     return average_throughput
 
 
-def run_benchmark(config, dataset_name, query, queryIdx, workerConfigIdx, enableLatency, no_combinations, no_queries):
+def classify_crash(returncode, stdout):
+    """Classify a benchmark failure based on exit code and stdout."""
+    if returncode < 0:
+        signal_num = -returncode
+        signal_names = {6: "SIGABRT", 9: "SIGKILL", 11: "SIGSEGV", 15: "SIGTERM"}
+        signal_name = signal_names.get(signal_num, f"signal {signal_num}")
+        if "BUFFER_EXHAUSTION" in stdout:
+            return "buffer_exhaustion"
+        return f"crashed ({signal_name})"
+    # returncode > 128 is also a signal (128 + signal_num)
+    if returncode > 128:
+        signal_num = returncode - 128
+        signal_names = {6: "SIGABRT", 9: "SIGKILL", 11: "SIGSEGV", 15: "SIGTERM"}
+        signal_name = signal_names.get(signal_num, f"signal {signal_num}")
+        if "BUFFER_EXHAUSTION" in stdout:
+            return "buffer_exhaustion"
+        return f"crashed ({signal_name})"
+    return f"failed (exit code {returncode})"
+
+
+def run_benchmark(config, dataset_name, query, query_info, queryIdx, workerConfigIdx, enableLatency, no_combinations, no_queries):
+    """Run a single benchmark. Returns a string describing the issue, or None on success."""
     # Create the working directory
     create_folder_and_remove_if_exists(working_dir, indent="    ")
 
+    stdout = ""
+    benchmark_results = []
+    issue = None
     try:
         # Running the query with a particular worker configuration
         worker_config = (f"--worker.query_engine.number_of_worker_threads={numberOfWorkerThreads} "
@@ -220,7 +261,7 @@ def run_benchmark(config, dataset_name, query, queryIdx, workerConfigIdx, enable
                          f"--worker.latency_listener={enableLatency} "
                          f"--worker.throughput_listener_interval_in_ms={throughputListenerInterval}")
 
-        benchmark_command = f"{systest_executable} -b -t {os.path.abspath(queries[(dataset_name, query)])} --data {os.path.abspath(test_data_dir)} --workingDir={working_dir} -- {worker_config}"
+        benchmark_command = f"{systest_executable} -b -t {os.path.abspath(query_info['test_file'])} --data {os.path.abspath(test_data_dir)} --workingDir={working_dir} -- {worker_config}"
 
         print()
         printInfo(
@@ -233,32 +274,39 @@ def run_benchmark(config, dataset_name, query, queryIdx, workerConfigIdx, enable
             benchmark_results = json.loads(content)
             if not benchmark_results:
                 printError(f"    WARNING: No benchmark results found in {benchmark_json_file}")
-                benchmark_results = []
+    except subprocess.CalledProcessError as e:
+        issue = classify_crash(e.returncode, e.stdout or "")
+        printError(f"Benchmark run {issue} (skipping)")
     except json.JSONDecodeError as e:
-        printError(f"Failed to parse benchmark output as JSON from {benchmark_json_file}")
-        printError(f"Error details: {e}")
-        benchmark_results = []
-        exit(1)
+        issue = f"json_parse_error"
+        printError(f"Failed to parse benchmark output as JSON: {e}")
     except Exception as e:
-        printError(f"An unexpected error occurred: {e}")
-        benchmark_results = []
-        exit(1)
+        issue = f"exception: {e}"
+        printError(f"Benchmark run failed (skipping): {e}")
+
+    if not benchmark_results:
+        return issue or "no_results"
 
     with open(csv_file_path, mode='a', newline='') as csv_file:
         average_throughput = parse_average_throughput_from_throughput_listener(stdout)
         writer = csv.DictWriter(csv_file, fieldnames=[
-            'dataset', 'bytesPerSecond', 'query_name', 'time', 'tuplesPerSecond', 'tuplesPerSecond_listener',
+            'dataset', 'statistic_type', 'statistic_config', 'build_window_size_sec',
+            'bytesPerSecond', 'query_name', 'time', 'tuplesPerSecond', 'tuplesPerSecond_listener',
             'executionMode', 'numberOfWorkerThreads', 'buffersInGlobalBufferManager',
             'joinStrategy',
-            'bufferSizeInBytes', 'pageSize'
+            'bufferSizeInBytes', 'pageSize', 'enableLatency'
         ])
         for result in benchmark_results:
             result.pop('query name', None)
             result['dataset'] = dataset_name
             result['query_name'] = query
+            result['statistic_type'] = query_info['statistic_type']
+            result['statistic_config'] = query_info['statistic_config']
+            result['build_window_size_sec'] = query_info['build_window_size_sec']
             result['tuplesPerSecond_listener'] = average_throughput
             writer.writerow({**result, **config})
         print(f"    Results for config {config} written to CSV.")
+    return None
 
 
 def estimate_eta(start_time, end_time, completed_runs, total_runs):
@@ -345,6 +393,7 @@ if __name__ == "__main__":
     initialize_csv_file()
 
     start_time = time.time()
+    problematic_experiments = []
 
     # Iterate over all cross-product combinations for each query
     no_combinations = (
@@ -358,7 +407,7 @@ if __name__ == "__main__":
     no_queries = len(queries_to_run)
     total_runs = no_queries * no_combinations * NUM_RUNS_PER_EXPERIMENT
     completed_runs = 0
-    for queryIdx, (dataset_name, query) in enumerate(queries_to_run):
+    for queryIdx, ((dataset_name, query), query_info) in enumerate(queries_to_run.items()):
         workerConfigIdx = 0
 
         combinations = itertools.product(allExecutionModes, number_of_worker_threads_to_run,
@@ -381,12 +430,22 @@ if __name__ == "__main__":
                 'buffersInGlobalBufferManager': buffersInGlobalBufferManager,
                 'joinStrategy': joinStrategy,
                 'bufferSizeInBytes': bufferSizeInBytes,
-                'pageSize': pageSize
+                'pageSize': pageSize,
+                'enableLatency': enableLatency
             }
 
             for i in range(NUM_RUNS_PER_EXPERIMENT):
                 run_start = time.time()
-                run_benchmark(config, dataset_name, query, queryIdx + 1, workerConfigIdx, enableLatency, no_combinations, no_queries)
+                experiment_desc = (f"{dataset_name}/{query} "
+                                   f"threads={numberOfWorkerThreads} "
+                                   f"latency={enableLatency} "
+                                   f"run={i}")
+                issue = run_benchmark(config, dataset_name, query, query_info, queryIdx + 1, workerConfigIdx, enableLatency, no_combinations, no_queries)
+                if issue:
+                    problematic_experiments.append({
+                        'description': experiment_desc,
+                        'issue': issue,
+                    })
                 run_end = time.time()
                 completed_runs += 1
                 eta_h, eta_m, eta_s, eta_time = estimate_eta(start_time, run_end, completed_runs, total_runs)
@@ -401,3 +460,35 @@ if __name__ == "__main__":
 
     abs_csv_path = os.path.abspath(csv_file_path)
     printInfo(f"CSV Measurement file can be found in {abs_csv_path}")
+
+    # --- Report problematic experiments (crashes, buffer exhaustion, other failures) ---
+    if problematic_experiments:
+        buffer_issues = [p for p in problematic_experiments if p['issue'] == 'buffer_exhaustion']
+        crash_issues = [p for p in problematic_experiments if p['issue'] != 'buffer_exhaustion']
+
+        if crash_issues:
+            printError(f"\n{'=' * 80}")
+            printError(f"CRASHES / FAILURES: {len(crash_issues)}")
+            printError(f"{'=' * 80}")
+            ct_file = os.path.join(output_dir, "build_crashes_and_failures.txt")
+            with open(ct_file, 'w') as f:
+                for i, entry in enumerate(crash_issues, 1):
+                    msg = (f"[{i}] {entry['description']}\n"
+                           f"    Issue: {entry['issue']}\n")
+                    printError(msg)
+                    f.write(msg + "\n")
+            printError(f"Written to {os.path.abspath(ct_file)}")
+
+        if buffer_issues:
+            printError(f"\n{'=' * 80}")
+            printError(f"BUFFER EXHAUSTION: {len(buffer_issues)}")
+            printError(f"{'=' * 80}")
+            be_file = os.path.join(output_dir, "build_buffer_exhaustion.txt")
+            with open(be_file, 'w') as f:
+                for i, entry in enumerate(buffer_issues, 1):
+                    msg = (f"[{i}] {entry['description']}\n")
+                    printError(msg)
+                    f.write(msg + "\n")
+            printError(f"Written to {os.path.abspath(be_file)}")
+    else:
+        printSuccess(f"All {total_runs} benchmark runs completed successfully.")

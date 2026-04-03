@@ -80,7 +80,7 @@ allExecutionModes = ["COMPILER"]
 allNumberOfWorkerThreads = ['1', '4', '16']
 allJoinStrategies = ["HASH_JOIN"]
 allPageSizes = [8192]
-allBufferConfigs = [(1048576, 10000)]
+allBufferConfigs = [(1048576, 20000)]
 allEnableLatencyListeners = [False, True]
 allNumStatisticIds = [1, 10, 100]
 throughputListenerInterval = 200
@@ -983,7 +983,7 @@ if __name__ == "__main__":
             printError(f"\n{'=' * 80}")
             printError(f"CRASHES / TIMEOUTS: {len(crash_timeout_issues)}")
             printError(f"{'=' * 80}")
-            ct_file = os.path.join(output_dir, "crashes_and_timeouts.txt")
+            ct_file = os.path.join(output_dir, "probe_crashes_and_timeouts.txt")
             with open(ct_file, 'w') as f:
                 for i, entry in enumerate(crash_timeout_issues, 1):
                     msg = (f"[{i}] {entry['description']}\n"
@@ -997,7 +997,7 @@ if __name__ == "__main__":
             printError(f"\n{'=' * 80}")
             printError(f"BUFFER EXHAUSTION: {len(buffer_issues)}")
             printError(f"{'=' * 80}")
-            be_file = os.path.join(output_dir, "buffer_exhaustion.txt")
+            be_file = os.path.join(output_dir, "probe_buffer_exhaustion.txt")
             with open(be_file, 'w') as f:
                 for i, entry in enumerate(buffer_issues, 1):
                     msg = (f"[{i}] {entry['description']}\n"
@@ -1011,7 +1011,7 @@ if __name__ == "__main__":
         printError(f"\n{'=' * 80}")
         printError(f"FAILED EXPERIMENTS: {len(failed_experiments)} out of {total_runs}")
         printError(f"{'=' * 80}")
-        failures_file = os.path.join(output_dir, "failed_experiments.txt")
+        failures_file = os.path.join(output_dir, "probe_failed_experiments.txt")
         with open(failures_file, 'w') as f:
             for i, failure in enumerate(failed_experiments, 1):
                 msg = (f"[{i}] {failure['description']}\n"

@@ -594,7 +594,7 @@ def initialize_csv_file():
             'build_throughput_listener', 'build_duration_s',
             'executionMode', 'numberOfWorkerThreads',
             'buffersInGlobalBufferManager', 'joinStrategy',
-            'bufferSizeInBytes', 'pageSize', 'enableLatency'
+            'bufferSizeInBytes', 'pageSize', 'enableLatency', 'issue'
         ]
         writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
         writer.writeheader()
@@ -945,21 +945,42 @@ if __name__ == "__main__":
                                             'output_folder': run_folder,
                                         })
 
-                                if result:
-                                    # Write result to CSV
-                                    with open(csv_file_path, mode='a', newline='') as csv_out:
-                                        fieldnames = [
-                                            'dataset', 'statistic_type', 'statistic_config', 'query_name',
-                                            'num_statistic_ids', 'build_window_size_sec', 'build_windows_per_probe_window',
-                                            'probe_throughput_listener', 'probe_duration_s',
-                                            'build_throughput_listener', 'build_duration_s',
-                                            'executionMode', 'numberOfWorkerThreads',
-                                            'buffersInGlobalBufferManager', 'joinStrategy',
-                                            'bufferSizeInBytes', 'pageSize', 'enableLatency'
-                                        ]
-                                        writer = csv.DictWriter(csv_out, fieldnames=fieldnames)
+                                probe_fieldnames = [
+                                    'dataset', 'statistic_type', 'statistic_config', 'query_name',
+                                    'num_statistic_ids', 'build_window_size_sec', 'build_windows_per_probe_window',
+                                    'probe_throughput_listener', 'probe_duration_s',
+                                    'build_throughput_listener', 'build_duration_s',
+                                    'executionMode', 'numberOfWorkerThreads',
+                                    'buffersInGlobalBufferManager', 'joinStrategy',
+                                    'bufferSizeInBytes', 'pageSize', 'enableLatency', 'issue'
+                                ]
+
+                                with open(csv_file_path, mode='a', newline='') as csv_out:
+                                    writer = csv.DictWriter(csv_out, fieldnames=probe_fieldnames)
+                                    if result:
+                                        result['issue'] = ';'.join(issues) if issues else 'ok'
                                         writer.writerow(result)
-                                    printSuccess(f"Results written to {csv_file_path}")
+                                        printSuccess(f"Results written to {csv_file_path}")
+                                    else:
+                                        # Write a row with the issue and config but no measurements
+                                        issue_str = ';'.join(issues) if issues else 'no_result'
+                                        row = {
+                                            'dataset': dataset_name or '',
+                                            'statistic_type': statistic_type,
+                                            'statistic_config': str(statistic_config),
+                                            'num_statistic_ids': num_statistic_ids,
+                                            'build_window_size_sec': build_window_size_sec,
+                                            'build_windows_per_probe_window': build_windows_per_probe_window,
+                                            'executionMode': executionMode,
+                                            'numberOfWorkerThreads': numberOfWorkerThreads,
+                                            'buffersInGlobalBufferManager': buffersInGlobalBufferManager,
+                                            'joinStrategy': joinStrategy,
+                                            'bufferSizeInBytes': bufferSizeInBytes,
+                                            'pageSize': pageSize,
+                                            'enableLatency': enableLatency,
+                                            'issue': issue_str,
+                                        }
+                                        writer.writerow(row)
 
                             except Exception as e:
                                 printError(f"Experiment failed: {e}")

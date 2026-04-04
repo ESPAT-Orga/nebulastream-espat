@@ -223,20 +223,14 @@ def parse_average_throughput_from_throughput_listener(console_output):
 
 def classify_crash(returncode, stdout):
     """Classify a benchmark failure based on exit code and stdout."""
-    if returncode < 0:
-        signal_num = -returncode
+    signal_num = -returncode if returncode < 0 else (returncode - 128 if returncode > 128 else 0)
+    if signal_num > 0:
         signal_names = {6: "SIGABRT", 9: "SIGKILL", 11: "SIGSEGV", 15: "SIGTERM"}
         signal_name = signal_names.get(signal_num, f"signal {signal_num}")
-        if "BUFFER_EXHAUSTION" in stdout:
+        if "BUFFER_EXHAUSTION" in (stdout or ""):
             return "buffer_exhaustion"
-        return f"crashed ({signal_name})"
-    # returncode > 128 is also a signal (128 + signal_num)
-    if returncode > 128:
-        signal_num = returncode - 128
-        signal_names = {6: "SIGABRT", 9: "SIGKILL", 11: "SIGSEGV", 15: "SIGTERM"}
-        signal_name = signal_names.get(signal_num, f"signal {signal_num}")
-        if "BUFFER_EXHAUSTION" in stdout:
-            return "buffer_exhaustion"
+        if signal_num == 9:
+            return "oom_killed"
         return f"crashed ({signal_name})"
     return f"failed (exit code {returncode})"
 
@@ -261,7 +255,12 @@ def run_benchmark(config, dataset_name, query, query_info, queryIdx, workerConfi
                          f"--worker.latency_listener={enableLatency} "
                          f"--worker.throughput_listener_interval_in_ms={throughputListenerInterval}")
 
-        benchmark_command = f"{systest_executable} -b -t {os.path.abspath(query_info['test_file'])} --data {os.path.abspath(test_data_dir)} --workingDir={working_dir} -- {worker_config}"
+        raw_command = f"{systest_executable} -b -t {os.path.abspath(query_info['test_file'])} --data {os.path.abspath(test_data_dir)} --workingDir={working_dir} -- {worker_config}"
+
+        # Wrap the command so the systest child gets oom_score_adj=1000, making it the
+        # preferred OOM-kill target. This protects the benchmark script and tmux session
+        # from being killed when the system under test exhausts memory.
+        benchmark_command = f"echo 1000 > /proc/self/oom_score_adj && exec {raw_command}"
 
         print()
         printInfo(
@@ -391,6 +390,13 @@ if __name__ == "__main__":
 
     # Init csv files
     initialize_csv_file()
+
+    # Lower our own OOM score so the kernel prefers to kill the system under test, not us.
+    try:
+        with open("/proc/self/oom_score_adj", "w") as f:
+            f.write("-1000")
+    except OSError:
+        pass
 
     start_time = time.time()
     problematic_experiments = []

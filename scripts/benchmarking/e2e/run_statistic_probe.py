@@ -323,6 +323,15 @@ def start_single_node_worker(file_path_stdout, numberOfWorkerThreads, executionM
     printInfo(f"Starting the single node worker with {cmd}")
     process = subprocess.Popen(cmd.split(" "), stdout=file_path_stdout, stderr=subprocess.STDOUT)
     pid = process.pid
+
+    # Make the worker the preferred OOM-kill target so that memory exhaustion
+    # kills this process rather than the benchmark script or the tmux session.
+    try:
+        with open(f"/proc/{pid}/oom_score_adj", "w") as f:
+            f.write("1000")
+    except OSError:
+        pass  # Best-effort; may fail if process exited already
+
     printSuccess(f"Started single node worker with pid {pid}")
 
     # Verify the worker is still alive after startup
@@ -832,6 +841,13 @@ if __name__ == "__main__":
     # Optionally clean the build directory
     if args.clean:
         create_folder_and_remove_if_exists(build_dir)
+
+    # Lower our own OOM score so the kernel prefers to kill the system under test, not us.
+    try:
+        with open("/proc/self/oom_score_adj", "w") as f:
+            f.write("-1000")
+    except OSError:
+        pass
 
     # Build NebulaStream
     compile_nebulastream(cmake_flags, build_dir)

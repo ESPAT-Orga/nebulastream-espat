@@ -187,7 +187,7 @@ def initialize_csv_file():
             'bytesPerSecond', 'query_name', 'time', 'tuplesPerSecond', 'tuplesPerSecond_listener',
             'executionMode', 'numberOfWorkerThreads', 'buffersInGlobalBufferManager',
             'joinStrategy',
-            'bufferSizeInBytes', 'pageSize', 'enableLatency'
+            'bufferSizeInBytes', 'pageSize', 'enableLatency', 'issue'
         ]
         writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
         writer.writeheader()
@@ -283,18 +283,32 @@ def run_benchmark(config, dataset_name, query, query_info, queryIdx, workerConfi
         issue = f"exception: {e}"
         printError(f"Benchmark run failed (skipping): {e}")
 
-    if not benchmark_results:
-        return issue or "no_results"
+    fieldnames = [
+        'dataset', 'statistic_type', 'statistic_config', 'build_window_size_sec',
+        'bytesPerSecond', 'query_name', 'time', 'tuplesPerSecond', 'tuplesPerSecond_listener',
+        'executionMode', 'numberOfWorkerThreads', 'buffersInGlobalBufferManager',
+        'joinStrategy',
+        'bufferSizeInBytes', 'pageSize', 'enableLatency', 'issue'
+    ]
 
     with open(csv_file_path, mode='a', newline='') as csv_file:
+        writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
+
+        if not benchmark_results:
+            issue = issue or "no_results"
+            row = {
+                'dataset': dataset_name,
+                'query_name': query,
+                'statistic_type': query_info['statistic_type'],
+                'statistic_config': query_info['statistic_config'],
+                'build_window_size_sec': query_info['build_window_size_sec'],
+                'issue': issue,
+                **config,
+            }
+            writer.writerow(row)
+            return issue
+
         average_throughput = parse_average_throughput_from_throughput_listener(stdout)
-        writer = csv.DictWriter(csv_file, fieldnames=[
-            'dataset', 'statistic_type', 'statistic_config', 'build_window_size_sec',
-            'bytesPerSecond', 'query_name', 'time', 'tuplesPerSecond', 'tuplesPerSecond_listener',
-            'executionMode', 'numberOfWorkerThreads', 'buffersInGlobalBufferManager',
-            'joinStrategy',
-            'bufferSizeInBytes', 'pageSize', 'enableLatency'
-        ])
         for result in benchmark_results:
             result.pop('query name', None)
             result['dataset'] = dataset_name
@@ -302,7 +316,7 @@ def run_benchmark(config, dataset_name, query, query_info, queryIdx, workerConfi
             result['statistic_type'] = query_info['statistic_type']
             result['statistic_config'] = query_info['statistic_config']
             result['build_window_size_sec'] = query_info['build_window_size_sec']
-            result['tuplesPerSecond_listener'] = average_throughput
+            result['issue'] = 'ok'
             writer.writerow({**result, **config})
         print(f"    Results for config {config} written to CSV.")
     return None

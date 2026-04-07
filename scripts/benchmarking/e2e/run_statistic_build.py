@@ -257,10 +257,9 @@ def run_benchmark(config, dataset_name, query, query_info, queryIdx, workerConfi
 
         raw_command = f"{systest_executable} -b -t {os.path.abspath(query_info['test_file'])} --data {os.path.abspath(test_data_dir)} --workingDir={working_dir} -- {worker_config}"
 
-        # Wrap the command so the systest child gets oom_score_adj=1000, making it the
-        # preferred OOM-kill target. This protects the benchmark script and tmux session
-        # from being killed when the system under test exhausts memory.
-        benchmark_command = f"echo 1000 > /proc/self/oom_score_adj && exec {raw_command}"
+        # Run in a separate systemd scope so that if the OOM killer fires, only this
+        # scope is killed — the benchmark script and tmux session survive.
+        benchmark_command = f"systemd-run --user --scope --quiet {raw_command}"
 
         print()
         printInfo(

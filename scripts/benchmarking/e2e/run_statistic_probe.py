@@ -319,19 +319,10 @@ def start_single_node_worker(file_path_stdout, numberOfWorkerThreads, executionM
                      f"--worker.latency_listener={enableLatency} "
                      f"--worker.throughput_listener_interval_in_ms={throughputListenerInterval}")
 
-    cmd = f"{single_node_executable} {worker_config}"
+    cmd = f"systemd-run --user --scope --quiet {single_node_executable} {worker_config}"
     printInfo(f"Starting the single node worker with {cmd}")
     process = subprocess.Popen(cmd.split(" "), stdout=file_path_stdout, stderr=subprocess.STDOUT)
     pid = process.pid
-
-    # Make the worker the preferred OOM-kill target so that memory exhaustion
-    # kills this process rather than the benchmark script or the tmux session.
-    try:
-        with open(f"/proc/{pid}/oom_score_adj", "w") as f:
-            f.write("1000")
-    except OSError:
-        pass  # Best-effort; may fail if process exited already
-
     printSuccess(f"Started single node worker with pid {pid}")
 
     # Verify the worker is still alive after startup

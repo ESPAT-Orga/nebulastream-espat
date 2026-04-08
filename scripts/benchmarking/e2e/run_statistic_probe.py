@@ -48,7 +48,7 @@ allBuildWindowsPerProbeWindow = [1, 1000]
 NUM_PROBE_TUPLES = 10
 # Number of times to repeat the probe tuples so the probe query runs long enough
 # for the throughput listener to capture measurements.
-NUM_PROBE_REPETITIONS = 1
+allNumProbeRepetitions = [100, 100000]
 
 # Statistic IDs used in build queries (must match the ID in the SQL template)
 STATISTIC_IDS = {
@@ -867,7 +867,7 @@ if __name__ == "__main__":
 
     total_runs = (len(experiments) * len(worker_combinations)
                   * len(allNumStatisticIds) * len(allBuildWindowSizesSec)
-                  * len(allBuildWindowsPerProbeWindow)
+                  * len(allBuildWindowsPerProbeWindow) * len(allNumProbeRepetitions)
                   * NUM_RUNS_PER_EXPERIMENT)
     completed_runs = 0
     failed_experiments = []       # hard failures (submit failed, exception)
@@ -879,6 +879,7 @@ if __name__ == "__main__":
     printInfo(f"Number of statistic IDs: {allNumStatisticIds}")
     printInfo(f"Build window sizes (sec): {allBuildWindowSizesSec}")
     printInfo(f"Build windows per probe window: {allBuildWindowsPerProbeWindow}")
+    printInfo(f"Probe repetitions: {allNumProbeRepetitions}")
     printInfo(f"Total runs: {total_runs}")
     print()
 
@@ -896,115 +897,118 @@ if __name__ == "__main__":
             for num_statistic_ids in allNumStatisticIds:
                 for build_window_size_sec in allBuildWindowSizesSec:
                     for build_windows_per_probe_window in allBuildWindowsPerProbeWindow:
-                        for run_idx in range(NUM_RUNS_PER_EXPERIMENT):
-                            run_start = time.time()
+                        for num_probe_repetitions in allNumProbeRepetitions:
+                            for run_idx in range(NUM_RUNS_PER_EXPERIMENT):
+                                run_start = time.time()
 
-                            # Create per-run output folder
-                            run_folder = create_output_folder(
-                                f"{dataset_name}_{statistic_type}_{statistic_config}"
-                                f"_{numberOfWorkerThreads}threads"
-                                f"_{num_statistic_ids}ids"
-                                f"_{build_window_size_sec}sec"
-                                f"_{build_windows_per_probe_window}xwindow")
+                                # Create per-run output folder
+                                run_folder = create_output_folder(
+                                    f"{dataset_name}_{statistic_type}_{statistic_config}"
+                                    f"_{numberOfWorkerThreads}threads"
+                                    f"_{num_statistic_ids}ids"
+                                    f"_{build_window_size_sec}sec"
+                                    f"_{build_windows_per_probe_window}xwindow"
+                                    f"_{num_probe_repetitions}reps")
 
-                            # Open CLI log
-                            cli_log_path = os.path.join(run_folder, "nes-cli.log")
-                            cli_log_file = open(cli_log_path, 'w')
+                                # Open CLI log
+                                cli_log_path = os.path.join(run_folder, "nes-cli.log")
+                                cli_log_file = open(cli_log_path, 'w')
 
-                            experiment_desc = (f"{dataset_name}/{statistic_type} "
-                                               f"config={statistic_config} "
-                                               f"threads={numberOfWorkerThreads} "
-                                               f"statistic_ids={num_statistic_ids} "
-                                               f"build_window={build_window_size_sec}s "
-                                               f"build_windows_per_probe={build_windows_per_probe_window} "
-                                               f"run={run_idx}")
+                                experiment_desc = (f"{dataset_name}/{statistic_type} "
+                                                   f"config={statistic_config} "
+                                                   f"threads={numberOfWorkerThreads} "
+                                                   f"statistic_ids={num_statistic_ids} "
+                                                   f"build_window={build_window_size_sec}s "
+                                                   f"build_windows_per_probe={build_windows_per_probe_window} "
+                                                   f"probe_reps={num_probe_repetitions} "
+                                                   f"run={run_idx}")
 
-                            try:
-                                printInfo(f"\n{'=' * 80}")
-                                printInfo(f"Experiment [{completed_runs + 1}/{total_runs}] starting at {datetime.now().strftime('%H:%M:%S')}: {experiment_desc}")
-                                printInfo(f"{'=' * 80}")
+                                try:
+                                    printInfo(f"\n{'=' * 80}")
+                                    printInfo(f"Experiment [{completed_runs + 1}/{total_runs}] starting at {datetime.now().strftime('%H:%M:%S')}: {experiment_desc}")
+                                    printInfo(f"{'=' * 80}")
 
-                                result, issues = run_experiment(
-                                    statistic_type, statistic_config, worker_config,
-                                    build_dataset_path, run_folder, cli_log_file,
-                                    num_statistic_ids=num_statistic_ids,
-                                    build_windows_per_probe_window=build_windows_per_probe_window,
-                                    dataset_name=dataset_name,
-                                    build_window_size_sec=build_window_size_sec,
-                                    enableLatency=enableLatency,
-                                    num_probe_tuples=num_probe_tuples,
-                                    num_probe_repetitions=NUM_PROBE_REPETITIONS)
+                                    result, issues = run_experiment(
+                                        statistic_type, statistic_config, worker_config,
+                                        build_dataset_path, run_folder, cli_log_file,
+                                        num_statistic_ids=num_statistic_ids,
+                                        build_windows_per_probe_window=build_windows_per_probe_window,
+                                        dataset_name=dataset_name,
+                                        build_window_size_sec=build_window_size_sec,
+                                        enableLatency=enableLatency,
+                                        num_probe_tuples=num_probe_tuples,
+                                        num_probe_repetitions=num_probe_repetitions)
 
-                                if issues:
-                                    for issue in issues:
-                                        problematic_experiments.append({
-                                            'description': experiment_desc,
-                                            'issue': issue,
-                                            'output_folder': run_folder,
-                                        })
+                                    if issues:
+                                        for issue in issues:
+                                            problematic_experiments.append({
+                                                'description': experiment_desc,
+                                                'issue': issue,
+                                                'output_folder': run_folder,
+                                            })
 
-                                probe_fieldnames = [
-                                    'dataset', 'statistic_type', 'statistic_config', 'query_name',
-                                    'num_statistic_ids', 'build_window_size_sec', 'build_windows_per_probe_window',
-                                    'num_probe_tuples', 'num_probe_repetitions',
-                                    'probe_throughput_listener', 'probe_duration_s',
-                                    'build_throughput_listener', 'build_duration_s',
-                                    'executionMode', 'numberOfWorkerThreads',
-                                    'buffersInGlobalBufferManager', 'joinStrategy',
-                                    'bufferSizeInBytes', 'pageSize', 'enableLatency', 'issue'
-                                ]
+                                    probe_fieldnames = [
+                                        'dataset', 'statistic_type', 'statistic_config', 'query_name',
+                                        'num_statistic_ids', 'build_window_size_sec', 'build_windows_per_probe_window',
+                                        'num_probe_tuples', 'num_probe_repetitions',
+                                        'probe_throughput_listener', 'probe_duration_s',
+                                        'build_throughput_listener', 'build_duration_s',
+                                        'executionMode', 'numberOfWorkerThreads',
+                                        'buffersInGlobalBufferManager', 'joinStrategy',
+                                        'bufferSizeInBytes', 'pageSize', 'enableLatency', 'issue'
+                                    ]
 
-                                with open(csv_file_path, mode='a', newline='') as csv_out:
-                                    writer = csv.DictWriter(csv_out, fieldnames=probe_fieldnames)
-                                    if result:
-                                        result['issue'] = ';'.join(issues) if issues else 'ok'
-                                        writer.writerow(result)
-                                        printSuccess(f"Results written to {csv_file_path}")
-                                    else:
-                                        # Write a row with the issue and config but no measurements
-                                        issue_str = ';'.join(issues) if issues else 'no_result'
-                                        row = {
-                                            'dataset': dataset_name or '',
-                                            'statistic_type': statistic_type,
-                                            'statistic_config': str(statistic_config),
-                                            'num_statistic_ids': num_statistic_ids,
-                                            'build_window_size_sec': build_window_size_sec,
-                                            'build_windows_per_probe_window': build_windows_per_probe_window,
-                                            'num_probe_tuples': num_probe_tuples,
-                                            'num_probe_repetitions': NUM_PROBE_REPETITIONS,
-                                            'executionMode': executionMode,
-                                            'numberOfWorkerThreads': numberOfWorkerThreads,
-                                            'buffersInGlobalBufferManager': buffersInGlobalBufferManager,
-                                            'joinStrategy': joinStrategy,
-                                            'bufferSizeInBytes': bufferSizeInBytes,
-                                            'pageSize': pageSize,
-                                            'enableLatency': enableLatency,
-                                            'issue': issue_str,
-                                        }
-                                        writer.writerow(row)
+                                    with open(csv_file_path, mode='a', newline='') as csv_out:
+                                        writer = csv.DictWriter(csv_out, fieldnames=probe_fieldnames)
+                                        if result:
+                                            result['issue'] = ';'.join(issues) if issues else 'ok'
+                                            writer.writerow(result)
+                                            printSuccess(f"Results written to {csv_file_path}")
+                                        else:
+                                            # Write a row with the issue and config but no measurements
+                                            issue_str = ';'.join(issues) if issues else 'no_result'
+                                            row = {
+                                                'dataset': dataset_name or '',
+                                                'statistic_type': statistic_type,
+                                                'statistic_config': str(statistic_config),
+                                                'num_statistic_ids': num_statistic_ids,
+                                                'build_window_size_sec': build_window_size_sec,
+                                                'build_windows_per_probe_window': build_windows_per_probe_window,
+                                                'num_probe_tuples': num_probe_tuples,
+                                                'num_probe_repetitions': num_probe_repetitions,
+                                                'executionMode': executionMode,
+                                                'numberOfWorkerThreads': numberOfWorkerThreads,
+                                                'buffersInGlobalBufferManager': buffersInGlobalBufferManager,
+                                                'joinStrategy': joinStrategy,
+                                                'bufferSizeInBytes': bufferSizeInBytes,
+                                                'pageSize': pageSize,
+                                                'enableLatency': enableLatency,
+                                                'issue': issue_str,
+                                            }
+                                            writer.writerow(row)
 
-                            except Exception as e:
-                                printError(f"Experiment failed: {e}")
-                                failed_experiments.append({
-                                    'description': experiment_desc,
-                                    'error': str(e),
-                                    'output_folder': run_folder,
-                                })
-                            finally:
-                                cli_log_file.close()
+                                except Exception as e:
+                                    printError(f"Experiment failed: {e}")
+                                    failed_experiments.append({
+                                        'description': experiment_desc,
+                                        'error': str(e),
+                                        'output_folder': run_folder,
+                                    })
+                                finally:
+                                    cli_log_file.close()
 
-                            run_end = time.time()
-                            completed_runs += 1
+                                run_end = time.time()
+                                completed_runs += 1
 
-                            if completed_runs < total_runs:
-                                eta_h, eta_m, eta_s, eta_time = estimate_eta(
-                                    start_time, run_end, completed_runs, total_runs)
-                                run_elapsed = run_end - run_start
-                                run_m, run_s = divmod(run_elapsed, 60)
-                                printInfo(f"[{completed_runs}/{total_runs}] finished at {datetime.now().strftime('%H:%M:%S')} "
-                                          f"(took {int(run_m)}m {run_s:.0f}s) | "
-                                          f"ETA: {eta_h}h {eta_m}m {eta_s:.0f}s remaining "
-                                          f"(~{eta_time.strftime('%H:%M:%S')})")
+                                if completed_runs < total_runs:
+                                    eta_h, eta_m, eta_s, eta_time = estimate_eta(
+                                        start_time, run_end, completed_runs, total_runs)
+                                    run_elapsed = run_end - run_start
+                                    run_m, run_s = divmod(run_elapsed, 60)
+                                    printInfo(f"[{completed_runs}/{total_runs}] finished at {datetime.now().strftime('%H:%M:%S')} "
+                                              f"(took {int(run_m)}m {run_s:.0f}s) | "
+                                              f"ETA: {eta_h}h {eta_m}m {eta_s:.0f}s remaining "
+                                              f"(~{eta_time.strftime('%H:%M:%S')})")
 
     elapsed = time.time() - start_time
     hours, remainder = divmod(elapsed, 3600)

@@ -459,6 +459,7 @@ if __name__ == "__main__":
                                    f"threads={numberOfWorkerThreads} "
                                    f"latency={enableLatency} "
                                    f"run={i}")
+                printInfo(f"Starting config at {datetime.now().strftime('%H:%M:%S')}: {experiment_desc}")
                 issue = run_benchmark(config, dataset_name, query, query_info, queryIdx + 1, workerConfigIdx, enableLatency, no_combinations, no_queries)
                 if issue:
                     problematic_experiments.append({
@@ -468,7 +469,10 @@ if __name__ == "__main__":
                 run_end = time.time()
                 completed_runs += 1
                 eta_h, eta_m, eta_s, eta_time = estimate_eta(start_time, run_end, completed_runs, total_runs)
-                printInfo(f"    [{completed_runs}/{total_runs}] took {run_end - run_start:.1f}s | "
+                run_elapsed = run_end - run_start
+                run_m, run_s = divmod(run_elapsed, 60)
+                printInfo(f"    [{completed_runs}/{total_runs}] finished at {datetime.now().strftime('%H:%M:%S')} "
+                         f"(took {int(run_m)}m {run_s:.0f}s) | "
                          f"ETA: {eta_h}h {eta_m}m {eta_s:.0f}s remaining "
                          f"(~{eta_time.strftime('%H:%M:%S')})")
 

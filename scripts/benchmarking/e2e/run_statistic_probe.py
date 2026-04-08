@@ -916,7 +916,7 @@ if __name__ == "__main__":
 
                             try:
                                 printInfo(f"\n{'=' * 80}")
-                                printInfo(f"Experiment [{completed_runs + 1}/{total_runs}]: {experiment_desc}")
+                                printInfo(f"Experiment [{completed_runs + 1}/{total_runs}] starting at {datetime.now().strftime('%H:%M:%S')}: {experiment_desc}")
                                 printInfo(f"{'=' * 80}")
 
                                 result, issues = run_experiment(
@@ -989,7 +989,10 @@ if __name__ == "__main__":
                             if completed_runs < total_runs:
                                 eta_h, eta_m, eta_s, eta_time = estimate_eta(
                                     start_time, run_end, completed_runs, total_runs)
-                                printInfo(f"[{completed_runs}/{total_runs}] took {run_end - run_start:.1f}s | "
+                                run_elapsed = run_end - run_start
+                                run_m, run_s = divmod(run_elapsed, 60)
+                                printInfo(f"[{completed_runs}/{total_runs}] finished at {datetime.now().strftime('%H:%M:%S')} "
+                                          f"(took {int(run_m)}m {run_s:.0f}s) | "
                                           f"ETA: {eta_h}h {eta_m}m {eta_s:.0f}s remaining "
                                           f"(~{eta_time.strftime('%H:%M:%S')})")
 

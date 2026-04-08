@@ -43,11 +43,12 @@ from scripts.benchmarking.utils import *
 allBuildWindowSizesSec = [1, 60]
 # Number of build windows covered by a single probe window.
 # probe_window_size = build_window_size_sec * build_windows_per_probe_window
-allBuildWindowsPerProbeWindow = [1, 100, 1000]
+#allBuildWindowsPerProbeWindow = [1, 100, 1000]
+allBuildWindowsPerProbeWindow = [1, 1000]
 NUM_PROBE_TUPLES = 10
 # Number of times to repeat the probe tuples so the probe query runs long enough
 # for the throughput listener to capture measurements.
-NUM_PROBE_REPETITIONS = 100000
+NUM_PROBE_REPETITIONS = 1
 
 # Statistic IDs used in build queries (must match the ID in the SQL template)
 STATISTIC_IDS = {
@@ -82,7 +83,8 @@ allJoinStrategies = ["HASH_JOIN"]
 allPageSizes = [8192]
 allBufferConfigs = [(1048576, 20000)]
 allEnableLatencyListeners = [False, True]
-allNumStatisticIds = [1, 10, 100]
+#allNumStatisticIds = [1, 10, 100]
+allNumStatisticIds = [1, 100]
 throughputListenerInterval = 200
 
 #### Statistic Build Configurations
@@ -100,15 +102,15 @@ allEquiWidthHistogramConfigs = [
 allCountMinConfigs = [
     # (rows, columns, counter_type)
     (1, 100, "uint64"),
-    (5, 100, "uint64"),
-    (10, 100, "uint64"),
+    #(5, 100, "uint64"),
+    #(10, 100, "uint64"),
 
     #(1, 1000, "uint64"),
     #(5, 1000, "uint64"),
     #(10, 1000, "uint64"),
 
-    (1, 10000, "uint64"),
-    (5, 10000, "uint64"),
+    #(1, 10000, "uint64"),
+    #(5, 10000, "uint64"),
     (10, 10000, "uint64"),
 ]
 
@@ -139,10 +141,8 @@ def load_template(name):
 
 
 def generate_probe_csv(probe_csv_path, statistic_ids, build_dataset_path,
-                       num_probes=NUM_PROBE_TUPLES,
-                       num_repetitions=NUM_PROBE_REPETITIONS,
-                       build_window_size_ms=10000,
-                       build_windows_per_probe_window=1):
+                       num_probes, num_repetitions,
+                       build_window_size_ms, build_windows_per_probe_window):
     """Generate a probe CSV file with probe tuples.
 
     Schema: STATISTICID, STATISTICSTART, STATISTICEND, STATISTICNUMBEROFSEENTUPLES
@@ -200,8 +200,7 @@ def get_build_statistic_ids(statistic_type, num_statistic_ids):
 
 
 def generate_build_query(statistic_type, config, output_dir, build_dataset_path,
-                         num_statistic_ids=1, dataset_name="Nexmark",
-                         build_window_size_sec=10):
+                         num_statistic_ids, dataset_name, build_window_size_sec):
     """Generate a build query yaml file and return (path, name, [statistic_ids]).
 
     When *num_statistic_ids* > 1 the YAML contains multiple SQL statements,
@@ -258,7 +257,7 @@ def generate_build_query(statistic_type, config, output_dir, build_dataset_path,
     return filepath, name, statistic_ids
 
 
-def generate_probe_query(statistic_type, config, output_dir, probe_csv_path, dataset_name="Nexmark"):
+def generate_probe_query(statistic_type, config, output_dir, probe_csv_path, dataset_name):
     """Generate a probe query yaml file and return its path.
 
     Templates are named ``{StatisticType}Probe_{DatasetName}.yaml.template``.
@@ -581,6 +580,7 @@ def initialize_csv_file():
         fieldnames = [
             'dataset', 'statistic_type', 'statistic_config', 'query_name',
             'num_statistic_ids', 'build_window_size_sec', 'build_windows_per_probe_window',
+            'num_probe_tuples', 'num_probe_repetitions',
             'probe_throughput_listener', 'probe_duration_s',
             'build_throughput_listener', 'build_duration_s',
             'executionMode', 'numberOfWorkerThreads',
@@ -612,9 +612,10 @@ def generate_all_experiments():
 
 
 def run_experiment(statistic_type, statistic_config, worker_config, build_dataset_path,
-                   output_dir, cli_log_file, num_statistic_ids=1,
-                   build_windows_per_probe_window=1, dataset_name=None,
-                   build_window_size_sec=10, enableLatency=False):
+                   output_dir, cli_log_file, num_statistic_ids,
+                   build_windows_per_probe_window, dataset_name,
+                   build_window_size_sec, enableLatency,
+                   num_probe_tuples, num_probe_repetitions):
     """Run a single build+probe experiment. Returns a (result_dict, issues) tuple.
 
     ``issues`` is a list of strings describing non-fatal problems observed
@@ -633,7 +634,9 @@ def run_experiment(statistic_type, statistic_config, worker_config, build_datase
     probe_csv_path = os.path.abspath(os.path.join(output_dir, f"probe_tuples_{build_name}.csv"))
     generate_probe_csv(probe_csv_path, statistic_ids, build_dataset_path,
                        build_window_size_ms=build_window_size_sec * 1000,
-                       build_windows_per_probe_window=build_windows_per_probe_window)
+                       build_windows_per_probe_window=build_windows_per_probe_window,
+                       num_probes=num_probe_tuples,
+                       num_repetitions=num_probe_repetitions)
 
     # Generate probe query
     probe_query_path, probe_name = generate_probe_query(
@@ -729,6 +732,8 @@ def run_experiment(statistic_type, statistic_config, worker_config, build_datase
             'num_statistic_ids': num_statistic_ids,
             'build_window_size_sec': build_window_size_sec,
             'build_windows_per_probe_window': build_windows_per_probe_window,
+            'num_probe_tuples': num_probe_tuples,
+            'num_probe_repetitions': num_probe_repetitions,
             'probe_throughput_listener': probe_throughput,
             'probe_duration_s': probe_duration,
             'build_throughput_listener': build_throughput,
@@ -926,7 +931,9 @@ if __name__ == "__main__":
                                     build_windows_per_probe_window=build_windows_per_probe_window,
                                     dataset_name=dataset_name,
                                     build_window_size_sec=build_window_size_sec,
-                                    enableLatency=enableLatency)
+                                    enableLatency=enableLatency,
+                                    num_probe_tuples=num_probe_tuples,
+                                    num_probe_repetitions=NUM_PROBE_REPETITIONS)
 
                                 if issues:
                                     for issue in issues:
@@ -939,6 +946,7 @@ if __name__ == "__main__":
                                 probe_fieldnames = [
                                     'dataset', 'statistic_type', 'statistic_config', 'query_name',
                                     'num_statistic_ids', 'build_window_size_sec', 'build_windows_per_probe_window',
+                                    'num_probe_tuples', 'num_probe_repetitions',
                                     'probe_throughput_listener', 'probe_duration_s',
                                     'build_throughput_listener', 'build_duration_s',
                                     'executionMode', 'numberOfWorkerThreads',
@@ -962,6 +970,8 @@ if __name__ == "__main__":
                                             'num_statistic_ids': num_statistic_ids,
                                             'build_window_size_sec': build_window_size_sec,
                                             'build_windows_per_probe_window': build_windows_per_probe_window,
+                                            'num_probe_tuples': num_probe_tuples,
+                                            'num_probe_repetitions': NUM_PROBE_REPETITIONS,
                                             'executionMode': executionMode,
                                             'numberOfWorkerThreads': numberOfWorkerThreads,
                                             'buffersInGlobalBufferManager': buffersInGlobalBufferManager,

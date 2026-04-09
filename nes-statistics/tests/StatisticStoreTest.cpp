@@ -36,7 +36,7 @@ Statistic createDummyStatistic(const Statistic::StatisticId statisticId, Windowi
 
     /// Picking a random statistic type value
     constexpr auto statisticTypes = magic_enum::enum_values<Statistic::StatisticType>();
-    std::uniform_int_distribution<> enumDistribution{0, magic_enum::enum_count<Statistic::StatisticType>()};
+    std::uniform_int_distribution<> enumDistribution{0, magic_enum::enum_count<Statistic::StatisticType>() - 1};
     const auto randomStatisticType = statisticTypes[enumDistribution(gen)];
 
     /// Generating random statistic data of size 1 to 100 KiB

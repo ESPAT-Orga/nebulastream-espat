@@ -15,6 +15,7 @@
 #include <ProgressTracker.hpp>
 #include <StatisticStoreBenchmarkUtils.hpp>
 
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -420,7 +421,8 @@ void runGetStatisticsBenchmark(std::ofstream& csv, ProgressTracker& progress)
                                 threads.reserve(hwThreads);
                                 for (uint64_t threadId = 0; threadId < hwThreads; ++threadId)
                                 {
-                                    const auto [start, end] = calcChunkBounds(threadId, numStatistics, hwThreads);
+                                    const auto start = stats.starts.at(threadId);
+                                    const auto end = stats.ends.at(threadId);
                                     threads.emplace_back(
                                         [&store, &stats, start, end]()
                                         {
@@ -467,6 +469,8 @@ void runGetStatisticsBenchmark(std::ofstream& csv, ProgressTracker& progress)
 
                             for (const auto numStatisticsPerRequest : Params::numStatisticsPerRequestVals)
                             {
+                                // As each window in the store contains only a single statistic, to have `numStatisticsPerRequest` statistics
+                                // per request, we need our query to span that many windows.
                                 const uint64_t queryRangeTs = numStatisticsPerRequest * windowSize;
 
                                 /// Pre-generate random start timestamps so the RNG cost is excluded from timing
@@ -816,8 +820,11 @@ void runBenchmarks(int argc, char* argv[])
 
     ProgressTracker progress{noInsertConfigs + noGetConfigs + noMixedConfigs};
 
+    auto now = std::chrono::system_clock::now();
+    auto local_time = std::chrono::zoned_time(std::chrono::current_zone(), now);
+
     std::cout << "=== StatisticStore Custom Benchmark ===\n";
-    std::cout << "Start time: " << std::chrono::system_clock::now() << "\n";
+    std::cout << "Local start time: " << local_time << "\n";
     std::cout << "Total configs: " << (noInsertConfigs + noGetConfigs + noMixedConfigs) << " (" << NUM_REPS << " reps each)\n";
     std::cout << "Random seed: " << RNG_SEED << "\n\n";
 

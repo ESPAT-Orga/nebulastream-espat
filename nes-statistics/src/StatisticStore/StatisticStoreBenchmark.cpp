@@ -298,7 +298,7 @@ static ChunkedPreparedStatistics createStats(
 /// InsertStatistic benchmark
 /// ============================================================
 
-void runInsertStatisticBenchmark(std::ofstream& csv, ProgressTracker& progress)
+void runInsertStatisticBenchmark(std::ofstream& csv, ProgressTracker& progress, BenchmarkArgs args)
 {
     using Params = InsertParams;
 
@@ -328,36 +328,45 @@ void runInsertStatisticBenchmark(std::ofstream& csv, ProgressTracker& progress)
                 forEachParam(
                     [&](const auto storeType, const auto numThreads)
                     {
-                        for (uint64_t rep = 0; rep < NUM_REPS; ++rep)
+                        auto currentBenchmarkReport = "Insert | " + padLeft(magic_enum::enum_name(storeType), 10) + " | " + pad("threads", numThreads, 2) + " | "
+                        + pad("stats", numStatistics, 7) + " | " + pad("ids", numStatisticIds, 7) + " | "
+                        + pad("size", statisticSize, 5) + " | " + pad("ws", Params::windowSize, 5);
+
+                        if (args.shouldSkip(currentBenchmarkReport))
                         {
-                            /// Fresh store for each repetition
-                            auto store = createStore(storeType, static_cast<int>(numThreads), Params::windowSize);
+                            progress.skip(currentBenchmarkReport, "", "was filtered or excluded.");
+                        }
+                        else
+                        {
+                            for (uint64_t rep = 0; rep < NUM_REPS; ++rep)
+                            {
 
-                            /// Copy prepared statistics before timing so the copy cost is excluded
-                            auto statsCopy = stats.preparedStatistics;
+                                /// Fresh store for each repetition
+                                auto store = createStore(storeType, static_cast<int>(numThreads), Params::windowSize);
 
-                            const auto durationMs = runTimedExperiment(
-                                numThreads,
-                                numStatistics,
-                                [&store, &statsCopy](const uint64_t start, const uint64_t end)
-                                {
-                                    for (uint64_t i = start; i < end; ++i)
+                                /// Copy prepared statistics before timing so the copy cost is excluded
+                                auto statsCopy = stats.preparedStatistics;
+
+                                const auto durationMs = runTimedExperiment(
+                                    numThreads,
+                                    numStatistics,
+                                    [&store, &statsCopy](const uint64_t start, const uint64_t end)
                                     {
-                                        auto& [statistic, statisticId] = statsCopy[i];
-                                        std::visit([&](auto& s) { s.insertStatistic(statisticId, std::move(statistic)); }, store);
-                                    }
-                                });
+                                        for (uint64_t i = start; i < end; ++i)
+                                        {
+                                            auto& [statistic, statisticId] = statsCopy[i];
+                                            std::visit([&](auto& s) { s.insertStatistic(statisticId, std::move(statistic)); }, store);
+                                        }
+                                    });
 
-                            csv << "InsertStatistic," << magic_enum::enum_name(storeType) << "," << numThreads << "," << numStatistics
-                                << "," << numStatisticIds << "," << statisticSize << "," << Params::windowSize << ",-1,-1,-1,-1,"
-                                << RNG_SEED << "," << rep << "," << durationMs << "\n"
-                                << std::flush;
+                                csv << "InsertStatistic," << magic_enum::enum_name(storeType) << "," << numThreads << "," << numStatistics
+                                    << "," << numStatisticIds << "," << statisticSize << "," << Params::windowSize << ",-1,-1,-1,-1,"
+                                    << RNG_SEED << "," << rep << "," << durationMs << "\n"
+                                    << std::flush;
+                            }
                         }
 
-                        progress.report(
-                            "Insert | " + padLeft(magic_enum::enum_name(storeType), 10) + " | " + pad("threads", numThreads, 2) + " | "
-                            + pad("stats", numStatistics, 7) + " | " + pad("ids", numStatisticIds, 7) + " | "
-                            + pad("size", statisticSize, 5) + " | " + pad("ws", Params::windowSize, 5));
+                        progress.report(currentBenchmarkReport);
                     },
                     Params::storeTypes,
                     Params::threadCounts);
@@ -469,7 +478,7 @@ void runGetStatisticsBenchmark(std::ofstream& csv, ProgressTracker& progress)
 
                             for (const auto numStatisticsPerRequest : Params::numStatisticsPerRequestVals)
                             {
-                                // As each window in the store contains only a single statistic, to have `numStatisticsPerRequest` statistics
+                                // As each window in the store shouldFilter only a single statistic, to have `numStatisticsPerRequest` statistics
                                 // per request, we need our query to span that many windows.
                                 const uint64_t queryRangeTs = numStatisticsPerRequest * windowSize;
 
@@ -718,105 +727,17 @@ void runInsertAndGetBenchmark(std::ofstream& csv, ProgressTracker& progress)
 
 /// ============================================================
 
-struct BenchmarkSelection
-{
-    bool runInsert = false;
-    bool runGet = false;
-    bool runMixed = false;
-};
-
-/// Parses --benchmarks insert,get,mixed.
-/// Valid tokens: insert, get, mixed.  Default (no flag): run all three.
-/// Prints usage and exits with 0 for --help/-h.
-/// Prints an error and exits with 1 for unrecognized arguments or invalid values.
-BenchmarkSelection parseBenchmarkSelection(int argc, char* argv[])
-{
-    auto printUsage = [&]()
-    {
-        std::cout << "Usage: " << argv[0] << " [--benchmarks <list>]\n"
-                  << "\n"
-                  << "Options:\n"
-                  << "  --benchmarks <list>   Comma-separated list of benchmarks to run.\n"
-                  << "                        Valid values: insert,get,mixed\n"
-                  << "                        Default: all three\n"
-                  << "  --help, -h            Print this help message and exit\n";
-    };
-
-    BenchmarkSelection sel;
-
-    for (int i = 1; i < argc; ++i)
-    {
-        std::string_view arg{argv[i]};
-
-        if (arg == "--help" || arg == "-h")
-        {
-            printUsage();
-            std::exit(0);
-        }
-
-        std::string_view value;
-        if (arg == "--benchmarks")
-        {
-            if (i + 1 >= argc)
-            {
-                std::cerr << "Error: --benchmarks requires a value\n";
-                printUsage();
-                std::exit(1);
-            }
-            value = argv[++i];
-        }
-        else
-        {
-            std::cerr << "Error: unrecognized argument '" << arg << "'\n";
-            printUsage();
-            std::exit(1);
-        }
-
-        std::string valueStr{value};
-        std::istringstream ss{valueStr};
-        std::string token;
-        while (std::getline(ss, token, ','))
-        {
-            if (token == "insert")
-            {
-                sel.runInsert = true;
-            }
-            else if (token == "get")
-            {
-                sel.runGet = true;
-            }
-            else if (token == "mixed")
-            {
-                sel.runMixed = true;
-            }
-            else
-            {
-                std::cerr << "Error: unknown benchmark '" << token << "'. Valid values: insert, get, mixed\n";
-                std::exit(1);
-            }
-        }
-    }
-
-    /// Default: run all benchmarks
-    if (!sel.runInsert && !sel.runGet && !sel.runMixed)
-    {
-        sel.runInsert = sel.runGet = sel.runMixed = true;
-    }
-
-    return sel;
-}
-
 void runBenchmarks(int argc, char* argv[])
 {
-    const auto [runInsert, runGet, runMixed] = parseBenchmarkSelection(argc, argv);
+    const auto args = BenchmarkArgs(argc, argv);
 
     std::ofstream csv{std::string{BENCHMARK_CSV}};
     csv << "benchmark,store_type,num_threads,num_statistics,num_statistic_ids,statistic_size,window_size,"
         << "pct_access_existing,num_statistics_per_request,pct_insert,pct_pre_populate,random_seed,repetition,duration_ms\n";
 
-    const uint64_t noInsertConfigs = runInsert ? InsertParams::validateAndCount() : 0;
-    const uint64_t noGetConfigs = runGet ? GetParams::validateAndCount() : 0;
-    const uint64_t noMixedConfigs = runMixed ? MixedParams::validateAndCount() : 0;
+    const uint64_t noInsertConfigs = InsertParams::validateAndCount();
+    const uint64_t noGetConfigs = GetParams::validateAndCount();
+    const uint64_t noMixedConfigs = MixedParams::validateAndCount();
 
     ProgressTracker progress{noInsertConfigs + noGetConfigs + noMixedConfigs};
 
@@ -830,37 +751,28 @@ void runBenchmarks(int argc, char* argv[])
 
     auto benchStart = std::chrono::steady_clock::now();
 
-    if (runInsert)
-    {
-        std::cout << "--- InsertStatistic (" << noInsertConfigs << " configs) ---\n";
-        progress.beginSection(noInsertConfigs);
-        runInsertStatisticBenchmark(csv, progress);
-        progress.finalizeProgressBar();
-        std::cout << "--- InsertStatistic finished in "
-                  << formatHMS(std::chrono::duration<double>(std::chrono::steady_clock::now() - benchStart).count()) << " ---\n";
-        benchStart = std::chrono::steady_clock::now();
-    }
+    std::cout << "--- InsertStatistic (" << noInsertConfigs << " configs) ---\n";
+    progress.beginSection(noInsertConfigs);
+    runInsertStatisticBenchmark(csv, progress, args);
+    progress.finalizeProgressBar();
+    std::cout << "--- InsertStatistic finished in "
+              << formatHMS(std::chrono::duration<double>(std::chrono::steady_clock::now() - benchStart).count()) << " ---\n";
+    benchStart = std::chrono::steady_clock::now();
 
-    if (runGet)
-    {
-        std::cout << "\n--- GetStatistics (" << noGetConfigs << " configs) ---\n";
-        progress.beginSection(noGetConfigs);
-        runGetStatisticsBenchmark(csv, progress);
-        progress.finalizeProgressBar();
-        std::cout << "--- GetStatistics finished in "
-                  << formatHMS(std::chrono::duration<double>(std::chrono::steady_clock::now() - benchStart).count()) << " ---\n";
-        benchStart = std::chrono::steady_clock::now();
-    }
+    std::cout << "\n--- GetStatistics (" << noGetConfigs << " configs) ---\n";
+    progress.beginSection(noGetConfigs);
+    runGetStatisticsBenchmark(csv, progress);
+    progress.finalizeProgressBar();
+    std::cout << "--- GetStatistics finished in "
+              << formatHMS(std::chrono::duration<double>(std::chrono::steady_clock::now() - benchStart).count()) << " ---\n";
+    benchStart = std::chrono::steady_clock::now();
 
-    if (runMixed)
-    {
-        std::cout << "\n--- InsertAndGetStatistics (" << noMixedConfigs << " configs) ---\n";
-        progress.beginSection(noMixedConfigs);
-        runInsertAndGetBenchmark(csv, progress);
-        progress.finalizeProgressBar();
-        std::cout << "--- InsertAndGetStatistics finished in "
-                  << formatHMS(std::chrono::duration<double>(std::chrono::steady_clock::now() - benchStart).count()) << " ---\n";
-    }
+    std::cout << "\n--- InsertAndGetStatistics (" << noMixedConfigs << " configs) ---\n";
+    progress.beginSection(noMixedConfigs);
+    runInsertAndGetBenchmark(csv, progress);
+    progress.finalizeProgressBar();
+    std::cout << "--- InsertAndGetStatistics finished in "
+              << formatHMS(std::chrono::duration<double>(std::chrono::steady_clock::now() - benchStart).count()) << " ---\n";
 
     std::cout << "\nBenchmarks complete in " << formatHMS(progress.getElapsedSeconds()) << ". Results written to "
               << std::filesystem::absolute(BENCHMARK_CSV).string() << "\n";

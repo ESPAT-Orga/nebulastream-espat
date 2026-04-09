@@ -15,6 +15,7 @@
 #include <StatisticStoreBenchmarkUtils.hpp>
 
 #include <iomanip>
+#include <iostream>
 #include <sstream>
 
 namespace NES
@@ -81,6 +82,76 @@ std::string formatBytes(const uint64_t bytes)
         oss << bytes << " B";
     }
     return oss.str();
+}
+
+bool BenchmarkArgs::shouldSkip(const std::string& reportLine) const
+{
+    for (const auto& word : filter)
+    {
+        if (not reportLine.contains(word))
+        {
+            return true;
+        }
+    }
+    for (const auto& word : exclude)
+    {
+        if (reportLine.contains(word))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+BenchmarkArgs::BenchmarkArgs(int argc, char* argv[])
+{
+    auto printUsage = [&]()
+    {
+        std::cout << "Usage: " << argv[0] << " [--filter <list>] [--exclude <list>]\n"
+                  << "\n"
+                  << "Options:\n"
+                  << "  --filter <list>  Comma-separated keywords; only configs containing ALL are run.\n"
+                  << "                   Example: --filter get,ws=60000\n"
+                  << "  --exclude <list> Comma-separated keywords; configs containing ANY are skipped.\n"
+                  << "                   Example: --exclude DEFAULT,threads=16\n"
+                  << "  --help, -h       Print this help message and exit\n";
+    };
+
+    auto parseTokens = [](std::string_view value, std::vector<std::string>& target)
+    {
+        std::istringstream ss{std::string{value}};
+        std::string token;
+        while (std::getline(ss, token, ','))
+            target.emplace_back(std::move(token));
+    };
+
+    for (int i = 1; i < argc; ++i)
+    {
+        std::string_view arg{argv[i]};
+
+        if (arg == "--help" || arg == "-h")
+        {
+            printUsage();
+            std::exit(0);
+        }
+        else if (arg == "--filter" || arg == "--exclude")
+        {
+            if (i + 1 >= argc)
+            {
+                std::cerr << "Error: " << arg << " requires a value\n";
+                printUsage();
+                std::exit(1);
+            }
+            auto& target = (arg == "--filter") ? filter : exclude;
+            parseTokens(argv[++i], target);
+        }
+        else
+        {
+            std::cerr << "Error: unrecognized argument '" << arg << "'\n";
+            printUsage();
+            std::exit(1);
+        }
+    }
 }
 
 }

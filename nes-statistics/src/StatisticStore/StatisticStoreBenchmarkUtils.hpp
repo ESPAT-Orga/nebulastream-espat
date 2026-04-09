@@ -89,4 +89,20 @@ double runTimedExperiment(const uint64_t numThreads, const uint64_t numItems, Th
     return std::chrono::duration<double, std::milli>(endTime - startTime).count();
 }
 
+struct BenchmarkArgs
+{
+    std::vector<std::string> filter;
+    std::vector<std::string> exclude;
+
+    /// Returns true if the config should be skipped:
+    /// - any filter token is absent from reportLine, or
+    /// - any exclude token is present in reportLine.
+    bool shouldSkip(const std::string& reportLine) const;
+
+    /// Parses --filter get,stats=50000 --exclude DEFAULT
+    /// Prints usage and exits with 0 for --help/-h.
+    /// Prints an error and exits with 1 for unrecognized arguments or invalid values.
+    BenchmarkArgs(int argc, char* argv[]);
+};
+
 }

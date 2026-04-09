@@ -15,7 +15,7 @@
 #include <ProgressTracker.hpp>
 #include <StatisticStoreBenchmarkUtils.hpp>
 
-#include <chrono>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -741,11 +741,9 @@ void runBenchmarks(int argc, char* argv[])
 
     ProgressTracker progress{noInsertConfigs + noGetConfigs + noMixedConfigs};
 
-    auto now = std::chrono::system_clock::now();
-    auto local_time = std::chrono::zoned_time(std::chrono::current_zone(), now);
-
+    const std::time_t now = std::time(nullptr);
     std::cout << "=== StatisticStore Custom Benchmark ===\n";
-    std::cout << "Local start time: " << local_time << "\n";
+    std::cout << "Local start time: " << std::put_time(std::localtime(&now), "%Y-%m-%d %H:%M:%S %Z") << "\n";
     std::cout << "Total configs: " << (noInsertConfigs + noGetConfigs + noMixedConfigs) << " (" << NUM_REPS << " reps each)\n";
     std::cout << "Random seed: " << RNG_SEED << "\n\n";
 

@@ -40,8 +40,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run statistic-store-benchmark.")
     parser.add_argument("--clean", action="store_true",
                         help="Remove and recreate the build directory before building.")
-    parser.add_argument("--benchmarks",
-                        help="Comma-separated list of benchmarks to run. Valid values: insert, get, mixed. Default: all three.")
+    parser.add_argument("--filter",
+                        help="Comma-separated keywords; only configs whose report line contains ALL keywords are run. Example: get,ws=60000")
+    parser.add_argument("--exclude",
+                        help="Comma-separated keywords; configs whose report line contains ANY keyword are skipped. Example: DEFAULT,threads=16")
     args = parser.parse_args()
 
     # Checking if the script has been executed from the repository root
@@ -56,8 +58,10 @@ if __name__ == "__main__":
 
     # Run the benchmark
     benchmark_command = benchmark_executable
-    if args.benchmarks:
-        benchmark_command += f" --benchmarks={args.benchmarks}"
+    if args.filter:
+        benchmark_command += f" --filter {args.filter}"
+    if args.exclude:
+        benchmark_command += f" --exclude {args.exclude}"
 
     printInfo("Running statistic-store-benchmark...")
     run_command_and_show_output(benchmark_command)

@@ -39,16 +39,17 @@ from datetime import datetime, timedelta
 from scripts.benchmarking.utils import *
 
 #### Configuration Constants
-#allBuildWindowSizesSec = [1, 30, 60]
-allBuildWindowSizesSec = [1, 60]
+allBuildWindowSizesSec = [1, 30, 60]
+#allBuildWindowSizesSec = [1, 60]
+#allBuildWindowSizesSec = [1]
 # Number of build windows covered by a single probe window.
 # probe_window_size = build_window_size_sec * build_windows_per_probe_window
-#allBuildWindowsPerProbeWindow = [1, 100, 1000]
-allBuildWindowsPerProbeWindow = [1, 1000]
+allBuildWindowsPerProbeWindow = [1, 100, 1000]
+#allBuildWindowsPerProbeWindow = [1, 1000]
 NUM_PROBE_TUPLES = 10
 # Number of times to repeat the probe tuples so the probe query runs long enough
 # for the throughput listener to capture measurements.
-allNumProbeRepetitions = [100, 100000]
+allNumProbeRepetitions = [1, 100000]
 
 # Statistic IDs used in build queries (must match the ID in the SQL template)
 STATISTIC_IDS = {
@@ -90,27 +91,27 @@ throughputListenerInterval = 200
 #### Statistic Build Configurations
 allReservoirSizes = [
     100,
-    #500,
+    500,
     1000
 ]
 allEquiWidthHistogramConfigs = [
     # (num_buckets, min_value, max_value, counter_type)
     (100, 0, 100 * 1000, "uint64"),
-    #(500, 0, 100 * 1000, "uint64"),
+    (500, 0, 100 * 1000, "uint64"),
     (1000, 0, 100 * 1000, "uint64"),
 ]
 allCountMinConfigs = [
     # (rows, columns, counter_type)
     (1, 100, "uint64"),
-    #(5, 100, "uint64"),
-    #(10, 100, "uint64"),
+    (5, 100, "uint64"),
+    (10, 100, "uint64"),
 
-    #(1, 1000, "uint64"),
-    #(5, 1000, "uint64"),
-    #(10, 1000, "uint64"),
+    (1, 1000, "uint64"),
+    (5, 1000, "uint64"),
+    (10, 1000, "uint64"),
 
-    #(1, 10000, "uint64"),
-    #(5, 10000, "uint64"),
+    (1, 10000, "uint64"),
+    (5, 10000, "uint64"),
     (10, 10000, "uint64"),
 ]
 
@@ -298,8 +299,15 @@ def terminate_process_if_exists(process):
     except subprocess.TimeoutExpired:
         printError(f"Process with PID {process.pid} did not terminate within timeout. Sending SIGKILL.")
         process.kill()
-        process.wait()
-        printError(f"Process with PID {process.pid} forcefully killed.")
+        try:
+            process.wait(timeout=10)
+            printError(f"Process with PID {process.pid} forcefully killed.")
+        except subprocess.TimeoutExpired:
+            printError(f"Process with PID {process.pid} could not be killed even with SIGKILL (D-state?).")
+    # systemd-run --scope does not forward signals to the child process, so the
+    # actual nes-single-node-worker may still be running after we kill systemd-run.
+    # Forcibly kill any remaining instances to avoid blocking the next experiment.
+    subprocess.run(["pkill", "-9", "-x", "nes-single-node-worker"], capture_output=True)
     # Brief pause after process exit to let the OS fully release the port.
     time.sleep(2)
 
@@ -344,7 +352,7 @@ def submit_query(query_file, cli_log_file, retries=3, retry_delay=5):
     for attempt in range(1, retries + 1):
         try:
             result = subprocess.run(cmd, check=True, stdout=subprocess.PIPE,
-                                    stderr=subprocess.PIPE, text=True)
+                                    stderr=subprocess.PIPE, text=True, timeout=60)
             query_ids = [qid for qid in result.stdout.strip().split('\n') if qid]
             cli_log_file.write(f"=== Submit query: {cmd} ===\n")
             cli_log_file.write(f"stdout: {result.stdout}\n")
@@ -630,15 +638,10 @@ def run_experiment(statistic_type, statistic_config, worker_config, build_datase
         num_statistic_ids=num_statistic_ids, dataset_name=dataset_name,
         build_window_size_sec=build_window_size_sec)
 
-    # Generate probe CSV — probes all statistic IDs from the build
+    # Determine probe CSV path now (content generated only after build succeeds)
     probe_csv_path = os.path.abspath(os.path.join(output_dir, f"probe_tuples_{build_name}.csv"))
-    generate_probe_csv(probe_csv_path, statistic_ids, build_dataset_path,
-                       build_window_size_ms=build_window_size_sec * 1000,
-                       build_windows_per_probe_window=build_windows_per_probe_window,
-                       num_probes=num_probe_tuples,
-                       num_repetitions=num_probe_repetitions)
 
-    # Generate probe query
+    # Generate probe query YAML — references probe_csv_path but doesn't need the file to exist yet
     probe_query_path, probe_name = generate_probe_query(
         statistic_type, statistic_config, output_dir, probe_csv_path,
         dataset_name=dataset_name)
@@ -656,6 +659,10 @@ def run_experiment(statistic_type, statistic_config, worker_config, build_datase
     issues = []
     build_query_ids = []
     probe_query_ids = []
+    build_throughput = -1
+    build_duration = 0.0
+    probe_throughput = -1
+    probe_duration = 0.0
     try:
         # === Phase 1: Build ===
         printInfo("=" * 60)
@@ -671,9 +678,6 @@ def run_experiment(statistic_type, statistic_config, worker_config, build_datase
         build_duration = build_end_time - build_start_time
         printInfo(f"Build phase completed in {build_duration:.1f}s")
 
-        if not build_ok:
-            issues.append(f"build:{build_reason}")
-
         # Stop the build queries and wait until they are fully stopped,
         # which also flushes remaining throughput windows via QueryStop.
         stop_queries_and_wait(build_query_ids, build_query_path, cli_log_file)
@@ -681,29 +685,42 @@ def run_experiment(statistic_type, statistic_config, worker_config, build_datase
         build_throughput = parse_average_throughput_from_throughput_listener(log_file_path, build_query_ids)
         printInfo(f"Build average throughput: {build_throughput:.2f} Tup/s")
 
-        # === Phase 2: Probe ===
-        printInfo("=" * 60)
-        printInfo(f"Phase 2: Probe ({probe_name})")
-        probe_start_time = time.time()
-        probe_query_ids = submit_query(probe_query_path, cli_log_file)
+        if not build_ok:
+            issues.append(f"build:{build_reason}")
+            printError(f"Build failed ({build_reason}), skipping probe phase.")
+        else:
+            # === Phase 2: Probe ===
+            # Generate the probe CSV only now that the build succeeded — for large
+            # repetition counts this file can be gigabytes, so we avoid writing it
+            # when the build would have failed anyway.
+            generate_probe_csv(probe_csv_path, statistic_ids, build_dataset_path,
+                               build_window_size_ms=build_window_size_sec * 1000,
+                               build_windows_per_probe_window=build_windows_per_probe_window,
+                               num_probes=num_probe_tuples,
+                               num_repetitions=num_probe_repetitions)
 
-        # Wait for probe query to stop by itself (file source exhausted)
-        probe_ok, probe_reason = wait_for_query_to_finish(
-            log_file_path, timeout=PROBE_DONE_TIMEOUT,
-            query_ids=probe_query_ids, worker_process=single_node_process)
-        probe_end_time = time.time()
-        probe_duration = probe_end_time - probe_start_time
-        printInfo(f"Probe phase completed in {probe_duration:.1f}s")
+            printInfo("=" * 60)
+            printInfo(f"Phase 2: Probe ({probe_name})")
+            probe_start_time = time.time()
+            probe_query_ids = submit_query(probe_query_path, cli_log_file)
 
-        if not probe_ok:
-            issues.append(f"probe:{probe_reason}")
+            # Wait for probe query to stop by itself (file source exhausted)
+            probe_ok, probe_reason = wait_for_query_to_finish(
+                log_file_path, timeout=PROBE_DONE_TIMEOUT,
+                query_ids=probe_query_ids, worker_process=single_node_process)
+            probe_end_time = time.time()
+            probe_duration = probe_end_time - probe_start_time
+            printInfo(f"Probe phase completed in {probe_duration:.1f}s")
 
-        # Stop the probe query and wait until fully stopped,
-        # which also flushes remaining throughput windows via QueryStop.
-        stop_queries_and_wait(probe_query_ids, probe_query_path, cli_log_file)
+            if not probe_ok:
+                issues.append(f"probe:{probe_reason}")
 
-        probe_throughput = parse_average_throughput_from_throughput_listener(log_file_path, probe_query_ids)
-        printInfo(f"Probe average throughput: {probe_throughput:.2f} Tup/s")
+            # Stop the probe query and wait until fully stopped,
+            # which also flushes remaining throughput windows via QueryStop.
+            stop_queries_and_wait(probe_query_ids, probe_query_path, cli_log_file)
+
+            probe_throughput = parse_average_throughput_from_throughput_listener(log_file_path, probe_query_ids)
+            printInfo(f"Probe average throughput: {probe_throughput:.2f} Tup/s")
 
         # Check for buffer exhaustion in the worker log (after both queries have run).
         # Buffer exhaustion can cause SIGSEGV when the thrown exception propagates
@@ -717,7 +734,7 @@ def run_experiment(statistic_type, statistic_config, worker_config, build_datase
         has_crash = any("crashed" in i for i in issues)
         if build_throughput < 0 and not has_buffer_exhaustion and not has_crash:
             issues.append("build:no_measurements")
-        if probe_throughput < 0 and not has_buffer_exhaustion and not has_crash:
+        if probe_throughput < 0 and not has_buffer_exhaustion and not has_crash and build_ok:
             issues.append("probe:no_measurements")
 
         # Parse full throughput log to CSV

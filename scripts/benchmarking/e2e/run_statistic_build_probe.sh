@@ -24,7 +24,7 @@ python3 -m venv myenv
 source myenv/bin/activate
 pip3 install argparse requests pandas pyyaml
 
-#myenv/bin/python3 -m scripts.benchmarking.e2e.run_statistic_build --all --output-dir "$OUTPUT_DIR"
+myenv/bin/python3 -m scripts.benchmarking.e2e.run_statistic_build --all --output-dir "$OUTPUT_DIR"
 
 myenv/bin/python3 -m scripts.benchmarking.e2e.run_statistic_probe --all --output-dir "$OUTPUT_DIR"
 

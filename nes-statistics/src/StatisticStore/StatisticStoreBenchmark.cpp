@@ -380,7 +380,7 @@ void runInsertStatisticBenchmark(std::ofstream& csv, ProgressTracker& progress, 
 /// GetStatistics benchmark
 /// ============================================================
 
-void runGetStatisticsBenchmark(std::ofstream& csv, ProgressTracker& progress)
+void runGetStatisticsBenchmark(std::ofstream& csv, ProgressTracker& progress, BenchmarkArgs args)
 {
     using Params = GetParams;
 
@@ -491,42 +491,51 @@ void runGetStatisticsBenchmark(std::ofstream& csv, ProgressTracker& progress)
                                     lookupStartTs[i] = startTsDist(gen);
                                 }
 
-                                /// The store is read-only during lookups, so we reuse it across repetitions
-                                for (uint64_t rep = 0; rep < NUM_REPS; ++rep)
-                                {
-                                    const auto durationMs = runTimedExperiment(
-                                        numThreads,
-                                        numStatistics,
-                                        [&store, &lookupIds, &lookupStartTs, queryRangeTs](const uint64_t start, const uint64_t end)
-                                        {
-                                            for (uint64_t i = start; i < end; ++i)
-                                            {
-                                                const auto& statisticId = lookupIds[i];
-                                                const auto startTs = lookupStartTs[i];
-                                                auto result = std::visit(
-                                                    [&](auto& s)
-                                                    {
-                                                        return s.getStatistics(
-                                                            statisticId,
-                                                            Windowing::TimeMeasure{startTs},
-                                                            Windowing::TimeMeasure{startTs + queryRangeTs});
-                                                    },
-                                                    store);
-                                            }
-                                        });
-
-                                    csv << "GetStatistics," << magic_enum::enum_name(storeType) << "," << numThreads << "," << numStatistics
-                                        << "," << numStatisticIds << "," << statisticSize << "," << windowSize << "," << pctAccessExisting
-                                        << "," << numStatisticsPerRequest << ",-1,-1," << RNG_SEED << "," << rep << "," << durationMs
-                                        << "\n"
-                                        << std::flush;
-                                }
-
-                                progress.report(
+                                const auto currentBenchmarkReport =
                                     "Get    | " + padLeft(magic_enum::enum_name(storeType), 10) + " | " + pad("threads", numThreads, 2)
                                     + " | " + pad("stats", numStatistics, 7) + " | " + pad("ids", numStatisticIds, 7) + " | "
                                     + pad("size", statisticSize, 5) + " | " + pad("ws", windowSize, 5) + " | "
-                                    + pad("pctExist", pctAccessExisting, 2) + " | " + pad("statsPerReq", numStatisticsPerRequest, 3));
+                                    + pad("pctExist", pctAccessExisting, 2) + " | " + pad("statsPerReq", numStatisticsPerRequest, 3);
+
+                                /// The store is read-only during lookups, so we reuse it across repetitions
+                                if (args.shouldSkip(currentBenchmarkReport))
+                                {
+                                    progress.skip(currentBenchmarkReport, "", "was filtered or excluded.");
+                                }
+                                else
+                                {
+                                    for (uint64_t rep = 0; rep < NUM_REPS; ++rep)
+                                    {
+                                        const auto durationMs = runTimedExperiment(
+                                            numThreads,
+                                            numStatistics,
+                                            [&store, &lookupIds, &lookupStartTs, queryRangeTs](const uint64_t start, const uint64_t end)
+                                            {
+                                                for (uint64_t i = start; i < end; ++i)
+                                                {
+                                                    const auto& statisticId = lookupIds[i];
+                                                    const auto startTs = lookupStartTs[i];
+                                                    auto result = std::visit(
+                                                        [&](auto& s)
+                                                        {
+                                                            return s.getStatistics(
+                                                                statisticId,
+                                                                Windowing::TimeMeasure{startTs},
+                                                                Windowing::TimeMeasure{startTs + queryRangeTs});
+                                                        },
+                                                        store);
+                                                }
+                                            });
+
+                                        csv << "GetStatistics," << magic_enum::enum_name(storeType) << "," << numThreads << "," << numStatistics
+                                            << "," << numStatisticIds << "," << statisticSize << "," << windowSize << "," << pctAccessExisting
+                                            << "," << numStatisticsPerRequest << ",-1,-1," << RNG_SEED << "," << rep << "," << durationMs
+                                            << "\n"
+                                            << std::flush;
+                                    }
+                                }
+
+                                progress.report(currentBenchmarkReport);
                             }
                         },
                         Params::storeTypes,
@@ -543,7 +552,7 @@ void runGetStatisticsBenchmark(std::ofstream& csv, ProgressTracker& progress)
 /// InsertAndGetStatistics benchmark
 /// ============================================================
 
-void runInsertAndGetBenchmark(std::ofstream& csv, ProgressTracker& progress)
+void runInsertAndGetBenchmark(std::ofstream& csv, ProgressTracker& progress, BenchmarkArgs args)
 {
     using Params = MixedParams;
 
@@ -628,7 +637,18 @@ void runInsertAndGetBenchmark(std::ofstream& csv, ProgressTracker& progress)
                                     lookupStartTs[i] = startTsDist(opRng);
                                 }
 
-                                for (uint64_t rep = 0; rep < NUM_REPS; ++rep)
+                                const auto currentBenchmarkReport =
+                                    "Mixed  | " + padLeft(magic_enum::enum_name(storeType), 10) + " | " + pad("threads", numThreads, 2)
+                                    + " | " + pad("stats", numStatistics, 7) + " | " + pad("ids", numStatisticIds, 7) + " | "
+                                    + pad("size", statisticSize, 5) + " | " + pad("ws", windowSize, 5) + " | "
+                                    + pad("pctPrePop", pctPrePopulate, 2) + " | " + pad("pctInsert", pctInsert, 2) + " | "
+                                    + pad("statsPerReq", numStatisticsPerRequest, 3);
+
+                                if (args.shouldSkip(currentBenchmarkReport))
+                                {
+                                    progress.skip(currentBenchmarkReport, "", "was filtered or excluded.");
+                                }
+                                else for (uint64_t rep = 0; rep < NUM_REPS; ++rep)
                                 {
                                     /// Fresh store per rep since inserts modify state
                                     auto store = createStore(storeType, static_cast<int>(numThreads), windowSize);
@@ -706,12 +726,7 @@ void runInsertAndGetBenchmark(std::ofstream& csv, ProgressTracker& progress)
                                         << std::flush;
                                 }
 
-                                progress.report(
-                                    "Mixed  | " + padLeft(magic_enum::enum_name(storeType), 10) + " | " + pad("threads", numThreads, 2)
-                                    + " | " + pad("stats", numStatistics, 7) + " | " + pad("ids", numStatisticIds, 7) + " | "
-                                    + pad("size", statisticSize, 5) + " | " + pad("ws", windowSize, 5) + " | "
-                                    + pad("pctPrePop", pctPrePopulate, 2) + " | " + pad("pctInsert", pctInsert, 2) + " | "
-                                    + pad("statsPerReq", numStatisticsPerRequest, 3));
+                                progress.report(currentBenchmarkReport);
                             },
                             Params::storeTypes,
                             Params::pctInsertVals,
@@ -759,7 +774,7 @@ void runBenchmarks(int argc, char* argv[])
 
     std::cout << "\n--- GetStatistics (" << noGetConfigs << " configs) ---\n";
     progress.beginSection(noGetConfigs);
-    runGetStatisticsBenchmark(csv, progress);
+    runGetStatisticsBenchmark(csv, progress, args);
     progress.finalizeProgressBar();
     std::cout << "--- GetStatistics finished in "
               << formatHMS(std::chrono::duration<double>(std::chrono::steady_clock::now() - benchStart).count()) << " ---\n";
@@ -767,7 +782,7 @@ void runBenchmarks(int argc, char* argv[])
 
     std::cout << "\n--- InsertAndGetStatistics (" << noMixedConfigs << " configs) ---\n";
     progress.beginSection(noMixedConfigs);
-    runInsertAndGetBenchmark(csv, progress);
+    runInsertAndGetBenchmark(csv, progress, args);
     progress.finalizeProgressBar();
     std::cout << "--- InsertAndGetStatistics finished in "
               << formatHMS(std::chrono::duration<double>(std::chrono::steady_clock::now() - benchStart).count()) << " ---\n";

@@ -22,7 +22,6 @@
 #include <cstdint>
 #include <iterator>
 #include <ranges>
-#include <unordered_map>
 #include <utility>
 
 namespace NES
@@ -44,8 +43,7 @@ SubStoresStatisticStore::SubStoresStatisticStore(const uint64_t numberOfExpected
     allSubStores.reserve(numberOfExpectedConcurrentAccess);
     for (uint64_t i = 0; i < numberOfExpectedConcurrentAccess; ++i)
     {
-        allSubStores.emplace_back(
-            folly::Synchronized<std::unordered_map<Statistic::StatisticId, std::vector<std::shared_ptr<Statistic>>>>{});
+        allSubStores.emplace_back(folly::Synchronized<std::vector<std::shared_ptr<Statistic>>>{});
     }
 }
 
@@ -53,7 +51,7 @@ bool SubStoresStatisticStore::insertStatistic(const Statistic::StatisticId& stat
 {
     const auto pos = getPos(statisticId, numberOfExpectedConcurrentAccess);
     const auto lockedStatisticStore = allSubStores[pos].wlock();
-    (*lockedStatisticStore)[statisticId].emplace_back(std::make_shared<Statistic>(statistic));
+    lockedStatisticStore->emplace_back(std::make_shared<Statistic>(statistic));
     return true;
 }
 
@@ -62,22 +60,15 @@ bool SubStoresStatisticStore::deleteStatistics(
 {
     const auto pos = getPos(statisticId, numberOfExpectedConcurrentAccess);
     const auto lockedStatisticStore = allSubStores[pos].wlock();
-    const auto it = lockedStatisticStore->find(statisticId);
-    if (it == lockedStatisticStore->end())
-    {
-        return false;
-    }
+    auto newIt = std::ranges::remove_if(
+        *lockedStatisticStore,
+        [startTs, endTs, statisticId](const std::shared_ptr<Statistic>& statistic)
+        { return statisticId == statistic->getStatisticId() and statistic->getStartTs() >= startTs and statistic->getEndTs() <= endTs; });
 
-    auto& bucket = it->second;
-    auto newEnd = std::ranges::remove_if(
-        bucket,
-        [startTs, endTs](const std::shared_ptr<Statistic>& statistic)
-        { return statistic->getStartTs() >= startTs and statistic->getEndTs() <= endTs; });
-
-    const auto foundAnyStatistic = newEnd.begin() != bucket.end();
+    const auto foundAnyStatistic = std::ranges::distance(newIt) > 0;
     if (foundAnyStatistic)
     {
-        bucket.erase(newEnd.begin(), bucket.end());
+        lockedStatisticStore->erase(newIt.begin(), newIt.end());
     }
 
     return foundAnyStatistic;
@@ -89,17 +80,14 @@ std::vector<std::shared_ptr<Statistic>> SubStoresStatisticStore::getStatistics(
     const auto pos = getPos(statisticId, numberOfExpectedConcurrentAccess);
     std::vector<std::shared_ptr<Statistic>> foundStatistics;
     const auto lockedStatisticStore = allSubStores[pos].rlock();
-    const auto it = lockedStatisticStore->find(statisticId);
-    if (it == lockedStatisticStore->end())
-    {
-        return foundStatistics;
-    }
-
     std::ranges::copy_if(
-        it->second,
+        *lockedStatisticStore,
         std::back_inserter(foundStatistics),
-        [startTs, endTs](const std::shared_ptr<Statistic>& statistic)
-        { return statistic->getStartTs() >= startTs and statistic->getEndTs() <= endTs; });
+        [startTs, endTs, statisticId](const std::shared_ptr<Statistic>& statistic)
+        {
+            return statistic and statistic->getStatisticId() == statisticId and statistic->getStartTs() >= startTs
+                and statistic->getEndTs() <= endTs;
+        });
     return foundStatistics;
 }
 
@@ -107,18 +95,13 @@ std::optional<std::shared_ptr<Statistic>> SubStoresStatisticStore::getSingleStat
     const Statistic::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs)
 {
     const auto pos = getPos(statisticId, numberOfExpectedConcurrentAccess);
+    std::vector<std::shared_ptr<Statistic>> foundStatistics;
     const auto lockedStatisticStore = allSubStores[pos].rlock();
-    const auto it = lockedStatisticStore->find(statisticId);
-    if (it == lockedStatisticStore->end())
-    {
-        return {};
-    }
-
     const auto foundStatistic = std::ranges::find_if(
-        it->second,
-        [startTs, endTs](const std::shared_ptr<Statistic>& statistic)
-        { return statistic->getStartTs() == startTs and statistic->getEndTs() == endTs; });
-    if (foundStatistic != it->second.end())
+        *lockedStatisticStore,
+        [startTs, endTs, statisticId](const std::shared_ptr<Statistic>& statistic)
+        { return statistic->getStatisticId() == statisticId and statistic->getStartTs() == startTs and statistic->getEndTs() == endTs; });
+    if (foundStatistic != lockedStatisticStore->end())
     {
         return *foundStatistic;
     }
@@ -131,13 +114,10 @@ std::vector<AbstractStatisticStore::IdStatisticPair> SubStoresStatisticStore::ge
     for (const auto& statisticStore : allSubStores)
     {
         const auto lockedStatisticStore = statisticStore.rlock();
-        for (const auto& [id, bucket] : *lockedStatisticStore)
-        {
-            auto pairs = bucket
-                | std::views::transform([&id](const std::shared_ptr<Statistic>& statistic)
-                                        { return std::make_pair(id, statistic); });
-            std::ranges::copy(pairs, std::back_inserter(retStatistics));
-        }
+        auto hashStatisticPairs = *lockedStatisticStore
+            | std::views::transform([](const std::shared_ptr<Statistic>& statistic)
+                                    { return std::make_pair(statistic->getStatisticId(), statistic); });
+        std::ranges::copy(hashStatisticPairs, std::back_inserter(retStatistics));
     }
     return retStatistics;
 }

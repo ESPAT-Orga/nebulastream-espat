@@ -26,7 +26,7 @@ namespace NES
 class SubStoresStatisticStore final : public AbstractStatisticStore
 {
     uint64_t numberOfExpectedConcurrentAccess;
-    std::vector<folly::Synchronized<std::unordered_map<Statistic::StatisticId, std::vector<std::shared_ptr<Statistic>>>>> allSubStores;
+    std::vector<folly::Synchronized<std::vector<std::shared_ptr<Statistic>>>> allSubStores;
 
 public:
     explicit SubStoresStatisticStore(uint64_t numberOfExpectedConcurrentAccess);

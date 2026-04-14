@@ -56,22 +56,22 @@ allJoinStrategies = ["HASH_JOIN"]
 allPageSizes = [8192]
 # [4000000] if buffer size is 8192 #[500000] if buffer size is 102400
 allBufferConfigs = [(1048576, 20000)]
-#allEnableLatencyListeners = [False, True]
-allEnableLatencyListeners = [False]
-#allBuildWindowSizesSec = [1, 30, 60]
-allBuildWindowSizesSec = [1, 60]
+allEnableLatencyListeners = [False, True]
+#allEnableLatencyListeners = [False]
+allBuildWindowSizesSec = [1, 30, 60]
+#allBuildWindowSizesSec = [1, 60]
 throughputListenerInterval = 200
 
 #### Statistic Build Configurations
 allReservoirSizes = [
     100,
-    #500,
+    500,
     1000
 ]
 allEquiWidthHistogramConfigs = [
     # (num_buckets, min_value, max_value, counter_type)
     (100, 0, 100 * 1000, "uint64"),
-    #(500, 0, 100 * 1000, "uint64"),
+    (500, 0, 100 * 1000, "uint64"),
     (1000, 0, 100 * 1000, "uint64"),
 ]
 allCountMinConfigs = [
@@ -80,9 +80,9 @@ allCountMinConfigs = [
     (5, 100, "uint64"),
     (10, 100, "uint64"),
 
-    #(1, 1000, "uint64"),
-    #(5, 1000, "uint64"),
-    #(10, 1000, "uint64"),
+    (1, 1000, "uint64"),
+    (5, 1000, "uint64"),
+    (10, 1000, "uint64"),
 
     (1, 10000, "uint64"),
     (5, 10000, "uint64"),
@@ -93,10 +93,10 @@ allCountMinConfigs = [
 # Each dataset lists which statistic types to benchmark.
 # Templates are named {StatisticType}Build_{DatasetName}.test.template
 allDatasets = [
-    #{
-    #    "name": "Nexmark",
-    #    "statistics": ["Reservoir", "EquiWidthHistogram", "CountMin"],
-    #},
+    {
+        "name": "Nexmark",
+        "statistics": ["Reservoir", "EquiWidthHistogram", "CountMin"],
+    },
     {
         "name": "ClusterMonitoring",
         "statistics": ["Reservoir", "EquiWidthHistogram", "CountMin"],

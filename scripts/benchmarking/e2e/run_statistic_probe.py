@@ -84,7 +84,8 @@ allJoinStrategies = ["HASH_JOIN"]
 allPageSizes = [8192]
 allBufferConfigs = [(1048576, 20000)]
 #allEnableLatencyListeners = [False, True]
-allEnableLatencyListeners = [False]
+#allEnableLatencyListeners = [False]
+allEnableLatencyListeners = [True]
 #allNumStatisticIds = [1, 10, 100]
 #allNumStatisticIds = [1, 100]
 allNumStatisticIds = [1]
@@ -542,6 +543,47 @@ def parse_average_throughput_from_throughput_listener(log_file_path, query_ids=N
     return sum(data) / len(data)
 
 
+def parse_average_latency_from_latency_listener(log_file_path, query_ids=None):
+    """Parse latency measurements from the worker log file for one or more query ids.
+
+    Expects lines like:
+      Latency for queryId 1 and 1 tasks over duration 12345-12346 is 1.234 ms
+
+    Returns the average latency in seconds, or -1 if no measurements found.
+    """
+    if query_ids is not None:
+        if isinstance(query_ids, str):
+            query_ids = [query_ids]
+        id_set = set(str(qid) for qid in query_ids)
+    else:
+        id_set = None
+
+    log_pattern = re.compile(
+        r'Latency for queryId (\d+) and (\d+) tasks over duration (\d+)-(\d+) is (\d+\.\d+) (\w*)s'
+    )
+    unit_multipliers = {'': 1.0, 'm': 1e-3, 'u': 1e-6, 'n': 1e-9}
+    data = []
+    try:
+        with open(log_file_path, 'r') as f:
+            for line in f:
+                match = log_pattern.match(line)
+                if match:
+                    matched_query_id = match.group(1)
+                    if id_set is not None and matched_query_id not in id_set:
+                        continue
+                    latency_value = float(match.group(5))
+                    unit_prefix = match.group(6)
+                    multiplier = unit_multipliers.get(unit_prefix, 1.0)
+                    data.append(latency_value * multiplier)
+    except FileNotFoundError:
+        printError(f"Log file {log_file_path} not found.")
+        return -1
+
+    if len(data) == 0:
+        return -1
+    return sum(data) / len(data)
+
+
 def parse_log_to_throughput_csv(log_file_path, csv_file_path):
     """Parse throughput from the worker log and write to CSV."""
     log_pattern = re.compile(
@@ -591,8 +633,8 @@ def initialize_csv_file():
             'dataset', 'statistic_type', 'statistic_config', 'query_name',
             'num_statistic_ids', 'build_window_size_sec', 'build_windows_per_probe_window',
             'num_probe_tuples', 'num_probe_repetitions',
-            'probe_throughput_listener', 'probe_duration_s',
-            'build_throughput_listener', 'build_duration_s',
+            'probe_throughput_listener', 'probe_duration_s', 'probe_latency_listener',
+            'build_throughput_listener', 'build_duration_s', 'build_latency_listener',
             'executionMode', 'numberOfWorkerThreads',
             'buffersInGlobalBufferManager', 'joinStrategy',
             'bufferSizeInBytes', 'pageSize', 'enableLatency', 'issue'
@@ -663,8 +705,10 @@ def run_experiment(statistic_type, statistic_config, worker_config, build_datase
     probe_query_ids = []
     build_throughput = -1
     build_duration = 0.0
+    build_latency = ''
     probe_throughput = -1
     probe_duration = 0.0
+    probe_latency = ''
     try:
         # === Phase 1: Build ===
         printInfo("=" * 60)
@@ -686,6 +730,9 @@ def run_experiment(statistic_type, statistic_config, worker_config, build_datase
 
         build_throughput = parse_average_throughput_from_throughput_listener(log_file_path, build_query_ids)
         printInfo(f"Build average throughput: {build_throughput:.2f} Tup/s")
+        build_latency = parse_average_latency_from_latency_listener(log_file_path, build_query_ids) if enableLatency else ''
+        if enableLatency:
+            printInfo(f"Build average latency: {build_latency:.6f} s" if build_latency != -1 else "Build average latency: no measurements")
 
         if not build_ok:
             issues.append(f"build:{build_reason}")
@@ -723,6 +770,9 @@ def run_experiment(statistic_type, statistic_config, worker_config, build_datase
 
             probe_throughput = parse_average_throughput_from_throughput_listener(log_file_path, probe_query_ids)
             printInfo(f"Probe average throughput: {probe_throughput:.2f} Tup/s")
+            probe_latency = parse_average_latency_from_latency_listener(log_file_path, probe_query_ids) if enableLatency else ''
+            if enableLatency:
+                printInfo(f"Probe average latency: {probe_latency:.6f} s" if probe_latency != -1 else "Probe average latency: no measurements")
 
         # Check for buffer exhaustion in the worker log (after both queries have run).
         # Buffer exhaustion can cause SIGSEGV when the thrown exception propagates
@@ -738,6 +788,10 @@ def run_experiment(statistic_type, statistic_config, worker_config, build_datase
             issues.append("build:no_measurements")
         if probe_throughput < 0 and not has_buffer_exhaustion and not has_crash and build_ok:
             issues.append("probe:no_measurements")
+        if enableLatency and build_latency == -1 and not has_buffer_exhaustion and not has_crash:
+            issues.append("build:latency_no_measurements")
+        if enableLatency and probe_latency == -1 and not has_buffer_exhaustion and not has_crash and build_ok:
+            issues.append("probe:latency_no_measurements")
 
         # Parse full throughput log to CSV
         throughput_csv_path = os.path.join(output_dir, f"throughput_{build_name}.csv")
@@ -755,8 +809,10 @@ def run_experiment(statistic_type, statistic_config, worker_config, build_datase
             'num_probe_repetitions': num_probe_repetitions,
             'probe_throughput_listener': probe_throughput,
             'probe_duration_s': probe_duration,
+            'probe_latency_listener': probe_latency,
             'build_throughput_listener': build_throughput,
             'build_duration_s': build_duration,
+            'build_latency_listener': build_latency,
             'executionMode': executionMode,
             'numberOfWorkerThreads': numberOfWorkerThreads,
             'buffersInGlobalBufferManager': buffersInGlobalBufferManager,
@@ -970,8 +1026,8 @@ if __name__ == "__main__":
                                         'dataset', 'statistic_type', 'statistic_config', 'query_name',
                                         'num_statistic_ids', 'build_window_size_sec', 'build_windows_per_probe_window',
                                         'num_probe_tuples', 'num_probe_repetitions',
-                                        'probe_throughput_listener', 'probe_duration_s',
-                                        'build_throughput_listener', 'build_duration_s',
+                                        'probe_throughput_listener', 'probe_duration_s', 'probe_latency_listener',
+                                        'build_throughput_listener', 'build_duration_s', 'build_latency_listener',
                                         'executionMode', 'numberOfWorkerThreads',
                                         'buffersInGlobalBufferManager', 'joinStrategy',
                                         'bufferSizeInBytes', 'pageSize', 'enableLatency', 'issue'

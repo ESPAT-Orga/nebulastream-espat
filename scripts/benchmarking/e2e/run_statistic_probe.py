@@ -83,9 +83,11 @@ allNumberOfWorkerThreads = ['1', '4', '16']
 allJoinStrategies = ["HASH_JOIN"]
 allPageSizes = [8192]
 allBufferConfigs = [(1048576, 20000)]
-allEnableLatencyListeners = [False, True]
+#allEnableLatencyListeners = [False, True]
+allEnableLatencyListeners = [False]
 #allNumStatisticIds = [1, 10, 100]
-allNumStatisticIds = [1, 100]
+#allNumStatisticIds = [1, 100]
+allNumStatisticIds = [1]
 throughputListenerInterval = 200
 
 #### Statistic Build Configurations

@@ -56,11 +56,11 @@ struct InsertParams
     static inline const std::vector<StatisticStoreType> storeTypes{
         StatisticStoreType::DEFAULT, StatisticStoreType::WINDOW, StatisticStoreType::SUB_STORES};
     /// Total number of statistics (see Statistic.hpp) inserted
-    static inline const std::vector<uint64_t> numStatisticsVals{1'000, 100'000, 500'000, 1'000'000};
+    static inline const std::vector<uint64_t> numStatisticsVals{1'000, 100'000, 1'000'000};
     /// Number of statistic queries that are inserting
-    static inline const std::vector<uint64_t> numStatisticIdsVals{100, 1'000, 10'000};
+    static inline const std::vector<uint64_t> numStatisticIdsVals{1, 10, 1'000};
     static inline const std::vector<uint64_t> statisticSizes{1024, 4 * 1024, 10 * 1024};
-    static inline const std::vector<uint64_t> threadCounts{1, 4, 16, 32};
+    static inline const std::vector<uint64_t> threadCounts{1, 4, 16};
     static constexpr uint64_t windowSize = 60'000;
 
     /// Insert pre-creates numStatistics stats of statisticSize bytes.
@@ -101,14 +101,14 @@ struct GetParams
     static inline const std::vector<StatisticStoreType> storeTypes{StatisticStoreType::DEFAULT, StatisticStoreType::WINDOW};
     static inline const std::vector<uint64_t> windowSizes{1'000, 10'000, 60'000};
     /// Total number of statistics (see Statistic.hpp) to retrieve
-    static inline const std::vector<uint64_t> numStatisticsVals{1'000, 100'000, 500'000, 1'000'000};
+    static inline const std::vector<uint64_t> numStatisticsVals{1'000, 100'000, 1'000'000};
     /// Number of statistic queries running
-    static inline const std::vector<uint64_t> numStatisticIdsVals{100, 1'000, 10'000};
+    static inline const std::vector<uint64_t> numStatisticIdsVals{1, 10, 1'000};
     static inline const std::vector<uint64_t> statisticSizes{1024, 4 * 1024, 10 * 1024};
-    static inline const std::vector<uint64_t> threadCounts{1, 4, 16, 32};
+    static inline const std::vector<uint64_t> threadCounts{1, 4, 16};
 
     static inline const std::vector<uint64_t> pctAccessExistingVals{10, 50, 90};
-    static inline const std::vector<uint64_t> numStatisticsPerRequestVals{1, 10, 100};
+    static inline const std::vector<uint64_t> numWindowsPerRequestVals{1, 10, 100};
 
     /// Get pre-populates numStatisticIds * numStatistics stats of statisticSize bytes.
     static bool fitsInMemory(const uint64_t numStatistics, const uint64_t statisticSize)
@@ -134,7 +134,7 @@ struct GetParams
                     /// Configs that do not pass fitsInMemory() or hasSufficientDensity() are printed at the end of all runs
                     if (fitsInMemory(numStatistics, statisticSize) and hasSufficientDensity(numStatistics, numStatisticIds))
                     {
-                        count += storeTypes.size() * windowSizes.size() * pctAccessExistingVals.size() * numStatisticsPerRequestVals.size()
+                        count += storeTypes.size() * windowSizes.size() * pctAccessExistingVals.size() * numWindowsPerRequestVals.size()
                             * threadCounts.size();
                     }
                 }
@@ -148,14 +148,15 @@ struct MixedParams
 {
     static inline const std::vector<StatisticStoreType> storeTypes{StatisticStoreType::DEFAULT, StatisticStoreType::WINDOW};
     static inline const std::vector<uint64_t> windowSizes{1'000, 10'000, 60'000};
-    /// Small values here make no sense for PrePopulate
-    static inline const std::vector<uint64_t> numStatisticsVals{100'000, 500'000, 1'000'000};
-    static inline const std::vector<uint64_t> numStatisticIdsVals{100, 1'000, 10'000};
+    /// Total number of statistics in the store
+    static inline const std::vector<uint64_t> numStatisticsVals{1'000, 100'000, 1'000'000};
+    /// Equal to the number of queries running
+    static inline const std::vector<uint64_t> numStatisticIdsVals{1, 10, 1'000};
     static inline const std::vector<uint64_t> statisticSizes{1024, 4 * 1024, 10 * 1024};
-    static inline const std::vector<uint64_t> threadCounts{1, 4, 16, 32};
+    static inline const std::vector<uint64_t> threadCounts{1, 4, 16};
     static inline const std::vector<uint64_t> pctInsertVals{10, 50, 90};
     static inline const std::vector<uint64_t> pctPrePopulateVals{10, 50, 90};
-    static inline const std::vector<uint64_t> numStatisticsPerRequestVals{1, 10, 100};
+    static inline const std::vector<uint64_t> numWindowsPerRequestVals{1, 10, 100};
 
     /// Mixed pre-populates numStatistics + prepares numStatistics inserts.
     static bool fitsInMemory(const uint64_t numStatistics, const uint64_t statisticSize)
@@ -182,7 +183,7 @@ struct MixedParams
                     if (fitsInMemory(numStatistics, statisticSize) and hasSufficientDensity(numStatistics, numStatisticIds))
                     {
                         count += storeTypes.size() * windowSizes.size() * pctInsertVals.size() * pctPrePopulateVals.size()
-                            * numStatisticsPerRequestVals.size() * threadCounts.size();
+                            * numWindowsPerRequestVals.size() * threadCounts.size();
                     }
                 }
             }
@@ -524,7 +525,7 @@ void runGetStatisticsBenchmark(std::ofstream& csv, ProgressTracker& progress, Be
                                 }
                             }
 
-                            for (const auto numStatisticsPerRequest : Params::numStatisticsPerRequestVals)
+                            for (const auto numStatisticsPerRequest : Params::numWindowsPerRequestVals)
                             {
                                 // As each window in the store shouldFilter only a single statistic, to have `numStatisticsPerRequest` statistics
                                 // per request, we need our query to span that many windows.
@@ -790,7 +791,7 @@ void runInsertAndGetBenchmark(std::ofstream& csv, ProgressTracker& progress, Ben
                             Params::storeTypes,
                             Params::pctInsertVals,
                             Params::threadCounts,
-                            Params::numStatisticsPerRequestVals);
+                            Params::numWindowsPerRequestVals);
                     }
                 }
             },

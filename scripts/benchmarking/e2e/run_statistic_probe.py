@@ -1011,6 +1011,38 @@ if __name__ == "__main__":
                                         'error': str(e),
                                         'output_folder': run_folder,
                                     })
+                                    # Write a CSV row so every entry in the error files
+                                    # has a corresponding line in the CSV output.
+                                    probe_fieldnames = [
+                                        'dataset', 'statistic_type', 'statistic_config', 'query_name',
+                                        'num_statistic_ids', 'build_window_size_sec', 'build_windows_per_probe_window',
+                                        'num_probe_tuples', 'num_probe_repetitions',
+                                        'probe_throughput_listener', 'probe_duration_s',
+                                        'build_throughput_listener', 'build_duration_s',
+                                        'executionMode', 'numberOfWorkerThreads',
+                                        'buffersInGlobalBufferManager', 'joinStrategy',
+                                        'bufferSizeInBytes', 'pageSize', 'enableLatency', 'issue'
+                                    ]
+                                    with open(csv_file_path, mode='a', newline='') as csv_out:
+                                        writer = csv.DictWriter(csv_out, fieldnames=probe_fieldnames)
+                                        writer.writerow({
+                                            'dataset': dataset_name or '',
+                                            'statistic_type': statistic_type,
+                                            'statistic_config': str(statistic_config),
+                                            'num_statistic_ids': num_statistic_ids,
+                                            'build_window_size_sec': build_window_size_sec,
+                                            'build_windows_per_probe_window': build_windows_per_probe_window,
+                                            'num_probe_tuples': num_probe_tuples,
+                                            'num_probe_repetitions': num_probe_repetitions,
+                                            'executionMode': executionMode,
+                                            'numberOfWorkerThreads': numberOfWorkerThreads,
+                                            'buffersInGlobalBufferManager': buffersInGlobalBufferManager,
+                                            'joinStrategy': joinStrategy,
+                                            'bufferSizeInBytes': bufferSizeInBytes,
+                                            'pageSize': pageSize,
+                                            'enableLatency': enableLatency,
+                                            'issue': f'exception:{e}',
+                                        })
                                 finally:
                                     cli_log_file.close()
 

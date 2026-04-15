@@ -56,8 +56,8 @@ allJoinStrategies = ["HASH_JOIN"]
 allPageSizes = [8192]
 # [4000000] if buffer size is 8192 #[500000] if buffer size is 102400
 allBufferConfigs = [(1048576, 20000)]
-allEnableLatencyListeners = [False, True]
-#allEnableLatencyListeners = [False]
+#allEnableLatencyListeners = [False, True]
+allEnableLatencyListeners = [True]
 allBuildWindowSizesSec = [1, 30, 60]
 #allBuildWindowSizesSec = [1, 60]
 throughputListenerInterval = 200
@@ -185,6 +185,7 @@ def initialize_csv_file():
         fieldnames = [
             'dataset', 'statistic_type', 'statistic_config', 'build_window_size_sec',
             'bytesPerSecond', 'query_name', 'time', 'tuplesPerSecond', 'tuplesPerSecond_listener',
+            'latency_listener',
             'executionMode', 'numberOfWorkerThreads', 'buffersInGlobalBufferManager',
             'joinStrategy',
             'bufferSizeInBytes', 'pageSize', 'enableLatency', 'issue'
@@ -219,6 +220,31 @@ def parse_average_throughput_from_throughput_listener(console_output):
         return -1
     average_throughput = sum(data) / len(data)
     return average_throughput
+
+
+def parse_average_latency_from_latency_listener(console_output):
+    """Parse latency measurements from the latency listener output.
+
+    Expects lines like:
+      Latency for queryId 1 and 1 tasks over duration 12345-12346 is 1.234 ms
+
+    Returns the average latency in seconds, or -1 if no measurements found.
+    """
+    log_pattern = re.compile(
+        r'Latency for queryId (\d+) and (\d+) tasks over duration (\d+)-(\d+) is (\d+\.\d+) (\w*)s'
+    )
+    unit_multipliers = {'': 1.0, 'm': 1e-3, 'u': 1e-6, 'n': 1e-9}
+    data = []
+    for line in console_output.split('\n'):
+        match = log_pattern.match(line)
+        if match:
+            latency_value = float(match.group(5))
+            unit_prefix = match.group(6)
+            multiplier = unit_multipliers.get(unit_prefix, 1.0)
+            data.append(latency_value * multiplier)
+    if len(data) == 0:
+        return -1
+    return sum(data) / len(data)
 
 
 def classify_crash(returncode, stdout):
@@ -285,6 +311,7 @@ def run_benchmark(config, dataset_name, query, query_info, queryIdx, workerConfi
     fieldnames = [
         'dataset', 'statistic_type', 'statistic_config', 'build_window_size_sec',
         'bytesPerSecond', 'query_name', 'time', 'tuplesPerSecond', 'tuplesPerSecond_listener',
+        'latency_listener',
         'executionMode', 'numberOfWorkerThreads', 'buffersInGlobalBufferManager',
         'joinStrategy',
         'bufferSizeInBytes', 'pageSize', 'enableLatency', 'issue'
@@ -301,6 +328,7 @@ def run_benchmark(config, dataset_name, query, query_info, queryIdx, workerConfi
                 'statistic_type': query_info['statistic_type'],
                 'statistic_config': query_info['statistic_config'],
                 'build_window_size_sec': query_info['build_window_size_sec'],
+                'latency_listener': '',
                 'issue': issue,
                 **config,
             }
@@ -308,6 +336,9 @@ def run_benchmark(config, dataset_name, query, query_info, queryIdx, workerConfi
             return issue
 
         average_throughput = parse_average_throughput_from_throughput_listener(stdout)
+        latency = parse_average_latency_from_latency_listener(stdout) if enableLatency else ''
+        if enableLatency:
+            printInfo(f"    Average latency: {latency:.6f} s" if latency != -1 else "    Average latency: no measurements")
         for result in benchmark_results:
             result.pop('query name', None)
             result['dataset'] = dataset_name
@@ -315,9 +346,15 @@ def run_benchmark(config, dataset_name, query, query_info, queryIdx, workerConfi
             result['statistic_type'] = query_info['statistic_type']
             result['statistic_config'] = query_info['statistic_config']
             result['build_window_size_sec'] = query_info['build_window_size_sec']
-            result['issue'] = 'ok'
+            result['latency_listener'] = latency
+            if enableLatency and latency == -1:
+                result['issue'] = 'latency_no_measurements'
+            else:
+                result['issue'] = 'ok'
             writer.writerow({**result, **config})
         print(f"    Results for config {config} written to CSV.")
+    if enableLatency and latency == -1:
+        return 'latency_no_measurements'
     return None
 
 

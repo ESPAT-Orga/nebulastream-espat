@@ -346,6 +346,7 @@ def run_benchmark(config, dataset_name, query, query_info, queryIdx, workerConfi
             result['statistic_type'] = query_info['statistic_type']
             result['statistic_config'] = query_info['statistic_config']
             result['build_window_size_sec'] = query_info['build_window_size_sec']
+            result['tuplesPerSecond_listener'] = average_throughput
             result['latency_listener'] = latency
             if enableLatency and latency == -1:
                 result['issue'] = 'latency_no_measurements'

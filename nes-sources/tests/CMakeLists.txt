@@ -22,3 +22,7 @@ endfunction()
 
 add_nes_source_test(source-thread-test SourceThreadTest.cpp)
 add_nes_source_test(source-catalog-test SourceCatalogTest.cpp)
+add_nes_source_test(process-source-test ProcessSourceTest.cpp)
+
+# This explicit link is necessary since ProcessSource is added as a separate library
+target_link_libraries(process-source-test process_source_plugin_library)

@@ -18,6 +18,7 @@ then cleans the CSV output.
 """
 
 import argparse
+import shlex
 import os
 
 from scripts.benchmarking.utils import *
@@ -42,8 +43,8 @@ if __name__ == "__main__":
                         help="Remove and recreate the build directory before building.")
     parser.add_argument("--filter",
                         help="Comma-separated keywords; only configs whose report line contains ALL keywords are run. Example: get,ws=60000")
-    parser.add_argument("--exclude",
-                        help="Comma-separated keywords; configs whose report line contains ANY keyword are skipped. Example: DEFAULT,threads=16")
+    parser.add_argument("--exclude", action="append", default=[],
+                    help="Comma-separated keywords per group; a config is skipped if ALL keywords in ANY group match. Can be repeated. Example: --exclude DEFAULT,threads=16 --exclude Get,ids=    1")
     args = parser.parse_args()
 
     # Checking if the script has been executed from the repository root
@@ -59,9 +60,9 @@ if __name__ == "__main__":
     # Run the benchmark
     benchmark_command = benchmark_executable
     if args.filter:
-        benchmark_command += f" --filter {args.filter}"
-    if args.exclude:
-        benchmark_command += f" --exclude {args.exclude}"
+        benchmark_command += f" --filter '{args.filter}'"
+    for exc in args.exclude:
+        benchmark_command += f" --exclude {shlex.quote(exc)}"
 
     printInfo("Running statistic-store-benchmark...")
     run_command_and_show_output(benchmark_command)

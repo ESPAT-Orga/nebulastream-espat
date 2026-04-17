@@ -92,7 +92,7 @@ double runTimedExperiment(const uint64_t numThreads, const uint64_t numItems, Th
 struct BenchmarkArgs
 {
     std::vector<std::string> filter;
-    std::vector<std::string> exclude;
+    std::vector<std::vector<std::string>> exclude;
 
     /// Returns true if the config should be skipped:
     /// - any filter token is absent from reportLine, or

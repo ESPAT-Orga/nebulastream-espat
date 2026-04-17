@@ -93,27 +93,38 @@ bool BenchmarkArgs::shouldSkip(const std::string& reportLine) const
             return true;
         }
     }
-    for (const auto& word : exclude)
+    
+    for (const auto& group : exclude)
     {
-        if (reportLine.contains(word))
+        bool allMatch = true;
+        for (const auto& word : group)
+        {
+            if (not reportLine.contains(word))
+            {
+                allMatch = false;
+                break;
+            }
+        }
+        if (allMatch)
         {
             return true;
         }
     }
     return false;
+
 }
 
 BenchmarkArgs::BenchmarkArgs(int argc, char* argv[])
 {
     auto printUsage = [&]()
     {
-        std::cout << "Usage: " << argv[0] << " [--filter <list>] [--exclude <list>]\n"
+        std::cout << "Usage: " << argv[0] << " [--filter <list>] [--exclude <list>]...\n"
                   << "\n"
                   << "Options:\n"
                   << "  --filter <list>  Comma-separated keywords; only configs containing ALL are run.\n"
                   << "                   Example: --filter get,ws=60000\n"
-                  << "  --exclude <list> Comma-separated keywords; configs containing ANY are skipped.\n"
-                  << "                   Example: --exclude DEFAULT,threads=16\n"
+                  << "  --exclude <list> Comma-separated keywords; configs containing ALL in any group are skipped.\n"
+                  << "                   Can be repeated. Example: --exclude DEFAULT,threads=16 --exclude stats=100\n"
                   << "  --help, -h       Print this help message and exit\n";
     };
 
@@ -142,8 +153,14 @@ BenchmarkArgs::BenchmarkArgs(int argc, char* argv[])
                 printUsage();
                 std::exit(1);
             }
-            auto& target = (arg == "--filter") ? filter : exclude;
-            parseTokens(argv[++i], target);
+            if (arg == "--filter")
+            {
+                parseTokens(argv[++i], filter);
+            }
+            else
+            {
+                parseTokens(argv[++i], exclude.emplace_back());
+            }
         }
         else
         {

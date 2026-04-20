@@ -20,6 +20,7 @@
 #include <unordered_map>
 #include <vector>
 #include <Configurations/Descriptor.hpp>
+#include <DataTypes/DataType.hpp>
 #include <DataTypes/Schema.hpp>
 #include <Identifiers/Identifiers.hpp>
 #include <Operators/LogicalOperator.hpp>
@@ -37,9 +38,9 @@ class SerializableOperator;
 class CountMinSketchProbeLogicalOperator final : public LogicalStatisticFields, public OriginIdAssigner
 {
 public:
-    explicit CountMinSketchProbeLogicalOperator(Statistic::StatisticHash statisticHash, DataType counterType);
+    explicit CountMinSketchProbeLogicalOperator(Statistic::StatisticId statisticId, DataType counterType);
     explicit CountMinSketchProbeLogicalOperator(
-        Statistic::StatisticHash statisticHash,
+        Statistic::StatisticId statisticId,
         DataType counterType,
         std::string rowIndexFieldName,
         std::string columnIndexFieldName,
@@ -63,7 +64,7 @@ public:
 
     [[nodiscard]] CountMinSketchProbeLogicalOperator withInferredSchema(const std::vector<Schema>& inputSchemas) const;
 
-    Statistic::StatisticHash statisticHash;
+    Statistic::StatisticId statisticId;
     DataType counterType;
 
     std::string rowIndexFieldName = ROW_INDEX_FIELD_NAME_DEFAULT;
@@ -104,7 +105,7 @@ namespace detail
 {
 struct ReflectedCountMinSketchProbeLogicalOperator
 {
-    uint64_t statisticHash;
+    Statistic::StatisticId::Underlying statisticId;
     DataType counterType;
     std::string rowIndexFieldName;
     std::string columnIndexFieldName;

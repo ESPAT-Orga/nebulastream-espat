@@ -35,7 +35,7 @@ ATTACH INLINE
 1,21,21000
 
 CREATE SINK sinkStream(stream.statisticStart UINT64 NOT NULL, stream.statisticEnd UINT64 NOT NULL, stream.id UINT64 NOT NULL, stream.value UINT64 NOT NULL, stream.timestamp UINT64 NOT NULL) TYPE File;
-CREATE SINK sinkStreamBuild(stream.statisticHash UINT64 NOT NULL, stream.statisticStart UINT64 NOT NULL, stream.statisticEnd UINT64 NOT NULL, stream.statisticNumberOfSeenTuples UINT64 NOT NULL) TYPE File;
+CREATE SINK sinkStreamBuild(stream.statisticId UINT64 NOT NULL, stream.statisticStart UINT64 NOT NULL, stream.statisticEnd UINT64 NOT NULL, stream.statisticNumberOfSeenTuples UINT64 NOT NULL) TYPE File;
 
 # Solely build operator
 SELECT RESERVOIR(43, id, value, timestamp, 4) FROM stream WINDOW TUMBLING(timestamp, size 5 sec) INTO sinkStreamBuild;

@@ -52,6 +52,7 @@ struct Repl::Impl
     SinkStatementHandler sinkStatementHandler;
     TopologyStatementHandler topologyStatementHandler;
     std::shared_ptr<QueryStatementHandler> queryStatementHandler;
+    StatisticRequestHandler statisticRequestHandler;
     StatementBinder binder;
     std::stop_token stopToken;
 
@@ -75,6 +76,7 @@ struct Repl::Impl
         SinkStatementHandler sinkStatementHandler,
         TopologyStatementHandler topologyStatementHandler,
         std::shared_ptr<QueryStatementHandler> queryStatementHandler,
+        StatisticRequestHandler statisticRequestHandler,
         StatementBinder binder,
         const ErrorBehaviour errorBehaviour,
         const StatementOutputFormat defaultOutputFormat,
@@ -84,6 +86,7 @@ struct Repl::Impl
         , sinkStatementHandler(std::move(sinkStatementHandler))
         , topologyStatementHandler(std::move(topologyStatementHandler))
         , queryStatementHandler(std::move(queryStatementHandler))
+        , statisticRequestHandler(std::move(statisticRequestHandler))
         , binder(std::move(binder))
         , stopToken(std::move(stopToken))
         , interactiveMode(interactiveMode)
@@ -403,6 +406,10 @@ struct Repl::Impl
                 {
                     return topologyStatementHandler.apply(stmt);
                 }
+                else if constexpr (requires { statisticRequestHandler.apply(stmt); })
+                {
+                    return statisticRequestHandler.apply(stmt);
+                }
                 else if constexpr (requires { queryStatementHandler->apply(stmt); })
                 {
                     return queryStatementHandler->apply(stmt);
@@ -554,6 +561,7 @@ Repl::Repl(
     SinkStatementHandler sinkStatementHandler,
     TopologyStatementHandler topologyStatementHandler,
     std::shared_ptr<QueryStatementHandler> queryStatementHandler,
+    StatisticRequestHandler statisticRequestHandler,
     StatementBinder binder,
     ErrorBehaviour errorBehaviour,
     StatementOutputFormat defaultOutputFormat,
@@ -564,6 +572,7 @@ Repl::Repl(
           std::move(sinkStatementHandler),
           std::move(topologyStatementHandler),
           std::move(queryStatementHandler),
+          std::move(statisticRequestHandler),
           std::move(binder),
           errorBehaviour,
           defaultOutputFormat,

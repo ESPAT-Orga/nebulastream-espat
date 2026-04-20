@@ -15,17 +15,19 @@
 #include <Operators/Statistic/StatisticStoreWriterLogicalOperator.hpp>
 
 #include <ranges>
+#include <utility>
 #include <fmt/format.h>
 #include <LogicalOperatorRegistry.hpp>
+#include <Statistic.hpp>
 
 namespace NES
 {
 
 StatisticStoreWriterLogicalOperator::StatisticStoreWriterLogicalOperator(
     std::shared_ptr<LogicalStatisticFields> inputLogicalStatisticFields,
-    const Statistic::StatisticHash statisticHash,
+    const Statistic::StatisticId statisticId,
     const Statistic::StatisticType statisticType)
-    : inputLogicalStatisticFields(std::move(inputLogicalStatisticFields)), statisticHash(statisticHash), statisticType(statisticType)
+    : inputLogicalStatisticFields(std::move(inputLogicalStatisticFields)), statisticId(statisticId), statisticType(statisticType)
 {
 }
 
@@ -112,7 +114,7 @@ StatisticStoreWriterLogicalOperator StatisticStoreWriterLogicalOperator::withInf
     /// We set the output logical fields to use the values defined in the class itself, as downstream operators assume it.
     copy.outputSchema = Schema{};
     const auto outputLogicalStatisticFields = getOutputStatisticFields(newQualifierForSystemField);
-    copy.outputSchema.addField(outputLogicalStatisticFields.statisticHashField);
+    copy.outputSchema.addField(outputLogicalStatisticFields.statisticIdField);
     copy.outputSchema.addField(outputLogicalStatisticFields.statisticStartTsField);
     copy.outputSchema.addField(outputLogicalStatisticFields.statisticEndTsField);
     copy.outputSchema.addField(outputLogicalStatisticFields.statisticNumberOfSeenTuplesField);
@@ -125,9 +127,9 @@ LogicalStatisticFields StatisticStoreWriterLogicalOperator::getOutputStatisticFi
     return LogicalStatisticFields().addQualifierName(qualifierName);
 }
 
-Statistic::StatisticHash StatisticStoreWriterLogicalOperator::getStatisticHash() const
+Statistic::StatisticId StatisticStoreWriterLogicalOperator::getStatisticId() const
 {
-    return statisticHash;
+    return statisticId;
 }
 
 Statistic::StatisticType StatisticStoreWriterLogicalOperator::getStatisticType() const
@@ -138,14 +140,14 @@ Statistic::StatisticType StatisticStoreWriterLogicalOperator::getStatisticType()
 Reflected Reflector<StatisticStoreWriterLogicalOperator>::operator()(const StatisticStoreWriterLogicalOperator& op) const
 {
     return reflect(detail::ReflectedStatisticStoreWriterLogicalOperator{
-        .statisticHash = op.getStatisticHash(), .statisticType = static_cast<uint8_t>(op.getStatisticType())});
+        .statisticId = op.getStatisticId().getRawValue(), .statisticType = op.getStatisticType()});
 }
 
 StatisticStoreWriterLogicalOperator Unreflector<StatisticStoreWriterLogicalOperator>::operator()(const Reflected& reflected) const
 {
-    auto [statisticHash, statisticType] = unreflect<detail::ReflectedStatisticStoreWriterLogicalOperator>(reflected);
+    auto [statisticId, statisticType] = unreflect<detail::ReflectedStatisticStoreWriterLogicalOperator>(reflected);
     return StatisticStoreWriterLogicalOperator{
-        std::make_shared<LogicalStatisticFields>(), statisticHash, static_cast<Statistic::StatisticType>(statisticType)};
+        std::make_shared<LogicalStatisticFields>(), Statistic::StatisticId{statisticId}, statisticType};
 }
 
 LogicalOperatorRegistryReturnType

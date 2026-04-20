@@ -28,6 +28,7 @@
 #include <Traits/Trait.hpp>
 #include <Util/PlanRenderer.hpp>
 #include <Util/Reflection.hpp>
+#include <Statistic.hpp>
 
 namespace NES
 {
@@ -36,8 +37,9 @@ namespace NES
 class ReservoirProbeLogicalOperator final : public LogicalStatisticFields, public OriginIdAssigner
 {
 public:
-    explicit ReservoirProbeLogicalOperator(uint64_t statisticHash, Schema sampleSchema);
-    explicit ReservoirProbeLogicalOperator(uint64_t statisticHash, Schema sampleSchema, LogicalStatisticFields logicalStatisticFields);
+    explicit ReservoirProbeLogicalOperator(Statistic::StatisticId statisticId, const Schema& sampleSchema);
+    explicit ReservoirProbeLogicalOperator(
+        Statistic::StatisticId statisticId, const Schema& sampleSchema, LogicalStatisticFields logicalStatisticFields);
 
     [[nodiscard]] bool operator==(const ReservoirProbeLogicalOperator& rhs) const;
 
@@ -57,22 +59,22 @@ public:
 
     struct ConfigParameters
     {
-        static inline const DescriptorConfig::ConfigParameter<std::string> STATISTIC_HASH{
-            "statisticHash",
-            std::nullopt,
-            [](const std::unordered_map<std::string, std::string>& config) { return DescriptorConfig::tryGet(STATISTIC_HASH, config); }};
+        static inline const DescriptorConfig::ConfigParameter<std::string> STATISTIC_ID{
+            "statisticId",
+            {},
+            [](const std::unordered_map<std::string, std::string>& config) { return DescriptorConfig::tryGet(STATISTIC_ID, config); }};
 
         static inline const DescriptorConfig::ConfigParameter<std::string> SAMPLE_SCHEMA{
             "sampleSchema",
-            std::nullopt,
+            {},
             [](const std::unordered_map<std::string, std::string>& config) { return DescriptorConfig::tryGet(SAMPLE_SCHEMA, config); }};
 
         static inline std::unordered_map<std::string, DescriptorConfig::ConfigParameterContainer> parameterMap
-            = DescriptorConfig::createConfigParameterContainerMap(STATISTIC_HASH, SAMPLE_SCHEMA);
+            = DescriptorConfig::createConfigParameterContainerMap(STATISTIC_ID, SAMPLE_SCHEMA);
     };
 
     /// Name of the field the sample is in.
-    uint64_t statisticHash;
+    Statistic::StatisticId statisticId;
     Schema sampleSchema;
 
 private:
@@ -109,7 +111,7 @@ struct ReflectedSchemaField
 
 struct ReflectedReservoirProbeLogicalOperator
 {
-    uint64_t statisticHash;
+    Statistic::StatisticId::Underlying statisticId;
     std::vector<ReflectedSchemaField> sampleFields;
 };
 }

@@ -13,7 +13,11 @@
 */
 
 #pragma once
+#include <cstddef>
+#include <cstdint>
+#include <ostream>
 #include <vector>
+#include <Identifiers/NESStrongType.hpp>
 #include <Util/Logger/Formatter.hpp>
 #include <WindowTypes/Measures/TimeMeasure.hpp>
 #include <fmt/base.h>
@@ -29,17 +33,8 @@ namespace NES
 class Statistic
 {
 public:
-    /// The StatisticHash uniquely identifies a statistic anywhere in our system, which means we do not need to send
-    /// characteristics and windows to all workers to uniquely identify a statistic.
-    /// StatisticHash is a combination of the StatisticId and the statistic type
-    using StatisticHash = uint64_t;
-
-    /// Unique identifier across the system so that we can track statistic over the component
-    /// We assume that the highest 8-bit are never used.
-    using StatisticId = uint64_t;
-
-    /// Fixed-point representation of the fractional part of the golden ratio to provide better distribution properties in hash functions
-    static constexpr auto goldenRatio = 0x9e3779b97f4a7c15;
+    /// Uniquely identifies a statistic. Assigned by the StatisticCoordinator via an atomic counter.
+    using StatisticId = NESStrongType<uint64_t, struct StatisticId_, 0, 1>;
 
     /// Defines what statistic type is for the underlying statistic memory area
     enum class StatisticType : uint8_t
@@ -81,30 +76,15 @@ public:
 
     [[nodiscard]] uint64_t getNumberOfSeenTuples() const { return numberOfSeenTuples; }
 
+    [[nodiscard]] StatisticId getStatisticId() const { return statisticId; }
+
     bool operator==(const Statistic& other) const
     {
         return statisticId == other.statisticId and statisticType == other.statisticType and startTs == other.startTs
             and endTs == other.endTs and statistic == other.statistic and numberOfSeenTuples == other.numberOfSeenTuples;
     }
 
-    [[nodiscard]] StatisticHash getHash() const
-    {
-        /// For now, a statistic hash is simply the statistic type combined with the statistic id.
-        /// In the future, we might add additional variable to it, e.g., metrics.
-        return (statisticId << 8) | (static_cast<uint8_t>(statisticType));
-    }
-
-    friend std::ostream& operator<<(std::ostream& os, const Statistic& statistic)
-    {
-        return os << fmt::format(
-                   "Statistic(Id: {}, StatisticType: {}, startTs: {}, endTs: {}, seenTuples: {}, statistic: {}B)",
-                   statistic.statisticId,
-                   magic_enum::enum_name(statistic.statisticType),
-                   statistic.startTs.toString(),
-                   statistic.endTs.toString(),
-                   statistic.numberOfSeenTuples,
-                   statistic.statistic.size());
-    }
+    friend std::ostream& operator<<(std::ostream& os, const Statistic& statistic);
 
 private:
     StatisticId statisticId;
@@ -114,6 +94,13 @@ private:
     uint64_t numberOfSeenTuples;
     std::vector<int8_t> statistic;
 };
+
+/// Overload modulo operator for StatisticId as it is commonly used to index into hash maps.
+inline size_t operator%(const Statistic::StatisticId id, const size_t containerSize)
+{
+    return id.getRawValue() % containerSize;
+}
+
 }
 
 FMT_OSTREAM(NES::Statistic);

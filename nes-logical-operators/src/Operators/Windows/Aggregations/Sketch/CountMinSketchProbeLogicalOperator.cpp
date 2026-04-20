@@ -23,6 +23,7 @@
 #include <vector>
 
 #include <Configurations/Descriptor.hpp>
+#include <DataTypes/DataType.hpp>
 #include <DataTypes/DataTypeProvider.hpp>
 #include <Identifiers/Identifiers.hpp>
 #include <Operators/LogicalOperator.hpp>
@@ -35,24 +36,25 @@
 #include <ErrorHandling.hpp>
 #include <LogicalOperatorRegistry.hpp>
 #include <SerializableVariantDescriptor.pb.h>
+#include <Statistic.hpp>
 
 namespace NES
 {
 
-CountMinSketchProbeLogicalOperator::CountMinSketchProbeLogicalOperator(const Statistic::StatisticHash statisticHash, DataType counterType)
-    : statisticHash(statisticHash), counterType(counterType)
+CountMinSketchProbeLogicalOperator::CountMinSketchProbeLogicalOperator(const Statistic::StatisticId statisticId, DataType counterType)
+    : statisticId(statisticId), counterType(counterType)
 {
 }
 
 CountMinSketchProbeLogicalOperator::CountMinSketchProbeLogicalOperator(
-    Statistic::StatisticHash statisticHash,
+    Statistic::StatisticId statisticId,
     DataType counterType,
     std::string rowIndexFieldName,
     std::string columnIndexFieldName,
     std::string counterFieldName,
     LogicalStatisticFields logicalStatisticFields)
     : LogicalStatisticFields(std::move(logicalStatisticFields))
-    , statisticHash(statisticHash)
+    , statisticId(statisticId)
     , counterType(counterType)
     , rowIndexFieldName(std::move(rowIndexFieldName))
     , columnIndexFieldName(std::move(columnIndexFieldName))
@@ -67,7 +69,7 @@ std::string_view CountMinSketchProbeLogicalOperator::getName() const noexcept
 
 bool CountMinSketchProbeLogicalOperator::operator==(const CountMinSketchProbeLogicalOperator& rhs) const
 {
-    return statisticHash == rhs.statisticHash and counterType == rhs.counterType and inputSchema == rhs.inputSchema
+    return statisticId == rhs.statisticId and counterType == rhs.counterType and inputSchema == rhs.inputSchema
         and outputSchema == rhs.outputSchema and inputOriginIds == rhs.inputOriginIds and outputOriginIds == rhs.outputOriginIds;
 };
 
@@ -86,10 +88,10 @@ CountMinSketchProbeLogicalOperator CountMinSketchProbeLogicalOperator::withInfer
     copy.inputSchema = firstSchema;
     if (not copy.inputSchema.getFieldByName(copy.statisticStartTsField.name).has_value()
         or not copy.inputSchema.getFieldByName(copy.statisticEndTsField.name).has_value()
-        or not copy.inputSchema.getFieldByName(copy.statisticHashField.name).has_value())
+        or not copy.inputSchema.getFieldByName(copy.statisticIdField.name).has_value())
     {
         std::stringstream expectedFields;
-        expectedFields << copy.statisticStartTsField << ", " << copy.statisticEndTsField << ", " << copy.statisticHashField;
+        expectedFields << copy.statisticStartTsField << ", " << copy.statisticEndTsField << ", " << copy.statisticIdField;
         throw FieldNotFound("Expected the following fields {} to be in the schema {}.", expectedFields.str(), copy.inputSchema);
     }
 
@@ -102,12 +104,12 @@ CountMinSketchProbeLogicalOperator CountMinSketchProbeLogicalOperator::withInfer
     copy.counterFieldName = addIfMissing(this->counterFieldName, newQualifierForSystemField);
 
     copy.outputSchema = Schema{};
-    copy.statisticHashField.addQualifierIfNotExists(newQualifierForSystemField);
+    copy.statisticIdField.addQualifierIfNotExists(newQualifierForSystemField);
     copy.statisticStartTsField.addQualifierIfNotExists(newQualifierForSystemField);
     copy.statisticEndTsField.addQualifierIfNotExists(newQualifierForSystemField);
     copy.statisticNumberOfSeenTuplesField.addQualifierIfNotExists(newQualifierForSystemField);
 
-    copy.outputSchema.addField(copy.statisticHashField);
+    copy.outputSchema.addField(copy.statisticIdField);
     copy.outputSchema.addField(copy.statisticStartTsField);
     copy.outputSchema.addField(copy.statisticEndTsField);
     copy.outputSchema.addField(copy.statisticNumberOfSeenTuplesField);
@@ -163,15 +165,15 @@ std::string CountMinSketchProbeLogicalOperator::explain(ExplainVerbosity verbosi
 {
     if (verbosity == ExplainVerbosity::Debug)
     {
-        return fmt::format("COUNTMIN_PROBE(opId: {}, statHash: {}, counterType: {})", id, statisticHash, counterType);
+        return fmt::format("COUNTMIN_PROBE(opId: {}, statHash: {}, counterType: {})", id, statisticId, counterType);
     }
-    return fmt::format("COUNTMIN_PROBE()", statisticHash);
+    return fmt::format("COUNTMIN_PROBE()", statisticId);
 }
 
 Reflected Reflector<CountMinSketchProbeLogicalOperator>::operator()(const CountMinSketchProbeLogicalOperator& op) const
 {
     return reflect(detail::ReflectedCountMinSketchProbeLogicalOperator{
-        .statisticHash = op.statisticHash,
+        .statisticId = op.statisticId.getRawValue(),
         .counterType = op.counterType,
         .rowIndexFieldName = op.rowIndexFieldName,
         .columnIndexFieldName = op.columnIndexFieldName,
@@ -182,7 +184,7 @@ CountMinSketchProbeLogicalOperator Unreflector<CountMinSketchProbeLogicalOperato
 {
     auto data = unreflect<detail::ReflectedCountMinSketchProbeLogicalOperator>(reflected);
     return CountMinSketchProbeLogicalOperator{
-        data.statisticHash,
+        Statistic::StatisticId{data.statisticId},
         data.counterType,
         std::move(data.rowIndexFieldName),
         std::move(data.columnIndexFieldName),

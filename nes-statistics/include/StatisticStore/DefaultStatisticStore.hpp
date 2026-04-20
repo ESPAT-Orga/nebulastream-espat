@@ -14,8 +14,11 @@
 
 #pragma once
 
+#include <unordered_map>
 #include <StatisticStore/AbstractStatisticStore.hpp>
+#include <WindowTypes/Measures/TimeMeasure.hpp>
 #include <folly/Synchronized.h>
+#include <Statistic.hpp>
 
 namespace NES
 {
@@ -23,26 +26,17 @@ namespace NES
 class DefaultStatisticStore final : public AbstractStatisticStore
 {
 public:
-    /// Inserts a statistic with the statisticHash into a StatisticStore. Returns false, if statistic already exists
-    bool insertStatistic(const Statistic::StatisticHash& statisticHash, Statistic statistic) override;
-
-    /// Deletes all statistics belonging to the statisticHash in the period of [startTs, endTs]. Returns true, if any statistic was deleted
+    bool insertStatistic(const Statistic::StatisticId& statisticId, Statistic statistic) override;
     bool deleteStatistics(
-        const Statistic::StatisticHash& statisticHash, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs) override;
-
-    /// Gets all statistics belonging to the statisticHash in the period of [startTs, endTs]
+        const Statistic::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs) override;
     std::vector<std::shared_ptr<Statistic>> getStatistics(
-        const Statistic::StatisticHash& statisticHash, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs) override;
-
-    /// Gets a single statistic belonging to the statisticHash that has exactly the startTs and endTs
+        const Statistic::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs) override;
     std::optional<std::shared_ptr<Statistic>> getSingleStatistic(
-        const Statistic::StatisticHash& statisticHash, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs) override;
-
-    /// Returns all statistics which are currently saved in this store
-    std::vector<HashStatisticPair> getAllStatistics() override;
+        const Statistic::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs) override;
+    std::vector<IdStatisticPair> getAllStatistics() override;
 
 private:
-    folly::Synchronized<std::unordered_map<Statistic::StatisticHash, std::vector<std::shared_ptr<Statistic>>>> statistics;
+    folly::Synchronized<std::unordered_map<Statistic::StatisticId, std::vector<std::shared_ptr<Statistic>>>> statistics;
 };
 
 }

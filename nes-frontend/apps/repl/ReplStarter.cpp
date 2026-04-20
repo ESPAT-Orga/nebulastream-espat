@@ -32,6 +32,8 @@
 #include <unistd.h>
 
 #include <Identifiers/Identifiers.hpp>
+#include <Phases/SemanticAnalyzer.hpp>
+#include <Plans/LogicalPlan.hpp>
 #include <QueryManager/GRPCQuerySubmissionBackend.hpp>
 #include <QueryManager/QueryManager.hpp>
 #include <SQLQueryParser/AntlrSQLQueryParser.hpp>
@@ -53,10 +55,12 @@
 #include <fmt/ranges.h>
 #include <magic_enum/magic_enum.hpp>
 #include <nlohmann/json.hpp>
+#include <DefaultStatisticQueryGenerator.hpp>
 #include <ErrorHandling.hpp>
 #include <QueryOptimizer.hpp>
 #include <QueryOptimizerConfiguration.hpp>
 #include <Repl.hpp>
+#include <StatisticCoordinator.hpp>
 #include <Thread.hpp>
 #include <WorkerCatalog.hpp>
 #include <utils.hpp>
@@ -280,16 +284,40 @@ int main(int argc, char** argv)
         NES::TopologyStatementHandler topologyStatementHandler{queryManager, workerCatalog};
         auto queryOptimizer = std::make_shared<NES::QueryOptimizer>(queryOptimizerConfig, sourceCatalog, sinkCatalog, workerCatalog);
         auto queryStatementHandler = std::make_shared<NES::QueryStatementHandler>(queryManager, queryOptimizer);
-        NES::Repl replClient(
+        auto semanticAnalyzer = std::make_shared<NES::SemanticAnalyzer>(sourceCatalog, sinkCatalog);
+        auto submitQueryFn
+            = [queryManager, semanticAnalyzer, queryOptimizer](NES::LogicalPlan plan) -> std::expected<NES::QueryId, NES::Exception>
+        {
+            plan = semanticAnalyzer->analyse(plan);
+            auto distributedPlan = queryOptimizer->optimize(plan);
+            auto registerResult = queryManager->registerQuery(distributedPlan);
+            if (!registerResult.has_value())
+            {
+                return std::unexpected(registerResult.error());
+            }
+            auto distributedQueryId = registerResult.value();
+            auto startResult = queryManager->start(distributedQueryId);
+            if (!startResult.has_value())
+            {
+                return std::unexpected(NES::QueryStartFailed("Could not start statistic query: {}", startResult.error().front()));
+            }
+            return NES::QueryId::createDistributed(distributedQueryId);
+        };
+        NES::StatisticCoordinator statisticCoordinator{std::make_unique<NES::DefaultStatisticQueryGenerator>(), submitQueryFn};
+        auto coordinatorAddr = statisticCoordinator.startGrpcServer();
+        NES_INFO("StatisticCoordinator gRPC server listening on {}", coordinatorAddr);
+        NES::StatisticRequestHandler statisticRequestHandler{std::move(statisticCoordinator)};
+        NES::Repl replClient{
             std::move(sourceStatementHandler),
             std::move(sinkStatementHandler),
             std::move(topologyStatementHandler),
             queryStatementHandler,
+            std::move(statisticRequestHandler),
             std::move(binder),
             errorBehaviour,
             defaultOutputFormat,
             interactiveMode,
-            SignalHandler::terminationToken());
+            SignalHandler::terminationToken()};
         replClient.run();
 
         bool hasError = false;

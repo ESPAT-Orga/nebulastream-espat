@@ -13,15 +13,24 @@
 */
 #include <Statistic/StatisticStore/StatisticStoreReader.hpp>
 
+#include <cstdint>
+#include <string_view>
+
+#include <Nautilus/Interface/NESStrongTypeRef.hpp>
+#include <Runtime/Execution/OperatorHandler.hpp>
 #include <Statistic/StatisticProvider.hpp>
 #include <Statistic/StatisticStore/StatisticStoreOperatorHandler.hpp>
+#include <Time/Timestamp.hpp>
 #include <ExecutionContext.hpp>
+#include <Statistic.hpp>
+#include <function.hpp>
+#include <val_arith.hpp>
 
 namespace NES
 {
 
-const int8_t*
-getStatisticDataProxy(OperatorHandler* ptrOpHandler, const Statistic::StatisticHash hash, const Timestamp startTs, const Timestamp endTs)
+const static int8_t*
+getStatisticDataProxy(OperatorHandler* ptrOpHandler, const Statistic::StatisticId hash, const Timestamp startTs, const Timestamp endTs)
 {
     PRECONDITION(ptrOpHandler != nullptr, "opHandler should not be null!");
 
@@ -39,7 +48,7 @@ getStatisticDataProxy(OperatorHandler* ptrOpHandler, const Statistic::StatisticH
 }
 
 uint64_t getNumberOfSeenTuplesOfStatistic(
-    OperatorHandler* ptrOpHandler, const Statistic::StatisticHash hash, const Timestamp startTs, const Timestamp endTs)
+    OperatorHandler* ptrOpHandler, const Statistic::StatisticId hash, const Timestamp startTs, const Timestamp endTs)
 {
     PRECONDITION(ptrOpHandler != nullptr, "opHandler should not be null!");
 
@@ -58,13 +67,13 @@ uint64_t getNumberOfSeenTuplesOfStatistic(
 
 StatisticStoreReader::StatisticStoreReader(
     const OperatorHandlerId operatorHandlerId,
-    const std::string_view statisticHashFieldName,
+    const std::string_view statisticIdFieldName,
     const std::string_view statisticStartTsFieldName,
     const std::string_view statisticEndTsFieldName,
     const std::string_view statisticNumberOfSeenTuplesFieldName,
     StatisticProvider statisticProvider)
     : operatorHandlerId(operatorHandlerId)
-    , statisticHashFieldName(statisticHashFieldName)
+    , statisticIdFieldName(statisticIdFieldName)
     , statisticStartTsFieldName(statisticStartTsFieldName)
     , statisticEndTsFieldName(statisticEndTsFieldName)
     , statisticNumberOfSeenTuplesFieldName(statisticNumberOfSeenTuplesFieldName)
@@ -76,11 +85,12 @@ void StatisticStoreReader::execute(ExecutionContext& executionCtx, Record& recor
 {
     /// Read statistics and call the child with the generated tuples
     auto operatorHandlerMemRef = executionCtx.getGlobalOperatorHandler(operatorHandlerId);
-    const auto statisticHash = record.read(statisticHashFieldName).getRawValueAs<nautilus::val<Statistic::StatisticHash>>();
+    const nautilus::val<Statistic::StatisticId> statisticId{
+        record.read(statisticIdFieldName).getRawValueAs<nautilus::val<Statistic::StatisticId::Underlying>>()};
     const nautilus::val<Timestamp> startTs{record.read(statisticStartTsFieldName).getRawValueAs<nautilus::val<Timestamp::Underlying>>()};
     const nautilus::val<Timestamp> endTs{record.read(statisticEndTsFieldName).getRawValueAs<nautilus::val<Timestamp::Underlying>>()};
-    const auto numberOfSeenTuples = invoke(getNumberOfSeenTuplesOfStatistic, operatorHandlerMemRef, statisticHash, startTs, endTs);
-    const auto statisticMemArea = invoke(getStatisticDataProxy, operatorHandlerMemRef, statisticHash, startTs, endTs);
+    const auto numberOfSeenTuples = invoke(getNumberOfSeenTuplesOfStatistic, operatorHandlerMemRef, statisticId, startTs, endTs);
+    const auto statisticMemArea = invoke(getStatisticDataProxy, operatorHandlerMemRef, statisticId, startTs, endTs);
     for (auto statisticIterator = statisticProvider.begin(statisticMemArea); statisticIterator != statisticProvider.end(statisticMemArea);
          ++statisticIterator)
     {
@@ -90,7 +100,7 @@ void StatisticStoreReader::execute(ExecutionContext& executionCtx, Record& recor
         /// Adding additional data so that downstream operators know when and for what the statistic was created
         statisticRecord.write(statisticStartTsFieldName, startTs.convertToValue());
         statisticRecord.write(statisticEndTsFieldName, endTs.convertToValue());
-        statisticRecord.write(statisticHashFieldName, statisticHash);
+        statisticRecord.write(statisticIdFieldName, statisticId.convertToValue());
         statisticRecord.write(statisticNumberOfSeenTuplesFieldName, numberOfSeenTuples);
         executeChild(executionCtx, statisticRecord);
     }

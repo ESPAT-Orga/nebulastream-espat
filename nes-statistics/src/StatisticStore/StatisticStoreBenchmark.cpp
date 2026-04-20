@@ -468,6 +468,38 @@ void runGetStatisticsBenchmark(std::ofstream& csv, ProgressTracker& progress, Be
                     forEachParam(
                         [&](const auto storeType, const auto pctAccessExisting, const auto numThreads)
                         {
+                            /// Skip pre-population when all inner configs would be excluded anyway
+                            {
+                                bool anyRun = false;
+                                for (const auto numStatisticsPerRequest : Params::numWindowsPerRequestVals)
+                                {
+                                    if (!args.shouldSkip(
+                                            "Get    | " + padLeft(magic_enum::enum_name(storeType), 10) + " | "
+                                            + pad("threads", numThreads, 2) + " | " + pad("stats", numStatistics, 7) + " | "
+                                            + pad("ids", numStatisticIds, 7) + " | " + pad("size", statisticSize, 5) + " | "
+                                            + pad("ws", windowSize, 5) + " | " + pad("pctExist", pctAccessExisting, 2) + " | "
+                                            + pad("statsPerReq", numStatisticsPerRequest, 3)))
+                                    {
+                                        anyRun = true;
+                                        break;
+                                    }
+                                }
+                                if (!anyRun)
+                                {
+                                    for (const auto numStatisticsPerRequest : Params::numWindowsPerRequestVals)
+                                    {
+                                        const auto r = "Get    | " + padLeft(magic_enum::enum_name(storeType), 10) + " | "
+                                            + pad("threads", numThreads, 2) + " | " + pad("stats", numStatistics, 7) + " | "
+                                            + pad("ids", numStatisticIds, 7) + " | " + pad("size", statisticSize, 5) + " | "
+                                            + pad("ws", windowSize, 5) + " | " + pad("pctExist", pctAccessExisting, 2) + " | "
+                                            + pad("statsPerReq", numStatisticsPerRequest, 3);
+                                        progress.skip(r, "", "was filtered or excluded.");
+                                        progress.report(r);
+                                    }
+                                    return;
+                                }
+                            }
+
                             /// Pre-populate the store (not timed)
                             const auto hwThreads = static_cast<uint64_t>(std::thread::hardware_concurrency());
 

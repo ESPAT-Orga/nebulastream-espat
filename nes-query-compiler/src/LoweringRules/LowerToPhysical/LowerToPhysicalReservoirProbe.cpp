@@ -58,7 +58,7 @@ LoweringRuleResultSubgraph LowerToPhysicalReservoirProbe::apply(LogicalOperator 
     auto statisticProvider = getStatisticProvider(reservoirProbe->sampleSchema);
     StatisticStoreReader statisticStoreReader{
         operatorHandlerId,
-        reservoirProbe->statisticHashField.name,
+        reservoirProbe->statisticIdField.name,
         reservoirProbe->statisticStartTsField.name,
         reservoirProbe->statisticEndTsField.name,
         reservoirProbe->statisticNumberOfSeenTuplesField.name,

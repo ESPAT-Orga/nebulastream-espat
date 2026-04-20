@@ -37,7 +37,7 @@ LoweringRuleResultSubgraph LowerToPhysicalStatisticStoreWriter::apply(LogicalOpe
     const auto memoryLayoutType = memoryLayoutTypeTrait.value()->memoryLayout;
     StatisticStoreWriter statisticStoreWriter{
         operatorHandlerId,
-        logicalStatisticStoreWriter->getStatisticHash(),
+        logicalStatisticStoreWriter->getStatisticId(),
         logicalStatisticStoreWriter->getStatisticType(),
         *logicalStatisticStoreWriter->inputLogicalStatisticFields,
         logicalStatisticStoreWriter->getOutputStatisticFields(inputSchema.getQualifierNameForSystemGeneratedFieldsWithSeparator())};

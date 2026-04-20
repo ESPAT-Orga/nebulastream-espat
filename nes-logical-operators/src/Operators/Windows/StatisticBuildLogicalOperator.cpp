@@ -256,15 +256,15 @@ StatisticBuildLogicalOperator Unreflector<StatisticBuildLogicalOperator>::operat
             name,
             AggregationLogicalFunctionRegistryArguments{
                 .fields = {},
-                .sampleHash = std::nullopt,
-                .seed = std::nullopt,
-                .reservoirSize = std::nullopt,
-                .histogramNumBuckets = std::nullopt,
-                .histogramMinValue = std::nullopt,
-                .histogramMaxValue = std::nullopt,
-                .histogramCounterType = std::nullopt,
-                .countMinNumColumns = std::nullopt,
-                .countMinNumRows = std::nullopt,
+                .statisticId = {},
+                .seed = {},
+                .reservoirSize = {},
+                .histogramNumBuckets = {},
+                .histogramMinValue = {},
+                .histogramMaxValue = {},
+                .histogramCounterType = {},
+                .countMinNumColumns = {},
+                .countMinNumRows = {},
                 .reflected = reflectedAggregation});
         if (!functionOpt.has_value())
         {

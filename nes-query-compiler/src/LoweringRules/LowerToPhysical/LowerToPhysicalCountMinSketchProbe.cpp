@@ -51,7 +51,7 @@ LoweringRuleResultSubgraph LowerToPhysicalCountMinSketchProbe::apply(LogicalOper
         countMinProbe->counterType, countMinProbe->columnIndexFieldName, countMinProbe->rowIndexFieldName, countMinProbe->counterFieldName);
     StatisticStoreReader statisticStoreReader{
         operatorHandlerId,
-        countMinProbe->statisticHashField.name,
+        countMinProbe->statisticIdField.name,
         countMinProbe->statisticStartTsField.name,
         countMinProbe->statisticEndTsField.name,
         countMinProbe->statisticNumberOfSeenTuplesField.name,

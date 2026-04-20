@@ -15,6 +15,7 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 #include <Functions/FieldAccessLogicalFunction.hpp>
@@ -32,7 +33,7 @@ struct AggregationLogicalFunctionRegistryArguments
 {
     std::vector<FieldAccessLogicalFunction> fields;
     /// Additional arguments for statistics
-    std::optional<Statistic::StatisticHash> sampleHash;
+    std::optional<Statistic::StatisticId> statisticId;
     /// Reservoir Sample and Count Min Sketch:
     std::optional<uint64_t> seed;
     /// Reservoir Sample:

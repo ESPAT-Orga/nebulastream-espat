@@ -22,6 +22,7 @@
 #include <Functions/FieldAccessLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/WindowAggregationLogicalFunction.hpp>
 #include <Util/Reflection.hpp>
+#include <Statistic.hpp>
 
 namespace NES
 {
@@ -35,14 +36,14 @@ public:
     /// `numBuckets` number of buckets the histogram should have.
     /// `minValue` start value of the histogram
     /// `maxValue` end value of the histogram
-    /// `statisticHash` the number that identifies this synopsis in the statistic store to later retrieve it
+    /// `statisticId` the number that identifies this synopsis in the statistic store to later retrieve it
     /// `counterType` data type of the counter in each bucket
     EquiWidthHistogramLogicalFunction(
         const FieldAccessLogicalFunction& onField,
         uint64_t numBuckets,
         uint64_t minValue,
         uint64_t maxValue,
-        uint64_t statisticHash,
+        Statistic::StatisticId statisticId,
         DataType counterType);
     EquiWidthHistogramLogicalFunction(
         const FieldAccessLogicalFunction& onField,
@@ -50,7 +51,7 @@ public:
         uint64_t numBuckets,
         uint64_t minValue,
         uint64_t maxValue,
-        uint64_t statisticHash,
+        Statistic::StatisticId statisticId,
         DataType counterType);
 
     ~EquiWidthHistogramLogicalFunction() = default;
@@ -79,7 +80,7 @@ public:
     uint64_t minValue;
     uint64_t maxValue;
 
-    uint64_t statisticHash;
+    Statistic::StatisticId statisticId;
     DataType counterType;
 
 private:
@@ -117,7 +118,7 @@ struct ReflectedEquiWidthHistogramLogicalFunction
     uint64_t numBuckets;
     uint64_t minValue;
     uint64_t maxValue;
-    uint64_t statisticHash;
+    Statistic::StatisticId::Underlying statisticId;
     DataType counterType;
 };
 }

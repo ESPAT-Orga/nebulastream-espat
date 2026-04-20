@@ -28,8 +28,8 @@ public:
     /// The fields need to be in upper case. Otherwise, the parsing of the field names in the SLT of the sink does not work
     Schema::Field statisticNumberOfSeenTuplesField
         = {"STATISTICNUMBEROFSEENTUPLES", DataTypeProvider::provideDataType(DataType::Type::UINT64, DataType::NULLABLE::NOT_NULLABLE)};
-    Schema::Field statisticHashField
-        = {"STATISTICHASH", DataTypeProvider::provideDataType(DataType::Type::UINT64, DataType::NULLABLE::NOT_NULLABLE)};
+    Schema::Field statisticIdField
+        = {"STATISTICID", DataTypeProvider::provideDataType(DataType::Type::UINT64, DataType::NULLABLE::NOT_NULLABLE)};
     Schema::Field statisticStartTsField
         = {"STATISTICSTART", DataTypeProvider::provideDataType(DataType::Type::UINT64, DataType::NULLABLE::NOT_NULLABLE)};
     Schema::Field statisticEndTsField
@@ -44,11 +44,11 @@ public:
 
     LogicalStatisticFields(
         Schema::Field statisticNumberOfSeenTuplesField,
-        Schema::Field statisticHashField,
+        Schema::Field statisticIdField,
         Schema::Field statisticStartTsField,
         Schema::Field statisticEndTsField)
         : statisticNumberOfSeenTuplesField(std::move(statisticNumberOfSeenTuplesField))
-        , statisticHashField(std::move(statisticHashField))
+        , statisticIdField(std::move(statisticIdField))
         , statisticStartTsField(std::move(statisticStartTsField))
         , statisticEndTsField(std::move(statisticEndTsField))
     {
@@ -57,7 +57,7 @@ public:
     LogicalStatisticFields& addQualifierName(const std::string_view qualifierName)
     {
         statisticNumberOfSeenTuplesField.addQualifierIfNotExists(qualifierName);
-        statisticHashField.addQualifierIfNotExists(qualifierName);
+        statisticIdField.addQualifierIfNotExists(qualifierName);
         statisticStartTsField.addQualifierIfNotExists(qualifierName);
         statisticEndTsField.addQualifierIfNotExists(qualifierName);
         statisticDataField.addQualifierIfNotExists(qualifierName);

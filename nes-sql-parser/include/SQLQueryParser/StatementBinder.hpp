@@ -37,6 +37,7 @@
 #include <Util/Logger/Formatter.hpp>
 #include <fmt/base.h>
 #include <ErrorHandling.hpp>
+#include <RequestStatisticStatement.hpp>
 
 namespace NES
 {
@@ -173,7 +174,8 @@ using Statement = std::variant<
     ExplainQueryStatement,
     ShowQueriesStatement,
     ShowSinksStatement,
-    DropQueryStatement>;
+    DropQueryStatement,
+    RequestStatisticBuildStatement>;
 
 inline std::optional<StatementOutputFormat> getOutputFormat(const Statement& statement)
 {
@@ -186,7 +188,7 @@ inline std::optional<StatementOutputFormat> getOutputFormat(const Statement& sta
         }
         else
         {
-            return std::nullopt;
+            return {};
         }
     };
     return std::visit(visitor, statement);

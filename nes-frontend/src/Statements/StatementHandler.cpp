@@ -41,6 +41,8 @@
 #include <ErrorHandling.hpp>
 #include <QueryOptimizer.hpp>
 #include <SingleNodeWorkerConfiguration.hpp>
+#include <StatisticCoordinator.hpp>
+#include <StatisticQueryGenerator.hpp>
 #include <WorkerCatalog.hpp>
 #include <WorkerConfig.hpp>
 
@@ -416,5 +418,29 @@ std::expected<ShowQueriesStatementResult, Exception> QueryStatementHandler::oper
             std::unordered_map<DistributedQueryId, DistributedQueryStatusSnapshot>{{statement.id.value(), statusOpt.value()}}};
     }
     return std::unexpected(QueryStatusFailed("Could not retrieve query status for some queries: ", fmt::join(statusOpt.error(), "\n")));
+}
+
+StatisticRequestHandler::StatisticRequestHandler(StatisticCoordinator statisticCoordinator)
+    : statisticCoordinator(std::move(statisticCoordinator))
+{
+}
+
+std::expected<RequestStatisticBuildStatementResult, Exception>
+StatisticRequestHandler::operator()(const RequestStatisticBuildStatement& statement)
+{
+    CPPTRACE_TRY
+    {
+        return statisticCoordinator.collectNewStatistic(statement).transform(
+            [](auto result)
+            {
+                return RequestStatisticBuildStatementResult{
+                    .queryId = result.queryId, .statisticId = result.statisticId, .alreadyExisted = result.alreadyExisted};
+            });
+    }
+    CPPTRACE_CATCH(...)
+    {
+        return std::unexpected{wrapExternalException()};
+    }
+    std::unreachable();
 }
 }

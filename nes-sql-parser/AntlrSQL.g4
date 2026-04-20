@@ -58,9 +58,20 @@ singleStatement: statement ';'? EOF;
 
 terminatedStatement: statement ';';
 multipleStatements: (statement (';' statement)* ';'?)? EOF;
-statement: queryWithOptions | createStatement | dropStatement | showStatement | explainStatement;
+statement: queryWithOptions | createStatement | dropStatement | showStatement | explainStatement | requestStatisticStatement;
 
 explainStatement: EXPLAIN query;
+
+requestStatisticStatement: REQUEST STATISTIC requestCharacteristic;
+
+requestCharacteristic
+    : DATA metricType ON sourceName=identifier '(' fieldName=identifier ')' windowClause (EVENTTIME eventTimeField=identifier)? optionsClause?          #dataCharacteristic
+    | WORKLOAD metricType ON QUERY queryId=INTEGER_VALUE OPERATOR operatorId=INTEGER_VALUE '(' fieldName=identifier ')' windowClause optionsClause?  #workloadCharacteristic
+    | INFRASTRUCTURE metricType ON WORKER workerId=identifier windowClause optionsClause?                        #infrastructureCharacteristic
+    ;
+
+metricType: CARDINALITY | MINVAL | MAXVAL | RATE | AVERAGE;
+
 createStatement: CREATE createDefinition;
 createDefinition: createLogicalSourceDefinition | createPhysicalSourceDefinition | createSinkDefinition | createWorkerDefinition;
 createLogicalSourceDefinition: LOGICAL SOURCE sourceName=identifier schemaDefinition fromQuery?;
@@ -193,7 +204,13 @@ identifier: strictIdentifier;
 
 strictIdentifier
     : IDENTIFIER #unquotedIdentifier
-    | quotedIdentifier #quotedIdentifierAlternative;
+    | quotedIdentifier #quotedIdentifierAlternative
+    | nonReserved #unquotedIdentifier;
+
+/// Keywords that may also appear as identifiers (e.g., field or source names).
+nonReserved
+    : DATA
+    ;
 
 quotedIdentifier
     : BACKQUOTED_IDENTIFIER
@@ -450,7 +467,7 @@ OF: 'OF';
 ON: 'ON' | 'on';
 OR: 'OR' | 'or';
 ORDER: 'ORDER' | 'order';
-QUERY: 'QUERY';
+QUERY: 'QUERY' | 'query';
 RECOVER: 'RECOVER';
 RIGHT: 'RIGHT';
 RLIKE: 'RLIKE' | 'REGEXP';
@@ -498,6 +515,19 @@ AT_LEAST_ONCE : 'AT_LEAST_ONCE';
 JSON: 'JSON';
 TEXT: 'TEXT';
 EXPLAIN: 'EXPLAIN' | 'explain';
+REQUEST: 'REQUEST' | 'request';
+STATISTIC: 'STATISTIC' | 'statistic';
+CARDINALITY: 'CARDINALITY' | 'cardinality';
+MINVAL: 'MINVAL' | 'minval';
+MAXVAL: 'MAXVAL' | 'maxval';
+RATE: 'RATE' | 'rate';
+AVERAGE: 'AVERAGE' | 'average';
+DATA: 'DATA' | 'data';
+WORKLOAD: 'WORKLOAD' | 'workload';
+INFRASTRUCTURE: 'INFRASTRUCTURE' | 'infrastructure';
+WORKER: 'WORKER' | 'worker';
+OPERATOR: 'OPERATOR' | 'operator';
+EVENTTIME: 'EVENTTIME' | 'eventtime';
 
 ///--NebulaSQL-KEYWORD-LIST-END
 ///****************************
@@ -593,7 +623,6 @@ CREATE : 'CREATE';
 SOURCE : 'SOURCE';
 LOGICAL: 'LOGICAL';
 PHYSICAL: 'PHYSICAL';
-WORKER: 'WORKER';
 SINK : 'SINK';
 
 //Make sure that you add lexer rules for keywords before the identifier rule,

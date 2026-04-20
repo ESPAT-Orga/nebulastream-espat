@@ -13,10 +13,12 @@
 */
 #include <Statistic/StatisticStore/StatisticStoreWriter.hpp>
 
+#include <Nautilus/Interface/NESStrongTypeRef.hpp>
 #include <Nautilus/Interface/Record.hpp>
 #include <Operators/Statistic/LogicalStatisticFields.hpp>
 #include <Statistic/StatisticStore/StatisticStoreOperatorHandler.hpp>
 #include <ExecutionContext.hpp>
+#include <Statistic.hpp>
 #include <val_enum.hpp>
 
 namespace NES
@@ -24,7 +26,7 @@ namespace NES
 
 void insertStatisticIntoStoreProxy(
     OperatorHandler* ptrOpHandler,
-    const Statistic::StatisticHash hash,
+    const Statistic::StatisticId hash,
     const Statistic::StatisticType type,
     const Timestamp startTs,
     const Timestamp endTs,
@@ -56,12 +58,12 @@ void insertStatisticIntoStoreProxy(
 
 StatisticStoreWriter::StatisticStoreWriter(
     const OperatorHandlerId operatorHandlerId,
-    const Statistic::StatisticHash statisticHash,
+    const Statistic::StatisticId statisticId,
     const Statistic::StatisticType statisticType,
     const LogicalStatisticFields& inputLogicalStatisticFields,
     const LogicalStatisticFields& outputLogicalStatisticFields)
     : operatorHandlerId(operatorHandlerId)
-    , statisticHash(statisticHash)
+    , statisticId(statisticId)
     , statisticType(statisticType)
     , inputStatisticStartTsFieldName(inputLogicalStatisticFields.statisticStartTsField.name)
     , inputStatisticEndTsFieldName(inputLogicalStatisticFields.statisticEndTsField.name)
@@ -69,7 +71,7 @@ StatisticStoreWriter::StatisticStoreWriter(
     , inputStatisticNumberOfSeenTuplesFieldName(inputLogicalStatisticFields.statisticNumberOfSeenTuplesField.name)
     , outputStatisticStartTsFieldName(outputLogicalStatisticFields.statisticStartTsField.name)
     , outputStatisticEndTsFieldName(outputLogicalStatisticFields.statisticEndTsField.name)
-    , outputStatisticHashFieldName(outputLogicalStatisticFields.statisticHashField.name)
+    , outputStatisticIdFieldName(outputLogicalStatisticFields.statisticIdField.name)
     , outputStatisticNumberOfSeenTuplesFieldName(outputLogicalStatisticFields.statisticNumberOfSeenTuplesField.name)
 {
 }
@@ -78,7 +80,7 @@ void StatisticStoreWriter::execute(ExecutionContext& executionCtx, Record& recor
 {
     /// Insert statistic into store
     auto operatorHandlerMemRef = executionCtx.getGlobalOperatorHandler(operatorHandlerId);
-    const nautilus::val<Statistic::StatisticHash> statisticHashVal{statisticHash};
+    const nautilus::val<Statistic::StatisticId> statisticIdVal{statisticId};
     const nautilus::val<Statistic::StatisticType> statisticTypeVal{statisticType};
     const nautilus::val<Timestamp> startTs{
         record.read(inputStatisticStartTsFieldName).getRawValueAs<nautilus::val<Timestamp::Underlying>>()};
@@ -89,7 +91,7 @@ void StatisticStoreWriter::execute(ExecutionContext& executionCtx, Record& recor
     invoke(
         insertStatisticIntoStoreProxy,
         operatorHandlerMemRef,
-        statisticHashVal,
+        statisticIdVal,
         statisticTypeVal,
         startTs,
         endTs,
@@ -101,7 +103,7 @@ void StatisticStoreWriter::execute(ExecutionContext& executionCtx, Record& recor
     Record newRecord;
     newRecord.write(outputStatisticStartTsFieldName, startTs.convertToValue());
     newRecord.write(outputStatisticEndTsFieldName, endTs.convertToValue());
-    newRecord.write(outputStatisticHashFieldName, statisticHashVal);
+    newRecord.write(outputStatisticIdFieldName, statisticIdVal.convertToValue());
     newRecord.write(outputStatisticNumberOfSeenTuplesFieldName, numberOfSeenTuples);
     executeChild(executionCtx, newRecord);
 }

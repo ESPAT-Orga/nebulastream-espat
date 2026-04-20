@@ -23,6 +23,7 @@
 #include <Functions/FieldAccessLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/WindowAggregationLogicalFunction.hpp>
 #include <Util/Reflection.hpp>
+#include <Statistic.hpp>
 
 namespace NES
 {
@@ -38,13 +39,13 @@ public:
         const FieldAccessLogicalFunction& onField,
         std::vector<FieldAccessLogicalFunction> sampleFields,
         uint64_t reservoirSize,
-        uint64_t sampleHash);
+        Statistic::StatisticId statisticId);
     ReservoirSampleLogicalFunction(
         const FieldAccessLogicalFunction& onField,
         const FieldAccessLogicalFunction& asField,
         std::vector<FieldAccessLogicalFunction> sampleFields,
         uint64_t reservoirSize,
-        uint64_t sampleHash);
+        Statistic::StatisticId statisticId);
 
     ~ReservoirSampleLogicalFunction() = default;
 
@@ -74,7 +75,7 @@ public:
     /// We hardcode the seed to have determinism for testing purposes
     uint64_t seed = 42;
     /// Identifies the sample in the StatStore
-    uint64_t sampleHash;
+    Statistic::StatisticId statisticId;
 
 private:
     static constexpr std::string_view NAME = "ReservoirSample";
@@ -111,6 +112,6 @@ struct ReflectedReservoirSampleLogicalFunction
     std::vector<FieldAccessLogicalFunction> sampleFields;
     uint64_t reservoirSize;
     uint64_t seed;
-    uint64_t sampleHash;
+    Statistic::StatisticId::Underlying statisticId;
 };
 }

@@ -15,6 +15,7 @@
 #pragma once
 
 #include <StatisticStore/AbstractStatisticStore.hpp>
+#include <WindowTypes/Measures/TimeMeasure.hpp>
 #include <folly/Synchronized.h>
 
 namespace NES
@@ -29,14 +30,14 @@ class SubStoresStatisticStore final : public AbstractStatisticStore
 
 public:
     explicit SubStoresStatisticStore(uint64_t numberOfExpectedConcurrentAccess);
-    bool insertStatistic(const Statistic::StatisticHash& statisticHash, Statistic statistic) override;
+    bool insertStatistic(const Statistic::StatisticId& statisticId, Statistic statistic) override;
     bool deleteStatistics(
-        const Statistic::StatisticHash& statisticHash, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs) override;
+        const Statistic::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs) override;
     std::vector<std::shared_ptr<Statistic>> getStatistics(
-        const Statistic::StatisticHash& statisticHash, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs) override;
+        const Statistic::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs) override;
     std::optional<std::shared_ptr<Statistic>> getSingleStatistic(
-        const Statistic::StatisticHash& statisticHash, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs) override;
-    std::vector<HashStatisticPair> getAllStatistics() override;
+        const Statistic::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs) override;
+    std::vector<IdStatisticPair> getAllStatistics() override;
 };
 
 }

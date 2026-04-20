@@ -29,7 +29,7 @@ class StatisticStoreWriterLogicalOperator final
 public:
     StatisticStoreWriterLogicalOperator(
         std::shared_ptr<LogicalStatisticFields> inputLogicalStatisticFields,
-        Statistic::StatisticHash statisticHash,
+        Statistic::StatisticId statisticId,
         Statistic::StatisticType statisticType);
     [[nodiscard]] std::string explain(ExplainVerbosity verbosity, OperatorId id) const;
     [[nodiscard]] std::vector<LogicalOperator> getChildren() const;
@@ -41,7 +41,7 @@ public:
     [[nodiscard]] std::vector<Schema> getInputSchemas() const;
     [[nodiscard]] Schema getOutputSchema() const;
     [[nodiscard]] StatisticStoreWriterLogicalOperator withInferredSchema(std::vector<Schema> inputSchemas) const;
-    [[nodiscard]] Statistic::StatisticHash getStatisticHash() const;
+    [[nodiscard]] Statistic::StatisticId getStatisticId() const;
     [[nodiscard]] Statistic::StatisticType getStatisticType() const;
     [[nodiscard]] static LogicalStatisticFields getOutputStatisticFields(const std::string_view qualifierName);
 
@@ -51,7 +51,7 @@ public:
 private:
     static constexpr std::string_view NAME = "StatisticStoreWriter";
 
-    Statistic::StatisticHash statisticHash;
+    Statistic::StatisticId statisticId;
     Statistic::StatisticType statisticType;
     std::vector<LogicalOperator> children;
     TraitSet traitSet;
@@ -78,8 +78,8 @@ namespace detail
 {
 struct ReflectedStatisticStoreWriterLogicalOperator
 {
-    uint64_t statisticHash;
-    uint8_t statisticType;
+    Statistic::StatisticId::Underlying statisticId;
+    Statistic::StatisticType statisticType;
 };
 }
 

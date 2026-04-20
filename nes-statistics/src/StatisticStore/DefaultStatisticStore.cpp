@@ -13,14 +13,16 @@
 */
 
 #include <StatisticStore/DefaultStatisticStore.hpp>
+#include <WindowTypes/Measures/TimeMeasure.hpp>
+#include <Statistic.hpp>
 
 namespace NES
 {
 
-bool DefaultStatisticStore::insertStatistic(const Statistic::StatisticHash& statisticHash, Statistic statistic)
+bool DefaultStatisticStore::insertStatistic(const Statistic::StatisticId& statisticId, Statistic statistic)
 {
     const auto statisticsLocked = statistics.wlock();
-    auto& statisticsVec = (*statisticsLocked)[statisticHash];
+    auto& statisticsVec = (*statisticsLocked)[statisticId];
 
     const auto statisticExists = std::ranges::any_of(
         statisticsVec,
@@ -37,10 +39,10 @@ bool DefaultStatisticStore::insertStatistic(const Statistic::StatisticHash& stat
 }
 
 bool DefaultStatisticStore::deleteStatistics(
-    const Statistic::StatisticHash& statisticHash, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs)
+    const Statistic::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs)
 {
     const auto statisticsLocked = statistics.wlock();
-    auto& statisticsVec = (*statisticsLocked)[statisticHash];
+    auto& statisticsVec = (*statisticsLocked)[statisticId];
 
     const auto range = std::ranges::remove_if(
         statisticsVec,
@@ -51,11 +53,11 @@ bool DefaultStatisticStore::deleteStatistics(
 }
 
 std::vector<std::shared_ptr<Statistic>> DefaultStatisticStore::getStatistics(
-    const Statistic::StatisticHash& statisticHash, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs)
+    const Statistic::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs)
 {
     std::vector<std::shared_ptr<Statistic>> returnStatisticsVector;
     const auto statisticsLocked = statistics.rlock();
-    auto& statisticsVec = statisticsLocked->at(statisticHash);
+    const auto& statisticsVec = statisticsLocked->at(statisticId);
 
     std::ranges::copy_if(
         statisticsVec,
@@ -65,28 +67,28 @@ std::vector<std::shared_ptr<Statistic>> DefaultStatisticStore::getStatistics(
 }
 
 std::optional<std::shared_ptr<Statistic>> DefaultStatisticStore::getSingleStatistic(
-    const Statistic::StatisticHash& statisticHash, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs)
+    const Statistic::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs)
 {
     const auto statisticsLocked = statistics.rlock();
-    auto& statisticsVec = statisticsLocked->at(statisticHash);
+    const auto& statisticsVec = statisticsLocked->at(statisticId);
 
     const auto it = std::ranges::find_if(
         statisticsVec,
         [startTs, endTs](const auto statistic) { return startTs == statistic->getStartTs() && statistic->getEndTs() == endTs; });
-    return it != statisticsVec.end() ? std::make_optional(*it) : std::nullopt;
+    return it != statisticsVec.end() ? std::make_optional(*it) : std::optional<std::shared_ptr<Statistic>>{};
 }
 
-std::vector<DefaultStatisticStore::HashStatisticPair> DefaultStatisticStore::getAllStatistics()
+std::vector<DefaultStatisticStore::IdStatisticPair> DefaultStatisticStore::getAllStatistics()
 {
-    std::vector<HashStatisticPair> returnStatisticsVector;
+    std::vector<IdStatisticPair> returnStatisticsVector;
     const auto statisticsLocked = statistics.rlock();
 
-    for (const auto& [statisticHash, statisticVec] : *statisticsLocked)
+    for (const auto& [statisticId, statisticVec] : *statisticsLocked)
     {
         std::ranges::transform(
             statisticVec,
             std::back_inserter(returnStatisticsVector),
-            [statisticHash](const auto statistic) { return std::make_pair(statisticHash, statistic); });
+            [statisticId](const auto& statistic) { return std::make_pair(statisticId, statistic); });
     }
     return returnStatisticsVector;
 }

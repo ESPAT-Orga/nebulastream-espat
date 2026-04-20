@@ -28,6 +28,7 @@
 #include <fmt/format.h>
 #include <AggregationLogicalFunctionRegistry.hpp>
 #include <ErrorHandling.hpp>
+#include <Statistic.hpp>
 
 namespace NES
 {
@@ -36,10 +37,10 @@ ReservoirSampleLogicalFunction::ReservoirSampleLogicalFunction(
     const FieldAccessLogicalFunction& onField,
     std::vector<FieldAccessLogicalFunction> sampleFields,
     const uint64_t reservoirSize,
-    const uint64_t sampleHash)
+    const Statistic::StatisticId statisticId)
     : sampleFields(std::move(sampleFields))
     , reservoirSize(reservoirSize)
-    , sampleHash(sampleHash)
+    , statisticId(statisticId)
     , inputStamp(onField.getDataType())
     , partialAggregateStamp(DataTypeProvider::provideDataType(DataType::Type::UNDEFINED, DataType::NULLABLE::NOT_NULLABLE))
     , finalAggregateStamp(DataTypeProvider::provideDataType(DataType::Type::VARSIZED, DataType::NULLABLE::NOT_NULLABLE))
@@ -53,10 +54,10 @@ ReservoirSampleLogicalFunction::ReservoirSampleLogicalFunction(
     const FieldAccessLogicalFunction& asField,
     std::vector<FieldAccessLogicalFunction> sampleFields,
     const uint64_t reservoirSize,
-    const uint64_t sampleHash)
+    const Statistic::StatisticId statisticId)
     : sampleFields(std::move(sampleFields))
     , reservoirSize(reservoirSize)
-    , sampleHash(sampleHash)
+    , statisticId(statisticId)
     , inputStamp(onField.getDataType())
     , partialAggregateStamp(DataTypeProvider::provideDataType(DataType::Type::UNDEFINED, DataType::NULLABLE::NOT_NULLABLE))
     , finalAggregateStamp(DataTypeProvider::provideDataType(DataType::Type::VARSIZED, DataType::NULLABLE::NOT_NULLABLE))
@@ -88,13 +89,14 @@ Reflected Reflector<ReservoirSampleLogicalFunction>::operator()(const ReservoirS
         .sampleFields = function.sampleFields,
         .reservoirSize = function.reservoirSize,
         .seed = function.seed,
-        .sampleHash = function.sampleHash});
+        .statisticId = function.statisticId.getRawValue()});
 }
 
 ReservoirSampleLogicalFunction Unreflector<ReservoirSampleLogicalFunction>::operator()(const Reflected& reflected) const
 {
     auto data = unreflect<detail::ReflectedReservoirSampleLogicalFunction>(reflected);
-    auto result = ReservoirSampleLogicalFunction{data.onField, data.asField, data.sampleFields, data.reservoirSize, data.sampleHash};
+    auto result = ReservoirSampleLogicalFunction{
+        data.onField, data.asField, data.sampleFields, data.reservoirSize, Statistic::StatisticId{data.statisticId}};
     result.seed = data.seed;
     return result;
 }
@@ -192,7 +194,7 @@ bool ReservoirSampleLogicalFunction::shallIncludeNullValues() noexcept
 bool ReservoirSampleLogicalFunction::operator==(const ReservoirSampleLogicalFunction& rhs) const
 {
     return this->getName() == rhs.getName() && this->onField == rhs.onField && this->asField == rhs.asField
-        && this->reservoirSize == rhs.reservoirSize && this->sampleHash == rhs.sampleHash;
+        && this->reservoirSize == rhs.reservoirSize && this->statisticId == rhs.statisticId;
 }
 
 AggregationLogicalFunctionRegistryReturnType
@@ -208,11 +210,11 @@ AggregationLogicalFunctionGeneratedRegistrar::RegisterReservoirSampleAggregation
         arguments.fields.size() >= 3,
         "ReservoirSampleLogicalFunction requires onField (even though unused), asField, and at least one field for the sample");
     PRECONDITION(arguments.reservoirSize.has_value(), "ReservoirSampleLogicalFunction requires reservoirSize to be set!");
-    PRECONDITION(arguments.sampleHash.has_value(), "ReservoirSampleLogicalFunction requires statisticHash to be set!");
+    PRECONDITION(arguments.statisticId.has_value(), "ReservoirSampleLogicalFunction requires statisticId to be set!");
 
     const std::vector<FieldAccessLogicalFunction> sampleFields{
         std::make_move_iterator(arguments.fields.begin() + 2), std::make_move_iterator(arguments.fields.end())};
     return std::make_shared<WindowAggregationLogicalFunction>(ReservoirSampleLogicalFunction{
-        arguments.fields[0], arguments.fields[1], sampleFields, arguments.reservoirSize.value(), arguments.sampleHash.value()});
+        arguments.fields[0], arguments.fields[1], sampleFields, arguments.reservoirSize.value(), arguments.statisticId.value()});
 }
 }

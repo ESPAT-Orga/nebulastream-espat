@@ -41,6 +41,8 @@
 #include <Sources/SourceValidationProvider.hpp>
 #include <Util/Overloaded.hpp>
 #include <fmt/format.h>
+#include <CollectionDomain.hpp>
+#include <Metric.hpp>
 
 #include <ANTLRInputStream.h>
 #include <AntlrSQLLexer.h>
@@ -58,6 +60,7 @@
 #include <ErrorHandling.hpp>
 
 #include <CommonParserFunctions.hpp>
+#include <RequestStatisticStatement.hpp>
 
 namespace NES
 {
@@ -282,7 +285,7 @@ public:
         const AntlrSQLParser::ShowFilterContext* showFilter, AntlrSQLParser::ShowFormatContext* showFormat) const
     {
         const std::optional<StatementOutputFormat> format
-            = showFormat != nullptr ? std::make_optional(bindFormat(showFormat)) : std::nullopt;
+            = showFormat != nullptr ? std::make_optional(bindFormat(showFormat)) : std::optional<StatementOutputFormat>{};
         if (showFilter != nullptr)
         {
             const auto [attr, value] = bindShowFilter(showFilter);
@@ -296,7 +299,7 @@ public:
             }
             return ShowLogicalSourcesStatement{.name = std::get<std::string>(value), .format = format};
         }
-        return ShowLogicalSourcesStatement{.name = std::nullopt, .format = format};
+        return ShowLogicalSourcesStatement{.name = {}, .format = format};
     }
 
     ShowPhysicalSourcesStatement bindShowPhysicalSourcesStatement(
@@ -306,7 +309,7 @@ public:
     {
         std::optional<LogicalSourceName> logicalSourceName{};
         const std::optional<StatementOutputFormat> format
-            = showFormat != nullptr ? std::make_optional(bindFormat(showFormat)) : std::nullopt;
+            = showFormat != nullptr ? std::make_optional(bindFormat(showFormat)) : std::optional<StatementOutputFormat>{};
         if (physicalSourcesSubject->logicalSourceName != nullptr)
         {
             logicalSourceName = LogicalSourceName(bindIdentifier(physicalSourcesSubject->logicalSourceName));
@@ -324,14 +327,14 @@ public:
             }
             return ShowPhysicalSourcesStatement{.logicalSource = logicalSourceName, .id = std::get<uint64_t>(value), .format = format};
         }
-        return ShowPhysicalSourcesStatement{.logicalSource = logicalSourceName, .id = std::nullopt, .format = format};
+        return ShowPhysicalSourcesStatement{.logicalSource = logicalSourceName, .id = {}, .format = format};
     }
 
     ShowSinksStatement
     bindShowSinksStatement(const AntlrSQLParser::ShowFilterContext* showFilter, AntlrSQLParser::ShowFormatContext* showFormat) const
     {
         const std::optional<StatementOutputFormat> format
-            = showFormat != nullptr ? std::make_optional(bindFormat(showFormat)) : std::nullopt;
+            = showFormat != nullptr ? std::make_optional(bindFormat(showFormat)) : std::optional<StatementOutputFormat>{};
         if (showFilter != nullptr)
         {
             const auto [attr, value] = bindShowFilter(showFilter);
@@ -345,14 +348,14 @@ public:
             }
             return ShowSinksStatement{.name = std::get<std::string>(value), .format = format};
         }
-        return ShowSinksStatement{.name = std::nullopt, .format = format};
+        return ShowSinksStatement{.name = {}, .format = format};
     }
 
     ShowQueriesStatement
     bindShowQueriesStatement(const AntlrSQLParser::ShowFilterContext* showFilter, AntlrSQLParser::ShowFormatContext* showFormat) const
     {
         const std::optional<StatementOutputFormat> format
-            = showFormat != nullptr ? std::make_optional(bindFormat(showFormat)) : std::nullopt;
+            = showFormat != nullptr ? std::make_optional(bindFormat(showFormat)) : std::optional<StatementOutputFormat>{};
         if (showFilter != nullptr)
         {
             const auto [attr, value] = bindShowFilter(showFilter);
@@ -366,7 +369,7 @@ public:
             }
             return ShowQueriesStatement{.id = DistributedQueryId{std::get<std::string>(value)}, .format = format};
         }
-        return ShowQueriesStatement{.id = std::nullopt, .format = format};
+        return ShowQueriesStatement{.id = {}, .format = format};
     }
 
     Statement bindShowStatement(AntlrSQLParser::ShowStatementContext* showAST) const
@@ -463,6 +466,157 @@ public:
         throw InvalidStatement("Unrecognized DROP statement");
     }
 
+    /// Converts a timeUnit token type to a millisecond multiplier.
+    static uint64_t timeUnitToMs(size_t tokenType)
+    {
+        switch (tokenType)
+        {
+            case AntlrSQLLexer::MS:
+                return 1;
+            case AntlrSQLLexer::SEC:
+                return 1000;
+            case AntlrSQLLexer::MINUTE:
+                return 60000;
+            case AntlrSQLLexer::HOUR:
+                return 3600000;
+            case AntlrSQLLexer::DAY:
+                return 86400000;
+            default:
+                throw InvalidQuerySyntax("Unknown time unit in REQUEST STATISTIC window clause");
+        }
+    }
+
+    /// Parses the metricType rule into a Metric enum.
+    static Metric bindMetricType(AntlrSQLParser::MetricTypeContext* metricTypeAST)
+    {
+        if (metricTypeAST->CARDINALITY() != nullptr)
+        {
+            return Metric::Cardinality;
+        }
+        if (metricTypeAST->MINVAL() != nullptr)
+        {
+            return Metric::MinVal;
+        }
+        if (metricTypeAST->MAXVAL() != nullptr)
+        {
+            return Metric::MaxVal;
+        }
+        if (metricTypeAST->RATE() != nullptr)
+        {
+            return Metric::Rate;
+        }
+        if (metricTypeAST->AVERAGE() != nullptr)
+        {
+            return Metric::Average;
+        }
+        throw InvalidQuerySyntax("Unknown metric type in REQUEST STATISTIC");
+    }
+
+    /// Extracts window size (and optional advance) in milliseconds from a windowClause AST node.
+    static std::pair<uint64_t, std::optional<uint64_t>> bindWindowClause(AntlrSQLParser::WindowClauseContext* windowClauseAST)
+    {
+        PRECONDITION(windowClauseAST != nullptr, "REQUEST STATISTIC requires a WINDOW clause");
+        auto* windowSpec = windowClauseAST->windowSpec();
+        PRECONDITION(windowSpec != nullptr, "Window spec must not be null");
+
+        auto* timeBasedWindow = dynamic_cast<AntlrSQLParser::TimeBasedWindowContext*>(windowSpec);
+        if (timeBasedWindow == nullptr)
+        {
+            throw InvalidQuerySyntax("REQUEST STATISTIC only supports time-based windows (TUMBLING or SLIDING)");
+        }
+
+        auto* timeWindow = timeBasedWindow->timeWindow();
+        if (auto* tumbling = dynamic_cast<AntlrSQLParser::TumblingWindowContext*>(timeWindow); tumbling != nullptr)
+        {
+            auto* sizeParam = tumbling->sizeParameter();
+            const auto sizeValue = std::stoull(sizeParam->INTEGER_VALUE()->getText());
+            const auto timeUnitToken = sizeParam->timeUnit()->getStart()->getType();
+            const auto sizeMs = sizeValue * timeUnitToMs(timeUnitToken);
+            return {sizeMs, {}};
+        }
+        if (auto* sliding = dynamic_cast<AntlrSQLParser::SlidingWindowContext*>(timeWindow); sliding != nullptr)
+        {
+            auto* sizeParam = sliding->sizeParameter();
+            const auto sizeValue = std::stoull(sizeParam->INTEGER_VALUE()->getText());
+            const auto sizeTimeUnitToken = sizeParam->timeUnit()->getStart()->getType();
+            const auto sizeMs = sizeValue * timeUnitToMs(sizeTimeUnitToken);
+
+            auto* advanceParam = sliding->advancebyParameter();
+            const auto advanceValue = std::stoull(advanceParam->INTEGER_VALUE()->getText());
+            const auto advanceTimeUnitToken = advanceParam->timeUnit()->getStart()->getType();
+            const auto advanceMs = advanceValue * timeUnitToMs(advanceTimeUnitToken);
+            return {sizeMs, advanceMs};
+        }
+        throw InvalidQuerySyntax("REQUEST STATISTIC window must be TUMBLING or SLIDING");
+    }
+
+    /// Binds a REQUEST STATISTIC statement from the AST.
+    RequestStatisticBuildStatement
+    bindRequestStatisticBuildStatement(AntlrSQLParser::RequestStatisticStatementContext* requestStatAST) const
+    {
+        auto* characteristic = requestStatAST->requestCharacteristic();
+        PRECONDITION(characteristic != nullptr, "requestCharacteristic must not be null");
+
+        if (auto* dataChar = dynamic_cast<AntlrSQLParser::DataCharacteristicContext*>(characteristic); dataChar != nullptr)
+        {
+            const auto metric = bindMetricType(dataChar->metricType());
+            const auto sourceName = bindIdentifier(dataChar->sourceName);
+            const auto fieldName = bindIdentifier(dataChar->fieldName);
+            const auto [windowSizeMs, windowAdvanceMs] = bindWindowClause(dataChar->windowClause());
+
+            std::unordered_map<std::string, std::string> options;
+            if (dataChar->optionsClause() != nullptr)
+            {
+                auto configOptions = bindConfigOptions(dataChar->optionsClause()->options->namedConfigExpression());
+                for (const auto& [rootKey, subMap] : configOptions)
+                {
+                    for (const auto& [subKey, value] : subMap)
+                    {
+                        if (std::holds_alternative<Literal>(value))
+                        {
+                            options[toLowerCase(rootKey) + "." + toLowerCase(subKey)] = literalToString(std::get<Literal>(value));
+                        }
+                    }
+                }
+            }
+
+            std::optional<std::string> eventTimeFieldName;
+            if (dataChar->eventTimeField != nullptr)
+            {
+                eventTimeFieldName = bindIdentifier(dataChar->eventTimeField);
+            }
+
+            DataDomain domain{.logicalSourceName = sourceName, .fieldName = fieldName};
+            return RequestStatisticBuildStatement{
+                .domain = domain,
+                .metric = metric,
+                .windowSizeMs = windowSizeMs,
+                .windowAdvanceMs = windowAdvanceMs,
+                .eventTimeFieldName = std::move(eventTimeFieldName),
+                .conditionTrigger = {},
+                .options = std::move(options)};
+        }
+        if (auto* workloadChar = dynamic_cast<AntlrSQLParser::WorkloadCharacteristicContext*>(characteristic); workloadChar != nullptr)
+        {
+            const auto queryId = workloadChar->queryId->getText();
+            const auto operatorId = workloadChar->operatorId->getText();
+            throw NotImplemented(
+                "REQUEST STATISTIC WORKLOAD is not yet implemented. "
+                "Requires extracting subplans from running queries (query {}, operator {}).",
+                queryId,
+                operatorId);
+        }
+        if (auto* infraChar = dynamic_cast<AntlrSQLParser::InfrastructureCharacteristicContext*>(characteristic); infraChar != nullptr)
+        {
+            const auto workerId = bindIdentifier(infraChar->workerId);
+            throw NotImplemented(
+                "REQUEST STATISTIC INFRASTRUCTURE is not yet implemented. "
+                "Requires infrastructure metric sources for worker {}.",
+                workerId);
+        }
+        throw InvalidStatement("Unrecognized REQUEST STATISTIC characteristic");
+    }
+
     std::expected<Statement, Exception> bind(AntlrSQLParser::StatementContext* statementAST) const
     {
         try
@@ -478,6 +632,10 @@ public:
             if (auto* dropAst = statementAST->dropStatement(); dropAst != nullptr)
             {
                 return bindDropStatement(dropAst);
+            }
+            if (auto* const requestStatAST = statementAST->requestStatisticStatement(); requestStatAST != nullptr)
+            {
+                return bindRequestStatisticBuildStatement(requestStatAST);
             }
             if (auto* const explainStatementAST = statementAST->explainStatement())
             {

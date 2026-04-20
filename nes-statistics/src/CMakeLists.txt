@@ -10,4 +10,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+add_source_files(nes-statistics
+        Metric.cpp
+        StatisticCoordinator.cpp
+        StatisticRegistry.cpp
+        DefaultStatisticQueryGenerator.cpp
+)
+
 add_subdirectory(StatisticStore)

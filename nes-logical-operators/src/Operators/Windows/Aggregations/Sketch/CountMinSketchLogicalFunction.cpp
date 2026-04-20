@@ -28,6 +28,7 @@
 #include <fmt/format.h>
 #include <AggregationLogicalFunctionRegistry.hpp>
 #include <ErrorHandling.hpp>
+#include <Statistic.hpp>
 
 namespace NES
 {
@@ -38,12 +39,12 @@ CountMinSketchLogicalFunction::CountMinSketchLogicalFunction(
     const NumberOfRows rows,
     const uint64_t seed,
     const DataType counterType,
-    const Statistic::StatisticHash statisticHash)
+    const Statistic::StatisticId statisticId)
     : columns(columns)
     , rows(rows)
     , seed(seed)
     , counterType(counterType)
-    , statisticHash(statisticHash)
+    , statisticId(statisticId)
     , inputStamp(onField.getDataType())
     , partialAggregateStamp(DataTypeProvider::provideDataType(DataType::Type::UNDEFINED, DataType::NULLABLE::NOT_NULLABLE))
     , finalAggregateStamp(DataTypeProvider::provideDataType(DataType::Type::VARSIZED, DataType::NULLABLE::NOT_NULLABLE))
@@ -59,12 +60,12 @@ CountMinSketchLogicalFunction::CountMinSketchLogicalFunction(
     const NumberOfRows rows,
     const uint64_t seed,
     const DataType counterType,
-    const Statistic::StatisticHash statisticHash)
+    const Statistic::StatisticId statisticId)
     : columns(columns)
     , rows(rows)
     , seed(seed)
     , counterType(counterType)
-    , statisticHash(statisticHash)
+    , statisticId(statisticId)
     , inputStamp(onField.getDataType())
     , partialAggregateStamp(DataTypeProvider::provideDataType(DataType::Type::UNDEFINED, DataType::NULLABLE::NOT_NULLABLE))
     , finalAggregateStamp(DataTypeProvider::provideDataType(DataType::Type::VARSIZED, DataType::NULLABLE::NOT_NULLABLE))
@@ -92,7 +93,7 @@ Reflected CountMinSketchLogicalFunction::reflect() const
 Reflected Reflector<CountMinSketchLogicalFunction>::operator()(const CountMinSketchLogicalFunction& op) const
 {
     return reflect(detail::ReflectedCountMinSketchLogicalFunction{
-        .statisticHash = op.statisticHash,
+        .statisticId = op.statisticId.getRawValue(),
         .onField = op.getOnField(),
         .asField = op.getAsField(),
         .columns = op.columns.getRawValue(),
@@ -105,7 +106,13 @@ CountMinSketchLogicalFunction Unreflector<CountMinSketchLogicalFunction>::operat
 {
     auto data = unreflect<detail::ReflectedCountMinSketchLogicalFunction>(reflected);
     return CountMinSketchLogicalFunction{
-        data.onField, data.asField, NumberOfCols{data.columns}, NumberOfRows{data.rows}, data.seed, data.counterType, data.statisticHash};
+        data.onField,
+        data.asField,
+        NumberOfCols{data.columns},
+        NumberOfRows{data.rows},
+        data.seed,
+        data.counterType,
+        Statistic::StatisticId{data.statisticId}};
 }
 
 CountMinSketchLogicalFunction CountMinSketchLogicalFunction::withInferredStamp(const Schema& schema) const

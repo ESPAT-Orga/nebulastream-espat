@@ -20,25 +20,28 @@
 #include <utility>
 #include <vector>
 #include <DataTypes/DataTypeProvider.hpp>
+#include <DataTypes/Schema.hpp>
 #include <Identifiers/Identifiers.hpp>
 #include <Operators/LogicalOperator.hpp>
+#include <Operators/Statistic/LogicalStatisticFields.hpp>
 #include <Traits/Trait.hpp>
 #include <Util/PlanRenderer.hpp>
 #include <fmt/format.h>
 #include <ErrorHandling.hpp>
 #include <LogicalOperatorRegistry.hpp>
+#include <Statistic.hpp>
 
 namespace NES
 {
 
-ReservoirProbeLogicalOperator::ReservoirProbeLogicalOperator(const uint64_t statisticHash, Schema sampleSchema)
-    : statisticHash(statisticHash), sampleSchema(std::move(sampleSchema))
+ReservoirProbeLogicalOperator::ReservoirProbeLogicalOperator(const Statistic::StatisticId statisticId, const Schema& sampleSchema)
+    : statisticId(statisticId), sampleSchema(sampleSchema)
 {
 }
 
 ReservoirProbeLogicalOperator::ReservoirProbeLogicalOperator(
-    uint64_t stashHash, Schema sampleSchema, LogicalStatisticFields logicalStatisticFields)
-    : LogicalStatisticFields(std::move(logicalStatisticFields)), statisticHash(stashHash), sampleSchema(std::move(sampleSchema))
+    Statistic::StatisticId stashHash, const Schema& sampleSchema, LogicalStatisticFields logicalStatisticFields)
+    : LogicalStatisticFields(std::move(logicalStatisticFields)), statisticId(stashHash), sampleSchema(sampleSchema)
 {
 }
 
@@ -49,7 +52,7 @@ std::string_view ReservoirProbeLogicalOperator::getName() const noexcept
 
 bool ReservoirProbeLogicalOperator::operator==(const ReservoirProbeLogicalOperator& rhs) const
 {
-    return statisticHash == rhs.statisticHash and sampleSchema == rhs.sampleSchema and inputSchema == rhs.inputSchema
+    return statisticId == rhs.statisticId and sampleSchema == rhs.sampleSchema and inputSchema == rhs.inputSchema
         and outputSchema == rhs.outputSchema and inputOriginIds == rhs.inputOriginIds and outputOriginIds == rhs.outputOriginIds;
 };
 
@@ -70,10 +73,10 @@ ReservoirProbeLogicalOperator ReservoirProbeLogicalOperator::withInferredSchema(
     copy.inputSchema = firstSchema;
     if (not copy.inputSchema.getFieldByName(copy.statisticStartTsField.name).has_value()
         or not copy.inputSchema.getFieldByName(copy.statisticEndTsField.name).has_value()
-        or not copy.inputSchema.getFieldByName(copy.statisticHashField.name).has_value())
+        or not copy.inputSchema.getFieldByName(copy.statisticIdField.name).has_value())
     {
         std::stringstream expectedFields;
-        expectedFields << copy.statisticStartTsField << ", " << copy.statisticEndTsField << ", " << copy.statisticHashField;
+        expectedFields << copy.statisticStartTsField << ", " << copy.statisticEndTsField << ", " << copy.statisticIdField;
         throw FieldNotFound("Expected the following fields {} to be in the schema {}.", expectedFields.str(), copy.inputSchema);
     }
 
@@ -87,12 +90,12 @@ ReservoirProbeLogicalOperator ReservoirProbeLogicalOperator::withInferredSchema(
     }
 
     copy.outputSchema = Schema();
-    copy.statisticHashField.addQualifierIfNotExists(newQualifierForSystemField);
+    copy.statisticIdField.addQualifierIfNotExists(newQualifierForSystemField);
     copy.statisticStartTsField.addQualifierIfNotExists(newQualifierForSystemField);
     copy.statisticEndTsField.addQualifierIfNotExists(newQualifierForSystemField);
     copy.statisticNumberOfSeenTuplesField.addQualifierIfNotExists(newQualifierForSystemField);
 
-    copy.outputSchema.addField(copy.statisticHashField);
+    copy.outputSchema.addField(copy.statisticIdField);
     copy.outputSchema.addField(copy.statisticStartTsField);
     copy.outputSchema.addField(copy.statisticEndTsField);
     copy.outputSchema.addField(copy.statisticNumberOfSeenTuplesField);
@@ -139,7 +142,7 @@ std::string ReservoirProbeLogicalOperator::explain(ExplainVerbosity verbosity, O
 {
     if (verbosity == ExplainVerbosity::Debug)
     {
-        return fmt::format("RESERVOIR_PROBE(opId: {}, statHash: {}, sampleSchema: {})", id, statisticHash, sampleSchema);
+        return fmt::format("RESERVOIR_PROBE(opId: {}, statHash: {}, sampleSchema: {})", id, statisticId, sampleSchema);
     }
     std::string joined;
     const auto& fields = sampleSchema.getFieldNames();
@@ -160,19 +163,19 @@ Reflected Reflector<ReservoirProbeLogicalOperator>::operator()(const ReservoirPr
     {
         fields.push_back({field.name, static_cast<uint8_t>(field.dataType.type)});
     }
-    return reflect(detail::ReflectedReservoirProbeLogicalOperator{.statisticHash = op.statisticHash, .sampleFields = fields});
+    return reflect(detail::ReflectedReservoirProbeLogicalOperator{.statisticId = op.statisticId.getRawValue(), .sampleFields = fields});
 }
 
 ReservoirProbeLogicalOperator Unreflector<ReservoirProbeLogicalOperator>::operator()(const Reflected& reflected) const
 {
-    auto [statisticHash, sampleFields] = unreflect<detail::ReflectedReservoirProbeLogicalOperator>(reflected);
+    auto [statisticId, sampleFields] = unreflect<detail::ReflectedReservoirProbeLogicalOperator>(reflected);
     Schema sampleSchema;
     for (const auto& field : sampleFields)
     {
         sampleSchema.addField(
             field.name, DataTypeProvider::provideDataType(static_cast<DataType::Type>(field.dataType), DataType::NULLABLE::NOT_NULLABLE));
     }
-    return ReservoirProbeLogicalOperator{statisticHash, sampleSchema};
+    return ReservoirProbeLogicalOperator{Statistic::StatisticId{statisticId}, sampleSchema};
 }
 
 LogicalOperatorRegistryReturnType

@@ -26,7 +26,7 @@ class StatisticStoreWriter final : public PhysicalOperatorConcept
 public:
     explicit StatisticStoreWriter(
         const OperatorHandlerId operatorHandlerId,
-        const Statistic::StatisticHash statisticHash,
+        Statistic::StatisticId statisticId,
         const Statistic::StatisticType statisticType,
         const LogicalStatisticFields& inputLogicalStatisticFields,
         const LogicalStatisticFields& outputLogicalStatisticFields);
@@ -40,7 +40,7 @@ public:
 private:
     std::optional<PhysicalOperator> child;
     OperatorHandlerId operatorHandlerId;
-    Statistic::StatisticHash statisticHash;
+    Statistic::StatisticId statisticId;
     Statistic::StatisticType statisticType;
     std::string inputStatisticStartTsFieldName;
     std::string inputStatisticEndTsFieldName;
@@ -48,7 +48,7 @@ private:
     std::string inputStatisticNumberOfSeenTuplesFieldName;
     std::string outputStatisticStartTsFieldName;
     std::string outputStatisticEndTsFieldName;
-    std::string outputStatisticHashFieldName;
+    std::string outputStatisticIdFieldName;
     std::string outputStatisticNumberOfSeenTuplesFieldName;
 };
 

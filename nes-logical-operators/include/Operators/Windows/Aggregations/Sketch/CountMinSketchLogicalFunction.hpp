@@ -40,7 +40,7 @@ public:
         NumberOfRows rows,
         uint64_t seed,
         DataType counterType,
-        Statistic::StatisticHash statisticHash);
+        Statistic::StatisticId statisticId);
     /// `onField` the field for which the sketch should be created
     /// `asField` used when the sketch should be renamed in the query
     /// `columns` how many possible "buckets" per hashfunction
@@ -54,7 +54,7 @@ public:
         NumberOfRows rows,
         uint64_t seed,
         DataType counterType,
-        Statistic::StatisticHash statisticHash);
+        Statistic::StatisticId statisticId);
 
     ~CountMinSketchLogicalFunction() = default;
 
@@ -83,7 +83,7 @@ public:
     uint64_t seed;
 
     DataType counterType;
-    Statistic::StatisticHash statisticHash;
+    Statistic::StatisticId statisticId;
 
 private:
     static constexpr std::string_view NAME = "CountMinSketch";
@@ -115,7 +115,7 @@ namespace NES::detail
 {
 struct ReflectedCountMinSketchLogicalFunction
 {
-    Statistic::StatisticHash statisticHash;
+    Statistic::StatisticId::Underlying statisticId;
     FieldAccessLogicalFunction onField;
     FieldAccessLogicalFunction asField;
     uint64_t columns;

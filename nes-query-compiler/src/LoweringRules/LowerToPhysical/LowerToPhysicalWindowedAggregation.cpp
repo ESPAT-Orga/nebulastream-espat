@@ -34,8 +34,8 @@
 #include <Functions/PhysicalFunction.hpp>
 #include <Identifiers/Identifiers.hpp>
 #include <LoweringRules/AbstractLoweringRule.hpp>
-#include <Nautilus/Interface/BufferRef/LowerSchemaProvider.hpp>
 #include <Nautilus/Interface/BufferRef/ColumnTupleBufferRef.hpp>
+#include <Nautilus/Interface/BufferRef/LowerSchemaProvider.hpp>
 #include <Nautilus/Interface/Hash/MurMur3HashFunction.hpp>
 #include <Nautilus/Interface/HashMap/ChainedHashMap/ChainedEntryMemoryProvider.hpp>
 #include <Nautilus/Interface/HashMap/ChainedHashMap/ChainedHashMap.hpp>

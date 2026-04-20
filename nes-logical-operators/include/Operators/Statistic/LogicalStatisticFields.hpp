@@ -64,50 +64,5 @@ public:
         statisticTypeField.addQualifierIfNotExists(qualifierName);
         return *this;
     }
-
-    struct ConfigParameters
-    {
-        static inline const DescriptorConfig::ConfigParameter<std::string> STATISTIC_START_TS{
-            "statisticStartTs",
-            std::nullopt,
-            [](const std::unordered_map<std::string, std::string>& config)
-            { return DescriptorConfig::tryGet(STATISTIC_START_TS, config); }};
-
-        static inline const DescriptorConfig::ConfigParameter<std::string> STATISTIC_END_TS{
-            "statisticEndTs",
-            std::nullopt,
-            [](const std::unordered_map<std::string, std::string>& config) { return DescriptorConfig::tryGet(STATISTIC_END_TS, config); }};
-
-        static inline const DescriptorConfig::ConfigParameter<std::string> STATISTIC_NUMBER_OF_SEEN_TUPLES{
-            "statisticNumberOfSeenTuples",
-            std::nullopt,
-            [](const std::unordered_map<std::string, std::string>& config)
-            { return DescriptorConfig::tryGet(STATISTIC_NUMBER_OF_SEEN_TUPLES, config); }};
-
-        static inline const DescriptorConfig::ConfigParameter<std::string> STATISTIC_HASH_FIELD{
-            "statisticHashFieldName",
-            std::nullopt,
-            [](const std::unordered_map<std::string, std::string>& config)
-            { return DescriptorConfig::tryGet(STATISTIC_HASH_FIELD, config); }};
-
-        static inline const DescriptorConfig::ConfigParameter<std::string> STATISTIC_DATA{
-            "statisticData",
-            std::nullopt,
-            [](const std::unordered_map<std::string, std::string>& config) { return DescriptorConfig::tryGet(STATISTIC_DATA, config); }};
-
-        static inline const DescriptorConfig::ConfigParameter<std::string> STATISTIC_TYPE{
-            "statisticType",
-            std::nullopt,
-            [](const std::unordered_map<std::string, std::string>& config) { return DescriptorConfig::tryGet(STATISTIC_TYPE, config); }};
-
-        static inline std::unordered_map<std::string, DescriptorConfig::ConfigParameterContainer> parameterMap
-            = DescriptorConfig::createConfigParameterContainerMap(
-                STATISTIC_START_TS,
-                STATISTIC_END_TS,
-                STATISTIC_NUMBER_OF_SEEN_TUPLES,
-                STATISTIC_HASH_FIELD,
-                STATISTIC_DATA,
-                STATISTIC_TYPE);
-    };
 };
 }

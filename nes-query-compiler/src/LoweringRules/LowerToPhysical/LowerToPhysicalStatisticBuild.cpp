@@ -24,6 +24,7 @@
 #include <Aggregation/AggregationBuildPhysicalOperator.hpp>
 #include <Aggregation/AggregationOperatorHandler.hpp>
 #include <Aggregation/AggregationProbePhysicalOperator.hpp>
+#include <Aggregation/AggregationSlice.hpp>
 #include <Aggregation/Function/AggregationPhysicalFunction.hpp>
 #include <DataTypes/DataTypeProvider.hpp>
 #include <Functions/FieldAccessPhysicalFunction.hpp>
@@ -254,12 +255,31 @@ LoweringRuleResultSubgraph LowerToPhysicalStatisticBuild::apply(LogicalOperator 
         pageSize,
         numberOfBuckets);
 
-    auto sliceAndWindowStore
-        = std::make_unique<DefaultTimeBasedSliceStore>(windowType->getSize().getTime(), windowType->getSlide().getTime());
+    auto sliceAndWindowStore = std::make_unique<DefaultTimeBasedSliceStore>(
+        windowType->getSize().getTime(), windowType->getSlide().getTime(), conf.sliceCacheConfiguration);
+    auto sliceStoreRef = sliceAndWindowStore->createSliceStoreRef(
+        [](Slice& slice, const WorkerThreadId workerThreadId) -> std::span<const std::byte>
+        {
+            auto& aggregationSlice = dynamic_cast<AggregationSlice&>(slice);
+            auto* ptr = aggregationSlice.getHashMapPtrOrCreate(workerThreadId);
+            return {reinterpret_cast<const std::byte*>(ptr), sizeof(ChainedHashMap)};
+        },
+        [hashMapOptions](WindowBasedOperatorHandler& handler)
+        {
+            auto& aggHandler = dynamic_cast<AggregationOperatorHandler&>(handler);
+            const CreateNewHashMapSliceArgs hashMapSliceArgs{
+                {aggHandler.cleanupStateNautilusFunction},
+                hashMapOptions.keySize,
+                hashMapOptions.valueSize,
+                hashMapOptions.pageSize,
+                hashMapOptions.numberOfBuckets};
+            return handler.getCreateNewSlicesFunction(hashMapSliceArgs);
+        });
     auto handler = std::make_shared<AggregationOperatorHandler>(
         inputOriginIds | std::ranges::to<std::vector>(), outputOriginId, std::move(sliceAndWindowStore), conf.maxNumberOfBuckets);
-    auto build = AggregationBuildPhysicalOperator(handlerId, std::move(timeFunction), aggregationPhysicalFunctions, hashMapOptions);
-    auto probe = AggregationProbePhysicalOperator(hashMapOptions, aggregationPhysicalFunctions, handlerId, windowMetaData);
+    const AggregationBuildPhysicalOperator build{
+        handlerId, std::move(timeFunction), std::move(sliceStoreRef), aggregationPhysicalFunctions, hashMapOptions};
+    const AggregationProbePhysicalOperator probe{hashMapOptions, aggregationPhysicalFunctions, handlerId, windowMetaData};
 
     auto buildWrapper = std::make_shared<PhysicalOperatorWrapper>(
         build,

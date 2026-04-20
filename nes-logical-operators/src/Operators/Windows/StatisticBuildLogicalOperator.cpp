@@ -142,18 +142,14 @@ StatisticBuildLogicalOperator StatisticBuildLogicalOperator::withInferredSchema(
     {
         throw CannotInferSchema("Unsupported window type {}", getWindowType()->toString());
     }
-    for (const auto& agg : copy.aggregationFunctions)
+    if (copy.aggregationFunctions.size() != 1)
     {
-        copy.outputSchema.addField(agg->getAsField().getFieldName(), agg->getAsField().getDataType());
+        throw CannotInferSchema(
+            "Expect exactly one aggregation for a statistic aggregation but found {}", copy.aggregationFunctions.size());
     }
-
-    if (aggregationFunctions.size() != 1)
-    {
-        throw CannotInferSchema("Expect exactly one aggregation for a statistic aggregation but found {}", aggregationFunctions.size());
-    }
-    copy.logicalStatisticFields->statisticDataField
-        = {aggregationFunctions[0]->getAsField().getFieldName(), aggregationFunctions[0]->getAsField().getDataType()};
-    copy.outputSchema.addField(logicalStatisticFields->statisticNumberOfSeenTuplesField);
+    copy.logicalStatisticFields->statisticDataField.name = copy.aggregationFunctions[0]->getAsField().getFieldName();
+    copy.outputSchema.addField(copy.logicalStatisticFields->statisticDataField);
+    copy.outputSchema.addField(copy.logicalStatisticFields->statisticNumberOfSeenTuplesField);
 
     return copy;
 }

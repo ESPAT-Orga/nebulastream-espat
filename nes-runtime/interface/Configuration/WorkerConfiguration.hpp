@@ -64,6 +64,14 @@ public:
 
     BoolOption dumpGraph = {"dump_graph", "false", "If to dump graph of the compilation results"};
 
+    BoolOption latencyListener = {"latency_listener", "false", "Should add the latency listener to the query engine listeners"};
+
+    UIntOption throughputListenerInterval
+        = {"throughput_listener_interval_in_ms",
+           "200",
+           "Time interval in milliseconds for the throughput listener",
+           {std::make_shared<NumberValidation>()}};
+
 private:
     std::vector<BaseOption*> getOptions() override
     {
@@ -75,7 +83,9 @@ private:
             &numberOfBuffersInGlobalBufferManager,
             &defaultMaxInflightBuffers,
             &dumpQueryCompilationIR,
-            &dumpGraph};
+            &dumpGraph,
+            &latencyListener,
+            &throughputListenerInterval};
     }
 };
 }

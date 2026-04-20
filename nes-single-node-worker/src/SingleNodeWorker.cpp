@@ -40,13 +40,13 @@
 #include <CompositeStatisticListener.hpp>
 #include <ErrorHandling.hpp>
 #include <GoogleEventTracePrinter.hpp>
+#include <LatencyListener.hpp>
 #include <NetworkOptions.hpp>
 #include <QueryCompiler.hpp>
 #include <QueryStatus.hpp>
 #include <SingleNodeWorkerConfiguration.hpp>
-#include <WorkerStatus.hpp>
-#include <LatencyListener.hpp>
 #include <ThroughputListener.hpp>
+#include <WorkerStatus.hpp>
 
 extern void initNetworkServices(const std::string& connectionAddr, const NES::Host& host, const NES::NetworkOptions& options);
 

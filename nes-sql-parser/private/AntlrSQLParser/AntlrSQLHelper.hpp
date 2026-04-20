@@ -71,7 +71,7 @@ public:
 
     /// Containers that hold state of specific objects that we create during parsing.
     std::optional<LogicalOperator> statProbe;
-    std::optional<Statistic::StatisticHash> statisticHash;
+    std::optional<Statistic::StatisticId> statisticId;
     std::shared_ptr<Windowing::WindowType> windowType;
     std::vector<std::shared_ptr<WindowAggregationLogicalFunction>> windowAggs;
     std::vector<SinkDescriptor> sinkDescriptor;

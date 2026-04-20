@@ -94,7 +94,7 @@ public:
         std::vector<Statistic> statistics;
         uint64_t maxEndTs = 0;
 
-        for (auto statisticId = 0; statisticId < numberOfStatisticIds; ++statisticId)
+        for (uint64_t statisticId = 0; statisticId < static_cast<uint64_t>(numberOfStatisticIds); ++statisticId)
         {
             uint64_t curStartTs = 0;
             uint64_t curEndTs = windowSize;
@@ -105,7 +105,7 @@ public:
                 const Windowing::TimeMeasure startTs{curStartTs};
                 const Windowing::TimeMeasure endTs{curEndTs};
 
-                statistics.emplace_back(createDummyStatistic(statisticId, startTs, endTs));
+                statistics.emplace_back(createDummyStatistic(Statistic::StatisticId{statisticId}, startTs, endTs));
                 curStartTs += windowSize;
                 curEndTs += windowSize;
                 maxEndTs = std::max(maxEndTs, curEndTs);
@@ -128,11 +128,11 @@ TEST_P(StatisticStoreTest, singleItem)
 
     /// Checking if insert and get works properly
     ASSERT_TRUE(std::visit(
-        [&dummyStatistic](auto& store) { return store.insertStatistic(dummyStatistic.getHash(), dummyStatistic); }, statisticStore));
+        [&dummyStatistic](auto& store) { return store.insertStatistic(dummyStatistic.getStatisticId(), dummyStatistic); }, statisticStore));
     /// Testing, if we get the inserted statistic via getStatistics()
     auto getStatistics = std::visit(
         [&dummyStatistic](auto& store)
-        { return store.getStatistics(dummyStatistic.getHash(), dummyStatistic.getStartTs(), dummyStatistic.getEndTs()); },
+        { return store.getStatistics(dummyStatistic.getStatisticId(), dummyStatistic.getStartTs(), dummyStatistic.getEndTs()); },
         statisticStore);
     ASSERT_EQ(getStatistics.size(), 1);
     EXPECT_EQ(*getStatistics[0], dummyStatistic);
@@ -140,7 +140,7 @@ TEST_P(StatisticStoreTest, singleItem)
     /// Testing, if we get the inserted statistic via getSingleStatistic()
     auto getSingleStatistic = std::visit(
         [&dummyStatistic](auto& store)
-        { return store.getSingleStatistic(dummyStatistic.getHash(), dummyStatistic.getStartTs(), dummyStatistic.getEndTs()); },
+        { return store.getSingleStatistic(dummyStatistic.getStatisticId(), dummyStatistic.getStartTs(), dummyStatistic.getEndTs()); },
         statisticStore);
     ASSERT_TRUE(getSingleStatistic.has_value());
     EXPECT_EQ(*getSingleStatistic.value(), dummyStatistic);
@@ -148,11 +148,11 @@ TEST_P(StatisticStoreTest, singleItem)
     /// Now, we delete the statistic and then check that we can not retrieve it anymore
     ASSERT_TRUE(std::visit(
         [&dummyStatistic](auto& store)
-        { return store.deleteStatistics(dummyStatistic.getHash(), dummyStatistic.getStartTs(), dummyStatistic.getEndTs()); },
+        { return store.deleteStatistics(dummyStatistic.getStatisticId(), dummyStatistic.getStartTs(), dummyStatistic.getEndTs()); },
         statisticStore));
     getStatistics = std::visit(
         [&dummyStatistic](auto& store)
-        { return store.getStatistics(dummyStatistic.getHash(), dummyStatistic.getStartTs(), dummyStatistic.getEndTs()); },
+        { return store.getStatistics(dummyStatistic.getStatisticId(), dummyStatistic.getStartTs(), dummyStatistic.getEndTs()); },
         statisticStore);
     ASSERT_EQ(getStatistics.size(), 0);
 }
@@ -181,13 +181,16 @@ TEST_P(StatisticStoreTest, multipleItem)
                 {
                     const auto& dummyStatistic = allStatistics[nextPos];
                     ASSERT_TRUE(std::visit(
-                        [&dummyStatistic](auto& store) { return store.insertStatistic(dummyStatistic.getHash(), dummyStatistic); },
+                        [&dummyStatistic](auto& store) { return store.insertStatistic(dummyStatistic.getStatisticId(), dummyStatistic); },
                         statisticStore));
 
                     /// Testing, if we get the inserted statistic via getStatistics()
                     auto getStatistics = std::visit(
                         [&dummyStatistic](auto& store)
-                        { return store.getStatistics(dummyStatistic.getHash(), dummyStatistic.getStartTs(), dummyStatistic.getEndTs()); },
+                        {
+                            return store.getStatistics(
+                                dummyStatistic.getStatisticId(), dummyStatistic.getStartTs(), dummyStatistic.getEndTs());
+                        },
                         statisticStore);
                     ASSERT_EQ(getStatistics.size(), 1);
                     EXPECT_EQ(*getStatistics[0], dummyStatistic);
@@ -197,7 +200,7 @@ TEST_P(StatisticStoreTest, multipleItem)
                         [&dummyStatistic](auto& store)
                         {
                             return store.getSingleStatistic(
-                                dummyStatistic.getHash(), dummyStatistic.getStartTs(), dummyStatistic.getEndTs());
+                                dummyStatistic.getStatisticId(), dummyStatistic.getStartTs(), dummyStatistic.getEndTs());
                         },
                         statisticStore);
                     ASSERT_TRUE(getSingleStatistic.has_value());
@@ -227,7 +230,7 @@ TEST_P(StatisticStoreTest, multipleItem)
     {
         auto retrievedStatistics = std::visit(
             [&dummyStatistic, &maxEndTs](auto& store)
-            { return store.getStatistics(dummyStatistic.getHash(), Windowing::TimeMeasure{0}, maxEndTs); },
+            { return store.getStatistics(dummyStatistic.getStatisticId(), Windowing::TimeMeasure{0}, maxEndTs); },
             statisticStore);
 
         const auto foundStatistic
@@ -251,13 +254,13 @@ TEST_P(StatisticStoreTest, multipleItem)
                     const auto endTs = dummyStatistic.getEndTs();
                     ASSERT_TRUE(std::visit(
                         [&dummyStatistic, &startTs, &endTs](auto& store)
-                        { return store.deleteStatistics(dummyStatistic.getHash(), startTs, endTs); },
+                        { return store.deleteStatistics(dummyStatistic.getStatisticId(), startTs, endTs); },
                         statisticStore))
                         << "Could not delete: " << dummyStatistic;
 
                     auto getStatistics = std::visit(
                         [&dummyStatistic, &startTs, &endTs](auto& store)
-                        { return store.getStatistics(dummyStatistic.getHash(), startTs, endTs); },
+                        { return store.getStatistics(dummyStatistic.getStatisticId(), startTs, endTs); },
                         statisticStore);
                     ASSERT_EQ(getStatistics.size(), 0);
                 }
@@ -274,7 +277,7 @@ TEST_P(StatisticStoreTest, multipleItem)
     {
         auto getStatistics = std::visit(
             [&dummyStatistic, &maxEndTs](auto& store)
-            { return store.getStatistics(dummyStatistic.getHash(), Windowing::TimeMeasure{0}, maxEndTs); },
+            { return store.getStatistics(dummyStatistic.getStatisticId(), Windowing::TimeMeasure{0}, maxEndTs); },
             statisticStore);
         ASSERT_EQ(getStatistics.size(), 0);
     }

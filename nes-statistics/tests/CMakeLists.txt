@@ -20,3 +20,5 @@ endfunction()
 
 
 add_nes_statistic_store_test(statistic-store-test StatisticStoreTest.cpp)
+add_nes_statistic_store_test(statistic-registry-test StatisticRegistryTest.cpp)
+add_nes_statistic_store_test(default-statistic-query-generator-test DefaultStatisticQueryGeneratorTest.cpp)

@@ -59,7 +59,7 @@ LoweringRuleResultSubgraph LowerToPhysicalEquiWidthHistogramProbe::apply(Logical
         equiWidthProbe->binCounterFieldName);
     StatisticStoreReader statisticStoreReader{
         operatorHandlerId,
-        equiWidthProbe->statisticHashField.name,
+        equiWidthProbe->statisticIdField.name,
         equiWidthProbe->statisticStartTsField.name,
         equiWidthProbe->statisticEndTsField.name,
         equiWidthProbe->statisticNumberOfSeenTuplesField.name,

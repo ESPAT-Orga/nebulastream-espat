@@ -14,6 +14,8 @@
 
 #pragma once
 
+#include <string>
+#include <string_view>
 #include <Statistic/StatisticProvider.hpp>
 #include <PhysicalOperator.hpp>
 
@@ -28,7 +30,7 @@ class StatisticStoreReader final : public PhysicalOperatorConcept
 public:
     explicit StatisticStoreReader(
         OperatorHandlerId operatorHandlerId,
-        std::string_view statisticHashFieldName,
+        std::string_view statisticIdFieldName,
         std::string_view statisticStartTsFieldName,
         std::string_view statisticEndTsFieldName,
         std::string_view statisticNumberOfSeenTuplesFieldName,
@@ -43,7 +45,7 @@ public:
 private:
     std::optional<PhysicalOperator> child;
     OperatorHandlerId operatorHandlerId;
-    std::string statisticHashFieldName;
+    std::string statisticIdFieldName;
     std::string statisticStartTsFieldName;
     std::string statisticEndTsFieldName;
     std::string statisticNumberOfSeenTuplesFieldName;

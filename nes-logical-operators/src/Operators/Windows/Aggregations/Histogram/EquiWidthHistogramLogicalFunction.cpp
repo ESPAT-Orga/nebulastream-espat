@@ -28,6 +28,7 @@
 #include <fmt/format.h>
 #include <AggregationLogicalFunctionRegistry.hpp>
 #include <ErrorHandling.hpp>
+#include <Statistic.hpp>
 
 namespace NES
 {
@@ -37,12 +38,12 @@ EquiWidthHistogramLogicalFunction::EquiWidthHistogramLogicalFunction(
     const uint64_t numBuckets,
     const uint64_t minValue,
     const uint64_t maxValue,
-    const uint64_t statisticHash,
+    const Statistic::StatisticId statisticId,
     const DataType counterType)
     : numBuckets(numBuckets)
     , minValue(minValue)
     , maxValue(maxValue)
-    , statisticHash(statisticHash)
+    , statisticId(statisticId)
     , counterType(counterType)
     , inputStamp(onField.getDataType())
     , partialAggregateStamp(DataTypeProvider::provideDataType(DataType::Type::UNDEFINED, DataType::NULLABLE::NOT_NULLABLE))
@@ -58,12 +59,12 @@ EquiWidthHistogramLogicalFunction::EquiWidthHistogramLogicalFunction(
     const uint64_t numBuckets,
     const uint64_t minValue,
     const uint64_t maxValue,
-    const uint64_t statisticHash,
+    const Statistic::StatisticId statisticId,
     const DataType counterType)
     : numBuckets(numBuckets)
     , minValue(minValue)
     , maxValue(maxValue)
-    , statisticHash(statisticHash)
+    , statisticId(statisticId)
     , counterType(counterType)
     , inputStamp(onField.getDataType())
     , partialAggregateStamp(DataTypeProvider::provideDataType(DataType::Type::UNDEFINED, DataType::NULLABLE::NOT_NULLABLE))
@@ -102,7 +103,7 @@ Reflected Reflector<EquiWidthHistogramLogicalFunction>::operator()(const EquiWid
         .numBuckets = function.numBuckets,
         .minValue = function.minValue,
         .maxValue = function.maxValue,
-        .statisticHash = function.statisticHash,
+        .statisticId = function.statisticId.getRawValue(),
         .counterType = function.counterType});
 }
 
@@ -110,7 +111,13 @@ EquiWidthHistogramLogicalFunction Unreflector<EquiWidthHistogramLogicalFunction>
 {
     auto data = unreflect<detail::ReflectedEquiWidthHistogramLogicalFunction>(reflected);
     return EquiWidthHistogramLogicalFunction{
-        data.onField, data.asField, data.numBuckets, data.minValue, data.maxValue, data.statisticHash, data.counterType};
+        data.onField,
+        data.asField,
+        data.numBuckets,
+        data.minValue,
+        data.maxValue,
+        Statistic::StatisticId{data.statisticId},
+        data.counterType};
 }
 
 EquiWidthHistogramLogicalFunction EquiWidthHistogramLogicalFunction::withInferredStamp(const Schema& schema) const
@@ -226,7 +233,7 @@ AggregationLogicalFunctionGeneratedRegistrar::RegisterEquiWidthHistogramAggregat
     PRECONDITION(arguments.histogramMinValue.has_value(), "EquiWidthHistogramLogicalFunction requires min value to be set");
     PRECONDITION(arguments.histogramMaxValue.has_value(), "EquiWidthHistogramLogicalFunction requires max value be set");
     PRECONDITION(arguments.histogramNumBuckets.has_value(), "EquiWidthHistogramLogicalFunction requires number of buckets to be set");
-    PRECONDITION(arguments.sampleHash.has_value(), "EquiWidthHistogramLogicalFunction requires statisticHash to be set");
+    PRECONDITION(arguments.statisticId.has_value(), "EquiWidthHistogramLogicalFunction requires statisticId to be set");
     PRECONDITION(arguments.histogramCounterType.has_value(), "EquiWidthHistogramLogicalFunction requires counterType to be set");
 
     return std::make_shared<WindowAggregationLogicalFunction>(EquiWidthHistogramLogicalFunction{
@@ -235,7 +242,7 @@ AggregationLogicalFunctionGeneratedRegistrar::RegisterEquiWidthHistogramAggregat
         arguments.histogramNumBuckets.value(),
         arguments.histogramMinValue.value(),
         arguments.histogramMaxValue.value(),
-        arguments.sampleHash.value(),
+        arguments.statisticId.value(),
         arguments.histogramCounterType.value()});
 }
 

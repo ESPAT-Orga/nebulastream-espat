@@ -167,10 +167,16 @@ LogicalPlan generateForDataDomain(
     grpcSinkSchema.addField(statisticFields.statisticStartTsField);
     grpcSinkSchema.addField(statisticFields.statisticEndTsField);
     const auto hostIt = request.options.find("host");
-    PRECONDITION(
-        hostIt != request.options.end(), "REQUEST STATISTIC requires 'host' in the SET clause to specify the worker for sink placement");
+    if (hostIt == request.options.end())
+    {
+        throw InvalidStatement("REQUEST STATISTIC requires 'host' in the SET clause to specify the worker for sink placement");
+    }
     plan = LogicalPlanBuilder::addInlineSink(
-        "Grpc", grpcSinkSchema, {{"grpc_host", sinkHost}, {"grpc_port", sinkPort}, {"host", hostIt->second}}, {}, plan);
+        "Grpc",
+        grpcSinkSchema,
+        {{"grpc_host", sinkHost}, {"grpc_port", sinkPort}, {"host", hostIt->second}, {"output_format", "NATIVE"}},
+        {},
+        plan);
 
     return plan;
 }

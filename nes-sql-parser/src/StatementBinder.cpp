@@ -41,6 +41,7 @@
 #include <Sources/SourceValidationProvider.hpp>
 #include <Util/Overloaded.hpp>
 #include <fmt/format.h>
+#include <fmt/ranges.h>
 #include <CollectionDomain.hpp>
 #include <Metric.hpp>
 
@@ -567,15 +568,16 @@ public:
             std::unordered_map<std::string, std::string> options;
             if (dataChar->optionsClause() != nullptr)
             {
-                auto configOptions = bindConfigOptions(dataChar->optionsClause()->options->namedConfigExpression());
-                for (const auto& [rootKey, subMap] : configOptions)
+                /// REQUEST STATISTIC options are flat or dotted keys (e.g. `"localhost:8080" AS host`,
+                /// `256 AS sketch.columns`). Use the multi-map binder and join path segments with '.'
+                /// so single-part keys like `host` are stored as-is.
+                auto configOptions = bindConfigOptionsWithDuplicates(dataChar->optionsClause()->options->namedConfigExpression());
+                for (const auto& [path, value] : configOptions)
                 {
-                    for (const auto& [subKey, value] : subMap)
+                    if (std::holds_alternative<Literal>(value) && !path.empty())
                     {
-                        if (std::holds_alternative<Literal>(value))
-                        {
-                            options[toLowerCase(rootKey) + "." + toLowerCase(subKey)] = literalToString(std::get<Literal>(value));
-                        }
+                        const auto key = fmt::format("{}", fmt::join(path | std::views::transform(toLowerCase), "."));
+                        options[key] = literalToString(std::get<Literal>(value));
                     }
                 }
             }

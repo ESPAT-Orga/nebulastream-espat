@@ -54,13 +54,19 @@ constexpr uint64_t MAX_DATA_BYTES = 30ULL * 1024 * 1024 * 1024;
 struct InsertParams
 {
     static inline const std::vector<StatisticStoreType> storeTypes{
-        StatisticStoreType::DEFAULT, StatisticStoreType::WINDOW, StatisticStoreType::SUB_STORES};
+        // StatisticStoreType::DEFAULT,
+        StatisticStoreType::WINDOW,
+        StatisticStoreType::SUB_STORES};
     /// Total number of statistics (see Statistic.hpp) inserted
-    static inline const std::vector<uint64_t> numStatisticsVals{1'000, 100'000, 1'000'000};
+    // static inline const std::vector<uint64_t> numStatisticsVals{1'000, 100'000, 1'000'000};
+    static inline const std::vector<uint64_t> numStatisticsVals{10'000'000};
     /// Number of statistic queries that are inserting
-    static inline const std::vector<uint64_t> numStatisticIdsVals{1, 10, 1'000};
-    static inline const std::vector<uint64_t> statisticSizes{1024, 4 * 1024, 10 * 1024};
+    static inline const std::vector<uint64_t> numStatisticIdsVals{1, 10, 100, 1'000};
+    // static inline const std::vector<uint64_t> numStatisticIdsVals{1'000};
+    // static inline const std::vector<uint64_t> statisticSizes{1024, 4 * 1024, 10 * 1024};
+    static inline const std::vector<uint64_t> statisticSizes{1 * 1024};
     static inline const std::vector<uint64_t> threadCounts{1, 4, 16};
+    // static inline const std::vector<uint64_t> threadCounts{16};
     static constexpr uint64_t windowSize = 60'000;
 
     /// Insert pre-creates numStatistics stats of statisticSize bytes.
@@ -375,6 +381,7 @@ void runInsertStatisticBenchmark(std::ofstream& csv, ProgressTracker& progress, 
                         if (args.shouldSkip(currentBenchmarkReport))
                         {
                             progress.skip(currentBenchmarkReport, "", "was filtered or excluded.");
+                            progress.report(currentBenchmarkReport, "was filtered or excluded.");
                         }
                         else
                         {
@@ -386,7 +393,7 @@ void runInsertStatisticBenchmark(std::ofstream& csv, ProgressTracker& progress, 
                                 /// Copy prepared statistics before timing so the copy cost is excluded
                                 auto statsCopy = stats.preparedStatistics;
 
-                                const auto durationMs = runTimedExperiment(
+                                const auto duration = runTimedExperiment(
                                     numThreads,
                                     numStatistics,
                                     [&store, &statsCopy](const uint64_t start, const uint64_t end)
@@ -400,12 +407,11 @@ void runInsertStatisticBenchmark(std::ofstream& csv, ProgressTracker& progress, 
 
                                 csv << "InsertStatistic," << magic_enum::enum_name(storeType) << "," << numThreads << "," << numStatistics
                                     << "," << numStatisticIds << "," << statisticSize << "," << Params::windowSize << ",-1,-1,-1,-1,"
-                                    << RNG_SEED << "," << rep << "," << durationMs << "\n"
+                                    << RNG_SEED << "," << rep << "," << duration << "\n"
                                     << std::flush;
                             }
+                            progress.report(currentBenchmarkReport);
                         }
-
-                        progress.report(currentBenchmarkReport);
                     },
                     Params::storeTypes,
                     Params::threadCounts);
@@ -494,7 +500,7 @@ void runGetStatisticsBenchmark(std::ofstream& csv, ProgressTracker& progress, Be
                                             + pad("ws", windowSize, 5) + " | " + pad("pctExist", pctAccessExisting, 2) + " | "
                                             + pad("statsPerReq", numStatisticsPerRequest, 3);
                                         progress.skip(r, "", "was filtered or excluded.");
-                                        progress.report(r);
+                                        progress.report(r, "was filtered or excluded.");
                                     }
                                     return;
                                 }
@@ -559,8 +565,8 @@ void runGetStatisticsBenchmark(std::ofstream& csv, ProgressTracker& progress, Be
 
                             for (const auto numStatisticsPerRequest : Params::numWindowsPerRequestVals)
                             {
-                                // As each window in the store shouldFilter only a single statistic, to have `numStatisticsPerRequest` statistics
-                                // per request, we need our query to span that many windows.
+                                /// As each window in the store shouldFilter only a single statistic, to have `numStatisticsPerRequest` statistics
+                                /// per request, we need our query to span that many windows.
                                 const uint64_t queryRangeTs = numStatisticsPerRequest * windowSize;
 
                                 /// Pre-generate random start timestamps so the RNG cost is excluded from timing
@@ -582,6 +588,7 @@ void runGetStatisticsBenchmark(std::ofstream& csv, ProgressTracker& progress, Be
                                 if (args.shouldSkip(currentBenchmarkReport))
                                 {
                                     progress.skip(currentBenchmarkReport, "", "was filtered or excluded.");
+                                    progress.report(currentBenchmarkReport, "was filtered or excluded.");
                                 }
                                 else
                                 {
@@ -614,9 +621,8 @@ void runGetStatisticsBenchmark(std::ofstream& csv, ProgressTracker& progress, Be
                                             << "," << durationMs << "\n"
                                             << std::flush;
                                     }
+                                    progress.report(currentBenchmarkReport);
                                 }
-
-                                progress.report(currentBenchmarkReport);
                             }
                         },
                         Params::storeTypes,
@@ -706,28 +712,6 @@ void runInsertAndGetBenchmark(std::ofstream& csv, ProgressTracker& progress, Ben
                         forEachParam(
                             [&](const auto storeType, const auto pctInsert, const auto numThreads, const auto numStatisticsPerRequest)
                             {
-                                const uint64_t queryRangeTs = numStatisticsPerRequest * windowSize;
-
-                                /// Pre-determine the insert-vs-get operation sequence
-                                std::mt19937 opRng{RNG_SEED};
-                                const uint64_t numOps = numStatistics;
-                                std::vector<bool> isInsertOp;
-                                isInsertOp.reserve(numOps);
-                                std::uniform_int_distribution<uint64_t> pctDist{0, 99};
-                                for (uint64_t i = 0; i < numOps; ++i)
-                                {
-                                    isInsertOp.emplace_back(pctDist(opRng) < pctInsert);
-                                }
-
-                                /// Pre-generate random start timestamps so the RNG cost is excluded from timing
-                                const uint64_t maxStartTs = maxTs > queryRangeTs ? maxTs - queryRangeTs : 0;
-                                std::vector<uint64_t> lookupStartTs(lookupIds.size());
-                                std::uniform_int_distribution<uint64_t> startTsDist{0, maxStartTs};
-                                for (uint64_t i = 0; i < lookupIds.size(); ++i)
-                                {
-                                    lookupStartTs[i] = startTsDist(opRng);
-                                }
-
                                 const auto currentBenchmarkReport = "Mixed  | " + padLeft(magic_enum::enum_name(storeType), 10) + " | "
                                     + pad("threads", numThreads, 2) + " | " + pad("stats", numStatistics, 7) + " | "
                                     + pad("ids", numStatisticIds, 7) + " | " + pad("size", statisticSize, 5) + " | "
@@ -737,8 +721,30 @@ void runInsertAndGetBenchmark(std::ofstream& csv, ProgressTracker& progress, Ben
                                 if (args.shouldSkip(currentBenchmarkReport))
                                 {
                                     progress.skip(currentBenchmarkReport, "", "was filtered or excluded.");
+                                    progress.report(currentBenchmarkReport, "was filtered or excluded.");
                                 }
                                 else
+                                {
+                                    /// Pre-determine the insert-vs-get operation sequence
+                                    const uint64_t queryRangeTs = numStatisticsPerRequest * windowSize;
+                                    std::mt19937 opRng{RNG_SEED};
+                                    const uint64_t numOps = numStatistics;
+                                    std::vector<bool> isInsertOp;
+                                    isInsertOp.reserve(numOps);
+                                    std::uniform_int_distribution<uint64_t> pctDist{0, 99};
+                                    for (uint64_t i = 0; i < numOps; ++i)
+                                    {
+                                        isInsertOp.emplace_back(pctDist(opRng) < pctInsert);
+                                    }
+
+                                    /// Pre-generate random start timestamps so the RNG cost is excluded from timing
+                                    const uint64_t maxStartTs = maxTs > queryRangeTs ? maxTs - queryRangeTs : 0;
+                                    std::vector<uint64_t> lookupStartTs(lookupIds.size());
+                                    std::uniform_int_distribution<uint64_t> startTsDist{0, maxStartTs};
+                                    for (uint64_t i = 0; i < lookupIds.size(); ++i)
+                                    {
+                                        lookupStartTs[i] = startTsDist(opRng);
+                                    }
                                     for (uint64_t rep = 0; rep < NUM_REPS; ++rep)
                                     {
                                         /// Fresh store per rep since inserts modify state
@@ -817,8 +823,8 @@ void runInsertAndGetBenchmark(std::ofstream& csv, ProgressTracker& progress, Ben
                                             << RNG_SEED << "," << rep << "," << durationMs << "\n"
                                             << std::flush;
                                     }
-
-                                progress.report(currentBenchmarkReport);
+                                    progress.report(currentBenchmarkReport);
+                                }
                             },
                             Params::storeTypes,
                             Params::pctInsertVals,
@@ -834,9 +840,44 @@ void runInsertAndGetBenchmark(std::ofstream& csv, ProgressTracker& progress, Ben
 
 /// ============================================================
 
+void printFilterAndExclude(const BenchmarkArgs& args)
+{
+    if (args.filter.empty())
+    {
+        std::cout << "Filter:  (none)\n";
+    }
+    else
+    {
+        std::cout << "Filter:  run only configs containing ALL of [";
+        for (size_t i = 0; i < args.filter.size(); ++i)
+        {
+            std::cout << (i == 0 ? "" : ", ") << args.filter[i];
+        }
+        std::cout << "]\n";
+    }
+
+    if (args.exclude.empty())
+    {
+        std::cout << "Exclude: (none)\n";
+    }
+    else
+    {
+        std::cout << "Exclude: skip configs matching ANY of:\n";
+        for (const auto& group : args.exclude)
+        {
+            std::cout << "  - ALL of [";
+            for (size_t i = 0; i < group.size(); ++i)
+            {
+                std::cout << (i == 0 ? "" : ", ") << group[i];
+            }
+            std::cout << "]\n";
+        }
+    }
+}
+
 void runBenchmarks(int argc, char* argv[])
 {
-    const auto args = BenchmarkArgs(argc, argv);
+    const BenchmarkArgs args{argc, argv};
 
     std::ofstream csv{std::string{BENCHMARK_CSV}};
     csv << "benchmark,store_type,num_threads,num_statistics,num_statistic_ids,statistic_size,window_size,"
@@ -852,7 +893,9 @@ void runBenchmarks(int argc, char* argv[])
     std::cout << "=== StatisticStore Custom Benchmark ===\n";
     std::cout << "Local start time: " << std::put_time(std::localtime(&now), "%Y-%m-%d %H:%M:%S %Z") << "\n";
     std::cout << "Total configs: " << (noInsertConfigs + noGetConfigs + noMixedConfigs) << " (" << NUM_REPS << " reps each)\n";
-    std::cout << "Random seed: " << RNG_SEED << "\n\n";
+    std::cout << "Random seed: " << RNG_SEED << "\n";
+    printFilterAndExclude(args);
+    std::cout << "\n";
 
     auto benchStart = std::chrono::steady_clock::now();
 
@@ -882,7 +925,7 @@ void runBenchmarks(int argc, char* argv[])
     std::cout << "\nBenchmarks complete in " << formatHMS(progress.getElapsedSeconds()) << ". Results written to "
               << std::filesystem::absolute(BENCHMARK_CSV).string() << "\n";
 
-    progress.printSkipped();
+    // progress.printSkipped();
 }
 }
 }

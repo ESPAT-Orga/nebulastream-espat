@@ -56,7 +56,9 @@ public:
 
     /// Prints the config result line, then redraws the progress bar below it.
     /// The progress bar shows per-section progress, the ETA is computed globally.
-    void report(const std::string& configDesc);
+    /// If skippedReason is non-empty, the config result line is annotated as skipped with that reason
+    /// instead of showing the per-config duration.
+    void report(const std::string& configDesc, const std::string& skippedReason = "");
 
     /// Records a skipped config with a reason.
     void skip(const std::string& benchmark, const std::string& description, const std::string& reason);

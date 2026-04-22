@@ -14,6 +14,7 @@
 
 #include <StatisticStoreBenchmarkUtils.hpp>
 
+#include <cctype>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
@@ -84,22 +85,63 @@ std::string formatBytes(const uint64_t bytes)
     return oss.str();
 }
 
+namespace
+{
+std::string normalize(std::string_view s)
+{
+    std::string result;
+    result.reserve(s.size());
+    for (const unsigned char c : s)
+    {
+        if (not std::isspace(c))
+        {
+            result.push_back(static_cast<char>(std::tolower(c)));
+        }
+    }
+    return result;
+}
+
+/// Matches needle in haystack only at word boundaries (surrounding chars must be non-alphanumeric),
+/// so a filter like "insert" does not match "pctinsert".
+bool containsAsWord(std::string_view haystack, std::string_view needle)
+{
+    if (needle.empty())
+    {
+        return true;
+    }
+    size_t pos = 0;
+    while ((pos = haystack.find(needle, pos)) != std::string_view::npos)
+    {
+        const bool leftOk = (pos == 0) || not std::isalnum(static_cast<unsigned char>(haystack[pos - 1]));
+        const size_t endPos = pos + needle.size();
+        const bool rightOk = (endPos == haystack.size()) || not std::isalnum(static_cast<unsigned char>(haystack[endPos]));
+        if (leftOk and rightOk)
+        {
+            return true;
+        }
+        ++pos;
+    }
+    return false;
+}
+}
+
 bool BenchmarkArgs::shouldSkip(const std::string& reportLine) const
 {
+    const auto normalizedReport = normalize(reportLine);
     for (const auto& word : filter)
     {
-        if (not reportLine.contains(word))
+        if (not containsAsWord(normalizedReport, normalize(word)))
         {
             return true;
         }
     }
-    
+
     for (const auto& group : exclude)
     {
         bool allMatch = true;
         for (const auto& word : group)
         {
-            if (not reportLine.contains(word))
+            if (not containsAsWord(normalizedReport, normalize(word)))
             {
                 allMatch = false;
                 break;
@@ -111,7 +153,6 @@ bool BenchmarkArgs::shouldSkip(const std::string& reportLine) const
         }
     }
     return false;
-
 }
 
 BenchmarkArgs::BenchmarkArgs(int argc, char* argv[])

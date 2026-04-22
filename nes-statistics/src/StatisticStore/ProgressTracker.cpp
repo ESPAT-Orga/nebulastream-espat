@@ -28,7 +28,7 @@ namespace
 std::string formatSeconds(const double seconds)
 {
     std::ostringstream oss;
-    oss << std::fixed << std::setprecision(1) << seconds << "s";
+    oss << std::fixed << std::setprecision(4) << seconds << "s";
     return oss.str();
 }
 
@@ -46,7 +46,7 @@ void ProgressTracker::beginSection(const uint64_t sectionConfigs)
     sectionCompleted = 0;
 }
 
-void ProgressTracker::report(const std::string& configDesc)
+void ProgressTracker::report(const std::string& configDesc, const std::string& skippedReason)
 {
     ++completedConfigs;
     ++sectionCompleted;
@@ -58,7 +58,16 @@ void ProgressTracker::report(const std::string& configDesc)
     const double avgSecPerConfig = elapsedSec / static_cast<double>(completedConfigs);
     const double etaSec = avgSecPerConfig * static_cast<double>(totalConfigs - completedConfigs);
 
-    /// Clear the progress bar line, print config result above it
+    /// For skipped configs, overwrite the current line in-place with "Skipping: ..." and return.
+    /// No newline is printed, so the next report() call overwrites this line (either with another
+    /// "Skipping: ..." or with a permanent config result + progress bar).
+    if (not skippedReason.empty())
+    {
+        std::cout << "\r\033[2K" << "Skipping: " << configDesc << " (" << skippedReason << ")" << "\r" << std::flush;
+        return;
+    }
+
+    /// Clear the progress bar line, print config result above it as a permanent line
     std::cout << "\r\033[2K" << configDesc << "  " << formatSeconds(configSec) << "\n";
 
     /// Draw the progress bar scoped to the current section

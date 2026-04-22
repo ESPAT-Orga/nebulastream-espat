@@ -89,7 +89,8 @@ def get_vcpkg_dir():
     elif hostname == "hare":
         vcpkg_dir = "/data/vcpkg/scripts/buildsystems/vcpkg.cmake"
     elif hostname == "mif-ws":
-        vcpkg_dir = "/home/flang/vcpkg/scripts/buildsystems/vcpkg.cmake"
+        # vcpkg_dir = "/home/flang/vcpkg/scripts/buildsystems/vcpkg.cmake"
+        vcpkg_dir = "/home/nschubert/remote_server/vcpkg/scripts/buildsystems/vcpkg.cmake"
     elif hostname == "docker-hostname":
         vcpkg_dir = "/vcpkg"
     elif hostname == "beaver":
@@ -178,8 +179,8 @@ def compile_nebulastream(cmake_flags, build_dir):
     if not cmake_path:
         raise RuntimeError("No suitable cmake (version >= 3.21) found in PATH.")
 
-    cmake_command = f"{cmake_path} {cmake_flags} -S . -B {build_dir}"
-    build_command = f"{cmake_path} --build {build_dir}"
+    cmake_command = f"MOLD_JOBS=1 {cmake_path} {cmake_flags} -S . -B {build_dir}"
+    build_command = f"MOLD_JOBS=1 {cmake_path} --build {build_dir}"
 
     print(f"Using cmake at: {cmake_path}")
     printInfo("Running cmake...")

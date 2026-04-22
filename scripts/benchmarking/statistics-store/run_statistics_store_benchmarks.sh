@@ -19,7 +19,8 @@ python3 -m venv myenv
 source myenv/bin/activate
 pip3 install argparse requests pandas pyyaml
 
-myenv/bin/python3 -m scripts.benchmarking.statistics-store.run_statistics_store_benchmarks #--filter Mixed  --exclude "DEFAULT,ids=      1,stats=1000000" --exclude "DEFAULT,ids=      1,stats= 100000" --exclude "DEFAULT,ids=     10,stats=1000000" --exclude "DEFAULT,ids=   1000,stats=1000000"
+#myenv/bin/python3 -m scripts.benchmarking.statistics-store.run_statistics_store_benchmarks #--filter Mixed  --exclude "DEFAULT,ids=      1,stats=1000000" --exclude "DEFAULT,ids=      1,stats= 100000" --exclude "DEFAULT,ids=     10,stats=1000000" --exclude "DEFAULT,ids=   1000,stats=1000000"
+myenv/bin/python3 -m scripts.benchmarking.statistics-store.run_statistics_store_benchmarks --filter Insert
 
 # Deactivate the virtual environment
 deactivate

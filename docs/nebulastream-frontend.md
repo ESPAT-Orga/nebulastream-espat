@@ -45,7 +45,6 @@ nes-repl -d -f JSON
 
 - `-d` - Debug mode with detailed logging
 - `-f <format>` - Output format: `JSON` for programmatic access, `TEXT` for tabular format (default: `TEXT`)
-- `-s <address>` - Server address to connect to (default: `localhost:8080`). Not required for `nes-repl-embedded`.
 - `--on-exit <behavior>` - Behavior when REPL exits (default: `DO_NOTHING`)
   - `DO_NOTHING` - Exit immediately, leaving queries running on workers
   - `WAIT_FOR_QUERY_TERMINATION` - Wait for all queries to finish before exiting
@@ -65,7 +64,7 @@ Sources and sinks are automatically placed on the single node. No `HOST` configu
 > [!NOTE]
 > **Starting a worker:** Each worker is started with separate gRPC and data addresses:
 > ```bash
-> nes-single-node-worker --grpc=0.0.0.0:8080 --data_address=<dns-name/ip>:9090
+> nes-single-node-worker --grpc=0.0.0.0:8080 --data_address=0.0.0.0:9090
 > ```
 > The gRPC address (port 8080 by convention) is the address used to identify workers in topology files and for source/sink placement. The data address (port 9090 by convention) is used internally for data transfer between workers.
 
@@ -75,6 +74,12 @@ Sources and sinks are automatically placed on the single node. No `HOST` configu
 #### Basic Workflow Example
 
 ```sql
+
+-- Start nes-single-node-worker
+
+-- 1. Register the worker (does not work with 0.0.0.0)
+CREATE WORKER "localhost:8080";
+
 -- 1. Create a logical source schema
 CREATE LOGICAL SOURCE endless(ts UINT64);
 
@@ -87,7 +92,9 @@ SET(
     'emit_rate 10' AS `SOURCE`.GENERATOR_RATE_CONFIG,
     10000000 AS `SOURCE`.MAX_RUNTIME_MS,
     1 AS `SOURCE`.SEED,
-    'SEQUENCE UINT64 0 10000000 1' AS `SOURCE`.GENERATOR_SCHEMA
+    -- TODO Cool would be if we used sinus instead of sequence or even better implement a new data generator "stairs"
+    'SEQUENCE UINT64 0 10000000 1' AS `SOURCE`.GENERATOR_SCHEMA,
+    'localhost:8080' AS `SOURCE`.HOST
 );
 
 -- 3. Create a sink (file output)
@@ -95,7 +102,8 @@ CREATE SINK someSink(ENDLESS.TS UINT64)
 TYPE File
 SET(
     'out.csv' as `SINK`.FILE_PATH,
-    'CSV' as `SINK`.OUTPUT_FORMAT
+    'CSV' as `SINK`.OUTPUT_FORMAT,
+    'localhost:8080' AS `SINK`.HOST
 );
 
 -- 4. Check queries (should be empty initially)
@@ -110,6 +118,11 @@ SELECT TS FROM ENDLESS INTO SOMESINK;
 SHOW QUERIES;
 -- Returns: Array with global and local query instances
 -- Query statuses: "Running" | "Registered" | "Started"
+
+-- We will not use this command for the experiment (adaptive optimization experiment)
+REQUEST STATISTIC DATA CARDINALITY ON endless(value)
+        WINDOW TUMBLING(SIZE 10000 MS)
+        SET ("localhost:8080" AS host, 256 AS sketch.columns, 4 AS sketch.rows);
 
 -- 7. Filter queries by ID
 SHOW QUERIES WHERE ID = '<query-id>';

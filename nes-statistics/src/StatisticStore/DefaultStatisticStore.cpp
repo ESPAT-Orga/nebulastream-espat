@@ -22,19 +22,7 @@ namespace NES
 bool DefaultStatisticStore::insertStatistic(const Statistic::StatisticId& statisticId, Statistic statistic)
 {
     const auto statisticsLocked = statistics.wlock();
-    auto& statisticsVec = (*statisticsLocked)[statisticId];
-
-    const auto statisticExists = std::ranges::any_of(
-        statisticsVec,
-        [&statistic](const Statistic& existingStatistic)
-        { return statistic.getStartTs() == existingStatistic.getStartTs() and statistic.getEndTs() == existingStatistic.getEndTs(); });
-
-    if (statisticExists)
-    {
-        return false;
-    }
-
-    statisticsVec.emplace_back(std::move(statistic));
+    (*statisticsLocked)[statisticId].emplace_back(std::move(statistic));
     return true;
 }
 

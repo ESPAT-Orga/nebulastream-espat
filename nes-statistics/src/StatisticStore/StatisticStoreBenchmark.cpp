@@ -53,10 +53,9 @@ constexpr uint64_t MAX_DATA_BYTES = 30ULL * 1024 * 1024 * 1024;
 
 struct InsertParams
 {
-    static inline const std::vector<StatisticStoreType> storeTypes{
-        // StatisticStoreType::DEFAULT,
-        StatisticStoreType::WINDOW,
-        StatisticStoreType::SUB_STORES};
+    static inline const std::vector<StatisticStoreType> storeTypes{StatisticStoreType::DEFAULT,
+                                                                   StatisticStoreType::WINDOW,
+                                                                   StatisticStoreType::SUB_STORES};
     /// Total number of statistics (see Statistic.hpp) inserted
     // static inline const std::vector<uint64_t> numStatisticsVals{1'000, 100'000, 1'000'000};
     static inline const std::vector<uint64_t> numStatisticsVals{10'000'000};
@@ -104,16 +103,25 @@ struct InsertParams
 
 struct GetParams
 {
-    static inline const std::vector<StatisticStoreType> storeTypes{StatisticStoreType::DEFAULT, StatisticStoreType::WINDOW};
-    static inline const std::vector<uint64_t> windowSizes{1'000, 10'000, 60'000};
+    static inline const std::vector<StatisticStoreType> storeTypes{StatisticStoreType::DEFAULT,
+                                                                   StatisticStoreType::SUB_STORES,
+                                                                   StatisticStoreType::WINDOW};
+    // static inline const std::vector<uint64_t> windowSizes{1'000, 10'000, 60'000};
+    static inline const std::vector<uint64_t> windowSizes{1'000};
     /// Total number of statistics (see Statistic.hpp) to retrieve
-    static inline const std::vector<uint64_t> numStatisticsVals{1'000, 100'000, 1'000'000};
+    // static inline const std::vector<uint64_t> numStatisticsVals{1'000, 100'000, 1'000'000};
+    static inline const std::vector<uint64_t> numStatisticsVals{1'000'000};
+
     /// Number of statistic queries running
-    static inline const std::vector<uint64_t> numStatisticIdsVals{1, 10, 1'000};
-    static inline const std::vector<uint64_t> statisticSizes{1024, 4 * 1024, 10 * 1024};
+    static inline const std::vector<uint64_t> numStatisticIdsVals{1, 10, 100, 1'000};
+
+    // static inline const std::vector<uint64_t> statisticSizes{1024, 4 * 1024, 10 * 1024};
+    static inline const std::vector<uint64_t> statisticSizes{1024};
     static inline const std::vector<uint64_t> threadCounts{1, 4, 16};
 
-    static inline const std::vector<uint64_t> pctAccessExistingVals{10, 50, 90};
+    // static inline const std::vector<uint64_t> pctAccessExistingVals{10, 50, 90};
+    static inline const std::vector<uint64_t> pctAccessExistingVals{100};
+    // static inline const std::vector<uint64_t> numWindowsPerRequestVals{1, 10, 100};
     static inline const std::vector<uint64_t> numWindowsPerRequestVals{1, 10, 100};
 
     /// Get pre-populates numStatisticIds * numStatistics stats of statisticSize bytes.

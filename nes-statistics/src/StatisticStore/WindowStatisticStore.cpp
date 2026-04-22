@@ -114,7 +114,6 @@ std::vector<Statistic> WindowStatisticStore::getStatistics(
                 { return curStatistic.getStartTs() >= startTs and curStatistic.getEndTs() <= endTs; });
         }
     }
-
     return foundStatistics;
 }
 

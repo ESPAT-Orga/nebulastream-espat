@@ -14,6 +14,8 @@
 
 #pragma once
 
+#include <unordered_map>
+
 #include <StatisticStore/AbstractStatisticStore.hpp>
 #include <WindowTypes/Measures/TimeMeasure.hpp>
 #include <folly/Synchronized.h>
@@ -21,21 +23,22 @@
 namespace NES
 {
 
-/// Has multiple sub stores (std::vector) per expected no. concurrent access.
-/// The main idea is that we use the statistic hash to distribute the access to the sub stores.
+/// Has multiple sub stores (std::unordered_map keyed by statisticId) per expected no. concurrent access.
+/// The main idea is that the thread id hashes to distribute the access to the sub stores,
+/// and within each sub store the statisticId indexes directly to the relevant bucket.
 class SubStoresStatisticStore final : public AbstractStatisticStore
 {
     uint64_t numberOfExpectedConcurrentAccess;
-    std::vector<folly::Synchronized<std::vector<std::shared_ptr<Statistic>>>> allSubStores;
+    std::vector<folly::Synchronized<std::unordered_map<Statistic::StatisticId, std::vector<Statistic>>>> allSubStores;
 
 public:
     explicit SubStoresStatisticStore(uint64_t numberOfExpectedConcurrentAccess);
     bool insertStatistic(const Statistic::StatisticId& statisticId, Statistic statistic) override;
     bool deleteStatistics(
         const Statistic::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs) override;
-    std::vector<std::shared_ptr<Statistic>> getStatistics(
+    std::vector<Statistic> getStatistics(
         const Statistic::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs) override;
-    std::optional<std::shared_ptr<Statistic>> getSingleStatistic(
+    std::optional<Statistic> getSingleStatistic(
         const Statistic::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs) override;
     std::vector<IdStatisticPair> getAllStatistics() override;
 };

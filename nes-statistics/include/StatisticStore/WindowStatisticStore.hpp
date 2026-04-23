@@ -22,34 +22,22 @@
 namespace NES
 {
 
-/// WindowsStore: Maps each (key, window_start_time) pair to a vector of statistics.
-/// All windows are of fixed size, set at store initialization, enabling time-based partitioning of statistics per key.
+/// WindowsStore: Two-level hash index. The outer layer is sharded by StatisticId across
+/// numberOfExpectedConcurrentAccess sub-stores; each sub-store maps StatisticId to an
+/// inner map keyed by windowStart. This keeps O(1) single-statistic (id, windowStart)
+/// lookups (two hash probes on small maps) while letting range queries acquire a single
+/// rlock and walk a compact per-id inner map.
+/// All windows are of fixed size, set at store initialization.
 class WindowStatisticStore final : public AbstractStatisticStore
 {
-    struct StatisticKey
-    {
-        Statistic::StatisticId statisticId;
-        Windowing::TimeMeasure startTs;
-
-        bool operator==(const StatisticKey& other) const
-        {
-            return this->statisticId == other.statisticId && this->startTs == other.startTs;
-        }
-    };
-
-    struct StatisticKeyHash
-    {
-        size_t operator()(const StatisticKey& key) const
-        {
-            const auto h1 = std::hash<Statistic::StatisticId>{}(key.statisticId);
-            const auto h2 = std::hash<Windowing::TimeMeasure>{}(key.startTs);
-            return h1 ^ (h2 << 1);
-        }
-    };
+    /// windowStart -> statistics falling into that window
+    using WindowMap = std::unordered_map<Windowing::TimeMeasure, std::vector<Statistic>>;
+    /// statisticId -> windowMap
+    using IdWindowMap = std::unordered_map<Statistic::StatisticId, WindowMap>;
 
     uint64_t numberOfExpectedConcurrentAccess;
     Windowing::TimeMeasure windowSize;
-    std::vector<folly::Synchronized<std::unordered_map<StatisticKey, std::vector<Statistic>, StatisticKeyHash>>> allStatistics;
+    std::vector<folly::Synchronized<IdWindowMap>> allStatistics;
 
     Windowing::TimeMeasure calculateWindowStartTime(Windowing::TimeMeasure statStartTime) const;
 

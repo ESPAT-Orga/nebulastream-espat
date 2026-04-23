@@ -56,15 +56,11 @@ struct InsertParams
     static inline const std::vector<StatisticStoreType> storeTypes{
         StatisticStoreType::DEFAULT, StatisticStoreType::WINDOW, StatisticStoreType::SUB_STORES};
     /// Total number of statistics (see Statistic.hpp) inserted
-    // static inline const std::vector<uint64_t> numStatisticsVals{1'000, 100'000, 1'000'000};
     static inline const std::vector<uint64_t> numStatisticsVals{10'000'000};
     /// Number of statistic queries that are inserting
-    static inline const std::vector<uint64_t> numStatisticIdsVals{1, 10, 100, 1'000};
-    // static inline const std::vector<uint64_t> numStatisticIdsVals{1'000};
-    // static inline const std::vector<uint64_t> statisticSizes{1024, 4 * 1024, 10 * 1024};
+    static inline const std::vector<uint64_t> numStatisticIdsValsInsert{1, 10, 100, 1'000};
     static inline const std::vector<uint64_t> statisticSizes{1 * 1024};
     static inline const std::vector<uint64_t> threadCounts{1, 4, 16};
-    // static inline const std::vector<uint64_t> threadCounts{16};
     static constexpr uint64_t windowSize = 60'000;
 
     /// Insert pre-creates numStatistics stats of statisticSize bytes.
@@ -84,12 +80,12 @@ struct InsertParams
         uint64_t count = 0;
         for (const auto numStatistics : numStatisticsVals)
         {
-            for (const auto numStatisticIds : numStatisticIdsVals)
+            for (const auto numStatisticIdsInsert : numStatisticIdsValsInsert)
             {
                 for (const auto statisticSize : statisticSizes)
                 {
                     /// Configs that do not pass fitsInMemory() or hasSufficientDensity() are printed at the end of all runs
-                    if (fitsInMemory(numStatistics, statisticSize) and hasSufficientDensity(numStatistics, numStatisticIds))
+                    if (fitsInMemory(numStatistics, statisticSize) and hasSufficientDensity(numStatistics, numStatisticIdsInsert))
                     {
                         count += storeTypes.size() * threadCounts.size();
                     }
@@ -107,31 +103,29 @@ struct GetParams
     // static inline const std::vector<uint64_t> windowSizes{1'000, 10'000, 60'000};
     static inline const std::vector<uint64_t> windowSizes{1'000};
     /// Total number of statistics (see Statistic.hpp) to retrieve
-    // static inline const std::vector<uint64_t> numStatisticsVals{1'000, 100'000, 1'000'000};
     static inline const std::vector<uint64_t> numStatisticsVals{1, 100'000};
 
-    /// Number of statistic queries running
-    static inline const std::vector<uint64_t> numStatisticIdsVals{1, 10, 100, 1'000};
+    /// Pairs of (numStatisticIdsInsert, numStatisticIdsGet) to benchmark as-is.
+    /// Each pair runs once; there is NO cross product between the two values.
+    static inline const std::vector<std::pair<uint64_t, uint64_t>> numStatisticIdsVals{
+        {1, 1}, {10, 10}, {1'000, 1}, {1'000, 10}, {1'000, 100}};
 
-    // static inline const std::vector<uint64_t> statisticSizes{1024, 4 * 1024, 10 * 1024};
     static inline const std::vector<uint64_t> statisticSizes{1024};
     static inline const std::vector<uint64_t> threadCounts{1, 4, 16};
 
-    // static inline const std::vector<uint64_t> pctAccessExistingVals{10, 50, 90};
     static inline const std::vector<uint64_t> pctAccessExistingVals{100};
-    // static inline const std::vector<uint64_t> numWindowsPerRequestVals{1, 10, 100};
-    static inline const std::vector<uint64_t> numWindowsPerRequestVals{1, 10, 100, 1000};
+    static inline const std::vector<uint64_t> numWindowsPerRequestVals{1, 10, 100, 1'000};
 
-    /// Get pre-populates numStatisticIds * numStatistics stats of statisticSize bytes.
+    /// Get pre-populates numStatisticIdsInsert * numStatistics stats of statisticSize bytes.
     static bool fitsInMemory(const uint64_t numStatistics, const uint64_t statisticSize)
     {
         return numStatistics * statisticSize <= MAX_DATA_BYTES;
     }
 
-    /// Ensures there are at least 10x more statistics than IDs so each ID has meaningful coverage
-    static bool hasSufficientDensity(const uint64_t numStatistics, const uint64_t numStatisticIds)
+    /// Ensures there are at least as many statistics as insert IDs so each ID has meaningful coverage
+    static bool hasSufficientDensity(const uint64_t numStatistics, const uint64_t numStatisticIdsInsert)
     {
-        return numStatistics >= numStatisticIds;
+        return numStatistics >= numStatisticIdsInsert;
     }
 
     static uint64_t validateAndCount()
@@ -139,12 +133,12 @@ struct GetParams
         uint64_t count = 0;
         for (const auto numStatistics : numStatisticsVals)
         {
-            for (const auto numStatisticIds : numStatisticIdsVals)
+            for (const auto& [numStatisticIdsInsert, numStatisticIdsGet] : numStatisticIdsVals)
             {
                 for (const auto statisticSize : statisticSizes)
                 {
                     /// Configs that do not pass fitsInMemory() or hasSufficientDensity() are printed at the end of all runs
-                    if (fitsInMemory(numStatistics, statisticSize) and hasSufficientDensity(numStatistics, numStatisticIds))
+                    if (fitsInMemory(numStatistics, statisticSize) and hasSufficientDensity(numStatistics, numStatisticIdsInsert))
                     {
                         count += storeTypes.size() * windowSizes.size() * pctAccessExistingVals.size() * numWindowsPerRequestVals.size()
                             * threadCounts.size();
@@ -162,8 +156,9 @@ struct MixedParams
     static inline const std::vector<uint64_t> windowSizes{1'000, 10'000, 60'000};
     /// Total number of statistics in the store
     static inline const std::vector<uint64_t> numStatisticsVals{1'000, 100'000, 1'000'000};
-    /// Equal to the number of queries running
-    static inline const std::vector<uint64_t> numStatisticIdsVals{1, 10, 1'000};
+    /// Pairs of (numStatisticIdsInsert, numStatisticIdsGet) to benchmark as-is.
+    /// Each pair runs once; there is NO cross product between the two values.
+    static inline const std::vector<std::pair<uint64_t, uint64_t>> numStatisticIdsVals{{1, 1}, {10, 10}, {1'000, 1'000}};
     static inline const std::vector<uint64_t> statisticSizes{1024, 4 * 1024, 10 * 1024};
     static inline const std::vector<uint64_t> threadCounts{1, 4, 16};
     static inline const std::vector<uint64_t> pctInsertVals{10, 50, 90};
@@ -176,10 +171,10 @@ struct MixedParams
         return numStatistics * statisticSize <= MAX_DATA_BYTES;
     }
 
-    /// Ensures there are at least 10x more statistics than IDs so each ID has meaningful coverage
-    static bool hasSufficientDensity(const uint64_t numStatistics, const uint64_t numStatisticIds)
+    /// Ensures there are at least 10x more statistics than insert IDs so each ID has meaningful coverage
+    static bool hasSufficientDensity(const uint64_t numStatistics, const uint64_t numStatisticIdsInsert)
     {
-        return numStatistics >= 10 * numStatisticIds;
+        return numStatistics >= 10 * numStatisticIdsInsert;
     }
 
     static uint64_t validateAndCount()
@@ -187,12 +182,12 @@ struct MixedParams
         uint64_t count = 0;
         for (const auto numStatistics : numStatisticsVals)
         {
-            for (const auto numStatisticIds : numStatisticIdsVals)
+            for (const auto& [numStatisticIdsInsert, numStatisticIdsGet] : numStatisticIdsVals)
             {
                 for (const auto statisticSize : statisticSizes)
                 {
                     /// Configs that do not pass fitsInMemory() or hasSufficientDensity() are printed at the end of all runs
-                    if (fitsInMemory(numStatistics, statisticSize) and hasSufficientDensity(numStatistics, numStatisticIds))
+                    if (fitsInMemory(numStatistics, statisticSize) and hasSufficientDensity(numStatistics, numStatisticIdsInsert))
                     {
                         count += storeTypes.size() * windowSizes.size() * pctInsertVals.size() * pctPrePopulateVals.size()
                             * numWindowsPerRequestVals.size() * threadCounts.size();
@@ -349,39 +344,39 @@ void runInsertStatisticBenchmark(std::ofstream& csv, ProgressTracker& progress, 
         StatisticData statisticData{.data = std::make_shared<std::byte[]>(statisticSize), .size = statisticSize};
 
         forEachParam(
-            [&](const auto numStatisticIds, const auto numStatistics)
+            [&](const auto numStatisticIdsInsert, const auto numStatistics)
             {
                 if (not Params::fitsInMemory(numStatistics, statisticSize))
                 {
                     const auto required = numStatistics * statisticSize;
                     progress.skip(
                         "InsertStatistic",
-                        "stats=" + std::to_string(numStatistics) + " | ids=" + std::to_string(numStatisticIds)
+                        "stats=" + std::to_string(numStatistics) + " | insIds=" + std::to_string(numStatisticIdsInsert)
                             + " | size=" + std::to_string(statisticSize),
                         "requires " + formatBytes(required) + " > limit " + formatBytes(MAX_DATA_BYTES));
                     return;
                 }
 
-                if (not Params::hasSufficientDensity(numStatistics, numStatisticIds))
+                if (not Params::hasSufficientDensity(numStatistics, numStatisticIdsInsert))
                 {
                     progress.skip(
                         "InsertStatistic",
-                        "stats=" + std::to_string(numStatistics) + " | ids=" + std::to_string(numStatisticIds)
+                        "stats=" + std::to_string(numStatistics) + " | insIds=" + std::to_string(numStatisticIdsInsert)
                             + " | size=" + std::to_string(statisticSize),
-                        "insufficient density: numStatistics < 10 * numStatisticIds");
+                        "insufficient density: numStatistics < 10 * numStatisticIdsInsert");
                     return;
                 }
 
                 /// Pre-create all statistics using the maximum thread count for parallel generation
-                const auto stats
-                    = createStats(numStatistics, numStatisticIds, statisticData, Params::windowSize, std::thread::hardware_concurrency());
+                const auto stats = createStats(
+                    numStatistics, numStatisticIdsInsert, statisticData, Params::windowSize, std::thread::hardware_concurrency());
 
                 forEachParam(
                     [&](const auto storeType, const auto numThreads)
                     {
                         auto currentBenchmarkReport = "Insert | " + padLeft(magic_enum::enum_name(storeType), 10) + " | "
                             + pad("threads", numThreads, 2) + " | " + pad("stats", numStatistics, 7) + " | "
-                            + pad("ids", numStatisticIds, 7) + " | " + pad("size", statisticSize, 5) + " | "
+                            + pad("insIds", numStatisticIdsInsert, 7) + " | " + pad("size", statisticSize, 5) + " | "
                             + pad("ws", Params::windowSize, 5);
 
                         if (args.shouldSkip(currentBenchmarkReport))
@@ -412,8 +407,8 @@ void runInsertStatisticBenchmark(std::ofstream& csv, ProgressTracker& progress, 
                                     });
 
                                 csv << "InsertStatistic," << magic_enum::enum_name(storeType) << "," << numThreads << "," << numStatistics
-                                    << "," << numStatisticIds << "," << statisticSize << "," << Params::windowSize << ",-1,-1,-1,-1,"
-                                    << RNG_SEED << "," << rep << "," << duration << "\n"
+                                    << "," << numStatisticIdsInsert << ",-1," << statisticSize << "," << Params::windowSize
+                                    << ",-1,-1,-1,-1," << RNG_SEED << "," << rep << "," << duration << "\n"
                                     << std::flush;
                             }
                             progress.report(currentBenchmarkReport);
@@ -422,7 +417,7 @@ void runInsertStatisticBenchmark(std::ofstream& csv, ProgressTracker& progress, 
                     Params::storeTypes,
                     Params::threadCounts);
             },
-            Params::numStatisticIdsVals,
+            Params::numStatisticIdsValsInsert,
             Params::numStatisticsVals);
     }
 }
@@ -441,26 +436,28 @@ void runGetStatisticsBenchmark(std::ofstream& csv, ProgressTracker& progress, Be
         StatisticData statisticData{.data = std::make_shared<std::byte[]>(statisticSize), .size = statisticSize};
 
         forEachParam(
-            [&](const auto numStatisticIds, const auto numStatistics)
+            [&](const auto idsPair, const auto numStatistics)
             {
+                const uint64_t numStatisticIdsInsert = idsPair.first;
+                const uint64_t numStatisticIdsGet = idsPair.second;
                 if (not Params::fitsInMemory(numStatistics, statisticSize))
                 {
                     const auto required = numStatistics * statisticSize;
                     progress.skip(
                         "GetStatistics",
-                        "stats=" + std::to_string(numStatistics) + " | ids=" + std::to_string(numStatisticIds)
-                            + " | size=" + std::to_string(statisticSize),
+                        "stats=" + std::to_string(numStatistics) + " | insIds=" + std::to_string(numStatisticIdsInsert)
+                            + " | getIds=" + std::to_string(numStatisticIdsGet) + " | size=" + std::to_string(statisticSize),
                         "requires " + formatBytes(required) + " > limit " + formatBytes(MAX_DATA_BYTES));
                     return;
                 }
 
-                if (not Params::hasSufficientDensity(numStatistics, numStatisticIds))
+                if (not Params::hasSufficientDensity(numStatistics, numStatisticIdsInsert))
                 {
                     progress.skip(
                         "GetStatistics",
-                        "stats=" + std::to_string(numStatistics) + " | ids=" + std::to_string(numStatisticIds)
-                            + " | size=" + std::to_string(statisticSize),
-                        "insufficient density: numStatistics < 10 * numStatisticIds");
+                        "stats=" + std::to_string(numStatistics) + " | insIds=" + std::to_string(numStatisticIdsInsert)
+                            + " | getIds=" + std::to_string(numStatisticIdsGet) + " | size=" + std::to_string(statisticSize),
+                        "insufficient density: numStatistics < numStatisticIdsInsert");
                     return;
                 }
 
@@ -468,29 +465,26 @@ void runGetStatisticsBenchmark(std::ofstream& csv, ProgressTracker& progress, Be
                 {
                     /// Pre-create all statistics using the maximum thread count for parallel generation
                     const auto stats
-                        = createStats(numStatistics, numStatisticIds, statisticData, windowSize, std::thread::hardware_concurrency());
-                    /// Collect inserted IDs before parallel insert
-                    std::vector<Statistic::StatisticId> insertedIds;
-                    insertedIds.reserve(numStatistics);
-                    for (const auto& ps : stats.preparedStatistics)
-                    {
-                        insertedIds.emplace_back(ps.statisticId);
-                    }
+                        = createStats(numStatistics, numStatisticIdsInsert, statisticData, windowSize, std::thread::hardware_concurrency());
 
                     forEachParam(
                         [&](const auto storeType, const auto pctAccessExisting, const auto numThreads)
                         {
+                            const auto makeReport = [&](const uint64_t numStatisticsPerRequest)
+                            {
+                                return "Get    | " + padLeft(magic_enum::enum_name(storeType), 10) + " | " + pad("threads", numThreads, 2)
+                                    + " | " + pad("stats", numStatistics, 7) + " | " + pad("insIds", numStatisticIdsInsert, 7) + " | "
+                                    + pad("getIds", numStatisticIdsGet, 7) + " | " + pad("size", statisticSize, 5) + " | "
+                                    + pad("ws", windowSize, 5) + " | " + pad("pctExist", pctAccessExisting, 2) + " | "
+                                    + pad("statsPerReq", numStatisticsPerRequest, 5);
+                            };
+
                             /// Skip pre-population when all inner configs would be excluded anyway
                             {
                                 bool anyRun = false;
                                 for (const auto numStatisticsPerRequest : Params::numWindowsPerRequestVals)
                                 {
-                                    if (!args.shouldSkip(
-                                            "Get    | " + padLeft(magic_enum::enum_name(storeType), 10) + " | "
-                                            + pad("threads", numThreads, 2) + " | " + pad("stats", numStatistics, 7) + " | "
-                                            + pad("ids", numStatisticIds, 7) + " | " + pad("size", statisticSize, 5) + " | "
-                                            + pad("ws", windowSize, 5) + " | " + pad("pctExist", pctAccessExisting, 2) + " | "
-                                            + pad("statsPerReq", numStatisticsPerRequest, 3)))
+                                    if (!args.shouldSkip(makeReport(numStatisticsPerRequest)))
                                     {
                                         anyRun = true;
                                         break;
@@ -500,11 +494,7 @@ void runGetStatisticsBenchmark(std::ofstream& csv, ProgressTracker& progress, Be
                                 {
                                     for (const auto numStatisticsPerRequest : Params::numWindowsPerRequestVals)
                                     {
-                                        const auto r = "Get    | " + padLeft(magic_enum::enum_name(storeType), 10) + " | "
-                                            + pad("threads", numThreads, 2) + " | " + pad("stats", numStatistics, 7) + " | "
-                                            + pad("ids", numStatisticIds, 7) + " | " + pad("size", statisticSize, 5) + " | "
-                                            + pad("ws", windowSize, 5) + " | " + pad("pctExist", pctAccessExisting, 2) + " | "
-                                            + pad("statsPerReq", numStatisticsPerRequest, 3);
+                                        const auto r = makeReport(numStatisticsPerRequest);
                                         progress.skip(r, "", "was filtered or excluded.");
                                         progress.report(r, "was filtered or excluded.");
                                     }
@@ -541,12 +531,17 @@ void runGetStatisticsBenchmark(std::ofstream& csv, ProgressTracker& progress, Be
                                 }
                             }
 
-                            std::mt19937 gen{RNG_SEED};
                             const uint64_t maxTs = numStatistics * windowSize;
 
-                            /// Create non-existing statistic IDs (beyond inserted range)
+                            std::mt19937 gen{RNG_SEED};
+
+                            /// Existing pool: query IDs that are within the inserted range.
+                            /// Capped so at most numStatisticIdsGet distinct existing IDs are queried.
+                            const uint64_t existingPoolSize = std::min(numStatisticIdsGet, numStatisticIdsInsert);
+
+                            /// Non-existing IDs: a fixed small set beyond the inserted range.
                             std::vector<Statistic::StatisticId> nonExistingIds;
-                            for (uint64_t id = numStatisticIds; id < numStatisticIds + 10; ++id)
+                            for (uint64_t id = numStatisticIdsInsert; id < numStatisticIdsInsert + 10; ++id)
                             {
                                 nonExistingIds.emplace_back(Statistic::StatisticId{id});
                             }
@@ -554,14 +549,14 @@ void runGetStatisticsBenchmark(std::ofstream& csv, ProgressTracker& progress, Be
                             /// Build the lookup sequence: pctAccessExisting% existing, rest non-existing
                             std::vector<Statistic::StatisticId> lookupIds;
                             lookupIds.reserve(numStatistics);
-                            std::uniform_int_distribution<> existingDist{0, static_cast<int>(insertedIds.size()) - 1};
+                            std::uniform_int_distribution<uint64_t> existingDist{0, existingPoolSize - 1};
                             std::uniform_int_distribution<> nonExistingDist{0, static_cast<int>(nonExistingIds.size()) - 1};
                             std::uniform_int_distribution<uint64_t> percentDist{0, 99};
                             for (uint64_t i = 0; i < numStatistics; ++i)
                             {
                                 if (percentDist(gen) < pctAccessExisting)
                                 {
-                                    lookupIds.emplace_back(insertedIds[existingDist(gen)]);
+                                    lookupIds.emplace_back(Statistic::StatisticId{existingDist(gen)});
                                 }
                                 else
                                 {
@@ -571,8 +566,8 @@ void runGetStatisticsBenchmark(std::ofstream& csv, ProgressTracker& progress, Be
 
                             for (const auto numStatisticsPerRequest : Params::numWindowsPerRequestVals)
                             {
-                                /// As each window in the store shouldFilter only a single statistic, to have `numStatisticsPerRequest` statistics
-                                /// per request, we need our query to span that many windows.
+                                /// As each window in the store shouldFilter only a single statistic, to have `numStatisticsPerRequest`
+                                /// statistics per request, we need our query to span that many windows.
                                 const uint64_t queryRangeTs = numStatisticsPerRequest * windowSize;
 
                                 /// Pre-generate random start timestamps so the RNG cost is excluded from timing
@@ -584,11 +579,7 @@ void runGetStatisticsBenchmark(std::ofstream& csv, ProgressTracker& progress, Be
                                     lookupStartTs[i] = startTsDist(gen);
                                 }
 
-                                const auto currentBenchmarkReport = "Get    | " + padLeft(magic_enum::enum_name(storeType), 10) + " | "
-                                    + pad("threads", numThreads, 2) + " | " + pad("stats", numStatistics, 7) + " | "
-                                    + pad("ids", numStatisticIds, 7) + " | " + pad("size", statisticSize, 5) + " | "
-                                    + pad("ws", windowSize, 5) + " | " + pad("pctExist", pctAccessExisting, 2) + " | "
-                                    + pad("statsPerReq", numStatisticsPerRequest, 3);
+                                const auto currentBenchmarkReport = makeReport(numStatisticsPerRequest);
 
                                 /// The store is read-only during lookups, so we reuse it across repetitions
                                 if (args.shouldSkip(currentBenchmarkReport))
@@ -622,9 +613,9 @@ void runGetStatisticsBenchmark(std::ofstream& csv, ProgressTracker& progress, Be
                                             });
 
                                         csv << "GetStatistics," << magic_enum::enum_name(storeType) << "," << numThreads << ","
-                                            << numStatistics << "," << numStatisticIds << "," << statisticSize << "," << windowSize << ","
-                                            << pctAccessExisting << "," << numStatisticsPerRequest << ",-1,-1," << RNG_SEED << "," << rep
-                                            << "," << durationMs << "\n"
+                                            << numStatistics << "," << numStatisticIdsInsert << "," << numStatisticIdsGet << ","
+                                            << statisticSize << "," << windowSize << "," << pctAccessExisting << ","
+                                            << numStatisticsPerRequest << ",-1,-1," << RNG_SEED << "," << rep << "," << durationMs << "\n"
                                             << std::flush;
                                     }
                                     progress.report(currentBenchmarkReport);
@@ -655,26 +646,28 @@ void runInsertAndGetBenchmark(std::ofstream& csv, ProgressTracker& progress, Ben
         StatisticData statisticData{.data = std::make_shared<std::byte[]>(statisticSize), .size = statisticSize};
 
         forEachParam(
-            [&](const auto numStatisticIds, const auto numStatistics)
+            [&](const auto idsPair, const auto numStatistics)
             {
+                const uint64_t numStatisticIdsInsert = idsPair.first;
+                const uint64_t numStatisticIdsGet = idsPair.second;
                 if (!Params::fitsInMemory(numStatistics, statisticSize))
                 {
                     const auto required = numStatistics * statisticSize;
                     progress.skip(
                         "InsertAndGet",
-                        "stats=" + std::to_string(numStatistics) + " | ids=" + std::to_string(numStatisticIds)
-                            + " | size=" + std::to_string(statisticSize),
+                        "stats=" + std::to_string(numStatistics) + " | insIds=" + std::to_string(numStatisticIdsInsert)
+                            + " | getIds=" + std::to_string(numStatisticIdsGet) + " | size=" + std::to_string(statisticSize),
                         "requires " + formatBytes(required) + " > limit " + formatBytes(MAX_DATA_BYTES));
                     return;
                 }
 
-                if (not Params::hasSufficientDensity(numStatistics, numStatisticIds))
+                if (not Params::hasSufficientDensity(numStatistics, numStatisticIdsInsert))
                 {
                     progress.skip(
                         "InsertAndGet",
-                        "stats=" + std::to_string(numStatistics) + " | ids=" + std::to_string(numStatisticIds)
-                            + " | size=" + std::to_string(statisticSize),
-                        "insufficient density: numStatistics < 10 * numStatisticIds");
+                        "stats=" + std::to_string(numStatistics) + " | insIds=" + std::to_string(numStatisticIdsInsert)
+                            + " | getIds=" + std::to_string(numStatisticIdsGet) + " | size=" + std::to_string(statisticSize),
+                        "insufficient density: numStatistics < 10 * numStatisticIdsInsert");
                     return;
                 }
 
@@ -685,20 +678,21 @@ void runInsertAndGetBenchmark(std::ofstream& csv, ProgressTracker& progress, Ben
                         const uint64_t numPrePopulate = numStatistics * pctPrePopulate / 100;
 
                         /// Pre-create statistics for pre-population using the maximum thread count for parallel generation
-                        const auto prePopStats
-                            = createStats(numPrePopulate, numStatisticIds, statisticData, windowSize, std::thread::hardware_concurrency());
+                        const auto prePopStats = createStats(
+                            numPrePopulate, numStatisticIdsInsert, statisticData, windowSize, std::thread::hardware_concurrency());
                         const uint64_t maxTs = numPrePopulate * windowSize;
 
-                        /// Prepare insert operations (timestamps continue beyond the pre-populated range)
+                        /// Prepare insert operations (timestamps continue beyond the pre-populated range).
+                        /// Inserts during the workload draw IDs from [0, numStatisticIdsInsert).
                         std::mt19937 rng{RNG_SEED};
-                        std::uniform_int_distribution<uint64_t> idDist{0, numStatisticIds - 1};
+                        std::uniform_int_distribution<uint64_t> insertIdDist{0, numStatisticIdsInsert - 1};
 
                         std::vector<PreparedStatistic> preparedInserts;
                         preparedInserts.reserve(numStatistics);
                         uint64_t curTs = maxTs;
                         for (uint64_t i = 0; i < numStatistics; ++i)
                         {
-                            const Statistic::StatisticId statisticId{idDist(rng)};
+                            const Statistic::StatisticId statisticId{insertIdDist(rng)};
                             const Windowing::TimeMeasure startTs{curTs};
                             const Windowing::TimeMeasure endTs{curTs + windowSize};
                             auto statistic = createDummyStatistic(
@@ -707,12 +701,14 @@ void runInsertAndGetBenchmark(std::ofstream& csv, ProgressTracker& progress, Ben
                             curTs += windowSize;
                         }
 
-                        /// Prepare lookup IDs from the range that will be pre-populated
+                        /// Lookups during the workload draw IDs from [0, numStatisticIdsGet).
+                        /// IDs in [0, min(insert, get)) hit the pre-populated range; IDs in [insert, get) miss.
+                        std::uniform_int_distribution<uint64_t> getIdDist{0, numStatisticIdsGet - 1};
                         std::vector<Statistic::StatisticId> lookupIds;
                         lookupIds.reserve(numStatistics);
                         for (uint64_t i = 0; i < numStatistics; ++i)
                         {
-                            lookupIds.emplace_back(Statistic::StatisticId{idDist(rng)});
+                            lookupIds.emplace_back(Statistic::StatisticId{getIdDist(rng)});
                         }
 
                         forEachParam(
@@ -720,9 +716,10 @@ void runInsertAndGetBenchmark(std::ofstream& csv, ProgressTracker& progress, Ben
                             {
                                 const auto currentBenchmarkReport = "Mixed  | " + padLeft(magic_enum::enum_name(storeType), 10) + " | "
                                     + pad("threads", numThreads, 2) + " | " + pad("stats", numStatistics, 7) + " | "
-                                    + pad("ids", numStatisticIds, 7) + " | " + pad("size", statisticSize, 5) + " | "
-                                    + pad("ws", windowSize, 5) + " | " + pad("pctPrePop", pctPrePopulate, 2) + " | "
-                                    + pad("pctInsert", pctInsert, 2) + " | " + pad("statsPerReq", numStatisticsPerRequest, 3);
+                                    + pad("insIds", numStatisticIdsInsert, 7) + " | " + pad("getIds", numStatisticIdsGet, 7) + " | "
+                                    + pad("size", statisticSize, 5) + " | " + pad("ws", windowSize, 5) + " | "
+                                    + pad("pctPrePop", pctPrePopulate, 2) + " | " + pad("pctInsert", pctInsert, 2) + " | "
+                                    + pad("statsPerReq", numStatisticsPerRequest, 3);
 
                                 if (args.shouldSkip(currentBenchmarkReport))
                                 {
@@ -824,9 +821,9 @@ void runInsertAndGetBenchmark(std::ofstream& csv, ProgressTracker& progress, Ben
                                             });
 
                                         csv << "InsertAndGetStatistics," << magic_enum::enum_name(storeType) << "," << numThreads << ","
-                                            << numStatistics << "," << numStatisticIds << "," << statisticSize << "," << windowSize
-                                            << ",-1," << numStatisticsPerRequest << "," << pctInsert << "," << pctPrePopulate << ","
-                                            << RNG_SEED << "," << rep << "," << durationMs << "\n"
+                                            << numStatistics << "," << numStatisticIdsInsert << "," << numStatisticIdsGet << ","
+                                            << statisticSize << "," << windowSize << ",-1," << numStatisticsPerRequest << "," << pctInsert
+                                            << "," << pctPrePopulate << "," << RNG_SEED << "," << rep << "," << durationMs << "\n"
                                             << std::flush;
                                     }
                                     progress.report(currentBenchmarkReport);
@@ -886,7 +883,7 @@ void runBenchmarks(int argc, char* argv[])
     const BenchmarkArgs args{argc, argv};
 
     std::ofstream csv{std::string{BENCHMARK_CSV}};
-    csv << "benchmark,store_type,num_threads,num_statistics,num_statistic_ids,statistic_size,window_size,"
+    csv << "benchmark,store_type,num_threads,num_statistics,num_statistic_ids_insert,num_statistic_ids_get,statistic_size,window_size,"
         << "pct_access_existing,num_statistics_per_request,pct_insert,pct_pre_populate,random_seed,repetition,duration_ms\n";
 
     const uint64_t noInsertConfigs = InsertParams::validateAndCount();

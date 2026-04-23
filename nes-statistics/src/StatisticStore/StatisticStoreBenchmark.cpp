@@ -107,10 +107,9 @@ struct GetParams
 
     /// Pairs of (numStatisticIdsInsert, numStatisticIdsGet) to benchmark as-is.
     /// Each pair runs once; there is NO cross product between the two values.
-    static inline const std::vector<std::pair<uint64_t, uint64_t>> numStatisticIdsVals{
-        {1, 1}, {10, 10}, {1'000, 1}, {1'000, 10}, {1'000, 100}};
+    static inline const std::vector<std::pair<uint64_t, uint64_t>> numStatisticIdsVals{{1, 1}, {10, 1}, {10, 10}, {100, 1}, {100, 10}};
 
-    static inline const std::vector<uint64_t> statisticSizes{1024};
+    static inline const std::vector<uint64_t> statisticSizes{4096};
     static inline const std::vector<uint64_t> threadCounts{1, 4, 16};
 
     static inline const std::vector<uint64_t> pctAccessExistingVals{100};
@@ -240,14 +239,14 @@ Statistic createDummyStatistic(
 using StatisticStoreVariant = std::variant<DefaultStatisticStore, WindowStatisticStore, SubStoresStatisticStore>;
 
 /// Creates a statistic store variant based on the StatisticStoreType enum
-StatisticStoreVariant createStore(const StatisticStoreType storeType, const int numThreads, const uint64_t windowSize)
+StatisticStoreVariant createStore(const StatisticStoreType storeType, const int numThreads)
 {
     switch (storeType)
     {
         case StatisticStoreType::DEFAULT:
             return DefaultStatisticStore{};
         case StatisticStoreType::WINDOW:
-            return WindowStatisticStore{static_cast<uint64_t>(numThreads), Windowing::TimeMeasure{windowSize}};
+            return WindowStatisticStore{static_cast<uint64_t>(numThreads)};
         case StatisticStoreType::SUB_STORES:
             return SubStoresStatisticStore{static_cast<uint64_t>(numThreads)};
     }
@@ -389,7 +388,7 @@ void runInsertStatisticBenchmark(std::ofstream& csv, ProgressTracker& progress, 
                             for (uint64_t rep = 0; rep < NUM_REPS; ++rep)
                             {
                                 /// Fresh store for each repetition
-                                auto store = createStore(storeType, static_cast<int>(numThreads), Params::windowSize);
+                                auto store = createStore(storeType, static_cast<int>(numThreads));
 
                                 /// Copy prepared statistics before timing so the copy cost is excluded
                                 auto statsCopy = stats.preparedStatistics;
@@ -505,7 +504,7 @@ void runGetStatisticsBenchmark(std::ofstream& csv, ProgressTracker& progress, Be
                             /// Pre-populate the store (not timed)
                             const auto hwThreads = static_cast<uint64_t>(std::thread::hardware_concurrency());
 
-                            auto store = createStore(storeType, static_cast<int>(numThreads), windowSize);
+                            auto store = createStore(storeType, static_cast<int>(numThreads));
 
                             /// Insert all statistics in parallel using all available cores
                             {
@@ -751,7 +750,7 @@ void runInsertAndGetBenchmark(std::ofstream& csv, ProgressTracker& progress, Ben
                                     for (uint64_t rep = 0; rep < NUM_REPS; ++rep)
                                     {
                                         /// Fresh store per rep since inserts modify state
-                                        auto store = createStore(storeType, static_cast<int>(numThreads), windowSize);
+                                        auto store = createStore(storeType, static_cast<int>(numThreads));
 
                                         /// Pre-populate the store in parallel using all available cores
                                         {

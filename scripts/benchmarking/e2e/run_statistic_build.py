@@ -57,9 +57,10 @@ allPageSizes = [8192]
 # [4000000] if buffer size is 8192 #[500000] if buffer size is 102400
 allBufferConfigs = [(1048576, 20000)]
 #allEnableLatencyListeners = [False, True]
-allEnableLatencyListeners = [True]
-allBuildWindowSizesSec = [1, 30, 60]
-#allBuildWindowSizesSec = [1, 60]
+allEnableLatencyListeners = [False]
+# allBuildWindowSizesSec = [1, 30, 60]
+allBuildWindowSizesSec = [1, 60]
+allStatisticStoreTypes = ["DEFAULT", "WINDOW", "SUB_STORES"]
 throughputListenerInterval = 200
 
 #### Statistic Build Configurations
@@ -188,7 +189,7 @@ def initialize_csv_file():
             'latency_listener',
             'executionMode', 'numberOfWorkerThreads', 'buffersInGlobalBufferManager',
             'joinStrategy',
-            'bufferSizeInBytes', 'pageSize', 'enableLatency', 'issue'
+            'bufferSizeInBytes', 'pageSize', 'enableLatency', 'statisticStoreType', 'issue'
         ]
         writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
         writer.writeheader()
@@ -279,6 +280,7 @@ def run_benchmark(config, dataset_name, query, query_info, queryIdx, workerConfi
                          f"--worker.default_query_execution.page_size={pageSize} "
                          f"--worker.default_query_execution.operator_buffer_size={bufferSizeInBytes} "
                          f"--worker.latency_listener={enableLatency} "
+                         f"--worker.statistic_store_type={statisticStoreType} "
                          f"--worker.throughput_listener_interval_in_ms={throughputListenerInterval}")
 
         raw_command = f"{systest_executable} -b -t {os.path.abspath(query_info['test_file'])} --data {os.path.abspath(test_data_dir)} --workingDir={working_dir} -- {worker_config}"
@@ -314,7 +316,7 @@ def run_benchmark(config, dataset_name, query, query_info, queryIdx, workerConfi
         'latency_listener',
         'executionMode', 'numberOfWorkerThreads', 'buffersInGlobalBufferManager',
         'joinStrategy',
-        'bufferSizeInBytes', 'pageSize', 'enableLatency', 'issue'
+        'bufferSizeInBytes', 'pageSize', 'enableLatency', 'statisticStoreType', 'issue'
     ]
 
     with open(csv_file_path, mode='a', newline='') as csv_file:
@@ -393,6 +395,9 @@ if __name__ == "__main__":
     parser.add_argument("-w", "--worker-threads", nargs="+", help="Number of worker threads to run the queries.")
     parser.add_argument("-b", "--buffer-config", nargs="+",
                         help="List of buffer configurations as tuples and buffer size is first, e.g., '(1234, 100) (128, 40)'.")
+    parser.add_argument("--statistic-store-types", nargs="+",
+                        choices=["DEFAULT", "WINDOW", "SUB_STORES"],
+                        help="Statistic store implementations to benchmark. Default: DEFAULT WINDOW SUB_STORES.")
     parser.add_argument("--clean", action="store_true",
                         help="Remove and recreate the build directory before building.")
     parser.add_argument("--output-dir", type=str, default=None,
@@ -412,7 +417,7 @@ if __name__ == "__main__":
 
     if not args.all and args.queries:
         # Filter queries based on the query name (second element of the key tuple)
-        queries_to_run = {k: v for k, v in queries.items() if k[1] in args.queries}
+        queries_to_run = {k: v for k, v in queries.items() if k[0] in args.queries}
 
     # Determine the number of worker threads to run with
     number_of_worker_threads_to_run = allNumberOfWorkerThreads
@@ -423,11 +428,17 @@ if __name__ == "__main__":
     if args.buffer_config:
         allBufferConfigs = parse_buffer_config(args.buffer_config)
 
+    # Determine statistic store types to run
+    statistic_store_types_to_run = (
+        args.statistic_store_types if args.statistic_store_types else allStatisticStoreTypes
+    )
+
     # Print results
     print(",".join(f"{ds}/{qn}" for ds, qn in queries_to_run.keys()))
     print(",".join(number_of_worker_threads_to_run))
     print(",".join(map(str, allBufferConfigs)))
     print(",".join(map(str, allEnableLatencyListeners)))
+    print(",".join(statistic_store_types_to_run))
 
     # Checking if the script has been executed from the repository root
     check_repository_root()
@@ -443,11 +454,15 @@ if __name__ == "__main__":
     initialize_csv_file()
 
     # Lower our own OOM score so the kernel prefers to kill the system under test, not us.
-    try:
-        with open("/proc/self/oom_score_adj", "w") as f:
-            f.write("-1000")
-    except OSError:
-        pass
+    # Writing a negative value requires root; skip silently otherwise so sudo isn't needed.
+    if os.geteuid() == 0:
+        try:
+            with open("/proc/self/oom_score_adj", "w") as f:
+                f.write("-1000")
+        except OSError as e:
+            printError(e)
+    else:
+        printInfo("Skipping lowering oom score, as script is not root!")
 
     start_time = time.time()
     problematic_experiments = []
@@ -459,19 +474,22 @@ if __name__ == "__main__":
             len(allJoinStrategies) *
             len(allPageSizes) *
             len(allBufferConfigs) *
-            len(allEnableLatencyListeners)
+            len(allEnableLatencyListeners) *
+            len(statistic_store_types_to_run)
     )
     no_queries = len(queries_to_run)
     total_runs = no_queries * no_combinations * NUM_RUNS_PER_EXPERIMENT
     completed_runs = 0
+    print("total_runs", total_runs)
     for queryIdx, ((dataset_name, query), query_info) in enumerate(queries_to_run.items()):
         workerConfigIdx = 0
 
         combinations = itertools.product(allExecutionModes, number_of_worker_threads_to_run,
                                          allBufferConfigs, allJoinStrategies,
-                                         allPageSizes, allEnableLatencyListeners)
+                                         allPageSizes, allEnableLatencyListeners,
+                                         statistic_store_types_to_run)
         for [executionMode, numberOfWorkerThreads, (bufferSizeInBytes, buffersInGlobalBufferManager), joinStrategy,
-             pageSize, enableLatency] in combinations:
+             pageSize, enableLatency, statisticStoreType] in combinations:
             workerConfigIdx += 1
 
             # Otherwise we run out-of-memory / out-of-buffers
@@ -488,7 +506,8 @@ if __name__ == "__main__":
                 'joinStrategy': joinStrategy,
                 'bufferSizeInBytes': bufferSizeInBytes,
                 'pageSize': pageSize,
-                'enableLatency': enableLatency
+                'enableLatency': enableLatency,
+                'statisticStoreType': statisticStoreType,
             }
 
             for i in range(NUM_RUNS_PER_EXPERIMENT):
@@ -496,6 +515,7 @@ if __name__ == "__main__":
                 experiment_desc = (f"{dataset_name}/{query} "
                                    f"threads={numberOfWorkerThreads} "
                                    f"latency={enableLatency} "
+                                   f"store={statisticStoreType} "
                                    f"run={i}")
                 printInfo(f"Starting config at {datetime.now().strftime('%H:%M:%S')}: {experiment_desc}")
                 issue = run_benchmark(config, dataset_name, query, query_info, queryIdx + 1, workerConfigIdx, enableLatency, no_combinations, no_queries)

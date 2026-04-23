@@ -156,7 +156,8 @@ getAggregationPhysicalFunctions(const WindowedAggregationLogicalOperator& logica
 }
 }
 
-LoweringRuleResultSubgraph LowerToPhysicalWindowedAggregation::apply(LogicalOperator logicalOperator)
+LoweringRuleResultSubgraph LowerToPhysicalWindowedAggregation::apply(
+    LogicalOperator logicalOperator, [[maybe_unused]] const std::shared_ptr<AbstractStatisticStore>& statisticStore)
 {
     PRECONDITION(logicalOperator.tryGetAs<WindowedAggregationLogicalOperator>(), "Expected a WindowedAggregationLogicalOperator");
     PRECONDITION(std::ranges::size(logicalOperator.getChildren()) == 1, "Expected one child");

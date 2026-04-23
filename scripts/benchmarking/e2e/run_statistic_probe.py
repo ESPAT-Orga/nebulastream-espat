@@ -89,6 +89,7 @@ allEnableLatencyListeners = [True]
 #allNumStatisticIds = [1, 10, 100]
 #allNumStatisticIds = [1, 100]
 allNumStatisticIds = [1]
+allStatisticStoreTypes = ["DEFAULT", "WINDOW", "SUB_STORES"]
 throughputListenerInterval = 200
 
 #### Statistic Build Configurations
@@ -317,7 +318,8 @@ def terminate_process_if_exists(process):
 
 def start_single_node_worker(file_path_stdout, numberOfWorkerThreads, executionMode,
                              joinStrategy, pageSize, bufferSizeInBytes,
-                             buffersInGlobalBufferManager, enableLatency=False):
+                             buffersInGlobalBufferManager, enableLatency=False,
+                             statisticStoreType="SUB_STORES"):
     """Start the single node worker with the given configuration."""
     worker_config = (f"--worker.query_engine.number_of_worker_threads={numberOfWorkerThreads} "
                      f"--worker.default_query_execution.execution_mode={executionMode} "
@@ -327,6 +329,7 @@ def start_single_node_worker(file_path_stdout, numberOfWorkerThreads, executionM
                      f"--worker.default_query_execution.page_size={pageSize} "
                      f"--worker.default_query_execution.operator_buffer_size={bufferSizeInBytes} "
                      f"--worker.latency_listener={enableLatency} "
+                     f"--worker.statistic_store_type={statisticStoreType} "
                      f"--worker.throughput_listener_interval_in_ms={throughputListenerInterval}")
 
     cmd = f"systemd-run --user --scope --quiet {single_node_executable} {worker_config}"
@@ -637,7 +640,7 @@ def initialize_csv_file():
             'build_throughput_listener', 'build_duration_s', 'build_latency_listener',
             'executionMode', 'numberOfWorkerThreads',
             'buffersInGlobalBufferManager', 'joinStrategy',
-            'bufferSizeInBytes', 'pageSize', 'enableLatency', 'issue'
+            'bufferSizeInBytes', 'pageSize', 'enableLatency', 'statisticStoreType', 'issue'
         ]
         writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
         writer.writeheader()
@@ -667,7 +670,8 @@ def run_experiment(statistic_type, statistic_config, worker_config, build_datase
                    output_dir, cli_log_file, num_statistic_ids,
                    build_windows_per_probe_window, dataset_name,
                    build_window_size_sec, enableLatency,
-                   num_probe_tuples, num_probe_repetitions):
+                   num_probe_tuples, num_probe_repetitions,
+                   statisticStoreType):
     """Run a single build+probe experiment. Returns a (result_dict, issues) tuple.
 
     ``issues`` is a list of strings describing non-fatal problems observed
@@ -696,7 +700,8 @@ def run_experiment(statistic_type, statistic_config, worker_config, build_datase
     single_node_process = start_single_node_worker(
         stdout_file, numberOfWorkerThreads, executionMode,
         joinStrategy, pageSize, bufferSizeInBytes,
-        buffersInGlobalBufferManager, enableLatency)
+        buffersInGlobalBufferManager, enableLatency,
+        statisticStoreType=statisticStoreType)
 
     time.sleep(WAIT_BETWEEN_COMMANDS_LONG)
 
@@ -820,6 +825,7 @@ def run_experiment(statistic_type, statistic_config, worker_config, build_datase
             'bufferSizeInBytes': bufferSizeInBytes,
             'pageSize': pageSize,
             'enableLatency': enableLatency,
+            'statisticStoreType': statisticStoreType,
         }, issues
 
     finally:
@@ -849,6 +855,9 @@ if __name__ == "__main__":
                         help="Number of worker threads to run the queries.")
     parser.add_argument("-b", "--buffer-config", nargs="+",
                         help="Buffer configurations as tuples, e.g., '(1048576, 20000)'.")
+    parser.add_argument("--statistic-store-types", nargs="+",
+                        choices=["DEFAULT", "WINDOW", "SUB_STORES"],
+                        help="Statistic store implementations to benchmark. Default: DEFAULT WINDOW SUB_STORES.")
     parser.add_argument("--clean", action="store_true",
                         help="Remove and recreate the build directory before building.")
     parser.add_argument("--num-probe-tuples", type=int, default=NUM_PROBE_TUPLES,
@@ -909,16 +918,25 @@ if __name__ == "__main__":
     # Override probe tuple count
     num_probe_tuples = args.num_probe_tuples
 
+    # Determine statistic store types to run
+    statistic_store_types_to_run = (
+        args.statistic_store_types if args.statistic_store_types else allStatisticStoreTypes
+    )
+
     # Optionally clean the build directory
     if args.clean:
         create_folder_and_remove_if_exists(build_dir)
 
     # Lower our own OOM score so the kernel prefers to kill the system under test, not us.
-    try:
-        with open("/proc/self/oom_score_adj", "w") as f:
-            f.write("-1000")
-    except OSError:
-        pass
+    # Writing a negative value requires root; skip silently otherwise so sudo isn't needed.
+    if os.geteuid() == 0:
+        try:
+            with open("/proc/self/oom_score_adj", "w") as f:
+                f.write("-1000")
+        except OSError:
+            pass
+    else:
+        printInfo("Skipping lowering oom score, as script is not root!")
 
     # Build NebulaStream
     compile_nebulastream(cmake_flags, build_dir)
@@ -943,6 +961,7 @@ if __name__ == "__main__":
     total_runs = (len(experiments) * len(worker_combinations)
                   * len(allNumStatisticIds) * len(allBuildWindowSizesSec)
                   * len(allBuildWindowsPerProbeWindow) * len(allNumProbeRepetitions)
+                  * len(statistic_store_types_to_run)
                   * NUM_RUNS_PER_EXPERIMENT)
     completed_runs = 0
     failed_experiments = []       # hard failures (submit failed, exception)
@@ -955,6 +974,7 @@ if __name__ == "__main__":
     printInfo(f"Build window sizes (sec): {allBuildWindowSizesSec}")
     printInfo(f"Build windows per probe window: {allBuildWindowsPerProbeWindow}")
     printInfo(f"Probe repetitions: {allNumProbeRepetitions}")
+    printInfo(f"Statistic store types: {statistic_store_types_to_run}")
     printInfo(f"Total runs: {total_runs}")
     print()
 
@@ -973,6 +993,7 @@ if __name__ == "__main__":
                 for build_window_size_sec in allBuildWindowSizesSec:
                     for build_windows_per_probe_window in allBuildWindowsPerProbeWindow:
                         for num_probe_repetitions in allNumProbeRepetitions:
+                          for statisticStoreType in statistic_store_types_to_run:
                             for run_idx in range(NUM_RUNS_PER_EXPERIMENT):
                                 run_start = time.time()
 
@@ -983,7 +1004,8 @@ if __name__ == "__main__":
                                     f"_{num_statistic_ids}ids"
                                     f"_{build_window_size_sec}sec"
                                     f"_{build_windows_per_probe_window}xwindow"
-                                    f"_{num_probe_repetitions}reps")
+                                    f"_{num_probe_repetitions}reps"
+                                    f"_{statisticStoreType}")
 
                                 # Open CLI log
                                 cli_log_path = os.path.join(run_folder, "nes-cli.log")
@@ -996,6 +1018,7 @@ if __name__ == "__main__":
                                                    f"build_window={build_window_size_sec}s "
                                                    f"build_windows_per_probe={build_windows_per_probe_window} "
                                                    f"probe_reps={num_probe_repetitions} "
+                                                   f"store={statisticStoreType} "
                                                    f"run={run_idx}")
 
                                 try:
@@ -1012,7 +1035,8 @@ if __name__ == "__main__":
                                         build_window_size_sec=build_window_size_sec,
                                         enableLatency=enableLatency,
                                         num_probe_tuples=num_probe_tuples,
-                                        num_probe_repetitions=num_probe_repetitions)
+                                        num_probe_repetitions=num_probe_repetitions,
+                                        statisticStoreType=statisticStoreType)
 
                                     if issues:
                                         for issue in issues:
@@ -1030,7 +1054,8 @@ if __name__ == "__main__":
                                         'build_throughput_listener', 'build_duration_s', 'build_latency_listener',
                                         'executionMode', 'numberOfWorkerThreads',
                                         'buffersInGlobalBufferManager', 'joinStrategy',
-                                        'bufferSizeInBytes', 'pageSize', 'enableLatency', 'issue'
+                                        'bufferSizeInBytes', 'pageSize', 'enableLatency',
+                                        'statisticStoreType', 'issue'
                                     ]
 
                                     with open(csv_file_path, mode='a', newline='') as csv_out:
@@ -1058,6 +1083,7 @@ if __name__ == "__main__":
                                                 'bufferSizeInBytes': bufferSizeInBytes,
                                                 'pageSize': pageSize,
                                                 'enableLatency': enableLatency,
+                                                'statisticStoreType': statisticStoreType,
                                                 'issue': issue_str,
                                             }
                                             writer.writerow(row)
@@ -1079,7 +1105,8 @@ if __name__ == "__main__":
                                         'build_throughput_listener', 'build_duration_s',
                                         'executionMode', 'numberOfWorkerThreads',
                                         'buffersInGlobalBufferManager', 'joinStrategy',
-                                        'bufferSizeInBytes', 'pageSize', 'enableLatency', 'issue'
+                                        'bufferSizeInBytes', 'pageSize', 'enableLatency',
+                                        'statisticStoreType', 'issue'
                                     ]
                                     with open(csv_file_path, mode='a', newline='') as csv_out:
                                         writer = csv.DictWriter(csv_out, fieldnames=probe_fieldnames)
@@ -1099,6 +1126,7 @@ if __name__ == "__main__":
                                             'bufferSizeInBytes': bufferSizeInBytes,
                                             'pageSize': pageSize,
                                             'enableLatency': enableLatency,
+                                            'statisticStoreType': statisticStoreType,
                                             'issue': f'exception:{e}',
                                         })
                                 finally:

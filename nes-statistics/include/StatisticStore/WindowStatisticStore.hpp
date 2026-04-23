@@ -15,6 +15,7 @@
 #pragma once
 
 #include <functional>
+#include <map>
 #include <StatisticStore/AbstractStatisticStore.hpp>
 #include <folly/Synchronized.h>
 #include <Statistic.hpp>
@@ -22,27 +23,22 @@
 namespace NES
 {
 
-/// WindowsStore: Two-level hash index. The outer layer is sharded by StatisticId across
-/// numberOfExpectedConcurrentAccess sub-stores; each sub-store maps StatisticId to an
-/// inner map keyed by windowStart. This keeps O(1) single-statistic (id, windowStart)
-/// lookups (two hash probes on small maps) while letting range queries acquire a single
-/// rlock and walk a compact per-id inner map.
-/// All windows are of fixed size, set at store initialization.
+/// WindowsStore: Two-level index sharded by StatisticId across numberOfExpectedConcurrentAccess
+/// sub-stores (hash outer); each sub-store maps StatisticId to an inner ordered map keyed by the
+/// statistic's actual startTs. Point lookups are O(log N) (tree find) and range queries are
+/// O(log N + k) via lower_bound/upper_bound, so no fixed window size needs to be known upfront.
 class WindowStatisticStore final : public AbstractStatisticStore
 {
-    /// windowStart -> statistics falling into that window
-    using WindowMap = std::unordered_map<Windowing::TimeMeasure, std::vector<Statistic>>;
+    /// startTs -> statistics sharing that startTs
+    using WindowMap = std::map<Windowing::TimeMeasure, std::vector<Statistic>>;
     /// statisticId -> windowMap
     using IdWindowMap = std::unordered_map<Statistic::StatisticId, WindowMap>;
 
     uint64_t numberOfExpectedConcurrentAccess;
-    Windowing::TimeMeasure windowSize;
     std::vector<folly::Synchronized<IdWindowMap>> allStatistics;
 
-    Windowing::TimeMeasure calculateWindowStartTime(Windowing::TimeMeasure statStartTime) const;
-
 public:
-    explicit WindowStatisticStore(uint64_t numberOfExpectedConcurrentAccess, Windowing::TimeMeasure windowSize);
+    explicit WindowStatisticStore(uint64_t numberOfExpectedConcurrentAccess);
     bool insertStatistic(const Statistic::StatisticId& statisticId, Statistic statistic) override;
     bool deleteStatistics(
         const Statistic::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs) override;

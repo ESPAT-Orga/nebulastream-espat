@@ -114,11 +114,13 @@ Unreflector<IngestionTimeWatermarkAssignerLogicalOperator>::operator()(const Ref
 }
 
 LogicalOperatorRegistryReturnType
-LogicalOperatorGeneratedRegistrar::RegisterIngestionTimeWatermarkAssignerLogicalOperator(LogicalOperatorRegistryArguments)
+LogicalOperatorGeneratedRegistrar::RegisterIngestionTimeWatermarkAssignerLogicalOperator(LogicalOperatorRegistryArguments arguments)
 {
     //TODO: claude just removed the passing of input schemas here, because things were failing
     // but this cannot be the solution
-    return IngestionTimeWatermarkAssignerLogicalOperator{};
+    //return IngestionTimeWatermarkAssignerLogicalOperator{};
+    auto logicalOperator = IngestionTimeWatermarkAssignerLogicalOperator();
+    return logicalOperator.withInferredSchema(arguments.inputSchemas);
 }
 
 }

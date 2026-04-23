@@ -19,6 +19,7 @@
 #include <csignal>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
 #include <iostream>
 #include <memory>
 #include <ranges>
@@ -55,6 +56,8 @@ struct Repl::Impl
     StatisticRequestHandler statisticRequestHandler;
     StatementBinder binder;
     std::stop_token stopToken;
+    std::optional<RequestStatisticBuildStatement> companionStatisticRequest;
+    std::optional<std::function<void(DistributedQueryId, const std::string&)>> onCompanionAssociatedWithQuery;
 
     std::unique_ptr<replxx::Replxx> rx;
     std::vector<std::string> history;
@@ -81,7 +84,9 @@ struct Repl::Impl
         const ErrorBehaviour errorBehaviour,
         const StatementOutputFormat defaultOutputFormat,
         const bool interactiveMode,
-        std::stop_token stopToken)
+        std::stop_token stopToken,
+        std::optional<RequestStatisticBuildStatement> companionStatisticRequest,
+        std::optional<std::function<void(DistributedQueryId, const std::string&)>> onCompanionAssociatedWithQuery)
         : sourceStatementHandler(std::move(sourceStatementHandler))
         , sinkStatementHandler(std::move(sinkStatementHandler))
         , topologyStatementHandler(std::move(topologyStatementHandler))
@@ -89,6 +94,8 @@ struct Repl::Impl
         , statisticRequestHandler(std::move(statisticRequestHandler))
         , binder(std::move(binder))
         , stopToken(std::move(stopToken))
+        , companionStatisticRequest(std::move(companionStatisticRequest))
+        , onCompanionAssociatedWithQuery(std::move(onCompanionAssociatedWithQuery))
         , interactiveMode(interactiveMode)
         , errorBehaviour(errorBehaviour)
         , defaultOutputFormat(defaultOutputFormat)
@@ -412,7 +419,38 @@ struct Repl::Impl
                 }
                 else if constexpr (requires { queryStatementHandler->apply(stmt); })
                 {
-                    return queryStatementHandler->apply(stmt);
+                    auto result = queryStatementHandler->apply(stmt);
+                    if (result.has_value() && companionStatisticRequest.has_value())
+                    {
+                        if constexpr (std::is_same_v<std::remove_cvref_t<decltype(stmt)>, QueryStatement>)
+                        {
+                            try
+                            {
+                                auto statResult = statisticRequestHandler.collectNewStatistic(*companionStatisticRequest);
+                                if (statResult.has_value())
+                                {
+                                    std::cout << "[Statistic] Companion deployed: id=" << statResult->statisticId.getRawValue()
+                                              << (statResult->alreadyExisted ? " (reused existing)" : " (new)") << "\n";
+                                    std::flush(std::cout);
+                                    if (onCompanionAssociatedWithQuery.has_value())
+                                    {
+                                        (*onCompanionAssociatedWithQuery)(result.value().id, query);
+                                    }
+                                }
+                                else
+                                {
+                                    std::cout << "[Statistic] Failed to deploy companion: " << statResult.error().what() << "\n";
+                                    std::flush(std::cout);
+                                }
+                            }
+                            catch (const std::exception& e)
+                            {
+                                std::cout << "[Statistic] Exception deploying companion: " << e.what() << "\n";
+                                std::flush(std::cout);
+                            }
+                        }
+                    }
+                    return result;
                 }
                 else
                 {
@@ -566,7 +604,9 @@ Repl::Repl(
     ErrorBehaviour errorBehaviour,
     StatementOutputFormat defaultOutputFormat,
     bool interactiveMode,
-    std::stop_token stopToken)
+    std::stop_token stopToken,
+    std::optional<RequestStatisticBuildStatement> companionStatisticRequest,
+    std::optional<std::function<void(DistributedQueryId, const std::string&)>> onCompanionAssociatedWithQuery)
     : impl(std::make_unique<Impl>(
           std::move(sourceStatementHandler),
           std::move(sinkStatementHandler),
@@ -577,7 +617,9 @@ Repl::Repl(
           errorBehaviour,
           defaultOutputFormat,
           interactiveMode,
-          std::move(stopToken)))
+          std::move(stopToken),
+          std::move(companionStatisticRequest),
+          std::move(onCompanionAssociatedWithQuery)))
 {
 }
 

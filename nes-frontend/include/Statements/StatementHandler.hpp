@@ -242,11 +242,24 @@ public:
 
 class StatisticRequestHandler final : public StatementHandler<StatisticRequestHandler>
 {
-    StatisticCoordinator statisticCoordinator;
+    /// StatisticCoordinatorServiceImpl holds a reference to the coordinator; the Object itself must not move
+    /// after startGrpcServer() is called.
+    std::unique_ptr<StatisticCoordinator> statisticCoordinator;
 
 public:
     explicit StatisticRequestHandler(StatisticCoordinator statisticCoordinator);
     std::expected<RequestStatisticBuildStatementResult, Exception> operator()(const RequestStatisticBuildStatement& statement);
+
+    /// Directly deploys a statistic collection query without going through the SQL parser.
+    /// Used internally to co-deploy companion statistic queries alongside data queries.
+    [[nodiscard]] std::expected<CollectStatisticResult, Exception> collectNewStatistic(const RequestStatisticBuildStatement& statement);
+
+    /// Starts the gRPC server on the owned coordinator. Must be called after construction.
+    /// Returns "host:port" of the listening server.
+    std::string startGrpcServer();
+
+    /// Returns the coordinator's gRPC address after startGrpcServer() has been called.
+    [[nodiscard]] const std::string& getCoordinatorAddress() const;
 };
 
 template <typename HandlerT>

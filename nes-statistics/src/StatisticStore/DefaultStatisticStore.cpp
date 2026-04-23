@@ -43,15 +43,15 @@ bool DefaultStatisticStore::deleteStatistics(
 std::vector<Statistic> DefaultStatisticStore::getStatistics(
     const Statistic::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs)
 {
-    std::vector<Statistic> returnStatisticsVector;
     const auto statisticsLocked = statistics.rlock();
     const auto idIt = statisticsLocked->find(statisticId);
     if (idIt == statisticsLocked->end())
     {
-        return returnStatisticsVector;
+        return {};
     }
-    const auto& statisticsVec = idIt->second;
 
+    std::vector<Statistic> returnStatisticsVector;
+    const auto& statisticsVec = idIt->second;
     std::ranges::copy_if(
         statisticsVec,
         std::back_inserter(returnStatisticsVector),

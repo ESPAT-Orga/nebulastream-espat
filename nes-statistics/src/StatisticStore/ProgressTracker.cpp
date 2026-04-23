@@ -36,7 +36,7 @@ std::string formatSeconds(const double seconds)
 }
 
 ProgressTracker::ProgressTracker(const uint64_t totalConfigs)
-    : totalConfigs(totalConfigs), startTime(std::chrono::steady_clock::now()), lastReportTime(startTime)
+    : totalConfigs(totalConfigs), startTime(std::chrono::steady_clock::now()), lastReportTime(startTime), sectionStartTime(startTime)
 {
 }
 
@@ -44,6 +44,7 @@ void ProgressTracker::beginSection(const uint64_t sectionConfigs)
 {
     sectionTotal = sectionConfigs;
     sectionCompleted = 0;
+    sectionStartTime = std::chrono::steady_clock::now();
 }
 
 void ProgressTracker::report(const std::string& configDesc, const std::string& skippedReason)
@@ -57,6 +58,10 @@ void ProgressTracker::report(const std::string& configDesc, const std::string& s
 
     const double avgSecPerConfig = elapsedSec / static_cast<double>(completedConfigs);
     const double etaSec = avgSecPerConfig * static_cast<double>(totalConfigs - completedConfigs);
+
+    const double sectionElapsedSec = std::chrono::duration<double>(now - sectionStartTime).count();
+    const double sectionAvgSecPerConfig = sectionCompleted > 0 ? sectionElapsedSec / static_cast<double>(sectionCompleted) : 0;
+    const double sectionEtaSec = sectionAvgSecPerConfig * static_cast<double>(sectionTotal - sectionCompleted);
 
     /// For skipped configs, overwrite the current line in-place with "Skipping: ..." and return.
     /// No newline is printed, so the next report() call overwrites this line (either with another
@@ -88,8 +93,8 @@ void ProgressTracker::report(const std::string& configDesc, const std::string& s
             std::cout << ' ';
         }
     }
-    std::cout << "] " << sectionCompleted << "/" << sectionTotal << "  elapsed " << formatHMS(elapsedSec) << "  ETA " << formatHMS(etaSec)
-              << "\r" << std::flush;
+    std::cout << "] " << sectionCompleted << "/" << sectionTotal << "  elapsed " << formatHMS(elapsedSec) << "  section ETA "
+              << formatHMS(sectionEtaSec) << "  total ETA " << formatHMS(etaSec) << "\r" << std::flush;
 }
 
 void ProgressTracker::skip(const std::string& benchmark, const std::string& description, const std::string& reason)
@@ -119,9 +124,14 @@ void ProgressTracker::clearProgressBar()
 
 void ProgressTracker::finalizeProgressBar()
 {
-    const double elapsedSec = std::chrono::duration<double>(std::chrono::steady_clock::now() - startTime).count();
+    const auto now = std::chrono::steady_clock::now();
+    const double elapsedSec = std::chrono::duration<double>(now - startTime).count();
     const double avgSecPerConfig = completedConfigs > 0 ? elapsedSec / static_cast<double>(completedConfigs) : 0;
     const double etaSec = avgSecPerConfig * static_cast<double>(totalConfigs - completedConfigs);
+
+    const double sectionElapsedSec = std::chrono::duration<double>(now - sectionStartTime).count();
+    const double sectionAvgSecPerConfig = sectionCompleted > 0 ? sectionElapsedSec / static_cast<double>(sectionCompleted) : 0;
+    const double sectionEtaSec = sectionAvgSecPerConfig * static_cast<double>(sectionTotal - sectionCompleted);
 
     const int filled = sectionTotal > 0 ? static_cast<int>(BAR_WIDTH * sectionCompleted / sectionTotal) : 0;
     std::cout << "\r\033[2K[";
@@ -140,8 +150,8 @@ void ProgressTracker::finalizeProgressBar()
             std::cout << ' ';
         }
     }
-    std::cout << "] " << sectionCompleted << "/" << sectionTotal << "  elapsed " << formatHMS(elapsedSec) << "  ETA " << formatHMS(etaSec)
-              << "\n";
+    std::cout << "] " << sectionCompleted << "/" << sectionTotal << "  elapsed " << formatHMS(elapsedSec) << "  section ETA "
+              << formatHMS(sectionEtaSec) << "  total ETA " << formatHMS(etaSec) << "\n";
 }
 
 double ProgressTracker::getElapsedSeconds() const

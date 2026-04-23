@@ -39,11 +39,11 @@ struct SkippedConfig
 ///   --- InsertStatistic (6 configs) ---
 ///   Insert | DEFAULT | threads=1 | stats=100000 | ids=100000 | size=1024 | ws=60000  1.2s
 ///   Insert | DEFAULT | threads=4 | stats=100000 | ids=100000 | size=1024 | ws=60000  0.8s
-///   [==================>                      ] 2/6  elapsed 00:00:02  ETA 00:00:04
+///   [==================>                      ] 2/6  elapsed 00:00:02  section ETA 00:00:03  total ETA 00:00:04
 ///
 /// After finalizeProgressBar():
 ///
-///   [========================================>] 6/6  elapsed 00:00:06  ETA 00:00:00
+///   [========================================>] 6/6  elapsed 00:00:06  section ETA 00:00:00  total ETA 00:00:00
 ///   --- InsertStatistic finished in 00:00:06 ---
 ///
 class ProgressTracker
@@ -89,6 +89,7 @@ private:
     std::vector<SkippedConfig> skippedConfigs;
     std::chrono::steady_clock::time_point startTime;
     std::chrono::steady_clock::time_point lastReportTime;
+    std::chrono::steady_clock::time_point sectionStartTime;
 };
 
 }

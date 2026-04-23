@@ -27,12 +27,18 @@ namespace NES
 
 namespace
 {
-uint64_t getPos(const Statistic::StatisticId& statisticId, const uint64_t numberOfExpectedConcurrentAccess)
+uint64_t getPos(
+    const Statistic::StatisticId& statisticId,
+    const Windowing::TimeMeasure& statisticStartTs,
+    const uint64_t numberOfExpectedConcurrentAccess)
 {
-    /// We use here the randomness of the statisticId to distribute the accesses.
-    /// We can not use a worker thread id or etc, as this function is not only called from the execution
-    const auto pos = statisticId % numberOfExpectedConcurrentAccess;
-    return pos;
+    /// We use the randomness of both the statisticId and the statisticStartTs to distribute accesses across slots.
+    /// Hashing both components spreads traffic even when the number of distinct statisticIds is smaller than
+    /// numberOfExpectedConcurrentAccess. We can not use a worker thread id or etc, as this function is not only
+    /// called from the execution.
+    const auto h1 = std::hash<Statistic::StatisticId>{}(statisticId);
+    const auto h2 = std::hash<Windowing::TimeMeasure>{}(statisticStartTs);
+    return (h1 ^ (h2 << 1)) % numberOfExpectedConcurrentAccess;
 }
 }
 
@@ -55,8 +61,8 @@ Windowing::TimeMeasure WindowStatisticStore::calculateWindowStartTime(const Wind
 
 bool WindowStatisticStore::insertStatistic(const Statistic::StatisticId& statisticId, Statistic statistic)
 {
-    const auto pos = getPos(statisticId, numberOfExpectedConcurrentAccess);
     const auto windowStartTime = calculateWindowStartTime(statistic.getStartTs());
+    const auto pos = getPos(statisticId, windowStartTime, numberOfExpectedConcurrentAccess);
     const auto lockedStatisticStore = allStatistics[pos].wlock();
     (*lockedStatisticStore)[{statisticId, windowStartTime}].emplace_back(std::move(statistic));
     return true;
@@ -65,7 +71,6 @@ bool WindowStatisticStore::insertStatistic(const Statistic::StatisticId& statist
 bool WindowStatisticStore::deleteStatistics(
     const Statistic::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs)
 {
-    const auto pos = getPos(statisticId, numberOfExpectedConcurrentAccess);
     const uint64_t firstWindow = std::floor(startTs.getTime() / windowSize.getTime());
     const uint64_t lastWindow = std::floor(endTs.getTime() / windowSize.getTime());
     const auto numberOfWindows = lastWindow - firstWindow + 1;
@@ -74,6 +79,7 @@ bool WindowStatisticStore::deleteStatistics(
     for (uint64_t i = 0; i < numberOfWindows; ++i)
     {
         const Windowing::TimeMeasure curWindowStartTime{firstWindow * windowSize.getTime() + i * windowSize.getTime()};
+        const auto pos = getPos(statisticId, curWindowStartTime, numberOfExpectedConcurrentAccess);
         auto lockedStatisticStore = allStatistics[pos].wlock();
         auto& window = (*lockedStatisticStore)[{statisticId, curWindowStartTime}];
         auto newEnd = std::ranges::remove_if(
@@ -94,7 +100,6 @@ bool WindowStatisticStore::deleteStatistics(
 std::vector<Statistic> WindowStatisticStore::getStatistics(
     const Statistic::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs)
 {
-    const auto pos = getPos(statisticId, numberOfExpectedConcurrentAccess);
     const uint64_t firstWindow = std::floor(startTs.getTime() / windowSize.getTime());
     const uint64_t lastWindow = std::floor(endTs.getTime() / windowSize.getTime());
     const auto numberOfWindows = lastWindow - firstWindow + 1;
@@ -103,6 +108,7 @@ std::vector<Statistic> WindowStatisticStore::getStatistics(
     for (uint64_t i = 0; i < numberOfWindows; ++i)
     {
         const Windowing::TimeMeasure curWindowStartTime{firstWindow * windowSize.getTime() + i * windowSize.getTime()};
+        const auto pos = getPos(statisticId, curWindowStartTime, numberOfExpectedConcurrentAccess);
         const auto lockedStatisticStore = allStatistics[pos].rlock();
         if (auto window = lockedStatisticStore->find(StatisticKey{.statisticId = statisticId, .startTs = curWindowStartTime});
             window != lockedStatisticStore->end())
@@ -120,10 +126,10 @@ std::vector<Statistic> WindowStatisticStore::getStatistics(
 std::optional<Statistic> WindowStatisticStore::getSingleStatistic(
     const Statistic::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs)
 {
-    const auto pos = getPos(statisticId, numberOfExpectedConcurrentAccess);
     const uint64_t firstWindow = std::floor(startTs.getTime() / windowSize.getTime());
 
     const Windowing::TimeMeasure curWindowStartTime{firstWindow * windowSize.getTime()};
+    const auto pos = getPos(statisticId, curWindowStartTime, numberOfExpectedConcurrentAccess);
     const auto lockedStatisticStore = allStatistics[pos].rlock();
     const auto& window = lockedStatisticStore->at({statisticId, curWindowStartTime});
     const auto foundStatistic = std::ranges::find_if(

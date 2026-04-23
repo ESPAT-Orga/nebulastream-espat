@@ -307,6 +307,27 @@ int main(int argc, char** argv)
         auto coordinatorAddr = statisticCoordinator.startGrpcServer();
         NES_INFO("StatisticCoordinator gRPC server listening on {}", coordinatorAddr);
         NES::StatisticRequestHandler statisticRequestHandler{std::move(statisticCoordinator)};
+
+        /// Hardcoded companion statistic for the adaptive-optimization experiment.
+        /// Every data query gets a 1-second cardinality statistic on endless.ts.
+        /// The callback fires on every incoming window result and prints to stdout.
+        NES::RequestStatisticBuildStatement companionStatisticRequest{
+            .domain = NES::DataDomain{.logicalSourceName = "endless", .fieldName = "ts"},
+            .metric = NES::Metric::Cardinality,
+            .windowSizeMs = 1000,
+            .windowAdvanceMs = std::nullopt,
+            .eventTimeFieldName = std::nullopt,
+            .conditionTrigger = NES::ConditionTrigger{
+                .condition = std::nullopt, /// fire unconditionally on every window result
+                .callback =
+                    [](NES::Statistic::StatisticId statId, NES::Windowing::TimeMeasure startTs, NES::Windowing::TimeMeasure endTs)
+                {
+                    std::cout << "[StatisticTrigger] id=" << statId.getRawValue() << " window=[" << startTs.getTime() << "ms, "
+                              << endTs.getTime() << "ms]\n";
+                    std::flush(std::cout);
+                }},
+            .options = {{"host", "localhost:8080"}}};
+
         NES::Repl replClient{
             std::move(sourceStatementHandler),
             std::move(sinkStatementHandler),
@@ -317,7 +338,8 @@ int main(int argc, char** argv)
             errorBehaviour,
             defaultOutputFormat,
             interactiveMode,
-            SignalHandler::terminationToken()};
+            SignalHandler::terminationToken(),
+            std::move(companionStatisticRequest)};
         replClient.run();
 
         bool hasError = false;

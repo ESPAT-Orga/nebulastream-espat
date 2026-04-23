@@ -55,6 +55,7 @@ struct Repl::Impl
     StatisticRequestHandler statisticRequestHandler;
     StatementBinder binder;
     std::stop_token stopToken;
+    std::optional<RequestStatisticBuildStatement> companionStatisticRequest;
 
     std::unique_ptr<replxx::Replxx> rx;
     std::vector<std::string> history;
@@ -81,7 +82,8 @@ struct Repl::Impl
         const ErrorBehaviour errorBehaviour,
         const StatementOutputFormat defaultOutputFormat,
         const bool interactiveMode,
-        std::stop_token stopToken)
+        std::stop_token stopToken,
+        std::optional<RequestStatisticBuildStatement> companionStatisticRequest)
         : sourceStatementHandler(std::move(sourceStatementHandler))
         , sinkStatementHandler(std::move(sinkStatementHandler))
         , topologyStatementHandler(std::move(topologyStatementHandler))
@@ -89,6 +91,7 @@ struct Repl::Impl
         , statisticRequestHandler(std::move(statisticRequestHandler))
         , binder(std::move(binder))
         , stopToken(std::move(stopToken))
+        , companionStatisticRequest(std::move(companionStatisticRequest))
         , interactiveMode(interactiveMode)
         , errorBehaviour(errorBehaviour)
         , defaultOutputFormat(defaultOutputFormat)
@@ -412,7 +415,34 @@ struct Repl::Impl
                 }
                 else if constexpr (requires { queryStatementHandler->apply(stmt); })
                 {
-                    return queryStatementHandler->apply(stmt);
+                    auto r = queryStatementHandler->apply(stmt);
+                    if (r.has_value() && companionStatisticRequest.has_value())
+                    {
+                        if constexpr (std::is_same_v<std::remove_cvref_t<decltype(stmt)>, QueryStatement>)
+                        {
+                            try
+                            {
+                                auto statResult = statisticRequestHandler.collectNewStatistic(*companionStatisticRequest);
+                                if (statResult.has_value())
+                                {
+                                    std::cout << "[Statistic] Companion deployed: id=" << statResult->statisticId.getRawValue()
+                                              << (statResult->alreadyExisted ? " (reused existing)" : " (new)") << "\n";
+                                    std::flush(std::cout);
+                                }
+                                else
+                                {
+                                    std::cout << "[Statistic] Failed to deploy companion: " << statResult.error().what() << "\n";
+                                    std::flush(std::cout);
+                                }
+                            }
+                            catch (const std::exception& e)
+                            {
+                                std::cout << "[Statistic] Exception deploying companion: " << e.what() << "\n";
+                                std::flush(std::cout);
+                            }
+                        }
+                    }
+                    return r;
                 }
                 else
                 {
@@ -566,7 +596,8 @@ Repl::Repl(
     ErrorBehaviour errorBehaviour,
     StatementOutputFormat defaultOutputFormat,
     bool interactiveMode,
-    std::stop_token stopToken)
+    std::stop_token stopToken,
+    std::optional<RequestStatisticBuildStatement> companionStatisticRequest)
     : impl(std::make_unique<Impl>(
           std::move(sourceStatementHandler),
           std::move(sinkStatementHandler),
@@ -577,7 +608,8 @@ Repl::Repl(
           errorBehaviour,
           defaultOutputFormat,
           interactiveMode,
-          std::move(stopToken)))
+          std::move(stopToken),
+          std::move(companionStatisticRequest)))
 {
 }
 

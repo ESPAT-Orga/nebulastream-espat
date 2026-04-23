@@ -247,6 +247,10 @@ class StatisticRequestHandler final : public StatementHandler<StatisticRequestHa
 public:
     explicit StatisticRequestHandler(StatisticCoordinator statisticCoordinator);
     std::expected<RequestStatisticBuildStatementResult, Exception> operator()(const RequestStatisticBuildStatement& statement);
+
+    /// Directly deploys a statistic collection query without going through the SQL parser.
+    /// Used internally to co-deploy companion statistic queries alongside data queries.
+    [[nodiscard]] std::expected<CollectStatisticResult, Exception> collectNewStatistic(const RequestStatisticBuildStatement& statement);
 };
 
 template <typename HandlerT>

@@ -85,6 +85,8 @@ public:
     /// Removes the entry for this key. Returns true if an entry was removed.
     bool deregisterStatistic(const Key& key);
 
+    size_t getNumberOfEntries();
+
     /// Iterates over all entries, calling the visitor for each one. Thread-safe.
     template <typename Fn>
     void forEachEntry(Fn&& visitor) const

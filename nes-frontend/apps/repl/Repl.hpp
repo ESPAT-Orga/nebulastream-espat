@@ -15,10 +15,14 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <memory>
+#include <optional>
 #include <stop_token>
 #include <SQLQueryParser/StatementBinder.hpp>
 #include <Statements/StatementHandler.hpp>
+#include <QueryId.hpp>
+#include <RequestStatisticStatement.hpp>
 
 namespace NES
 {
@@ -46,7 +50,9 @@ public:
         ErrorBehaviour errorBehaviour,
         StatementOutputFormat defaultOutputFormat,
         bool interactiveMode,
-        std::stop_token stopToken);
+        std::stop_token stopToken,
+        std::optional<RequestStatisticBuildStatement> companionStatisticRequest = std::nullopt,
+        std::optional<std::function<void(DistributedQueryId, const std::string&)>> onCompanionAssociatedWithQuery = std::nullopt);
     void run();
     ~Repl();
 };

@@ -140,14 +140,17 @@ Statistic::StatisticType StatisticStoreWriterLogicalOperator::getStatisticType()
 Reflected Reflector<StatisticStoreWriterLogicalOperator>::operator()(const StatisticStoreWriterLogicalOperator& op) const
 {
     return reflect(detail::ReflectedStatisticStoreWriterLogicalOperator{
-        .statisticId = op.getStatisticId().getRawValue(), .statisticType = op.getStatisticType()});
+        .statisticId = op.getStatisticId().getRawValue(),
+        .statisticType = op.getStatisticType(),
+        .statisticDataFieldName = op.inputLogicalStatisticFields->statisticDataField.name});
 }
 
 StatisticStoreWriterLogicalOperator Unreflector<StatisticStoreWriterLogicalOperator>::operator()(const Reflected& reflected) const
 {
-    auto [statisticId, statisticType] = unreflect<detail::ReflectedStatisticStoreWriterLogicalOperator>(reflected);
-    return StatisticStoreWriterLogicalOperator{
-        std::make_shared<LogicalStatisticFields>(), Statistic::StatisticId{statisticId}, statisticType};
+    auto [statisticId, statisticType, statisticDataFieldName] = unreflect<detail::ReflectedStatisticStoreWriterLogicalOperator>(reflected);
+    auto logicalFields = std::make_shared<LogicalStatisticFields>();
+    logicalFields->statisticDataField.name = std::move(statisticDataFieldName);
+    return StatisticStoreWriterLogicalOperator{std::move(logicalFields), Statistic::StatisticId{statisticId}, statisticType};
 }
 
 LogicalOperatorRegistryReturnType

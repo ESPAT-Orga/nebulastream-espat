@@ -15,6 +15,7 @@
 #include <Operators/IngestionTimeWatermarkAssignerLogicalOperator.hpp>
 
 #include <algorithm>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <vector>

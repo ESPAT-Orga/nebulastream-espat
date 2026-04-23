@@ -32,7 +32,6 @@
 #include <unistd.h>
 
 #include <Identifiers/Identifiers.hpp>
-#include <Phases/SemanticAnalyzer.hpp>
 #include <Plans/LogicalPlan.hpp>
 #include <QueryManager/GRPCQuerySubmissionBackend.hpp>
 #include <QueryManager/QueryManager.hpp>
@@ -284,11 +283,9 @@ int main(int argc, char** argv)
         NES::TopologyStatementHandler topologyStatementHandler{queryManager, workerCatalog};
         auto queryOptimizer = std::make_shared<NES::QueryOptimizer>(queryOptimizerConfig, sourceCatalog, sinkCatalog, workerCatalog);
         auto queryStatementHandler = std::make_shared<NES::QueryStatementHandler>(queryManager, queryOptimizer);
-        auto semanticAnalyzer = std::make_shared<NES::SemanticAnalyzer>(sourceCatalog, sinkCatalog);
         auto submitQueryFn
-            = [queryManager, semanticAnalyzer, queryOptimizer](NES::LogicalPlan plan) -> std::expected<NES::QueryId, NES::Exception>
+            = [queryManager, queryOptimizer](NES::LogicalPlan plan) -> std::expected<NES::QueryId, NES::Exception>
         {
-            plan = semanticAnalyzer->analyse(plan);
             auto distributedPlan = queryOptimizer->optimize(plan);
             auto registerResult = queryManager->registerQuery(distributedPlan);
             if (!registerResult.has_value())

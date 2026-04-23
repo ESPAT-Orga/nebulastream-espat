@@ -114,10 +114,9 @@ Unreflector<IngestionTimeWatermarkAssignerLogicalOperator>::operator()(const Ref
 }
 
 LogicalOperatorRegistryReturnType
-LogicalOperatorGeneratedRegistrar::RegisterIngestionTimeWatermarkAssignerLogicalOperator(LogicalOperatorRegistryArguments arguments)
+LogicalOperatorGeneratedRegistrar::RegisterIngestionTimeWatermarkAssignerLogicalOperator(LogicalOperatorRegistryArguments)
 {
-    auto logicalOperator = IngestionTimeWatermarkAssignerLogicalOperator();
-    return logicalOperator.withInferredSchema(arguments.inputSchemas);
+    return IngestionTimeWatermarkAssignerLogicalOperator{};
 }
 
 }

@@ -96,8 +96,13 @@ public:
             [this, schema, sinkType](
                 const std::string_view assignedSinkName, std::filesystem::path filePath) -> std::expected<SinkDescriptor, Exception>
             {
-                std::unordered_map<std::string, std::string> config{{"file_path", std::move(filePath)}};
+                std::unordered_map<std::string, std::string> config{};
                 std::unordered_map<std::string, std::string> formatConfig{};
+                /// VoidSink rejects unknown keys, so don't inject a file_path it cannot consume.
+                if (toUpperCase(sinkType) != "VOID")
+                {
+                    config.emplace("file_path", std::move(filePath));
+                }
                 if (sinkType == "File")
                 {
                     config["output_format"] = "CSV";
@@ -711,7 +716,11 @@ struct SystestBinder::Impl
         auto formatConfig = sinkOperator->getFormatConfig();
         auto schema = sinkOperator->getSchema();
         sinkConfig.erase("file_path");
-        sinkConfig.emplace("file_path", resultFile);
+        /// VoidSink rejects unknown keys, so don't inject a file_path it cannot consume.
+        if (toUpperCase(sinkOperator->getSinkType()) != "VOID")
+        {
+            sinkConfig.emplace("file_path", resultFile);
+        }
 
         if (not(sinkConfig.contains("output_format")) and sinkOperator->getSinkType() != "CHECKSUM"
             and sinkOperator->getSinkType() != "VOID")

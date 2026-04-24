@@ -33,7 +33,7 @@ from scripts.benchmarking.utils import *
 
 #### Benchmark Configurations
 build_dir = os.path.join(".", "build_dir")
-working_dir = os.path.join(build_dir, "working_dir")
+working_dir = os.path.abspath(os.path.join(build_dir, "working_dir"))
 output_dir = "."
 csv_file_path = "results_nebulastream.csv"
 benchmark_json_file = os.path.abspath(os.path.join(working_dir, "BenchmarkResults.json"))
@@ -55,7 +55,8 @@ allNumberOfWorkerThreads = ['1', '4', '16']  # ['1', '4', '8', '16', '24'] #['4'
 allJoinStrategies = ["HASH_JOIN"]
 allPageSizes = [8192]
 # [4000000] if buffer size is 8192 #[500000] if buffer size is 102400
-allBufferConfigs = [(1048576, 20000)]
+# allBufferConfigs = [(1048576, 20000)]
+allBufferConfigs = [(100*1024, 200 * 1000)]
 #allEnableLatencyListeners = [False, True]
 allEnableLatencyListeners = [False]
 # allBuildWindowSizesSec = [1, 30, 60]
@@ -66,27 +67,27 @@ throughputListenerInterval = 200
 #### Statistic Build Configurations
 allReservoirSizes = [
     100,
-    500,
+    # 500,
     1000
 ]
 allEquiWidthHistogramConfigs = [
     # (num_buckets, min_value, max_value, counter_type)
     (100, 0, 100 * 1000, "uint64"),
-    (500, 0, 100 * 1000, "uint64"),
+    # (500, 0, 100 * 1000, "uint64"),
     (1000, 0, 100 * 1000, "uint64"),
 ]
 allCountMinConfigs = [
     # (rows, cols, counter_type)
     (1, 100, "uint64"),
-    (5, 100, "uint64"),
-    (10, 100, "uint64"),
-
-    (1, 1000, "uint64"),
-    (5, 1000, "uint64"),
-    (10, 1000, "uint64"),
-
-    (1, 10000, "uint64"),
-    (5, 10000, "uint64"),
+    # (5, 100, "uint64"),
+    # (10, 100, "uint64"),
+    #
+    # (1, 1000, "uint64"),
+    # (5, 1000, "uint64"),
+    # (10, 1000, "uint64"),
+    #
+    # (1, 10000, "uint64"),
+    # (5, 10000, "uint64"),
     (10, 10000, "uint64"),
 ]
 

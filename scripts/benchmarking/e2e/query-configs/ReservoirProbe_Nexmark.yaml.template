@@ -29,8 +29,6 @@ sinks:
       - name: probe_source$price
         type: FLOAT64
     type: Void
-    config:
-      file_path: "/tmp/discard_probe_sink.csv"
     parser_config: {{ }}
 logical:
   - name: probe_source

@@ -121,18 +121,9 @@ SourceImplementationTermination dataSourceThreadRoutine(
 
         if (!fillTupleResult.isEoS())
         {
-            if (fillTupleResult.isNativeTuples())
-            {
-                /// The source already produced a native-layout buffer. It has also written all payload data;
-                /// we only still need to set the tuple count the pipeline will read.
-                emptyBuffer->setNumberOfTuples(fillTupleResult.getNumberOfTuples());
-            }
-            else
-            {
-                /// The source read in raw bytes, thus we don't know the number of tuples yet.
-                /// The InputFormatter expects that the source set the number of bytes this way and uses it to determine the number of tuples.
-                emptyBuffer->setNumberOfTuples(fillTupleResult.getNumberOfBytes());
-            }
+            /// The source read in raw bytes, thus we don't know the number of tuples yet.
+            /// The InputFormatter expects that the source set the number of bytes this way and uses it to determine the number of tuples.
+            emptyBuffer->setNumberOfTuples(fillTupleResult.getNumberOfBytes());
             emit(std::move(*emptyBuffer), requiresMetadata);
         }
         else
@@ -196,7 +187,7 @@ void dataSourceThread(
 
 bool SourceThread::setup() const
 {
-    return sourceImplementation->setup(localBufferManager);
+    return sourceImplementation->setup();
 }
 
 bool SourceThread::start(SourceReturnType::EmitFunction&& emitFunction)

@@ -14,7 +14,6 @@
 
 #pragma once
 
-#include <cstddef>
 #include <memory>
 #include <string>
 
@@ -30,7 +29,6 @@ using SourceRegistryReturnType = std::unique_ptr<Source>;
 struct SourceRegistryArguments
 {
     SourceDescriptor sourceDescriptor;
-    size_t bufferSizeInBytes{0};
 };
 
 class SourceRegistry : public BaseRegistry<SourceRegistry, std::string, SourceRegistryReturnType, SourceRegistryArguments>

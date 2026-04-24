@@ -32,7 +32,6 @@
 #include <Sources/SourceDescriptor.hpp>
 #include <Sources/SourceValidationProvider.hpp>
 #include <Util/Logger/Logger.hpp>
-#include <Util/Strings.hpp>
 #include <ErrorHandling.hpp>
 #include <InputFormatterTupleBufferRefProvider.hpp>
 
@@ -91,10 +90,7 @@ std::expected<SourceDescriptor, Exception> SourceCatalog::addPhysicalSource(
     }
 
     auto parserConfigObject = ParserConfig::create(parserConfig);
-    /// "Native" is a pseudo parser type signaling that the source already produces native-layout buffers and
-    /// the pipeline should skip the input formatter wrap (see PipeliningPhase / LowerToPhysicalProjection).
-    /// It is therefore not registered with the InputFormatIndexer registry.
-    if (NES::toUpperCase(parserConfigObject.parserType) != "NATIVE" and not contains(parserConfigObject.parserType))
+    if (not contains(parserConfigObject.parserType))
     {
         return std::unexpected{InvalidConfigParameter("Invalid parser type {}", parserConfigObject.parserType)};
     }

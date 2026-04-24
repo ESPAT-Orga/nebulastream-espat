@@ -34,9 +34,6 @@ class Source
 public:
     class FillTupleBufferResult
     {
-        explicit FillTupleBufferResult(size_t sizeInBytes) : result(Data{sizeInBytes}) { };
-        FillTupleBufferResult() = default;
-
         struct EoS
         {
         };
@@ -46,16 +43,33 @@ public:
             size_t sizeInBytes;
         };
 
-        std::variant<EoS, Data> result = EoS{};
+        struct NativeTuples
+        {
+            size_t numTuples;
+        };
+
+        explicit FillTupleBufferResult(Data data) : result(data) { };
+        explicit FillTupleBufferResult(NativeTuples tuples) : result(tuples) { };
+        FillTupleBufferResult() = default;
+
+        std::variant<EoS, Data, NativeTuples> result = EoS{};
 
     public:
         static FillTupleBufferResult eos() { return {}; }
 
-        static FillTupleBufferResult withBytes(size_t sizeInBytes) { return FillTupleBufferResult{sizeInBytes}; }
+        static FillTupleBufferResult withBytes(size_t sizeInBytes) { return FillTupleBufferResult{Data{sizeInBytes}}; }
+
+        /// Signals that the source already populated the TupleBuffer with 'numTuples' native-layout records.
+        /// The SourceThread will set the buffer's tuple count accordingly and not treat the contents as raw bytes.
+        static FillTupleBufferResult withNativeTuples(size_t numTuples) { return FillTupleBufferResult{NativeTuples{numTuples}}; }
 
         [[nodiscard]] bool isEoS() const { return std::holds_alternative<EoS>(result); }
 
+        [[nodiscard]] bool isNativeTuples() const { return std::holds_alternative<NativeTuples>(result); }
+
         [[nodiscard]] size_t getNumberOfBytes() const { return std::get<Data>(result).sizeInBytes; }
+
+        [[nodiscard]] size_t getNumberOfTuples() const { return std::get<NativeTuples>(result).numTuples; }
     };
 
     Source() = default;
@@ -65,8 +79,11 @@ public:
     /// @return the number of bytes read
     virtual FillTupleBufferResult fillTupleBuffer(TupleBuffer& tupleBuffer, const std::stop_token& stopToken) = 0;
 
-    /// If applicable, setups the source. This function is called after the source has been lowered
-    virtual bool setup() { return true; }
+    /// If applicable, setups the source. This function is called after the source has been lowered.
+    /// The buffer provider is the same pool that the query engine will later hand to 'open()'; sources that
+    /// need to materialize TupleBuffers ahead of time (e.g., MemorySource) can allocate them here.
+    virtual bool setup(const std::shared_ptr<AbstractBufferProvider>& /*bufferProvider*/) { return true; }
+
 
     /// If applicable, opens a connection, e.g., a socket connection to get ready for data consumption.
     virtual void open(std::shared_ptr<AbstractBufferProvider> bufferProvider) = 0;

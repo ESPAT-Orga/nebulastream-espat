@@ -582,7 +582,10 @@ struct SystestBinder::Impl
             .parserConfig = statement.parserConfig,
             .sourceConfig = statement.sourceConfig};
 
-        std::unordered_map<std::string, std::string> defaultParserConfig{{"type", "CSV"}};
+        /// MemorySource parses CSV inside setup(), so downstream pipelines should treat its output as
+        /// already-formatted native data and skip any input formatter wrap.
+        std::unordered_map<std::string, std::string> defaultParserConfig{
+            {"type", physicalSourceConfig.type == "Memory" ? "Native" : "CSV"}};
         physicalSourceConfig.parserConfig.merge(defaultParserConfig);
 
         if (testData.has_value())

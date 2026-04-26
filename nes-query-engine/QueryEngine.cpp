@@ -513,9 +513,9 @@ bool ThreadPool::WorkerThread::operator()(WorkTask& task) const
                     pipeline->successors,
                     [&](const auto& successor)
                     {
-                        /// For formatting tasks, we emit a single TaskEmit after execution with the total processed tuple count.
-                        /// For non-formatting tasks, we emit per-buffer TaskEmit events here.
-                        if (not pipeline.get()->stage->formattingTask)
+                        /// For the first pipeline after the source, we emit a single TaskEmit after execution with the total processed tuple count.
+                        /// For all other pipelines, we emit per-buffer TaskEmit events here.
+                        if (not pipeline.get()->stage->firstPipeline)
                         {
                             pool.statistic->onEvent(
                                 TaskEmit{id, task.queryId, pipeline->id, successor->id, taskId, tupleBuffer.getNumberOfTuples(), false});
@@ -525,9 +525,9 @@ bool ThreadPool::WorkerThread::operator()(WorkTask& task) const
             },
             [&](const TupleBuffer& tupleBuffer, std::chrono::milliseconds duration)
             {
-                /// For formatting tasks, we emit a single TaskEmit after execution with the total processed tuple count.
-                /// For non-formatting tasks, we emit per-buffer TaskEmit events here.
-                if (not pipeline.get()->stage->formattingTask)
+                /// For the first pipeline after the source, we emit a single TaskEmit after execution with the total processed tuple count.
+                /// For all other pipelines, we emit per-buffer TaskEmit events here.
+                if (not pipeline.get()->stage->firstPipeline)
                 {
                     pool.statistic->onEvent(
                         TaskEmit{id, task.queryId, pipeline->id, pipeline->id, taskId, tupleBuffer.getNumberOfTuples(), false});
@@ -549,7 +549,7 @@ bool ThreadPool::WorkerThread::operator()(WorkTask& task) const
 
         /// After execution, numberOfProcessedTuples is set on the input buffer.
         /// Emit a TaskEmit event with the total processed tuple count for throughput measurement.
-        if (pipeline->stage->formattingTask)
+        if (pipeline->stage->firstPipeline)
         {
             for (const auto& successor : pipeline->successors)
             {

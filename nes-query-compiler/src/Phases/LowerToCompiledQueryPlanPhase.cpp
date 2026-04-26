@@ -66,6 +66,10 @@ void LowerToCompiledQueryPlanPhase::processSource(const std::shared_ptr<Pipeline
     {
         if (auto executableSuccessor = processSuccessor(sourceOperator.id, successor))
         {
+            /// Pipelines directly downstream of a source are 'first pipelines'. Throughput and latency listeners
+            /// emit events from these instead of from the source itself, since the source's tuple count is only
+            /// known after the first pipeline has processed the input buffer.
+            (*executableSuccessor)->stage->firstPipeline = true;
             executableSuccessorPipelines.emplace_back(*executableSuccessor);
         }
     }

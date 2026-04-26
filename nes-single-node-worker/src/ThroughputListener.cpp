@@ -83,9 +83,9 @@ void threadRoutine(
             Overloaded{
                 [&](const TaskEmit& taskEmit)
                 {
-                    /// We define the throughput to be the performance of the formatting steps, i.e., the throughput of emitting work from the formatting
-                    /// If this task did not belong to a formatting task, we ignore it and return
-                    if (not taskEmit.formattingTask)
+                    /// We define the throughput to be the performance of the first pipeline after the source, i.e., the throughput of emitting work from it.
+                    /// If this task did not belong to the first pipeline, we ignore it and return.
+                    if (not taskEmit.firstPipeline)
                     {
                         return;
                     }

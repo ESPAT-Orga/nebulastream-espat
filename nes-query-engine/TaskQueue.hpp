@@ -42,7 +42,7 @@ class TaskQueue
 
     /// To provide cancellation, we only block for StopTokenCheckInterval.
     /// This parameter could be tuned to allow for more timely cancellation
-    static constexpr std::chrono::milliseconds StopTokenCheckInterval{100};
+    static constexpr std::chrono::milliseconds StopTokenCheckInterval{10};
 
     TaskType readElementAssumingItExists()
     {

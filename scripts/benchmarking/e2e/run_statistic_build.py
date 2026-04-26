@@ -38,6 +38,7 @@ output_dir = "."
 csv_file_path = "results_nebulastream.csv"
 benchmark_json_file = os.path.abspath(os.path.join(working_dir, "BenchmarkResults.json"))
 systest_executable = os.path.join(build_dir, "nes-systests/systest/systest")
+cluster_config= os.path.abspath(os.path.join(".", "nes-systests/configs/topologies/single-node.yaml"))
 test_data_dir = os.path.abspath(os.path.join(build_dir, "nes-systests/testdata"))
 cmake_flags = ("-G Ninja "
                "-DCMAKE_BUILD_TYPE=Release "
@@ -56,7 +57,7 @@ allJoinStrategies = ["HASH_JOIN"]
 allPageSizes = [8192]
 # [4000000] if buffer size is 8192 #[500000] if buffer size is 102400
 # allBufferConfigs = [(1048576, 20000)]
-allBufferConfigs = [(100*1024, 200 * 1000)]
+allBufferConfigs = [(100 * 1024, 200 * 1000)]
 #allEnableLatencyListeners = [False, True]
 allEnableLatencyListeners = [False]
 # allBuildWindowSizesSec = [1, 30, 60]
@@ -80,7 +81,7 @@ allCountMinConfigs = [
     # (rows, cols, counter_type)
     (1, 100, "uint64"),
     # (5, 100, "uint64"),
-    # (10, 100, "uint64"),
+    (10, 100, "uint64"),
     #
     # (1, 1000, "uint64"),
     # (5, 1000, "uint64"),
@@ -88,7 +89,7 @@ allCountMinConfigs = [
     #
     # (1, 10000, "uint64"),
     # (5, 10000, "uint64"),
-    (10, 10000, "uint64"),
+    # (10, 10000, "uint64"),
 ]
 
 #### Dataset Configurations
@@ -164,16 +165,16 @@ def generate_queries():
 
             if "CountMin" in stat_types:
                 template = load_template(f"CountMinBuild_{dataset_name}.test.template")
-                for columns, rows, counter_type in allCountMinConfigs:
-                    name = f"{dataset_name}_CountMinBuild_{columns}_{rows}_{counter_type}_{window_size}sec"
+                for rows, columns, counter_type in allCountMinConfigs:
+                    name = f"{dataset_name}_CountMinBuild_{rows}_{columns}_{counter_type}_{window_size}sec"
                     filepath = os.path.join(generated_test_dir, f"{name}.test")
                     with open(filepath, 'w') as f:
-                        f.write(template.format(columns=columns, rows=rows, counter_type=counter_type,
+                        f.write(template.format(rows=rows, columns=columns, counter_type=counter_type,
                                                 window_size=window_size))
                     queries[(dataset_name, name)] = {
                         'test_file': f"{filepath}:01",
                         'statistic_type': 'CountMin',
-                        'statistic_config': f"({columns}, {rows}, {counter_type})",
+                        'statistic_config': f"({rows}, {columns}, {counter_type})",
                         'build_window_size_sec': window_size,
                     }
 
@@ -284,7 +285,7 @@ def run_benchmark(config, dataset_name, query, query_info, queryIdx, workerConfi
                          f"--worker.statistic_store_type={statisticStoreType} "
                          f"--worker.throughput_listener_interval_in_ms={throughputListenerInterval}")
 
-        raw_command = f"{systest_executable} -b -t {os.path.abspath(query_info['test_file'])} --data {os.path.abspath(test_data_dir)} --workingDir={working_dir} -- {worker_config}"
+        raw_command = f"{systest_executable} -b -t {os.path.abspath(query_info['test_file'])} --data {os.path.abspath(test_data_dir)} --workingDir={working_dir} --clusterConfig {cluster_config} -- {worker_config}"
 
         # Run in a separate systemd scope so that if the OOM killer fires, only this
         # scope is killed — the benchmark script and tmux session survive.

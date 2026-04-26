@@ -89,9 +89,9 @@ void threadRoutine(
             Overloaded{
                 [&](const TaskEmit& taskEmit)
                 {
-                    /// We want to measure the latency from the ingestion timestamp to the time the task gets picked up
-                    /// If this task did not belong to a formatting task, we ignore it and return
-                    if (not taskEmit.formattingTask or taskEmit.fromPipeline == taskEmit.toPipeline)
+                    /// We want to measure the latency from the ingestion timestamp to the time the task gets picked up.
+                    /// If this task did not belong to the first pipeline after the source, we ignore it and return.
+                    if (not taskEmit.firstPipeline or taskEmit.fromPipeline == taskEmit.toPipeline)
                     {
                         return;
                     }

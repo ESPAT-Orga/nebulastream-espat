@@ -38,8 +38,8 @@ CREATE SINK sinkStream(stream.statisticStart UINT64 NOT NULL, stream.statisticEn
 CREATE SINK sinkStreamBuild(stream.statisticId UINT64 NOT NULL, stream.statisticStart UINT64 NOT NULL, stream.statisticEnd UINT64 NOT NULL, stream.statisticNumberOfSeenTuples UINT64 NOT NULL) TYPE File;
 
 # Solely build operator
-# arguments: statisticId, field to estimate, columns, rows, counter datatype, seed for hash functions
-SELECT COUNTMINSKETCH(46, value, 9, 4, uint64, 42) FROM stream WINDOW TUMBLING(timestamp, size 5 sec) INTO sinkStreamBuild;
+# arguments: statisticId, field to estimate, rows, columns, counter datatype, seed for hash functions
+SELECT COUNTMINSKETCH(46, value, 4, 9, uint64, 42) FROM stream WINDOW TUMBLING(timestamp, size 5 sec) INTO sinkStreamBuild;
 ----
 46 0 5000 11
 46 10000 15000 5
@@ -51,7 +51,7 @@ SELECT COUNTMINSKETCH(46, value, 9, 4, uint64, 42) FROM stream WINDOW TUMBLING(t
 SELECT statisticStart, statisticEnd, rowIndex, columnIndex, counter FROM (
     SELECT COUNTMIN_PROBE(47, uint64)
     FROM (
-        SELECT COUNTMINSKETCH(47, value, 9, 4, uint64, 42) FROM stream WINDOW TUMBLING(timestamp, size 5 sec)
+        SELECT COUNTMINSKETCH(47, value, 4, 9, uint64, 42) FROM stream WINDOW TUMBLING(timestamp, size 5 sec)
     )
 ) INTO sinkStream;
 ----

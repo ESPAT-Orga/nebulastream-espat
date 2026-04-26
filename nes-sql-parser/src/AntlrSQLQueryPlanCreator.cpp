@@ -1194,9 +1194,9 @@ void AntlrSQLQueryPlanCreator::exitFunctionCall(AntlrSQLParser::FunctionCallCont
                 helpers.top().functionBuilder.pop_back();
                 const auto seed = parseConstant(helpers.top().constantBuilder.back(), "seed");
                 helpers.top().constantBuilder.pop_back();
-                const auto rows = parseConstant(helpers.top().constantBuilder.back(), "rows");
-                helpers.top().constantBuilder.pop_back();
                 const auto columns = parseConstant(helpers.top().constantBuilder.back(), "columns");
+                helpers.top().constantBuilder.pop_back();
+                const auto rows = parseConstant(helpers.top().constantBuilder.back(), "rows");
                 helpers.top().constantBuilder.pop_back();
                 const Statistic::StatisticId statisticId{parseConstant(helpers.top().constantBuilder.back(), "statisticId")};
                 helpers.top().constantBuilder.pop_back();

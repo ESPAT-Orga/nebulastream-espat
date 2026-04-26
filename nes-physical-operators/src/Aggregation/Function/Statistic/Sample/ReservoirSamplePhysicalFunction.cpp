@@ -200,8 +200,9 @@ void ReservoirSamplePhysicalFunction::reset(nautilus::val<AggregationState*> agg
             auto* pagedVector = reinterpret_cast<PagedVector*>(pagedVectorMemArea);
             new (pagedVector) PagedVector();
 
-            /// MemSet the three uint64_t values to 0
-            std::memset(reinterpret_cast<int8_t*>(pagedVector) + sizeof(PagedVector), 0, stateSize);
+            /// Zero the trailing fields after the PagedVector (numberOfSeenTuples and sampleDataSize).
+            /// Writing `stateSize` bytes here would overflow past the entry's state area and corrupt the next entry.
+            std::memset(reinterpret_cast<int8_t*>(pagedVector) + sizeof(PagedVector), 0, stateSize - sizeof(PagedVector));
         },
         aggregationState,
         nautilus::val<uint64_t>{getSizeOfStateInBytes()});

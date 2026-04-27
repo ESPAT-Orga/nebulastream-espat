@@ -251,6 +251,13 @@ public:
     /// Directly deploys a statistic collection query without going through the SQL parser.
     /// Used internally to co-deploy companion statistic queries alongside data queries.
     [[nodiscard]] std::expected<CollectStatisticResult, Exception> collectNewStatistic(const RequestStatisticBuildStatement& statement);
+
+    /// Starts the gRPC server on the owned coordinator. Must be called after construction.
+    /// Returns "host:port" of the listening server.
+    std::string startGrpcServer();
+
+    /// Returns the coordinator's gRPC address after startGrpcServer() has been called.
+    [[nodiscard]] const std::string& getCoordinatorAddress() const;
 };
 
 template <typename HandlerT>

@@ -55,4 +55,9 @@ bool StatisticRegistry::deregisterStatistic(const Key& key)
     return registry.wlock()->erase(key) != 0U;
 }
 
+size_t StatisticRegistry::getNumberOfEntries()
+{
+    return registry.rlock()->size();
+}
+
 }

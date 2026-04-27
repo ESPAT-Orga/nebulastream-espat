@@ -306,10 +306,10 @@ int main(int argc, char** argv)
             }
             return NES::QueryId::createDistributed(distributedQueryId);
         };
-        NES::StatisticCoordinator statisticCoordinator{std::make_unique<NES::DefaultStatisticQueryGenerator>(), submitQueryFn};
-        auto coordinatorAddr = statisticCoordinator.startGrpcServer();
+        NES::StatisticRequestHandler statisticRequestHandler{
+            NES::StatisticCoordinator{std::make_unique<NES::DefaultStatisticQueryGenerator>(), submitQueryFn}};
+        auto coordinatorAddr = statisticRequestHandler.startGrpcServer();
         NES_INFO("StatisticCoordinator gRPC server listening on {}", coordinatorAddr);
-        NES::StatisticRequestHandler statisticRequestHandler{std::move(statisticCoordinator)};
 
         /// Hardcoded companion statistic for the adaptive-optimization experiment.
         /// Every data query gets a 1-second cardinality statistic on bid.timestamp.

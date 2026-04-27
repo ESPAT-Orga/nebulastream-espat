@@ -56,6 +56,7 @@ public:
 
     grpc::Status ReportStatistic(grpc::ServerContext*, const StatisticReport* report, google::protobuf::Empty*) override
     {
+        fprintf(stderr, "Statistic coordinator: got message\n");
         coordinator.onStatisticReport(
             Statistic::StatisticId{report->statistic_id()},
             Windowing::TimeMeasure{report->start_ts()},
@@ -316,22 +317,26 @@ void StatisticCoordinator::onStatisticReport(
     const Statistic::StatisticId statisticId, const Windowing::TimeMeasure startTs, const Windowing::TimeMeasure endTs, const double value)
 {
     /// Check if this is a response to a pending probe query.
+    fprintf(stderr, "Statistic coordinator: handle statistic report for id %lu\n", statisticId.getRawValue());
     {
         auto probes = pendingProbes.wlock();
         if (auto it = probes->find(statisticId); it != probes->end())
         {
+            fprintf(stderr, "Statistic coordinator: probe response\n");
             it->second.promise.set_value(value);
             probes->erase(it);
             return;
         }
     }
 
+    fprintf(stderr, "Statistic coordinator: not a probe response, checking %lu entries\n", registry.getNumberOfEntries());
     /// Not a probe response — check for condition triggers in the registry.
     /// We iterate over all entries to find one matching this statisticId.
     /// This is acceptable for now since the registry is typically small.
     registry.forEachEntry(
         [&](const auto&, const StatisticRegistry::Entry& entry)
         {
+            fprintf(stderr, "Statistic coordinator: checking entry with id %lu (looking for %lu)\n",entry.statisticId.getRawValue(), statisticId.getRawValue());
             if (entry.statisticId == statisticId)
             {
                 for (const auto& [_, callback] : entry.triggers)

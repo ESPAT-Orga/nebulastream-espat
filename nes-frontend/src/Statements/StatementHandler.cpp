@@ -448,4 +448,14 @@ std::expected<CollectStatisticResult, Exception> StatisticRequestHandler::collec
 {
     return statisticCoordinator.collectNewStatistic(statement);
 }
+
+std::string StatisticRequestHandler::startGrpcServer()
+{
+    return statisticCoordinator.startGrpcServer();
+}
+
+const std::string& StatisticRequestHandler::getCoordinatorAddress() const
+{
+    return statisticCoordinator.getCoordinatorAddress();
+}
 }

@@ -59,6 +59,7 @@ void GrpcSink::start(PipelineExecutionContext&)
         throw CannotOpenSink("GrpcSink: Failed to create gRPC stub for {}:{}", grpcHost, grpcPort);
     }
     NES_INFO("GrpcSink: Connected to {}:{}.", grpcHost, grpcPort);
+    fprintf(stderr, "GrpcSink: Connected to %s:%s.\n", grpcHost.c_str(), std::to_string(grpcPort).c_str());
 }
 
 void GrpcSink::execute(const TupleBuffer& inputTupleBuffer, PipelineExecutionContext&)
@@ -71,6 +72,7 @@ void GrpcSink::execute(const TupleBuffer& inputTupleBuffer, PipelineExecutionCon
     const size_t tupleSize = schema->getSizeOfSchemaInBytes();
     const auto* data = inputTupleBuffer.getAvailableMemoryArea<uint8_t>().data();
     const size_t numTuples = inputTupleBuffer.getNumberOfTuples();
+    fprintf(stderr, "GrpcSink: Sending buffer to %s:%s.\n", grpcHost.c_str(), std::to_string(grpcPort).c_str());
 
     for (size_t t = 0; t < numTuples; t++)
     {

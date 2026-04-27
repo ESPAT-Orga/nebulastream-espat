@@ -15,6 +15,7 @@
 #include <Operators/IngestionTimeWatermarkAssignerLogicalOperator.hpp>
 
 #include <algorithm>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -59,6 +60,10 @@ IngestionTimeWatermarkAssignerLogicalOperator
 IngestionTimeWatermarkAssignerLogicalOperator::withInferredSchema(std::vector<Schema> inputSchemas) const
 {
     auto copy = *this;
+    fprintf(stderr, "DEBUG: IngestionTimeWatermarkAssigner::withInferredSchema - inputSchemas.size() = %zu\n", inputSchemas.size());
+    if (inputSchemas.empty()) {
+        fprintf(stderr, "DEBUG: IngestionTimeWatermarkAssigner: empty schemas - this is unexpected for remote deserialization!\n");
+    }
     PRECONDITION(inputSchemas.size() == 1, "Watermark assigner should have only one input");
     const auto& inputSchema = inputSchemas[0];
     copy.inputSchema = inputSchema;

@@ -286,7 +286,13 @@ int main(int argc, char** argv)
         auto submitQueryFn
             = [queryManager, queryOptimizer](NES::LogicalPlan plan) -> std::expected<NES::QueryId, NES::Exception>
         {
+            std::stringstream beforeSs;
+            beforeSs << plan;
+            fprintf(stderr, "DEBUG: Statistic query BEFORE optimization:\n%s\n", beforeSs.str().c_str());
             auto distributedPlan = queryOptimizer->optimize(plan);
+            std::stringstream afterSs;
+            afterSs << distributedPlan.getGlobalPlan();
+            fprintf(stderr, "DEBUG: Statistic query AFTER optimization:\n%s\n", afterSs.str().c_str());
             auto registerResult = queryManager->registerQuery(distributedPlan);
             if (!registerResult.has_value())
             {

@@ -125,10 +125,10 @@ grpc::Status GRPCServer::StartQuery(grpc::ServerContext* context, const StartQue
 
 grpc::Status GRPCServer::StopQuery(grpc::ServerContext* context, const StopQueryRequest* request, google::protobuf::Empty*)
 {
-    const auto queryId = QueryPlanSerializationUtil::deserializeQueryId(request->queryid());
-    const auto terminationType = static_cast<QueryTerminationType>(request->terminationtype());
     CPPTRACE_TRY
     {
+        const auto queryId = QueryPlanSerializationUtil::deserializeQueryId(request->queryid());
+        const auto terminationType = static_cast<QueryTerminationType>(request->terminationtype());
         getValueOrThrow(delegate.stopQuery(queryId, terminationType));
         return grpc::Status::OK;
     }

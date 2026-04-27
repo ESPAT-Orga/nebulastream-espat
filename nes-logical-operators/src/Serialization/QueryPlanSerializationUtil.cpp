@@ -56,6 +56,7 @@ SerializableQueryPlan QueryPlanSerializationUtil::serializeQueryPlan(const Logic
         }
         alreadySerialized.insert(itr.getId());
         NES_TRACE("QueryPlan: Inserting operator in collection of already visited node.");
+        fprintf(stderr, "DEBUG serializeQueryPlan: serializing operator type=%s\n", itr.getName().data());
         auto reflectedOperator = OperatorSerializationUtil::serializeOperator(itr);
         const auto serializedString = rfl::json::write(reflectedOperator);
         serializableQueryPlan.add_reflectedoperators(serializedString);
@@ -84,6 +85,7 @@ LogicalPlan QueryPlanSerializationUtil::deserializeQueryPlan(const SerializableQ
                 throw CannotDeserialize(serializedOpt.error().what());
             }
             const auto serialized = std::move(serializedOpt.value());
+            fprintf(stderr, "DEBUG deserializeQueryPlan: deserializing operator type=%s\n", serialized.type.c_str());
             auto op = OperatorSerializationUtil::deserializeOperator(serialized);
             op = op.withOperatorId(OperatorId{serialized.operatorId});
 
@@ -103,7 +105,9 @@ LogicalPlan QueryPlanSerializationUtil::deserializeQueryPlan(const SerializableQ
         }
         CPPTRACE_CATCH(...)
         {
-            deserializeExceptions.push_back(wrapExternalException());
+            auto exc = wrapExternalException();
+            fprintf(stderr, "DEBUG deserializeQueryPlan: EXCEPTION caught\n");
+            deserializeExceptions.push_back(exc);
         }
     }
 

@@ -37,6 +37,9 @@ ReflectedOperator OperatorSerializationUtil::serializeOperator(const TypedLogica
     reflectedOperator.type = op.getName();
     reflectedOperator.inputSchemas = op.getInputSchemas();
     reflectedOperator.outputSchema = op.getOutputSchema();
+    fprintf(stderr, "DEBUG serializeOperator: type=%s, inputSchemas.size()=%zu, hasOutputSchema=%d\n",
+            reflectedOperator.type.c_str(), reflectedOperator.inputSchemas.size(),
+            reflectedOperator.outputSchema.has_value());
     reflectedOperator.traitSet = op.getTraitSet();
 
     for (const auto& child : op.getChildren())
@@ -52,6 +55,7 @@ LogicalOperator OperatorSerializationUtil::deserializeOperator(const ReflectedOp
 {
     const std::optional<LogicalOperator> result = [&] -> std::optional<LogicalOperator>
     {
+        fprintf(stderr, "DEBUG deserializeOperator ENTRY: type=%s\n", serialized.type.c_str());
         if (serialized.type == "Source")
         {
             return unreflect<SourceDescriptorLogicalOperator>(serialized.config);
@@ -69,10 +73,15 @@ LogicalOperator OperatorSerializationUtil::deserializeOperator(const ReflectedOp
 
         if (!logicalOperatorOpt.has_value())
         {
+            fprintf(stderr, "DEBUG deserializeOperator: registry.create returned nullopt for type=%s\n", serialized.type.c_str());
             return std::nullopt;
         }
 
         auto logicalOperator = logicalOperatorOpt.value();
+
+        fprintf(stderr, "DEBUG deserializeOperator: type=%s, serialized.inputSchemas.size()=%zu, hasOutputSchema=%d\n",
+                serialized.type.c_str(), serialized.inputSchemas.size(),
+                serialized.outputSchema.has_value());
 
         logicalOperator = logicalOperator.withInferredSchema(serialized.inputSchemas);
 

@@ -80,6 +80,7 @@ struct ReflectedStatisticStoreWriterLogicalOperator
 {
     Statistic::StatisticId::Underlying statisticId;
     Statistic::StatisticType statisticType;
+    std::string statisticDataFieldName;
 };
 }
 

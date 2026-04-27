@@ -319,7 +319,7 @@ int main(int argc, char** argv)
             .metric = NES::Metric::Cardinality,
             .windowSizeMs = 1000,
             .windowAdvanceMs = std::nullopt,
-            .eventTimeFieldName = "timestamp",
+            .eventTimeFieldName = "BID$TIMESTAMP",
             .conditionTrigger = NES::ConditionTrigger{
                 .condition = std::nullopt, /// fire unconditionally on every window result
                 .callback =

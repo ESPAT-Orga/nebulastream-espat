@@ -312,14 +312,14 @@ int main(int argc, char** argv)
         NES::StatisticRequestHandler statisticRequestHandler{std::move(statisticCoordinator)};
 
         /// Hardcoded companion statistic for the adaptive-optimization experiment.
-        /// Every data query gets a 1-second cardinality statistic on endless.ts.
+        /// Every data query gets a 1-second cardinality statistic on bid.timestamp.
         /// The callback fires on every incoming window result and prints to stdout.
         NES::RequestStatisticBuildStatement companionStatisticRequest{
-            .domain = NES::DataDomain{.logicalSourceName = "endless", .fieldName = "ts"},
+            .domain = NES::DataDomain{.logicalSourceName = "bid", .fieldName = "price"},
             .metric = NES::Metric::Cardinality,
             .windowSizeMs = 1000,
             .windowAdvanceMs = std::nullopt,
-            .eventTimeFieldName = std::nullopt,
+            .eventTimeFieldName = "timestamp",
             .conditionTrigger = NES::ConditionTrigger{
                 .condition = std::nullopt, /// fire unconditionally on every window result
                 .callback =

@@ -135,7 +135,7 @@ TEST_F(DefaultStatisticQueryGeneratorTest, OptionsOverrideDefaults)
         .windowAdvanceMs = {},
         .eventTimeFieldName = {},
         .conditionTrigger = {},
-        .options = {{"buckets", "50"}, {"min", "0"}, {"max", "500"}}};
+        .options = {{"memory_budget", "2048"}, {"min", "0"}, {"max", "500"}}};
 
     const auto plan = generator.generateQuery(request, Statistic::StatisticId{1}, "localhost:9004");
 

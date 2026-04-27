@@ -34,18 +34,11 @@ struct AggregationLogicalFunctionRegistryArguments
     std::vector<FieldAccessLogicalFunction> fields;
     /// Additional arguments for statistics
     std::optional<Statistic::StatisticId> statisticId;
-    /// Reservoir Sample and Count Min Sketch:
-    std::optional<uint64_t> seed;
-    /// Reservoir Sample:
-    std::optional<uint64_t> reservoirSize;
-    /// Equi Width Histogram:
-    std::optional<uint64_t> histogramNumBuckets;
+    /// Memory budget in bytes for synopsis-based statistics (Reservoir, EquiWidthHistogram, CountMinSketch)
+    std::optional<uint64_t> memoryBudget;
+    /// Equi Width Histogram value range:
     std::optional<uint64_t> histogramMinValue;
     std::optional<uint64_t> histogramMaxValue;
-    std::optional<DataType> histogramCounterType;
-    /// Count Min Sketch:
-    std::optional<uint64_t> countMinNumColumns;
-    std::optional<uint64_t> countMinNumRows;
     Reflected reflected;
 };
 

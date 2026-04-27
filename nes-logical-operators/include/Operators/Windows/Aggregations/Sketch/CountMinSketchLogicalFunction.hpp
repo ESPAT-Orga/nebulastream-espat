@@ -15,12 +15,13 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <DataTypes/DataType.hpp>
 #include <DataTypes/Schema.hpp>
 #include <Functions/FieldAccessLogicalFunction.hpp>
-#include <Identifiers/SketchDimensions.hpp>
+#include <Operators/Windows/Aggregations/StatisticLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/WindowAggregationLogicalFunction.hpp>
 #include <Util/Reflection.hpp>
 #include <Statistic.hpp>
@@ -28,35 +29,23 @@
 namespace NES
 {
 
-/// The CountMinSketch estimates counts of `asField` values, where accuracy depends on `columns` and `rows`.
+/// The CountMinSketch estimates counts of `asField` values; rows × columns are derived from `memoryBudget` during lowering.
 /// The actual errors can be taken from the paper: An Improved Data Stream Summary: The Count-Min Sketch and its Applications
 /// https://dimacs.rutgers.edu/~graham/pubs/papers/cm-full.pdf
-class CountMinSketchLogicalFunction
+class CountMinSketchLogicalFunction : public StatisticLogicalFunction
 {
 public:
-    CountMinSketchLogicalFunction(
-        const FieldAccessLogicalFunction& onField,
-        NumberOfCols columns,
-        NumberOfRows rows,
-        uint64_t seed,
-        DataType counterType,
-        Statistic::StatisticId statisticId);
     /// `onField` the field for which the sketch should be created
     /// `asField` used when the sketch should be renamed in the query
-    /// `columns` how many possible "buckets" per hashfunction
-    /// `rows` equal to number of hash functions used
-    /// `seed` used to generate seeds to differentiate the hash functions between `rows`
-    /// `counterType` datatype of each entry in the `column`x`row` matrix
+    /// `memoryBudget` budget in bytes used to derive rows / columns during lowering
+    CountMinSketchLogicalFunction(const FieldAccessLogicalFunction& onField, uint64_t memoryBudget, Statistic::StatisticId statisticId);
     CountMinSketchLogicalFunction(
         const FieldAccessLogicalFunction& onField,
         const FieldAccessLogicalFunction& asField,
-        NumberOfCols columns,
-        NumberOfRows rows,
-        uint64_t seed,
-        DataType counterType,
+        uint64_t memoryBudget,
         Statistic::StatisticId statisticId);
 
-    ~CountMinSketchLogicalFunction() = default;
+    ~CountMinSketchLogicalFunction() override = default;
 
     [[nodiscard]] std::string_view getName() const noexcept;
     [[nodiscard]] std::string toString() const;
@@ -78,11 +67,8 @@ public:
 
     [[nodiscard]] bool operator==(const CountMinSketchLogicalFunction& rhs) const;
 
-    NumberOfCols columns;
-    NumberOfRows rows;
-    uint64_t seed;
+    [[nodiscard]] std::unique_ptr<StatisticConfig> calculateConfigs() const override;
 
-    DataType counterType;
     Statistic::StatisticId statisticId;
 
 private:
@@ -118,9 +104,6 @@ struct ReflectedCountMinSketchLogicalFunction
     Statistic::StatisticId::Underlying statisticId;
     FieldAccessLogicalFunction onField;
     FieldAccessLogicalFunction asField;
-    uint64_t columns;
-    uint64_t rows;
-    uint64_t seed;
-    DataType counterType;
+    uint64_t memoryBudget;
 };
 }

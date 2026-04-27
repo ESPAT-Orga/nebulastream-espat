@@ -15,12 +15,14 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
 #include <DataTypes/DataType.hpp>
 #include <DataTypes/Schema.hpp>
 #include <Functions/FieldAccessLogicalFunction.hpp>
+#include <Operators/Windows/Aggregations/StatisticLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/WindowAggregationLogicalFunction.hpp>
 #include <Util/Reflection.hpp>
 #include <Statistic.hpp>
@@ -28,26 +30,27 @@
 namespace NES
 {
 
-/// Builds a reservoir sample via our aggregation functions
-class ReservoirSampleLogicalFunction
+/// Builds a reservoir sample via our aggregation functions.
+/// Sized by a memory budget; the reservoir size is derived in `calculateConfigs`.
+class ReservoirSampleLogicalFunction : public StatisticLogicalFunction
 {
 public:
-    /// The argument `onField` needs to be a valid field, but is otherwise ignored
+    /// `onField` needs to be a valid field, but is otherwise ignored
     /// `asField` used when the reservoir should be renamed in the query
-    /// `reservoirSize` number of records the reservoir should hold per worker thread
+    /// `memoryBudget` budget in bytes used to derive the reservoir size during lowering
     ReservoirSampleLogicalFunction(
         const FieldAccessLogicalFunction& onField,
         std::vector<FieldAccessLogicalFunction> sampleFields,
-        uint64_t reservoirSize,
+        uint64_t memoryBudget,
         Statistic::StatisticId statisticId);
     ReservoirSampleLogicalFunction(
         const FieldAccessLogicalFunction& onField,
         const FieldAccessLogicalFunction& asField,
         std::vector<FieldAccessLogicalFunction> sampleFields,
-        uint64_t reservoirSize,
+        uint64_t memoryBudget,
         Statistic::StatisticId statisticId);
 
-    ~ReservoirSampleLogicalFunction() = default;
+    ~ReservoirSampleLogicalFunction() override = default;
 
     [[nodiscard]] std::string_view getName() const noexcept;
     [[nodiscard]] std::string toString() const;
@@ -69,11 +72,10 @@ public:
 
     [[nodiscard]] bool operator==(const ReservoirSampleLogicalFunction& rhs) const;
 
+    [[nodiscard]] std::unique_ptr<StatisticConfig> calculateConfigs() const override;
+
     /// Selects which fields get projected into the sample.
     std::vector<FieldAccessLogicalFunction> sampleFields;
-    uint64_t reservoirSize;
-    /// We hardcode the seed to have determinism for testing purposes
-    uint64_t seed = 42;
     /// Identifies the sample in the StatStore
     Statistic::StatisticId statisticId;
 
@@ -110,8 +112,7 @@ struct ReflectedReservoirSampleLogicalFunction
     FieldAccessLogicalFunction onField;
     FieldAccessLogicalFunction asField;
     std::vector<FieldAccessLogicalFunction> sampleFields;
-    uint64_t reservoirSize;
-    uint64_t seed;
+    uint64_t memoryBudget;
     Statistic::StatisticId::Underlying statisticId;
 };
 }

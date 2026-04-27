@@ -15,11 +15,13 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <DataTypes/DataType.hpp>
 #include <DataTypes/Schema.hpp>
 #include <Functions/FieldAccessLogicalFunction.hpp>
+#include <Operators/Windows/Aggregations/StatisticLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/WindowAggregationLogicalFunction.hpp>
 #include <Util/Reflection.hpp>
 #include <Statistic.hpp>
@@ -27,34 +29,31 @@
 namespace NES
 {
 
-/// The EquiWidthHistogram will count the values of the `asField` in the range of `minValue` and `maxValue`. The range is
-/// partitioned into `numBuckets` equi-width buckets.
-class EquiWidthHistogramLogicalFunction
+/// The EquiWidthHistogram counts values of `asField` in the range [`minValue`, `maxValue`].
+/// The number of equi-width buckets is derived from `memoryBudget` during lowering.
+class EquiWidthHistogramLogicalFunction : public StatisticLogicalFunction
 {
 public:
     /// `asField` used when the histogram should be renamed in the query
-    /// `numBuckets` number of buckets the histogram should have.
+    /// `memoryBudget` budget in bytes used to derive the bucket count during lowering
     /// `minValue` start value of the histogram
     /// `maxValue` end value of the histogram
     /// `statisticId` the number that identifies this synopsis in the statistic store to later retrieve it
-    /// `counterType` data type of the counter in each bucket
     EquiWidthHistogramLogicalFunction(
         const FieldAccessLogicalFunction& onField,
-        uint64_t numBuckets,
+        uint64_t memoryBudget,
         uint64_t minValue,
         uint64_t maxValue,
-        Statistic::StatisticId statisticId,
-        DataType counterType);
+        Statistic::StatisticId statisticId);
     EquiWidthHistogramLogicalFunction(
         const FieldAccessLogicalFunction& onField,
         const FieldAccessLogicalFunction& asField,
-        uint64_t numBuckets,
+        uint64_t memoryBudget,
         uint64_t minValue,
         uint64_t maxValue,
-        Statistic::StatisticId statisticId,
-        DataType counterType);
+        Statistic::StatisticId statisticId);
 
-    ~EquiWidthHistogramLogicalFunction() = default;
+    ~EquiWidthHistogramLogicalFunction() override = default;
 
     [[nodiscard]] std::string_view getName() const noexcept;
     [[nodiscard]] std::string toString() const;
@@ -76,12 +75,12 @@ public:
 
     [[nodiscard]] bool operator==(const EquiWidthHistogramLogicalFunction& rhs) const;
 
-    uint64_t numBuckets;
+    [[nodiscard]] std::unique_ptr<StatisticConfig> calculateConfigs() const override;
+
     uint64_t minValue;
     uint64_t maxValue;
 
     Statistic::StatisticId statisticId;
-    DataType counterType;
 
 private:
     static constexpr std::string_view NAME = "EquiWidthHistogram";
@@ -115,10 +114,9 @@ struct ReflectedEquiWidthHistogramLogicalFunction
 {
     FieldAccessLogicalFunction onField;
     FieldAccessLogicalFunction asField;
-    uint64_t numBuckets;
+    uint64_t memoryBudget;
     uint64_t minValue;
     uint64_t maxValue;
     Statistic::StatisticId::Underlying statisticId;
-    DataType counterType;
 };
 }

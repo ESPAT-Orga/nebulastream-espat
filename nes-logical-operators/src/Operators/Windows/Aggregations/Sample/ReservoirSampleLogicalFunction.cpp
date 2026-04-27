@@ -14,7 +14,9 @@
 
 #include <Operators/Windows/Aggregations/Sample/ReservoirSampleLogicalFunction.hpp>
 
+#include <algorithm>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -23,6 +25,7 @@
 #include <DataTypes/Schema.hpp>
 #include <Functions/FieldAccessLogicalFunction.hpp>
 #include <Functions/LogicalFunction.hpp>
+#include <Operators/Windows/Aggregations/StatisticLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/WindowAggregationLogicalFunction.hpp>
 #include <Util/Reflection.hpp>
 #include <fmt/format.h>
@@ -33,13 +36,18 @@
 namespace NES
 {
 
+namespace
+{
+constexpr uint64_t kReservoirSeed = 42;
+}
+
 ReservoirSampleLogicalFunction::ReservoirSampleLogicalFunction(
     const FieldAccessLogicalFunction& onField,
     std::vector<FieldAccessLogicalFunction> sampleFields,
-    const uint64_t reservoirSize,
+    const uint64_t memoryBudget,
     const Statistic::StatisticId statisticId)
-    : sampleFields(std::move(sampleFields))
-    , reservoirSize(reservoirSize)
+    : StatisticLogicalFunction(memoryBudget)
+    , sampleFields(std::move(sampleFields))
     , statisticId(statisticId)
     , inputStamp(onField.getDataType())
     , partialAggregateStamp(DataTypeProvider::provideDataType(DataType::Type::UNDEFINED, DataType::NULLABLE::NOT_NULLABLE))
@@ -53,10 +61,10 @@ ReservoirSampleLogicalFunction::ReservoirSampleLogicalFunction(
     const FieldAccessLogicalFunction& onField,
     const FieldAccessLogicalFunction& asField,
     std::vector<FieldAccessLogicalFunction> sampleFields,
-    const uint64_t reservoirSize,
+    const uint64_t memoryBudget,
     const Statistic::StatisticId statisticId)
-    : sampleFields(std::move(sampleFields))
-    , reservoirSize(reservoirSize)
+    : StatisticLogicalFunction(memoryBudget)
+    , sampleFields(std::move(sampleFields))
     , statisticId(statisticId)
     , inputStamp(onField.getDataType())
     , partialAggregateStamp(DataTypeProvider::provideDataType(DataType::Type::UNDEFINED, DataType::NULLABLE::NOT_NULLABLE))
@@ -73,7 +81,7 @@ std::string_view ReservoirSampleLogicalFunction::getName() const noexcept
 
 std::string ReservoirSampleLogicalFunction::toString() const
 {
-    return fmt::format("ReservoirSample: onField={} asField={} reservoirSize={}", onField, asField, reservoirSize);
+    return fmt::format("ReservoirSample: onField={} asField={} memoryBudget={}", onField, asField, memoryBudget);
 }
 
 Reflected ReservoirSampleLogicalFunction::reflect() const
@@ -87,18 +95,15 @@ Reflected Reflector<ReservoirSampleLogicalFunction>::operator()(const ReservoirS
         .onField = function.getOnField(),
         .asField = function.getAsField(),
         .sampleFields = function.sampleFields,
-        .reservoirSize = function.reservoirSize,
-        .seed = function.seed,
+        .memoryBudget = function.memoryBudget,
         .statisticId = function.statisticId.getRawValue()});
 }
 
 ReservoirSampleLogicalFunction Unreflector<ReservoirSampleLogicalFunction>::operator()(const Reflected& reflected) const
 {
     auto data = unreflect<detail::ReflectedReservoirSampleLogicalFunction>(reflected);
-    auto result = ReservoirSampleLogicalFunction{
-        data.onField, data.asField, data.sampleFields, data.reservoirSize, Statistic::StatisticId{data.statisticId}};
-    result.seed = data.seed;
-    return result;
+    return ReservoirSampleLogicalFunction{
+        data.onField, data.asField, data.sampleFields, data.memoryBudget, Statistic::StatisticId{data.statisticId}};
 }
 
 ReservoirSampleLogicalFunction ReservoirSampleLogicalFunction::withInferredStamp(const Schema& schema) const
@@ -194,7 +199,20 @@ bool ReservoirSampleLogicalFunction::shallIncludeNullValues() noexcept
 bool ReservoirSampleLogicalFunction::operator==(const ReservoirSampleLogicalFunction& rhs) const
 {
     return this->getName() == rhs.getName() && this->onField == rhs.onField && this->asField == rhs.asField
-        && this->reservoirSize == rhs.reservoirSize && this->statisticId == rhs.statisticId;
+        && this->memoryBudget == rhs.memoryBudget && this->statisticId == rhs.statisticId;
+}
+
+std::unique_ptr<StatisticConfig> ReservoirSampleLogicalFunction::calculateConfigs() const
+{
+    /// Map the budget onto a record count using the input-stamp size as the per-record cost.
+    /// We use the input stamp (not the sum of sampleFields) because sampleField stamps may not be
+    /// inferred yet at calculation time, and the input stamp gives a deterministic, schema-agnostic mapping.
+    uint64_t recordSize = inputStamp.getSizeInBytesWithoutNull();
+    if (recordSize == 0)
+    {
+        recordSize = sizeof(uint64_t);
+    }
+    return std::make_unique<ReservoirSampleConfig>(std::max<uint64_t>(1, memoryBudget / recordSize), kReservoirSeed);
 }
 
 AggregationLogicalFunctionRegistryReturnType
@@ -209,12 +227,12 @@ AggregationLogicalFunctionGeneratedRegistrar::RegisterReservoirSampleAggregation
     PRECONDITION(
         arguments.fields.size() >= 3,
         "ReservoirSampleLogicalFunction requires onField (even though unused), asField, and at least one field for the sample");
-    PRECONDITION(arguments.reservoirSize.has_value(), "ReservoirSampleLogicalFunction requires reservoirSize to be set!");
+    PRECONDITION(arguments.memoryBudget.has_value(), "ReservoirSampleLogicalFunction requires memoryBudget to be set!");
     PRECONDITION(arguments.statisticId.has_value(), "ReservoirSampleLogicalFunction requires statisticId to be set!");
 
     const std::vector<FieldAccessLogicalFunction> sampleFields{
         std::make_move_iterator(arguments.fields.begin() + 2), std::make_move_iterator(arguments.fields.end())};
     return std::make_shared<WindowAggregationLogicalFunction>(ReservoirSampleLogicalFunction{
-        arguments.fields[0], arguments.fields[1], sampleFields, arguments.reservoirSize.value(), arguments.statisticId.value()});
+        arguments.fields[0], arguments.fields[1], sampleFields, arguments.memoryBudget.value(), arguments.statisticId.value()});
 }
 }

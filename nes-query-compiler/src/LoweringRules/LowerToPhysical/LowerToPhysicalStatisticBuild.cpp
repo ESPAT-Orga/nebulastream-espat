@@ -144,9 +144,11 @@ std::vector<std::shared_ptr<AggregationPhysicalFunction>> getAggregationPhysical
             const auto logicalReservoirSample = descriptor->tryGetAs<ReservoirSampleLogicalFunction>();
             if (logicalReservoirSample.has_value())
             {
+                auto config = logicalReservoirSample->get().calculateConfigs();
+                const auto& reservoirConfig = dynamic_cast<const ReservoirSampleConfig&>(*config);
                 aggregationArguments.numberOfSeenTuplesFieldName = logicalOperator.getNumberOfSeenTuplesFieldName();
-                aggregationArguments.sampleSize = logicalReservoirSample->get().reservoirSize;
-                aggregationArguments.seed = logicalReservoirSample->get().seed;
+                aggregationArguments.sampleSize = reservoirConfig.reservoirSize;
+                aggregationArguments.seed = reservoirConfig.seed;
             }
         }
         else if (name.contains("EquiWidthHistogram"))
@@ -154,11 +156,13 @@ std::vector<std::shared_ptr<AggregationPhysicalFunction>> getAggregationPhysical
             const auto logicalEquiWidthHistogram = descriptor->tryGetAs<EquiWidthHistogramLogicalFunction>();
             if (logicalEquiWidthHistogram.has_value())
             {
+                auto config = logicalEquiWidthHistogram->get().calculateConfigs();
+                const auto& histogramConfig = dynamic_cast<const EquiWidthHistogramConfig&>(*config);
                 aggregationArguments.numberOfSeenTuplesFieldName = logicalOperator.getNumberOfSeenTuplesFieldName();
-                aggregationArguments.counterType = logicalEquiWidthHistogram->get().counterType;
-                aggregationArguments.minValue = logicalEquiWidthHistogram->get().minValue;
-                aggregationArguments.maxValue = logicalEquiWidthHistogram->get().maxValue;
-                aggregationArguments.numberOfBins = logicalEquiWidthHistogram->get().numBuckets;
+                aggregationArguments.counterType = histogramConfig.counterType;
+                aggregationArguments.minValue = histogramConfig.minValue;
+                aggregationArguments.maxValue = histogramConfig.maxValue;
+                aggregationArguments.numberOfBins = histogramConfig.numBuckets;
             }
         }
         else if (name.contains("CountMinSketch"))
@@ -166,11 +170,13 @@ std::vector<std::shared_ptr<AggregationPhysicalFunction>> getAggregationPhysical
             const auto logicalCountMinSketch = descriptor->tryGetAs<CountMinSketchLogicalFunction>();
             if (logicalCountMinSketch.has_value())
             {
+                auto config = logicalCountMinSketch->get().calculateConfigs();
+                const auto& countMinConfig = dynamic_cast<const CountMinSketchConfig&>(*config);
                 aggregationArguments.numberOfSeenTuplesFieldName = logicalOperator.getNumberOfSeenTuplesFieldName();
-                aggregationArguments.counterType = logicalCountMinSketch->get().counterType;
-                aggregationArguments.columns = logicalCountMinSketch->get().columns;
-                aggregationArguments.rows = logicalCountMinSketch->get().rows;
-                aggregationArguments.seed = logicalCountMinSketch->get().seed;
+                aggregationArguments.counterType = countMinConfig.counterType;
+                aggregationArguments.columns = countMinConfig.columns;
+                aggregationArguments.rows = countMinConfig.rows;
+                aggregationArguments.seed = countMinConfig.seed;
             }
         }
 

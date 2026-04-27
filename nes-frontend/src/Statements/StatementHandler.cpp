@@ -421,7 +421,7 @@ std::expected<ShowQueriesStatementResult, Exception> QueryStatementHandler::oper
 }
 
 StatisticRequestHandler::StatisticRequestHandler(StatisticCoordinator statisticCoordinator)
-    : statisticCoordinator(std::move(statisticCoordinator))
+    : statisticCoordinator(std::make_unique<StatisticCoordinator>(std::move(statisticCoordinator)))
 {
 }
 
@@ -430,7 +430,7 @@ StatisticRequestHandler::operator()(const RequestStatisticBuildStatement& statem
 {
     CPPTRACE_TRY
     {
-        return statisticCoordinator.collectNewStatistic(statement).transform(
+        return statisticCoordinator->collectNewStatistic(statement).transform(
             [](auto result)
             {
                 return RequestStatisticBuildStatementResult{
@@ -446,16 +446,16 @@ StatisticRequestHandler::operator()(const RequestStatisticBuildStatement& statem
 
 std::expected<CollectStatisticResult, Exception> StatisticRequestHandler::collectNewStatistic(const RequestStatisticBuildStatement& statement)
 {
-    return statisticCoordinator.collectNewStatistic(statement);
+    return statisticCoordinator->collectNewStatistic(statement);
 }
 
 std::string StatisticRequestHandler::startGrpcServer()
 {
-    return statisticCoordinator.startGrpcServer();
+    return statisticCoordinator->startGrpcServer();
 }
 
 const std::string& StatisticRequestHandler::getCoordinatorAddress() const
 {
-    return statisticCoordinator.getCoordinatorAddress();
+    return statisticCoordinator->getCoordinatorAddress();
 }
 }

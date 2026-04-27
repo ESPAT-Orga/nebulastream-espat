@@ -242,7 +242,10 @@ public:
 
 class StatisticRequestHandler final : public StatementHandler<StatisticRequestHandler>
 {
-    StatisticCoordinator statisticCoordinator;
+    /// Heap-allocated so that moves of StatisticRequestHandler don't relocate the coordinator.
+    /// StatisticCoordinatorServiceImpl holds a reference to the coordinator; it must not move
+    /// after startGrpcServer() is called.
+    std::unique_ptr<StatisticCoordinator> statisticCoordinator;
 
 public:
     explicit StatisticRequestHandler(StatisticCoordinator statisticCoordinator);

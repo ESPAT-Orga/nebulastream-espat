@@ -257,14 +257,9 @@ StatisticBuildLogicalOperator Unreflector<StatisticBuildLogicalOperator>::operat
             AggregationLogicalFunctionRegistryArguments{
                 .fields = {},
                 .statisticId = {},
-                .seed = {},
-                .reservoirSize = {},
-                .histogramNumBuckets = {},
+                .memoryBudget = {},
                 .histogramMinValue = {},
                 .histogramMaxValue = {},
-                .histogramCounterType = {},
-                .countMinNumColumns = {},
-                .countMinNumRows = {},
                 .reflected = reflectedAggregation});
         if (!functionOpt.has_value())
         {

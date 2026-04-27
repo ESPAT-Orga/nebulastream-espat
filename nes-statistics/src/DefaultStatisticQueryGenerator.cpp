@@ -14,8 +14,6 @@
 
 #include <DefaultStatisticQueryGenerator.hpp>
 
-#include <algorithm>
-#include <cctype>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -88,33 +86,20 @@ std::shared_ptr<WindowAggregationLogicalFunction> createAggregationFunction(
     switch (toStatisticType(metric))
     {
         case Statistic::StatisticType::Equi_Width_Histogram: {
-            const auto numBuckets = getOption(options, "histogram.buckets", 100);
-            const auto minValue = getOption(options, "histogram.min", 0);
-            const auto maxValue = getOption(options, "histogram.max", 1000);
-            return std::make_shared<WindowAggregationLogicalFunction>(EquiWidthHistogramLogicalFunction{
-                onField,
-                numBuckets,
-                minValue,
-                maxValue,
-                statisticId,
-                DataTypeProvider::provideDataType(DataType::Type::UINT64, DataType::NULLABLE::NOT_NULLABLE)});
+            const auto memoryBudget = getOption(options, "memory_budget", 4096);
+            const auto minValue = getOption(options, "min", 0);
+            const auto maxValue = getOption(options, "max", 1000);
+            return std::make_shared<WindowAggregationLogicalFunction>(
+                EquiWidthHistogramLogicalFunction{onField, memoryBudget, minValue, maxValue, statisticId});
         }
         case Statistic::StatisticType::Reservoir_Sample: {
-            const auto reservoirSize = getOption(options, "sample.reservoir_size", 1000);
+            const auto memoryBudget = getOption(options, "memory_budget", 8192);
             return std::make_shared<WindowAggregationLogicalFunction>(
-                ReservoirSampleLogicalFunction{onField, std::vector{onField}, reservoirSize, statisticId});
+                ReservoirSampleLogicalFunction{onField, std::vector{onField}, memoryBudget, statisticId});
         }
         case Statistic::StatisticType::Count_Min_Sketch: {
-            const auto columns = getOption(options, "sketch.columns", 256);
-            const auto rows = getOption(options, "sketch.rows", 4);
-            constexpr uint64_t seed = 42;
-            return std::make_shared<WindowAggregationLogicalFunction>(CountMinSketchLogicalFunction{
-                onField,
-                NumberOfCols{columns},
-                NumberOfRows{rows},
-                seed,
-                DataTypeProvider::provideDataType(DataType::Type::UINT64, DataType::NULLABLE::NOT_NULLABLE),
-                statisticId});
+            const auto memoryBudget = getOption(options, "memory_budget", 8192);
+            return std::make_shared<WindowAggregationLogicalFunction>(CountMinSketchLogicalFunction{onField, memoryBudget, statisticId});
         }
     }
     std::unreachable();
@@ -142,13 +127,7 @@ LogicalPlan generateForDataDomain(
         windowType = std::make_shared<Windowing::TumblingWindow>(timeChar, Windowing::TimeMeasure{request.windowSizeMs});
     }
 
-    /// The SQL parser uppercases all unquoted identifiers (via bindIdentifier). Mirror that
-    /// here so programmatic callers don't need to think about case.
-    auto sourceNameUpper = domain.logicalSourceName;
-    std::transform(sourceNameUpper.begin(), sourceNameUpper.end(), sourceNameUpper.begin(), [](unsigned char c) { return std::toupper(c); });
-    auto fieldNameUpper = domain.fieldName;
-    std::transform(fieldNameUpper.begin(), fieldNameUpper.end(), fieldNameUpper.begin(), [](unsigned char c) { return std::toupper(c); });
-    const FieldAccessLogicalFunction onField{fieldNameUpper};
+    const FieldAccessLogicalFunction onField{domain.fieldName};
     auto agg = createAggregationFunction(onField, request.metric, statisticId, request.options);
 
     /// The build and statistic store writer need to have a connection for the statistic fields, e.g., statisticDataField.
@@ -157,9 +136,9 @@ LogicalPlan generateForDataDomain(
     auto plan = LogicalPlanBuilder::createLogicalPlan(domain.logicalSourceName);
     plan = LogicalPlanBuilder::addStatisticBuild(std::move(plan), windowType, {agg}, {}, logicalStatisticFields);
     plan = LogicalPlanBuilder::addStatisticStoreWriter(plan, logicalStatisticFields, statisticId, toStatisticType(request.metric));
-    if (request.conditionTrigger.has_value() && request.conditionTrigger->condition.has_value())
+    if (request.conditionTrigger.has_value())
     {
-        plan = LogicalPlanBuilder::addSelection(*request.conditionTrigger->condition, plan);
+        plan = LogicalPlanBuilder::addSelection(request.conditionTrigger->condition, plan);
     }
 
     /// Append a gRPC sink to send results back to the StatisticCoordinator
@@ -168,27 +147,13 @@ LogicalPlan generateForDataDomain(
     const auto sinkHost = coordinatorAddress.substr(0, colonPos);
     const auto sinkPort = coordinatorAddress.substr(colonPos + 1);
 
-    /// StatisticStoreWriter qualifies its output fields with the source name (e.g. "ENDLESS$STATISTICID").
-    /// The gRPC sink schema must match exactly. The GrpcSink itself uses substring matching on field names,
-    /// so it handles the qualifier correctly at runtime.
-    const auto qualifier = sourceNameUpper + "$";
-    LogicalStatisticFields outputStatisticFields;
-    outputStatisticFields.addQualifierName(qualifier);
+    /// The StatisticStoreWriter outputs: startTs, endTs, and statisticId
     Schema grpcSinkSchema;
-    grpcSinkSchema.addField(outputStatisticFields.statisticIdField);
-    grpcSinkSchema.addField(outputStatisticFields.statisticStartTsField);
-    grpcSinkSchema.addField(outputStatisticFields.statisticEndTsField);
-    grpcSinkSchema.addField(outputStatisticFields.statisticNumberOfSeenTuplesField);
-    /// "host" specifies on which worker to place the gRPC sink. Falls back to the coordinator
-    /// host (i.e. the same machine) when not provided, which is correct for single-worker setups.
-    const auto hostIt = request.options.find("host");
-    const auto& sinkWorkerHost = hostIt != request.options.end() ? hostIt->second : sinkHost;
-    plan = LogicalPlanBuilder::addInlineSink(
-        "Grpc",
-        grpcSinkSchema,
-        {{"grpc_host", sinkHost}, {"grpc_port", sinkPort}, {"host", sinkWorkerHost}, {"output_format", "NATIVE"}},
-        {},
-        plan);
+    const LogicalStatisticFields statisticFields;
+    grpcSinkSchema.addField(statisticFields.statisticIdField);
+    grpcSinkSchema.addField(statisticFields.statisticStartTsField);
+    grpcSinkSchema.addField(statisticFields.statisticEndTsField);
+    plan = LogicalPlanBuilder::addInlineSink("Grpc", grpcSinkSchema, {{"grpc_host", sinkHost}, {"grpc_port", sinkPort}}, {}, plan);
 
     return plan;
 }

@@ -11,15 +11,15 @@ CREATE PHYSICAL SOURCE FOR monitoringClusterData TYPE File;
 ATTACH FILE large/cluster_monitoring/google-cluster-data-original_1G.csv
 
 
-SELECT RESERVOIR(100, auctionId, bidder, price, 1000) FROM bid WINDOW TUMBLING(timestamp, size 10 sec) INTO Discard();
+SELECT RESERVOIR(100, auctionId, bidder, price, 16000) FROM bid WINDOW TUMBLING(timestamp, size 10 sec) INTO Discard();
 ----
 
 # Reservoir build
-SELECT RESERVOIR(100, jobId, eventId, 1000) FROM monitoringClusterData WINDOW TUMBLING(creationTS, size 10 sec) INTO DISCARD();
+SELECT RESERVOIR(100, jobId, eventId, 16000) FROM monitoringClusterData WINDOW TUMBLING(creationTS, size 10 sec) INTO DISCARD();
 ----
 
 
 # Equiwidth histogram build
-SELECT EQUIWIDTHHISTOGRAM(200, jobId, 100, 0, 1000000, uint64) FROM monitoringClusterData WINDOW TUMBLING(creationTS, size 10 sec) INTO DISCARD();
+SELECT EQUIWIDTHHISTOGRAM(200, jobId, 2400, 0, 1000000) FROM monitoringClusterData WINDOW TUMBLING(creationTS, size 10 sec) INTO DISCARD();
 ----
 

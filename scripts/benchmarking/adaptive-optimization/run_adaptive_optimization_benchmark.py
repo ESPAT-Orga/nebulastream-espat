@@ -62,11 +62,11 @@ repl_binary = os.path.join(build_dir, "nes-frontend", "apps", "nes-repl")
 WORKER_GRPC = "localhost:8080"
 WORKER_DATA = "localhost:9090"
 
-#### Query to deploy (using the distributed-mode example from the docs)
+#### Query to deploy (nexmark bid-like schema, generator source)
 SETUP_SQL = f"""\
 CREATE WORKER "{WORKER_GRPC}" SET ('{WORKER_DATA}' AS DATA);
-CREATE LOGICAL SOURCE endless(ts UINT64);
-CREATE PHYSICAL SOURCE FOR endless
+CREATE LOGICAL SOURCE bid(timestamp UINT64 NOT NULL, auctionId INT32 NOT NULL, bidder INT32 NOT NULL, price FLOAT64 NOT NULL);
+CREATE PHYSICAL SOURCE FOR bid
 TYPE Generator
 SET(
     'ALL' as `SOURCE`.STOP_GENERATOR_WHEN_SEQUENCE_FINISHES,
@@ -74,17 +74,17 @@ SET(
     'emit_rate 10' AS `SOURCE`.GENERATOR_RATE_CONFIG,
     10000000 AS `SOURCE`.MAX_RUNTIME_MS,
     1 AS `SOURCE`.SEED,
-    'SEQUENCE UINT64 0 10000000 1' AS `SOURCE`.GENERATOR_SCHEMA,
+    'SEQUENCE UINT64 0 10000000 1, SEQUENCE INT32 0 1000 1, SEQUENCE INT32 0 100 1, SEQUENCE FLOAT64 0.0 1000.0 1.0' AS `SOURCE`.GENERATOR_SCHEMA,
     '{WORKER_GRPC}' AS `SOURCE`.HOST
 );
-CREATE SINK someSink(ENDLESS.TS UINT64)
+CREATE SINK someSink(BID.TIMESTAMP UINT64, BID.AUCTIONID INT32, BID.BIDDER INT32, BID.PRICE FLOAT64)
 TYPE File
 SET(
     'out.csv' as `SINK`.FILE_PATH,
     'CSV' as `SINK`.OUTPUT_FORMAT,
     '{WORKER_GRPC}' AS `SINK`.HOST
 );
-SELECT TS FROM ENDLESS INTO SOMESINK;
+SELECT timestamp, auctionId, bidder, price FROM bid INTO someSink;
 """
 
 

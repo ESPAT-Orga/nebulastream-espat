@@ -25,8 +25,10 @@ Usage (run from repository root):
 """
 
 import argparse
+import csv
+import json
 import os
-import signal
+import re
 import subprocess
 import sys
 import threading
@@ -36,6 +38,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 from scripts.benchmarking.utils import (
     check_repository_root,
     compile_nebulastream,
+    convert_unit_prefix,
     create_folder_and_remove_if_exists,
     get_vcpkg_dir,
     printError,
@@ -96,6 +99,12 @@ WHERE bidValue < FLOAT64(28.21) AND price < FLOAT64(714.03)
 INTO someSink;
 """
 
+# Matches: Throughput for queryId QueryId(local=<UUID>, distributed=<horse-name>) in window <ts>-<ts> is <val> <prefix>Tup/s
+_THROUGHPUT_RE = re.compile(
+    r"Throughput for queryId QueryId\(local=[^,)]+, distributed=([^)]+)\)"
+    r" in window (\d+)-(\d+) is (\d+\.\d+) (\w*)Tup/s"
+)
+
 
 def stream_output(proc, label, lines_out):
     """Read lines from a process stdout/stderr and print them with a label prefix."""
@@ -135,7 +144,56 @@ def terminate_process(proc, name, timeout=5):
         proc.wait()
 
 
-def run_benchmark(duration: int, skip_build: bool, clean: bool):
+def find_data_query_id(repl_lines, timeout=15.0):
+    """Poll repl_lines until the SELECT response appears and return its distributed query ID.
+
+    The REPL emits [{"query_id": "<horse-name>"}] (exactly one key) for a deployed SELECT.
+    All other setup statement responses have additional keys (worker, source_name, sink_name, …).
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        for line in repl_lines:
+            try:
+                parsed = json.loads(line)
+                if (
+                    isinstance(parsed, list)
+                    and len(parsed) == 1
+                    and set(parsed[0].keys()) == {"query_id"}
+                ):
+                    return parsed[0]["query_id"]
+            except (json.JSONDecodeError, KeyError):
+                pass
+        time.sleep(0.1)
+    return None
+
+
+def parse_throughput(worker_lines, data_query_id):
+    """Return list of (window_start_ms, throughput_tup_per_s) for the data query only."""
+    measurements = []
+    for line in worker_lines:
+        m = _THROUGHPUT_RE.search(line)
+        if m and m.group(1) == data_query_id:
+            window_start = int(m.group(2))
+            throughput = convert_unit_prefix(float(m.group(4)), m.group(5))
+            measurements.append((window_start, throughput))
+    return measurements
+
+
+def write_throughput_csv(measurements, output_path):
+    """Write all per-window throughput samples to a CSV for time-series plotting."""
+    if not measurements:
+        printError("No throughput data collected for the data query.")
+        return
+    min_ts = measurements[0][0]
+    with open(output_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["timestamp_ms", "throughput_tup_per_s"])
+        for ts, tput in measurements:
+            writer.writerow([ts - min_ts, tput])
+    printSuccess(f"Throughput data ({len(measurements)} samples) written to {os.path.abspath(output_path)}")
+
+
+def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str):
     check_repository_root()
 
     if clean:
@@ -200,6 +258,16 @@ def run_benchmark(duration: int, skip_build: bool, clean: bool):
         terminate_process(worker_proc, "nes-single-node-worker")
         sys.exit(1)
 
+    # --- Record the distributed query ID assigned to the data query ---
+    printInfo("Waiting for data query deployment confirmation...")
+    data_query_id = find_data_query_id(repl_lines, timeout=15.0)
+    if data_query_id is None:
+        printError("Timed out waiting for the SELECT query response — REPL may have crashed.")
+        terminate_process(repl_proc, "nes-repl")
+        terminate_process(worker_proc, "nes-single-node-worker")
+        sys.exit(1)
+    printSuccess(f"Data query deployed with id: {data_query_id}")
+
     printSuccess(f"Query deployed. Running for {duration} seconds...")
 
     # --- Run for the configured duration ---
@@ -212,6 +280,14 @@ def run_benchmark(duration: int, skip_build: bool, clean: bool):
     printInfo("Tearing down...")
     terminate_process(repl_proc, "nes-repl")
     terminate_process(worker_proc, "nes-single-node-worker")
+
+    # Wait for streaming threads to drain the remaining pipe output
+    repl_thread.join(timeout=5)
+    worker_thread.join(timeout=5)
+
+    # --- Parse and write throughput CSV ---
+    measurements = parse_throughput(worker_lines, data_query_id)
+    write_throughput_csv(measurements, output)
 
     printSuccess("Benchmark complete.")
 
@@ -236,6 +312,11 @@ if __name__ == "__main__":
         action="store_true",
         help="Remove and recreate the build directory before building.",
     )
+    parser.add_argument(
+        "--output",
+        default="data_throughput_adaptive.csv",
+        help="Path for the throughput CSV output (default: data_throughput_adaptive.csv).",
+    )
     args = parser.parse_args()
 
-    run_benchmark(duration=args.duration, skip_build=args.skip_build, clean=args.clean)
+    run_benchmark(duration=args.duration, skip_build=args.skip_build, clean=args.clean, output=args.output)

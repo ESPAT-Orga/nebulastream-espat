@@ -1,0 +1,26 @@
+# name: function/H3HashSmoke.test
+# description: Smoke test for the H3_HASH scalar function: deterministic per input.
+# groups: [Function]
+
+CREATE LOGICAL SOURCE stream(ID UINT64 NOT NULL, TIMESTAMP UINT64 NOT NULL);
+CREATE PHYSICAL SOURCE FOR stream TYPE File;
+ATTACH INLINE
+1,1000
+2,2000
+3,3000
+
+CREATE SINK h3_sink(stream.id UINT64 NOT NULL, h3_v100_r0 UINT64 NOT NULL, h3_v100_r1 UINT64 NOT NULL, h3_v100_r2 UINT64 NOT NULL) TYPE File;
+
+# Same value (100) hashed against three different rows should give three reproducible
+# column indices. We don't pin the actual values — they depend on H3 + mt19937(42) —
+# but they must be < numberOfCols (10) and identical across rows of input data.
+SELECT id,
+       H3_HASH(UINT64(100), UINT64(0), UINT64(3), UINT64(10), UINT64(42)) AS h3_v100_r0,
+       H3_HASH(UINT64(100), UINT64(1), UINT64(3), UINT64(10), UINT64(42)) AS h3_v100_r1,
+       H3_HASH(UINT64(100), UINT64(2), UINT64(3), UINT64(10), UINT64(42)) AS h3_v100_r2
+FROM stream
+INTO h3_sink;
+----
+1,1,2,2
+2,1,2,2
+3,1,2,2

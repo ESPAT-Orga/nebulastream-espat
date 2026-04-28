@@ -27,7 +27,8 @@
 namespace NES
 {
 
-LoweringRuleResultSubgraph LowerToPhysicalSink::apply(LogicalOperator logicalOperator)
+LoweringRuleResultSubgraph
+LowerToPhysicalSink::apply(LogicalOperator logicalOperator, [[maybe_unused]] const std::shared_ptr<AbstractStatisticStore>& statisticStore)
 {
     PRECONDITION(logicalOperator.tryGetAs<SinkLogicalOperator>(), "Expected a SinkLogicalOperator");
     auto sink = logicalOperator.getAs<SinkLogicalOperator>();

@@ -17,6 +17,7 @@
 #include <utility>
 
 #include <Plans/LogicalPlan.hpp>
+#include <StatisticStore/AbstractStatisticStore.hpp>
 #include <Util/DumpMode.hpp>
 #include <CompiledQueryPlan.hpp>
 #include <QueryExecutionConfiguration.hpp>
@@ -39,12 +40,17 @@ struct QueryCompilationRequest
 class QueryCompiler
 {
 public:
-    explicit QueryCompiler(QueryExecutionConfiguration defaultQueryExecution) : defaultQueryExecution(std::move(defaultQueryExecution)) { };
+    /// Passing here the statistic store is fine for this PoC but should be done differently, if we upstream this change.
+    QueryCompiler(QueryExecutionConfiguration defaultQueryExecution, std::shared_ptr<AbstractStatisticStore> statisticStore)
+        : defaultQueryExecution(std::move(defaultQueryExecution)), statisticStore(std::move(statisticStore))
+    {
+    }
 
-    std::unique_ptr<CompiledQueryPlan> compileQuery(std::unique_ptr<QueryCompilationRequest> request);
+    std::unique_ptr<CompiledQueryPlan> compileQuery(std::unique_ptr<QueryCompilationRequest> request) const;
 
 private:
     QueryExecutionConfiguration defaultQueryExecution;
+    std::shared_ptr<AbstractStatisticStore> statisticStore;
 };
 
 }

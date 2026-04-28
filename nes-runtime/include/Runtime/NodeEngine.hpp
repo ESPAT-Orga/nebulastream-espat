@@ -21,7 +21,6 @@
 #include <Runtime/QueryTerminationType.hpp>
 #include <Sources/SourceProvider.hpp>
 #include <StatisticStore/AbstractStatisticStore.hpp>
-#include <StatisticStore/DefaultStatisticStore.hpp>
 #include <CompiledQueryPlan.hpp>
 #include <QueryEngine.hpp>
 
@@ -48,7 +47,8 @@ public:
         std::shared_ptr<SystemEventListener> systemEventListener,
         std::shared_ptr<QueryLog> queryLog,
         std::unique_ptr<QueryEngine> queryEngine,
-        std::unique_ptr<SourceProvider> sourceProvider);
+        std::unique_ptr<SourceProvider> sourceProvider,
+        std::shared_ptr<AbstractStatisticStore> statisticStore);
 
     void registerCompiledQueryPlan(QueryId queryId, std::unique_ptr<CompiledQueryPlan> compiledQueryPlan);
     void startQuery(QueryId queryId);
@@ -62,11 +62,7 @@ public:
 
     [[nodiscard]] std::shared_ptr<const QueryLog> getQueryLog() const { return queryLog; }
 
-    [[nodiscard]] static std::shared_ptr<AbstractStatisticStore> getStatisticStore()
-    {
-        static std::shared_ptr<AbstractStatisticStore> statisticStore = std::make_shared<DefaultStatisticStore>();
-        return statisticStore;
-    }
+    [[nodiscard]] std::shared_ptr<AbstractStatisticStore> getStatisticStore() { return statisticStore; }
 
 private:
     std::shared_ptr<BufferManager> bufferManager;
@@ -76,5 +72,6 @@ private:
     std::unique_ptr<QueryEngine> queryEngine;
     std::unique_ptr<QueryTracker> queryTracker;
     std::unique_ptr<SourceProvider> sourceProvider;
+    std::shared_ptr<AbstractStatisticStore> statisticStore;
 };
 }

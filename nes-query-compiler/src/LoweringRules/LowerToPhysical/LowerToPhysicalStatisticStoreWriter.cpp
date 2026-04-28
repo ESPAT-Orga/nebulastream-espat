@@ -14,7 +14,6 @@
 #include <LoweringRules/LowerToPhysical/LowerToPhysicalStatisticStoreWriter.hpp>
 
 #include <Operators/Statistic/StatisticStoreWriterLogicalOperator.hpp>
-#include <Runtime/NodeEngine.hpp>
 #include <Statistic/StatisticStore/StatisticStoreOperatorHandler.hpp>
 #include <Statistic/StatisticStore/StatisticStoreWriter.hpp>
 #include <Traits/MemoryLayoutTypeTrait.hpp>
@@ -24,13 +23,13 @@
 namespace NES
 {
 
-LoweringRuleResultSubgraph LowerToPhysicalStatisticStoreWriter::apply(LogicalOperator logicalOperator)
+LoweringRuleResultSubgraph
+LowerToPhysicalStatisticStoreWriter::apply(LogicalOperator logicalOperator, const std::shared_ptr<AbstractStatisticStore>& statisticStore)
 {
     PRECONDITION(logicalOperator.tryGetAs<StatisticStoreWriterLogicalOperator>(), "Expected a StatisticStoreWriterLogicalOperator");
     const auto logicalStatisticStoreWriter = logicalOperator.getAs<StatisticStoreWriterLogicalOperator>();
     auto inputSchema = logicalStatisticStoreWriter.getInputSchemas()[0];
-    auto statisticStore = NodeEngine::getStatisticStore();
-    auto statisticStoreWriterOperatorHandler = std::make_shared<StatisticStoreOperatorHandler>(std::move(statisticStore));
+    auto statisticStoreWriterOperatorHandler = std::make_shared<StatisticStoreOperatorHandler>(statisticStore);
     const auto operatorHandlerId = getNextOperatorHandlerId();
     const auto memoryLayoutTypeTrait = logicalOperator.getTraitSet().tryGet<MemoryLayoutTypeTrait>();
     PRECONDITION(memoryLayoutTypeTrait.has_value(), "Expected a memory layout type trait");

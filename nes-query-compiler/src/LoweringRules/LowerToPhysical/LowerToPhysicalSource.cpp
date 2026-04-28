@@ -31,7 +31,8 @@
 namespace NES
 {
 
-LoweringRuleResultSubgraph LowerToPhysicalSource::apply(LogicalOperator logicalOperator)
+LoweringRuleResultSubgraph LowerToPhysicalSource::apply(
+    LogicalOperator logicalOperator, [[maybe_unused]] const std::shared_ptr<AbstractStatisticStore>& statisticStore)
 {
     PRECONDITION(logicalOperator.tryGetAs<SourceDescriptorLogicalOperator>(), "Expected a SourceDescriptorLogicalOperator");
     const auto source = logicalOperator.getAs<SourceDescriptorLogicalOperator>();

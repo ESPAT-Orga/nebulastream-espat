@@ -93,13 +93,15 @@ NodeEngine::NodeEngine(
     std::shared_ptr<SystemEventListener> systemEventListener,
     std::shared_ptr<QueryLog> queryLog,
     std::unique_ptr<QueryEngine> queryEngine,
-    std::unique_ptr<SourceProvider> sourceProvider)
+    std::unique_ptr<SourceProvider> sourceProvider,
+    std::shared_ptr<AbstractStatisticStore> statisticStore)
     : bufferManager(std::move(bufferManager))
     , queryLog(std::move(queryLog))
     , systemEventListener(std::move(systemEventListener))
     , queryEngine(std::move(queryEngine))
     , queryTracker(std::make_unique<QueryTracker>())
     , sourceProvider(std::move(sourceProvider))
+    , statisticStore(std::move(statisticStore))
 {
 }
 

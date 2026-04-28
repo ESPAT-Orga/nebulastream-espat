@@ -206,11 +206,14 @@ bool BufferControlBlock::release()
         const auto recycler = std::move(owningBufferRecycler);
         numberOfTuples = 0;
         numberOfProcessedTuples = 0;
-        recycleCallback(owner, recycler.get());
+        /// The statistics callback must run BEFORE recycleCallback. For unpooled buffers,
+        /// recycleCallback can destroy this control block (via chunk extraction in
+        /// UnpooledChunksManager), so touching any member after it is a use-after-free.
         if (recycleStatisticsCallback)
         {
             recycleStatisticsCallback.value()(owner);
         }
+        recycleCallback(owner, recycler.get());
         return true;
     }
     INVARIANT(prevRefCnt != 0, "releasing an already released buffer");

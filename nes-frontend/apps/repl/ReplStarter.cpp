@@ -12,6 +12,7 @@
     limitations under the License.
 */
 
+#include <atomic>
 #include <chrono>
 #include <csignal>
 #include <cstdint>
@@ -19,6 +20,7 @@
 #include <functional>
 #include <iostream>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <ostream>
 #include <ranges>
@@ -197,6 +199,8 @@ int main(int argc, char** argv)
         program.add_argument("--companion-host")
             .default_value(std::string{"localhost:8080"})
             .help("Worker host for the companion statistic sink (default: localhost:8080)");
+        program.add_argument("--companion-switch-to-sql")
+            .help("Full SELECT SQL to deploy when the companion statistic first fires, replacing the original query");
 
 #ifdef EMBED_ENGINE
         /// single node worker config
@@ -355,6 +359,13 @@ int main(int argc, char** argv)
             return selections.front()->getPredicate();
         };
 
+        /// A second binder instance sharing the same source catalog. Used inside the companion callback,
+        /// which runs on a gRPC thread and cannot use the binder that was moved into Repl.
+        /// Wrapped in shared_ptr so the non-copyable StatementBinder can be captured by a std::function.
+        auto callbackBinder = std::make_shared<NES::StatementBinder>(
+            sourceCatalog,
+            [](auto&& pH1) { return NES::AntlrSQLQueryParser::bindLogicalQueryPlan(std::forward<decltype(pH1)>(pH1)); });
+
         std::optional<NES::RequestStatisticBuildStatement> companionStatisticRequest = std::nullopt;
         if (program.get<bool>("--companion-statistic"))
         {
@@ -373,6 +384,18 @@ int main(int argc, char** argv)
             if (program.is_used("--companion-condition"))
                 condition = parseConditionExpression(program.get<std::string>("--companion-condition"));
 
+            std::string switchToSql;
+            if (program.is_used("--companion-switch-to-sql"))
+                switchToSql = program.get<std::string>("--companion-switch-to-sql");
+
+            struct AdaptiveSwapState
+            {
+                std::mutex mutex;
+                std::optional<NES::DistributedQueryId> dataQueryId;
+                std::atomic<bool> swapped{false};
+            };
+            auto swapState = std::make_shared<AdaptiveSwapState>();
+
             companionStatisticRequest = NES::RequestStatisticBuildStatement{
                 .domain = NES::DataDomain{
                     .logicalSourceName = program.get<std::string>("--companion-source"),
@@ -384,15 +407,71 @@ int main(int argc, char** argv)
                 .conditionTrigger = NES::ConditionTrigger{
                     .condition = condition,
                     .callback =
-                        [](NES::Statistic::StatisticId statId,
-                           NES::Windowing::TimeMeasure startTs,
-                           NES::Windowing::TimeMeasure endTs)
+                        [swapState, queryStatementHandler, callbackBinder, switchToSql](
+                            NES::Statistic::StatisticId statId,
+                            NES::Windowing::TimeMeasure startTs,
+                            NES::Windowing::TimeMeasure endTs)
                     {
                         std::cout << "[StatisticTrigger] id=" << statId.getRawValue() << " window=[" << startTs.getTime() << ", "
                                   << endTs.getTime() << "]\n";
                         std::flush(std::cout);
+
+                        if (switchToSql.empty() || swapState->swapped.exchange(true))
+                            return;
+
+                        std::optional<NES::DistributedQueryId> dataQueryId;
+                        {
+                            std::lock_guard lock(swapState->mutex);
+                            dataQueryId = swapState->dataQueryId;
+                        }
+                        if (!dataQueryId.has_value())
+                        {
+                            std::cout << "[AdaptiveOpt] Cannot swap: data query ID not yet recorded.\n";
+                            std::flush(std::cout);
+                            return;
+                        }
+
+                        auto stopResult = (*queryStatementHandler)(NES::DropQueryStatement{.id = *dataQueryId});
+                        if (!stopResult.has_value())
+                        {
+                            std::cout << "[AdaptiveOpt] Failed to stop query " << dataQueryId->getRawValue()
+                                      << ": " << stopResult.error().what() << "\n";
+                            std::flush(std::cout);
+                            return;
+                        }
+                        std::cout << "[AdaptiveOpt] Stopped original query (id=" << dataQueryId->getRawValue() << ").\n";
+
+                        auto bindResult = callbackBinder->parseAndBindSingle(switchToSql);
+                        if (!bindResult.has_value())
+                        {
+                            std::cout << "[AdaptiveOpt] Failed to parse switch-to query: " << bindResult.error().what() << "\n";
+                            std::flush(std::cout);
+                            return;
+                        }
+                        auto* queryStmt = std::get_if<NES::QueryStatement>(&bindResult.value());
+                        if (!queryStmt)
+                        {
+                            std::cout << "[AdaptiveOpt] --companion-switch-to-sql must be a SELECT statement.\n";
+                            std::flush(std::cout);
+                            return;
+                        }
+
+                        auto startResult = (*queryStatementHandler)(*queryStmt);
+                        if (!startResult.has_value())
+                        {
+                            std::cout << "[AdaptiveOpt] Failed to deploy replacement query: " << startResult.error().what() << "\n";
+                            std::flush(std::cout);
+                            return;
+                        }
+                        std::cout << "[AdaptiveOpt] Deployed replacement query (id=" << startResult->id << ").\n";
+                        std::flush(std::cout);
                     }},
-                .options = {{"host", program.get<std::string>("--companion-host")}}};
+                .options = {{"host", program.get<std::string>("--companion-host")}},
+                .onAssociatedWithQuery = [swapState](NES::DistributedQueryId id)
+                {
+                    std::lock_guard lock(swapState->mutex);
+                    swapState->dataQueryId = std::move(id);
+                }};
         }
 
         NES::Repl replClient{

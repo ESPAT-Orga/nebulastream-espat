@@ -428,6 +428,10 @@ struct Repl::Impl
                                     std::cout << "[Statistic] Companion deployed: id=" << statResult->statisticId.getRawValue()
                                               << (statResult->alreadyExisted ? " (reused existing)" : " (new)") << "\n";
                                     std::flush(std::cout);
+                                    if (companionStatisticRequest->onAssociatedWithQuery.has_value())
+                                    {
+                                        (*companionStatisticRequest->onAssociatedWithQuery)(r.value().id);
+                                    }
                                 }
                                 else
                                 {

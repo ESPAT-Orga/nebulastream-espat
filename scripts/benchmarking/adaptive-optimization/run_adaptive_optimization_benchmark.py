@@ -99,6 +99,14 @@ WHERE bidValue < FLOAT64(28.21) AND price < FLOAT64(714.03)
 INTO someSink;
 """
 
+# Same query with filter order reversed (price first, then bidValue).
+# The companion statistic fires once and asks the system to swap to this plan.
+REVERSED_QUERY_SQL = (
+    "SELECT timestamp, auctionId, bidValue, price FROM bid "
+    "WHERE price < FLOAT64(714.03) AND bidValue < FLOAT64(28.21) "
+    "INTO someSink;"
+)
+
 # Matches: Throughput for queryId QueryId(local=<UUID>, distributed=<horse-name>) in window <ts>-<ts> is <val> <prefix>Tup/s
 _THROUGHPUT_RE = re.compile(
     r"Throughput for queryId QueryId\(local=[^,)]+, distributed=([^)]+)\)"
@@ -246,6 +254,7 @@ def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str):
             "--companion-window-size-ms", "100000",
             "--companion-event-time-field", "BID$TIMESTAMP",
             "--companion-host", WORKER_GRPC,
+            "--companion-switch-to-sql", REVERSED_QUERY_SQL,
         ],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,

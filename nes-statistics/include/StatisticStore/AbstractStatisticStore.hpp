@@ -38,7 +38,9 @@ public:
     AbstractStatisticStore() = default;
     virtual ~AbstractStatisticStore() = default;
 
-    /// Inserts a statistic with the statisticId into a StatisticStore. Returns false, if statistic already exists
+    /// Inserts a statistic with the statisticId into a StatisticStore. Does not deduplicate: if multiple statistics are inserted with the
+    /// same statisticId, startTs, and endTs, they all coexist in the store and there is no guarantee which of them is returned by
+    /// getSingleStatistic, nor in what order they appear in getStatistics / getAllStatistics.
     virtual bool insertStatistic(const Statistic::StatisticId& statisticId, Statistic statistic) = 0;
 
     /// Deletes all statistics belonging to the statisticId in the period of [startTs, endTs]. Returns true, if any statistic was deleted

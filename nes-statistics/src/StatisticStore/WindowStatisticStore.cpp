@@ -42,8 +42,7 @@ WindowStatisticStore::WindowStatisticStore(const uint64_t numberOfExpectedConcur
     allStatistics.reserve(numberOfExpectedConcurrentAccess);
     for (uint64_t i = 0; i < numberOfExpectedConcurrentAccess; ++i)
     {
-        allStatistics.emplace_back(
-            folly::Synchronized<std::unordered_map<StatisticKey, std::vector<std::shared_ptr<Statistic>>, StatisticKeyHash>>{});
+        allStatistics.emplace_back(folly::Synchronized<std::unordered_map<StatisticKey, std::vector<Statistic>, StatisticKeyHash>>{});
     }
 }
 
@@ -59,7 +58,7 @@ bool WindowStatisticStore::insertStatistic(const Statistic::StatisticId& statist
     const auto pos = getPos(statisticId, numberOfExpectedConcurrentAccess);
     const auto windowStartTime = calculateWindowStartTime(statistic.getStartTs());
     const auto lockedStatisticStore = allStatistics[pos].wlock();
-    (*lockedStatisticStore)[{statisticId, windowStartTime}].emplace_back(std::make_shared<Statistic>(statistic));
+    (*lockedStatisticStore)[{statisticId, windowStartTime}].emplace_back(std::move(statistic));
     return true;
 }
 
@@ -79,8 +78,8 @@ bool WindowStatisticStore::deleteStatistics(
         auto& window = (*lockedStatisticStore)[{statisticId, curWindowStartTime}];
         auto newEnd = std::ranges::remove_if(
             window,
-            [startTs, endTs](const std::shared_ptr<Statistic>& curStatistic)
-            { return curStatistic->getStartTs() >= startTs and curStatistic->getEndTs() <= endTs; });
+            [startTs, endTs](const Statistic& curStatistic)
+            { return curStatistic.getStartTs() >= startTs and curStatistic.getEndTs() <= endTs; });
 
         foundAnyStatistic |= (newEnd.begin() != window.end());
         if (newEnd.begin() != window.end())
@@ -92,14 +91,14 @@ bool WindowStatisticStore::deleteStatistics(
     return foundAnyStatistic;
 }
 
-std::vector<std::shared_ptr<Statistic>> WindowStatisticStore::getStatistics(
+std::vector<Statistic> WindowStatisticStore::getStatistics(
     const Statistic::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs)
 {
     const auto pos = getPos(statisticId, numberOfExpectedConcurrentAccess);
     const uint64_t firstWindow = std::floor(startTs.getTime() / windowSize.getTime());
     const uint64_t lastWindow = std::floor(endTs.getTime() / windowSize.getTime());
     const auto numberOfWindows = lastWindow - firstWindow + 1;
-    std::vector<std::shared_ptr<Statistic>> foundStatistics;
+    std::vector<Statistic> foundStatistics;
 
     for (uint64_t i = 0; i < numberOfWindows; ++i)
     {
@@ -111,15 +110,15 @@ std::vector<std::shared_ptr<Statistic>> WindowStatisticStore::getStatistics(
             std::ranges::copy_if(
                 window->second,
                 std::back_inserter(foundStatistics),
-                [startTs, endTs](const std::shared_ptr<Statistic>& curStatistic)
-                { return curStatistic->getStartTs() >= startTs and curStatistic->getEndTs() <= endTs; });
+                [startTs, endTs](const Statistic& curStatistic)
+                { return curStatistic.getStartTs() >= startTs and curStatistic.getEndTs() <= endTs; });
         }
     }
 
     return foundStatistics;
 }
 
-std::optional<std::shared_ptr<Statistic>> WindowStatisticStore::getSingleStatistic(
+std::optional<Statistic> WindowStatisticStore::getSingleStatistic(
     const Statistic::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs)
 {
     const auto pos = getPos(statisticId, numberOfExpectedConcurrentAccess);
@@ -130,8 +129,8 @@ std::optional<std::shared_ptr<Statistic>> WindowStatisticStore::getSingleStatist
     const auto& window = lockedStatisticStore->at({statisticId, curWindowStartTime});
     const auto foundStatistic = std::ranges::find_if(
         window,
-        [startTs, endTs](const std::shared_ptr<Statistic>& curStatistic)
-        { return curStatistic->getStartTs() == startTs and curStatistic->getEndTs() == endTs; });
+        [startTs, endTs](const Statistic& curStatistic)
+        { return curStatistic.getStartTs() == startTs and curStatistic.getEndTs() == endTs; });
     if (foundStatistic != window.end())
     {
         return *foundStatistic;
@@ -148,10 +147,10 @@ std::vector<AbstractStatisticStore::IdStatisticPair> WindowStatisticStore::getAl
         auto lockedStatisticStore = statisticStore.rlock();
         for (auto& [key, window] : *lockedStatisticStore)
         {
-            auto hashStatisticPairs = window
-                | std::views::transform([&key](const std::shared_ptr<Statistic>& statistic)
-                                        { return std::make_pair(key.statisticId, statistic); });
-            std::ranges::copy(hashStatisticPairs, std::back_inserter(retStatistics));
+            for (const auto& statistic : window)
+            {
+                retStatistics.emplace_back(key.statisticId, statistic);
+            }
         }
     }
 

@@ -29,14 +29,14 @@ public:
     bool insertStatistic(const Statistic::StatisticId& statisticId, Statistic statistic) override;
     bool deleteStatistics(
         const Statistic::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs) override;
-    std::vector<std::shared_ptr<Statistic>> getStatistics(
+    std::vector<Statistic> getStatistics(
         const Statistic::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs) override;
-    std::optional<std::shared_ptr<Statistic>> getSingleStatistic(
+    std::optional<Statistic> getSingleStatistic(
         const Statistic::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs) override;
     std::vector<IdStatisticPair> getAllStatistics() override;
 
 private:
-    folly::Synchronized<std::unordered_map<Statistic::StatisticId, std::vector<std::shared_ptr<Statistic>>>> statistics;
+    folly::Synchronized<std::unordered_map<Statistic::StatisticId, std::vector<Statistic>>> statistics;
 };
 
 }

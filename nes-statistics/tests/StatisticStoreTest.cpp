@@ -42,14 +42,14 @@ Statistic createDummyStatistic(const Statistic::StatisticId statisticId, Windowi
     /// Generating random statistic data of size 1 to 100 KiB
     std::uniform_int_distribution<> sizeDistribution{1, 100 * 1024};
     const size_t statisticSize = sizeDistribution(gen);
-    std::vector<int8_t> statisticData(statisticSize);
+    auto statisticData = std::make_shared<std::byte[]>(statisticSize);
     std::uniform_int_distribution<> byteDistribution{0, 255};
     for (size_t i = 0; i < statisticSize; ++i)
     {
-        statisticData[i] = byteDistribution(gen);
+        statisticData[i] = static_cast<std::byte>(byteDistribution(gen));
     }
 
-    return {statisticId, randomStatisticType, startTs, endTs, statisticSize, statisticData.data(), statisticSize};
+    return {statisticId, randomStatisticType, startTs, endTs, statisticSize, std::move(statisticData), statisticSize};
 }
 
 }

@@ -40,8 +40,9 @@ void insertStatisticIntoStoreProxy(
     const auto* opHandler = dynamic_cast<StatisticStoreOperatorHandler*>(ptrOpHandler);
     const auto statisticStore = opHandler->getStatisticStore();
 
-    std::vector<int8_t> statisticData(statisticDataSize);
-    std::memcpy(statisticData.data(), data, statisticDataSize);
+    auto statisticData = std::make_shared<std::byte[]>(statisticDataSize);
+    std::memcpy(statisticData.get(), data, statisticDataSize);
+
 
     const Statistic statistic{
         hash,
@@ -49,8 +50,8 @@ void insertStatisticIntoStoreProxy(
         Windowing::TimeMeasure(startTs.getRawValue()),
         Windowing::TimeMeasure(endTs.getRawValue()),
         numberOfSeenTuples,
-        statisticData.data(),
-        statisticData.size()};
+        statisticData,
+        statisticDataSize};
 
 
     statisticStore->insertStatistic(hash, statistic);

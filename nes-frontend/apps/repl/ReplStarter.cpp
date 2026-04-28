@@ -32,6 +32,7 @@
 #include <unistd.h>
 
 #include <Identifiers/Identifiers.hpp>
+#include <Operators/SelectionLogicalOperator.hpp>
 #include <Plans/LogicalPlan.hpp>
 #include <QueryManager/GRPCQuerySubmissionBackend.hpp>
 #include <QueryManager/QueryManager.hpp>
@@ -165,6 +166,37 @@ int main(int argc, char** argv)
             .append()
             .help("changes optimizer default values. e.g. join_strategy=HASH_JOIN");
 
+        /// companion statistic config
+        program.add_argument("--companion-statistic")
+            .flag()
+            .help("Deploy a companion statistic query alongside every SELECT query");
+        program.add_argument("--companion-source")
+            .default_value(std::string{"bid"})
+            .help("Logical source name for the companion statistic (default: bid)");
+        program.add_argument("--companion-field")
+            .default_value(std::string{"price"})
+            .help("Field name for the companion statistic (default: price)");
+        program.add_argument("--companion-metric")
+            .default_value(std::string(magic_enum::enum_name(NES::Metric::Cardinality)))
+            .choices(
+                magic_enum::enum_name(NES::Metric::Cardinality),
+                magic_enum::enum_name(NES::Metric::MinVal),
+                magic_enum::enum_name(NES::Metric::MaxVal),
+                magic_enum::enum_name(NES::Metric::Rate),
+                magic_enum::enum_name(NES::Metric::Average))
+            .help("Metric type for the companion statistic (default: Cardinality)");
+        program.add_argument("--companion-window-size-ms")
+            .default_value(std::string{"1000000"})
+            .help("Window size in milliseconds for the companion statistic (default: 1000000)");
+        program.add_argument("--companion-window-advance-ms")
+            .help("Window advance in milliseconds; if omitted, uses a tumbling window");
+        program.add_argument("--companion-event-time-field")
+            .help("Event-time field name; if omitted, uses ingestion time");
+        program.add_argument("--companion-condition")
+            .help("SQL filter expression applied to the statistic result (e.g. 'value > 100')");
+        program.add_argument("--companion-host")
+            .default_value(std::string{"localhost:8080"})
+            .help("Worker host for the companion statistic sink (default: localhost:8080)");
 
 #ifdef EMBED_ENGINE
         /// single node worker config
@@ -311,25 +343,57 @@ int main(int argc, char** argv)
         auto coordinatorAddr = statisticRequestHandler.startGrpcServer();
         NES_INFO("StatisticCoordinator gRPC server listening on {}", coordinatorAddr);
 
-        /// Hardcoded companion statistic for the adaptive-optimization experiment.
-        /// Every data query gets a 1-second cardinality statistic on bid.timestamp.
-        /// The callback fires on every incoming window result and prints to stdout.
-        NES::RequestStatisticBuildStatement companionStatisticRequest{
-            .domain = NES::DataDomain{.logicalSourceName = "bid", .fieldName = "price"},
-            .metric = NES::Metric::Cardinality,
-            .windowSizeMs = 1000000,
-            .windowAdvanceMs = std::nullopt,
-            .eventTimeFieldName = "BID$TIMESTAMP",
-            .conditionTrigger = NES::ConditionTrigger{
-                .condition = std::nullopt, /// fire unconditionally on every window result
-                .callback =
-                    [](NES::Statistic::StatisticId statId, NES::Windowing::TimeMeasure startTs, NES::Windowing::TimeMeasure endTs)
-                {
-                    std::cout << "[StatisticTrigger] id=" << statId.getRawValue() << " window=[" << startTs.getTime() << "ms, "
-                              << endTs.getTime() << "ms]\n";
-                    std::flush(std::cout);
-                }},
-            .options = {{"host", "localhost:8080"}}};
+        auto parseConditionExpression = [](const std::string& conditionStr) -> std::optional<NES::LogicalFunction>
+        {
+            /// Wrap the raw SQL expression in a synthetic SELECT so the existing parser can handle it.
+            /// The dummy source name is irrelevant — expression parsing does not need schema lookup.
+            const auto sql = fmt::format("SELECT * FROM _nes_stat_dummy_ WHERE {}", conditionStr);
+            auto plan = NES::AntlrSQLQueryParser::createLogicalQueryPlanFromSQLString(sql);
+            auto selections = NES::getOperatorByType<NES::SelectionLogicalOperator>(plan);
+            if (selections.empty())
+                return std::nullopt;
+            return selections.front()->getPredicate();
+        };
+
+        std::optional<NES::RequestStatisticBuildStatement> companionStatisticRequest = std::nullopt;
+        if (program.get<bool>("--companion-statistic"))
+        {
+            const auto metric =
+                magic_enum::enum_cast<NES::Metric>(program.get<std::string>("--companion-metric")).value();
+
+            std::optional<uint64_t> windowAdvanceMs;
+            if (program.is_used("--companion-window-advance-ms"))
+                windowAdvanceMs = std::stoull(program.get<std::string>("--companion-window-advance-ms"));
+
+            std::optional<std::string> eventTimeFieldName;
+            if (program.is_used("--companion-event-time-field"))
+                eventTimeFieldName = program.get<std::string>("--companion-event-time-field");
+
+            std::optional<NES::LogicalFunction> condition;
+            if (program.is_used("--companion-condition"))
+                condition = parseConditionExpression(program.get<std::string>("--companion-condition"));
+
+            companionStatisticRequest = NES::RequestStatisticBuildStatement{
+                .domain = NES::DataDomain{
+                    .logicalSourceName = program.get<std::string>("--companion-source"),
+                    .fieldName = program.get<std::string>("--companion-field")},
+                .metric = metric,
+                .windowSizeMs = std::stoull(program.get<std::string>("--companion-window-size-ms")),
+                .windowAdvanceMs = windowAdvanceMs,
+                .eventTimeFieldName = eventTimeFieldName,
+                .conditionTrigger = NES::ConditionTrigger{
+                    .condition = condition,
+                    .callback =
+                        [](NES::Statistic::StatisticId statId,
+                           NES::Windowing::TimeMeasure startTs,
+                           NES::Windowing::TimeMeasure endTs)
+                    {
+                        std::cout << "[StatisticTrigger] id=" << statId.getRawValue() << " window=[" << startTs.getTime() << "ms, "
+                                  << endTs.getTime() << "ms]\n";
+                        std::flush(std::cout);
+                    }},
+                .options = {{"host", program.get<std::string>("--companion-host")}}};
+        }
 
         NES::Repl replClient{
             std::move(sourceStatementHandler),

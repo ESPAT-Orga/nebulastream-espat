@@ -82,7 +82,7 @@ SET(
     'ALL' as `SOURCE`.STOP_GENERATOR_WHEN_SEQUENCE_FINISHES,
     'CSV' as PARSER.`TYPE`,
     'emit_rate 100000' AS `SOURCE`.GENERATOR_RATE_CONFIG,
-    10000000 AS `SOURCE`.MAX_RUNTIME_MS,
+    100000000 AS `SOURCE`.MAX_RUNTIME_MS,
     1 AS `SOURCE`.SEED,
     'SEQUENCE UINT64 0 10000000 100, SEQUENCE INT32 0 1000 1, NORMAL_DISTRIBUTION FLOAT64 50.0 17.0, NORMAL_DISTRIBUTION FLOAT64 500.0 167.0' AS `SOURCE`.GENERATOR_SCHEMA,
     '{WORKER_GRPC}' AS `SOURCE`.HOST
@@ -236,7 +236,17 @@ def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str):
     # --- Start REPL ---
     printInfo("Starting nes-repl (distributed mode)...")
     repl_proc = subprocess.Popen(
-        [repl_binary, "-f", "JSON"],
+        [
+            repl_binary,
+            "-f", "JSON",
+            "--companion-statistic",
+            "--companion-source", "bid",
+            "--companion-field", "price",
+            "--companion-metric", "Cardinality",
+            "--companion-window-size-ms", "1000000",
+            "--companion-event-time-field", "BID$TIMESTAMP",
+            "--companion-host", WORKER_GRPC,
+        ],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,

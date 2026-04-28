@@ -79,12 +79,12 @@ CREATE LOGICAL SOURCE bid(timestamp UINT64 NOT NULL, auctionId INT32 NOT NULL, b
 CREATE PHYSICAL SOURCE FOR bid
 TYPE Generator
 SET(
-    'ALL' as `SOURCE`.STOP_GENERATOR_WHEN_SEQUENCE_FINISHES,
+    'NONE' as `SOURCE`.STOP_GENERATOR_WHEN_SEQUENCE_FINISHES,
     'CSV' as PARSER.`TYPE`,
     'emit_rate 100000' AS `SOURCE`.GENERATOR_RATE_CONFIG,
     100000000 AS `SOURCE`.MAX_RUNTIME_MS,
     1 AS `SOURCE`.SEED,
-    'SEQUENCE UINT64 0 10000000 100, SEQUENCE INT32 0 1000 1, NORMAL_DISTRIBUTION FLOAT64 50.0 17.0, NORMAL_DISTRIBUTION FLOAT64 500.0 167.0' AS `SOURCE`.GENERATOR_SCHEMA,
+    'SEQUENCE UINT64 0 10000000 1, SEQUENCE INT32 0 1000 1, NORMAL_DISTRIBUTION FLOAT64 50.0 17.0, NORMAL_DISTRIBUTION FLOAT64 500.0 167.0' AS `SOURCE`.GENERATOR_SCHEMA,
     '{WORKER_GRPC}' AS `SOURCE`.HOST
 );
 CREATE SINK someSink(BID.TIMESTAMP UINT64 NOT NULL, BID.AUCTIONID INT32 NOT NULL, BID.BIDVALUE FLOAT64 NOT NULL, BID.PRICE FLOAT64 NOT NULL)
@@ -243,7 +243,7 @@ def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str):
             "--companion-source", "bid",
             "--companion-field", "price",
             "--companion-metric", "Cardinality",
-            "--companion-window-size-ms", "1000000",
+            "--companion-window-size-ms", "100000",
             "--companion-event-time-field", "BID$TIMESTAMP",
             "--companion-host", WORKER_GRPC,
         ],

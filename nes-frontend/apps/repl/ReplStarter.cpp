@@ -388,8 +388,8 @@ int main(int argc, char** argv)
                            NES::Windowing::TimeMeasure startTs,
                            NES::Windowing::TimeMeasure endTs)
                     {
-                        std::cout << "[StatisticTrigger] id=" << statId.getRawValue() << " window=[" << startTs.getTime() << "ms, "
-                                  << endTs.getTime() << "ms]\n";
+                        std::cout << "[StatisticTrigger] id=" << statId.getRawValue() << " window=[" << startTs.getTime() << ", "
+                                  << endTs.getTime() << "]\n";
                         std::flush(std::cout);
                     }},
                 .options = {{"host", program.get<std::string>("--companion-host")}}};

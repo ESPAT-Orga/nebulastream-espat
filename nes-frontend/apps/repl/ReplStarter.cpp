@@ -317,7 +317,7 @@ int main(int argc, char** argv)
         NES::RequestStatisticBuildStatement companionStatisticRequest{
             .domain = NES::DataDomain{.logicalSourceName = "bid", .fieldName = "price"},
             .metric = NES::Metric::Cardinality,
-            .windowSizeMs = 1000,
+            .windowSizeMs = 1000000,
             .windowAdvanceMs = std::nullopt,
             .eventTimeFieldName = "BID$TIMESTAMP",
             .conditionTrigger = NES::ConditionTrigger{

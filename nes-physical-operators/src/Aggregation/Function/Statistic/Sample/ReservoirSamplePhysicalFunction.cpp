@@ -18,6 +18,7 @@
 #include <numeric>
 #include <random>
 #include <ranges>
+#include <thread>
 #include <Nautilus/Interface/PagedVector/PagedVector.hpp>
 #include <Nautilus/Interface/PagedVector/PagedVectorRef.hpp>
 #include <Nautilus/Util.hpp>
@@ -49,7 +50,9 @@ nautilus::val<uint64_t> getRecordDataSizeForSample(const Record& record, const T
 
 uint64_t getRandomNumberProxy(const uint64_t upperBound, const uint64_t seed)
 {
-    static std::mt19937 gen(seed);
+    /// Each thread gets its own RNG, seeded by combining the provided seed
+    /// with the thread id to ensure different threads produce different sequences.
+    thread_local std::mt19937 gen(seed ^ std::hash<std::thread::id>{}(std::this_thread::get_id()));
     std::uniform_int_distribution<> dis(0, upperBound);
 
     return dis(gen);

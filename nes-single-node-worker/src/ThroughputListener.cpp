@@ -134,6 +134,39 @@ void threadRoutine(
                         }
                     }
                 },
+                [&](const QueryStop& queryStop)
+                {
+                    /// When a query stops, flush all remaining windows for that query.
+                    /// This ensures throughput is reported even for very short-lived queries
+                    /// that finish within a single measurement window.
+                    auto it = queryIdToThroughputWindowMap.find(queryStop.queryId);
+                    if (it == queryIdToThroughputWindowMap.end())
+                    {
+                        return;
+                    }
+                    auto& endTimeAndThroughputWindow = it->second;
+                    for (auto windowIt = endTimeAndThroughputWindow.begin(); windowIt != endTimeAndThroughputWindow.end();)
+                    {
+                        const auto& [startTime, endTime, tuplesProcessed] = windowIt->second;
+                        if (tuplesProcessed > 0)
+                        {
+                            /// For the last (possibly partial) window, use the actual window boundaries for duration
+                            const auto durationInMilliseconds = (endTime - startTime).getRawValue();
+                            if (durationInMilliseconds > 0)
+                            {
+                                const auto throughputInTuplesPerSec = tuplesProcessed / (durationInMilliseconds / 1000.0);
+                                const ThroughputListener::CallBackParams callbackParams
+                                    = {.queryId = queryStop.queryId,
+                                       .windowStart = startTime,
+                                       .windowEnd = endTime,
+                                       .throughputInTuplesPerSec = throughputInTuplesPerSec};
+                                callBack(callbackParams);
+                            }
+                        }
+                        windowIt = endTimeAndThroughputWindow.erase(windowIt);
+                    }
+                    queryIdToThroughputWindowMap.erase(it);
+                },
                 [](auto) {}},
             event);
     }
@@ -167,7 +200,12 @@ ThroughputListener::~ThroughputListener()
 
 void ThroughputListener::onEvent(Event event)
 {
-    std::visit(Overloaded{[&](const TaskEmit& taskEmit) { events.wlock()->emplace(taskEmit); }, [](auto) {}}, event);
+    std::visit(
+        Overloaded{
+            [&](const TaskEmit& taskEmit) { events.wlock()->emplace(taskEmit); },
+            [&](const QueryStop& queryStop) { events.wlock()->emplace(queryStop); },
+            [](auto) {}},
+        event);
 }
 
 ThroughputListener::ThroughputListener(

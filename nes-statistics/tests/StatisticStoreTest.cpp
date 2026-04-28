@@ -80,7 +80,7 @@ public:
                 statisticStore = DefaultStatisticStore();
                 break;
             case StatisticStoreType::WINDOW:
-                statisticStore = WindowStatisticStore(numberOfThreads, windowSize);
+                statisticStore = WindowStatisticStore(numberOfThreads);
                 break;
             case StatisticStoreType::SUB_STORES:
                 statisticStore = SubStoresStatisticStore(numberOfThreads);

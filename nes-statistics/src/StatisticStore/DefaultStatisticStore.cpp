@@ -22,19 +22,7 @@ namespace NES
 bool DefaultStatisticStore::insertStatistic(const Statistic::StatisticId& statisticId, Statistic statistic)
 {
     const auto statisticsLocked = statistics.wlock();
-    auto& statisticsVec = (*statisticsLocked)[statisticId];
-
-    const auto statisticExists = std::ranges::any_of(
-        statisticsVec,
-        [&statistic](const Statistic& existingStatistic)
-        { return statistic.getStartTs() == existingStatistic.getStartTs() and statistic.getEndTs() == existingStatistic.getEndTs(); });
-
-    if (statisticExists)
-    {
-        return false;
-    }
-
-    statisticsVec.emplace_back(std::move(statistic));
+    (*statisticsLocked)[statisticId].emplace_back(std::move(statistic));
     return true;
 }
 
@@ -55,10 +43,15 @@ bool DefaultStatisticStore::deleteStatistics(
 std::vector<Statistic> DefaultStatisticStore::getStatistics(
     const Statistic::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs)
 {
-    std::vector<Statistic> returnStatisticsVector;
     const auto statisticsLocked = statistics.rlock();
-    const auto& statisticsVec = statisticsLocked->at(statisticId);
+    const auto idIt = statisticsLocked->find(statisticId);
+    if (idIt == statisticsLocked->end())
+    {
+        return {};
+    }
 
+    std::vector<Statistic> returnStatisticsVector;
+    const auto& statisticsVec = idIt->second;
     std::ranges::copy_if(
         statisticsVec,
         std::back_inserter(returnStatisticsVector),
@@ -70,7 +63,12 @@ std::optional<Statistic> DefaultStatisticStore::getSingleStatistic(
     const Statistic::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs)
 {
     const auto statisticsLocked = statistics.rlock();
-    const auto& statisticsVec = statisticsLocked->at(statisticId);
+    const auto idIt = statisticsLocked->find(statisticId);
+    if (idIt == statisticsLocked->end())
+    {
+        return std::nullopt;
+    }
+    const auto& statisticsVec = idIt->second;
 
     const auto it = std::ranges::find_if(
         statisticsVec,

@@ -42,7 +42,7 @@ getStatisticDataProxy(OperatorHandler* ptrOpHandler, const Statistic::StatisticI
 
     if (statistic.has_value())
     {
-        return statistic.value()->getStatisticData();
+        return statistic.value().getStatisticData();
     }
     return nullptr;
 }
@@ -60,7 +60,7 @@ uint64_t getNumberOfSeenTuplesOfStatistic(
 
     if (statistic.has_value())
     {
-        return statistic.value()->getNumberOfSeenTuples();
+        return statistic.value().getNumberOfSeenTuples();
     }
     return 0;
 }

@@ -240,7 +240,8 @@ createHashMapOptions(std::vector<FieldNamesExtension>& joinFieldExtensions, Sche
 }
 }
 
-LoweringRuleResultSubgraph LowerToPhysicalHashJoin::apply(LogicalOperator logicalOperator)
+LoweringRuleResultSubgraph LowerToPhysicalHashJoin::apply(
+    LogicalOperator logicalOperator, [[maybe_unused]] const std::shared_ptr<AbstractStatisticStore>& statisticStore)
 {
     PRECONDITION(logicalOperator.tryGetAs<JoinLogicalOperator>(), "Expected a JoinLogicalOperator");
     PRECONDITION(std::ranges::size(logicalOperator.getChildren()) == 2, "Expected two children");

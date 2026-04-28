@@ -17,7 +17,6 @@
 #include <Nautilus/Interface/BufferRef/LowerSchemaProvider.hpp>
 #include <Nautilus/Interface/HashMap/ChainedHashMap/ChainedEntryMemoryProvider.hpp>
 #include <Operators/Windows/Aggregations/Sample/ReservoirProbeLogicalOperator.hpp>
-#include <Runtime/NodeEngine.hpp>
 #include <Statistic/Sample/ReservoirSampleIteratorImpl.hpp>
 #include <Statistic/StatisticStore/StatisticStoreOperatorHandler.hpp>
 #include <Statistic/StatisticStore/StatisticStoreReader.hpp>
@@ -45,12 +44,12 @@ StatisticProvider getStatisticProvider(const Schema& sampleSchema)
 }
 }
 
-LoweringRuleResultSubgraph LowerToPhysicalReservoirProbe::apply(LogicalOperator logicalOperator)
+LoweringRuleResultSubgraph
+LowerToPhysicalReservoirProbe::apply(LogicalOperator logicalOperator, const std::shared_ptr<AbstractStatisticStore>& statisticStore)
 {
     PRECONDITION(logicalOperator.tryGetAs<ReservoirProbeLogicalOperator>(), "Expected a ReservoirProbeLogicalOperator");
     const auto reservoirProbe = logicalOperator.getAs<ReservoirProbeLogicalOperator>();
-    auto statisticStore = NodeEngine::getStatisticStore();
-    auto statisticStoreReaderOperatorHandler = std::make_shared<StatisticStoreOperatorHandler>(std::move(statisticStore));
+    auto statisticStoreReaderOperatorHandler = std::make_shared<StatisticStoreOperatorHandler>(statisticStore);
     const auto operatorHandlerId = getNextOperatorHandlerId();
     const auto memoryLayoutTypeTrait = logicalOperator.getTraitSet().tryGet<MemoryLayoutTypeTrait>();
     PRECONDITION(memoryLayoutTypeTrait.has_value(), "Expected a memory layout type trait");

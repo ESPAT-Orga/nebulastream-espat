@@ -28,10 +28,10 @@ namespace NES::QueryCompilation
 {
 
 /// This phase should be as dumb as possible and not further decisions should be made here.
-std::unique_ptr<CompiledQueryPlan> QueryCompiler::compileQuery(std::unique_ptr<QueryCompilationRequest> request)
+std::unique_ptr<CompiledQueryPlan> QueryCompiler::compileQuery(std::unique_ptr<QueryCompilationRequest> request) const
 {
     auto lowerToCompiledQueryPlanPhase = LowerToCompiledQueryPlanPhase(request->dumpCompilationResult);
-    auto queryPlan = LowerToPhysicalOperators::apply(request->queryPlan, defaultQueryExecution);
+    auto queryPlan = LowerToPhysicalOperators::apply(request->queryPlan, defaultQueryExecution, statisticStore);
     auto pipelinedQueryPlan = PipeliningPhase::apply(queryPlan);
     return lowerToCompiledQueryPlanPhase.apply(pipelinedQueryPlan);
 }

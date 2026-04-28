@@ -15,7 +15,6 @@
 #include <LoweringRules/LowerToPhysical/LowerToPhysicalEquiWidthHistogramProbe.hpp>
 
 #include <Operators/Windows/Aggregations/Histogram/EquiWidthHistogramProbeLogicalOperator.hpp>
-#include <Runtime/NodeEngine.hpp>
 #include <Statistic/Histogram/EquiWidthHistogramIteratorImpl.hpp>
 #include <Statistic/StatisticStore/StatisticStoreOperatorHandler.hpp>
 #include <Statistic/StatisticStore/StatisticStoreReader.hpp>
@@ -41,15 +40,15 @@ StatisticProvider getStatisticProvider(
 }
 }
 
-LoweringRuleResultSubgraph LowerToPhysicalEquiWidthHistogramProbe::apply(LogicalOperator logicalOperator)
+LoweringRuleResultSubgraph LowerToPhysicalEquiWidthHistogramProbe::apply(
+    LogicalOperator logicalOperator, const std::shared_ptr<AbstractStatisticStore>& statisticStore)
 {
     PRECONDITION(logicalOperator.tryGetAs<EquiWidthHistogramProbeLogicalOperator>(), "Expected a EquiWidthHistogramProbeLogicalOperator");
     const auto memoryLayoutTypeTrait = logicalOperator.getTraitSet().tryGet<MemoryLayoutTypeTrait>();
     PRECONDITION(memoryLayoutTypeTrait.has_value(), "Expected a memory layout type trait");
     const auto memoryLayoutType = memoryLayoutTypeTrait.value()->memoryLayout;
     const auto equiWidthProbe = logicalOperator.getAs<EquiWidthHistogramProbeLogicalOperator>();
-    auto statisticStore = NodeEngine::getStatisticStore();
-    auto statisticStoreReaderOperatorHandler = std::make_shared<StatisticStoreOperatorHandler>(std::move(statisticStore));
+    auto statisticStoreReaderOperatorHandler = std::make_shared<StatisticStoreOperatorHandler>(statisticStore);
     const auto operatorHandlerId = getNextOperatorHandlerId();
     auto statisticProvider = getStatisticProvider(
         equiWidthProbe->counterType,

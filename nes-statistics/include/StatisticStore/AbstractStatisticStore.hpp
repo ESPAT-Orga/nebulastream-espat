@@ -14,7 +14,6 @@
 
 #pragma once
 
-#include <memory>
 #include <optional>
 #include <utility>
 #include <vector>
@@ -34,7 +33,7 @@ enum class StatisticStoreType : uint8_t
 class AbstractStatisticStore
 {
 public:
-    using IdStatisticPair = std::pair<Statistic::StatisticId, std::shared_ptr<Statistic>>;
+    using IdStatisticPair = std::pair<Statistic::StatisticId, Statistic>;
 
     AbstractStatisticStore() = default;
     virtual ~AbstractStatisticStore() = default;
@@ -48,12 +47,12 @@ public:
         = 0;
 
     /// Gets all statistics belonging to the statisticId in the period of [startTs, endTs]
-    virtual std::vector<std::shared_ptr<Statistic>>
+    virtual std::vector<Statistic>
     getStatistics(const Statistic::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs)
         = 0;
 
     /// Gets a single statistic belonging to the statisticId that has exactly the startTs and endTs
-    virtual std::optional<std::shared_ptr<Statistic>> getSingleStatistic(
+    virtual std::optional<Statistic> getSingleStatistic(
         const Statistic::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs)
         = 0;
 

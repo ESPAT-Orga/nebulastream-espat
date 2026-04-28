@@ -26,3 +26,4 @@ add_plugin(CastToUnixTs LogicalFunction nes-logical-operators CastToUnixTimestam
 add_plugin(CastFromUnixTs LogicalFunction nes-logical-operators CastFromUnixTimestampLogicalFunction.cpp)
 add_plugin(ZstdCompress LogicalFunction nes-logical-operators ZstdCompressLogicalFunction.cpp)
 add_plugin(ZstdDecompress LogicalFunction nes-logical-operators ZstdDecompressLogicalFunction.cpp)
+add_plugin(H3_HASH LogicalFunction nes-logical-operators H3HashLogicalFunction.cpp)

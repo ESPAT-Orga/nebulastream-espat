@@ -22,6 +22,7 @@ add_plugin(Cast PhysicalFunction nes-physical-operators CastFieldPhysicalFunctio
 add_plugin(CastToUnixTs PhysicalFunction nes-physical-operators CastToUnixTimestampPhysicalFunction.cpp)
 add_plugin(CastFromUnixTs PhysicalFunction nes-physical-operators CastFromUnixTimestampPhysicalFunction.cpp)
 add_plugin(ZstdDecompress PhysicalFunction nes-physical-operators ZstdDecompressPhysicalFunction.cpp)
+add_plugin(H3_HASH PhysicalFunction nes-physical-operators H3HashPhysicalFunction.cpp)
 
 add_subdirectory(ArithmeticalFunctions)
 add_subdirectory(ComparisonFunctions)

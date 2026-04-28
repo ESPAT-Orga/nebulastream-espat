@@ -188,7 +188,8 @@ std::vector<std::shared_ptr<AggregationPhysicalFunction>> getAggregationPhysical
 }
 }
 
-LoweringRuleResultSubgraph LowerToPhysicalStatisticBuild::apply(LogicalOperator logicalOperator)
+LoweringRuleResultSubgraph LowerToPhysicalStatisticBuild::apply(
+    LogicalOperator logicalOperator, [[maybe_unused]] const std::shared_ptr<AbstractStatisticStore>& statisticStore)
 {
     PRECONDITION(logicalOperator.tryGetAs<StatisticBuildLogicalOperator>(), "Expected a StatisticBuildLogicalOperator");
     PRECONDITION(std::ranges::size(logicalOperator.getChildren()) == 1, "Expected one child");

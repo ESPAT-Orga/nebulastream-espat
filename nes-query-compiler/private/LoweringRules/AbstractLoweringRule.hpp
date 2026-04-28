@@ -17,6 +17,7 @@
 #include <memory>
 #include <vector>
 #include <Operators/LogicalOperator.hpp>
+#include <StatisticStore/AbstractStatisticStore.hpp>
 #include <PhysicalOperator.hpp>
 
 namespace NES
@@ -40,7 +41,11 @@ struct LoweringRuleResultSubgraph
 /// For now, the interface only considers lowering rules (logical operator to physical subgraph)
 struct AbstractLoweringRule
 {
-    virtual LoweringRuleResultSubgraph apply(LogicalOperator logicalOperator) = 0;
+    /// NOTE: threading the statisticStore through every rule's apply() is not ideal - most rules
+    /// don't need it. Fine for a PoC; longer term consider a richer lowering context or exposing
+    /// the store through a dedicated provider only to the rules that actually use it.
+    virtual LoweringRuleResultSubgraph apply(LogicalOperator logicalOperator, const std::shared_ptr<AbstractStatisticStore>& statisticStore)
+        = 0;
     virtual ~AbstractLoweringRule() = default;
 };
 

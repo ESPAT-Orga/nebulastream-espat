@@ -28,7 +28,8 @@
 namespace NES
 {
 
-LoweringRuleResultSubgraph LowerToPhysicalEventTimeWatermarkAssigner::apply(LogicalOperator logicalOperator)
+LoweringRuleResultSubgraph LowerToPhysicalEventTimeWatermarkAssigner::apply(
+    LogicalOperator logicalOperator, [[maybe_unused]] const std::shared_ptr<AbstractStatisticStore>& statisticStore)
 {
     PRECONDITION(logicalOperator.tryGetAs<EventTimeWatermarkAssignerLogicalOperator>(), "Expected a EventTimeWatermarkAssigner");
     const auto assigner = logicalOperator.getAs<EventTimeWatermarkAssignerLogicalOperator>();

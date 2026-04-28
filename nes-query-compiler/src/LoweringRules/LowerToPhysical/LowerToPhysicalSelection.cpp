@@ -28,7 +28,8 @@
 namespace NES
 {
 
-LoweringRuleResultSubgraph LowerToPhysicalSelection::apply(LogicalOperator logicalOperator)
+LoweringRuleResultSubgraph LowerToPhysicalSelection::apply(
+    LogicalOperator logicalOperator, [[maybe_unused]] const std::shared_ptr<AbstractStatisticStore>& statisticStore)
 {
     PRECONDITION(logicalOperator.tryGetAs<SelectionLogicalOperator>(), "Expected a SelectionLogicalOperator");
     const auto selection = logicalOperator.getAs<SelectionLogicalOperator>();

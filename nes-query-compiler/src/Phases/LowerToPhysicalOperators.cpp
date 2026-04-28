@@ -81,7 +81,7 @@ lowerOperatorRecursively(const LogicalOperator& logicalOperator, const LoweringR
     const auto rule = resolveLoweringRule(logicalOperator, registryArgument);
 
     /// We apply the rule and receive a subgraph
-    const auto [root, leafs] = rule->apply(logicalOperator);
+    const auto [root, leafs] = rule->apply(logicalOperator, registryArgument.statisticStore);
     INVARIANT(
         leafs.size() == logicalOperator.getChildren().size(),
         "Number of children after lowering must remain the same. {}, before:{}, after:{}",
@@ -121,9 +121,12 @@ lowerOperatorRecursively(const LogicalOperator& logicalOperator, const LoweringR
     return root;
 }
 
-PhysicalPlan apply(const LogicalPlan& queryPlan, const QueryExecutionConfiguration& conf) /// NOLINT
+PhysicalPlan apply(
+    const LogicalPlan& queryPlan,
+    const QueryExecutionConfiguration& conf,
+    std::shared_ptr<AbstractStatisticStore> statisticStore) /// NOLINT
 {
-    const auto registryArgument = LoweringRuleRegistryArguments{conf};
+    const auto registryArgument = LoweringRuleRegistryArguments{conf, std::move(statisticStore)};
     std::vector<std::shared_ptr<PhysicalOperatorWrapper>> newRootOperators;
     newRootOperators.reserve(queryPlan.getRootOperators().size());
     for (const auto& logicalRoot : queryPlan.getRootOperators())

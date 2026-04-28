@@ -63,6 +63,13 @@ WORKER_GRPC = "localhost:8080"
 WORKER_DATA = "localhost:9090"
 
 #### Query to deploy (nexmark bid-like schema, generator source)
+#
+# Two filters are applied with the following selectivities (fields are independent):
+#   bidValue < 28.21  →  selectivity 0.1
+#     bidValue ~ N(mean=50, stddev=17); 10th percentile = 50 + 17 * Φ⁻¹(0.10) = 50 + 17*(-1.2816) ≈ 28.21
+#   price    < 714.03 →  selectivity 0.9
+#     price    ~ N(mean=500, stddev=167); 90th percentile = 500 + 167 * Φ⁻¹(0.90) = 500 + 167*(+1.2816) ≈ 714.03
+#   Combined selectivity (AND): 0.1 * 0.9 = 0.09
 SETUP_SQL = f"""\
 CREATE WORKER "{WORKER_GRPC}" SET ('{WORKER_DATA}' AS DATA);
 CREATE LOGICAL SOURCE bid(timestamp UINT64 NOT NULL, auctionId INT32 NOT NULL, bidValue FLOAT64 NOT NULL, price FLOAT64 NOT NULL);
@@ -84,7 +91,9 @@ SET(
     'CSV' as `SINK`.OUTPUT_FORMAT,
     '{WORKER_GRPC}' AS `SINK`.HOST
 );
-SELECT timestamp, auctionId, bidValue, price FROM bid INTO someSink;
+SELECT timestamp, auctionId, bidValue, price FROM bid
+WHERE bidValue < FLOAT64(28.21) AND price < FLOAT64(714.03)
+INTO someSink;
 """
 
 

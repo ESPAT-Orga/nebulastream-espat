@@ -31,7 +31,8 @@
 namespace NES
 {
 
-LoweringRuleResultSubgraph LowerToPhysicalUnion::apply(LogicalOperator logicalOperator)
+LoweringRuleResultSubgraph
+LowerToPhysicalUnion::apply(LogicalOperator logicalOperator, [[maybe_unused]] const std::shared_ptr<AbstractStatisticStore>& statisticStore)
 {
     PRECONDITION(logicalOperator.tryGetAs<UnionLogicalOperator>(), "Expected a UnionLogicalOperator");
 

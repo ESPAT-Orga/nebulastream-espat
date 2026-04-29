@@ -18,10 +18,13 @@ then cleans the CSV output.
 """
 
 import argparse
+import shlex
 import os
 
 from scripts.benchmarking.utils import *
 
+#### This script builds and then runs the StatisticStoreBenchmark target. For changing the benchmark params, please see
+#### nes-statistics/src/StatisticStore/StatisticStoreBenchmark.cpp
 #### Benchmark Configurations
 build_dir = os.path.join(".", "build_dir")
 csv_file_path = os.path.abspath(os.path.join(os.getcwd(), "statistic_store_benchmark.csv"))
@@ -32,35 +35,16 @@ cmake_flags = ("-G Ninja "
                "-DUSE_LIBCXX_IF_AVAILABLE:BOOL=OFF "
                "-DENABLE_LARGE_TESTS=0 "
                "-DNES_BUILD_NATIVE:BOOL=ON "
-               "-DNES_LOG_LEVEL:STRING=LEVEL_NONE "
-               "-DNES_BUILD_NATIVE:BOOL=ON")
-
-
-def clean_csv(csv_path):
-    """Remove all lines from the head of the CSV until a line starting with 'name,iterations,real_time'."""
-    with open(csv_path, 'r') as f:
-        lines = f.readlines()
-
-    start_idx = None
-    for idx, line in enumerate(lines):
-        if line.startswith("name,iterations,real_time"):
-            start_idx = idx
-            break
-
-    if start_idx is None:
-        printError(f"Could not find header line starting with 'name,iterations,real_time' in {csv_path}")
-        return
-
-    with open(csv_path, 'w') as f:
-        f.writelines(lines[start_idx:])
-
-    printSuccess(f"Cleaned CSV: removed {start_idx} header lines.")
-
+               "-DNES_LOG_LEVEL:STRING=LEVEL_NONE ")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run statistic-store-benchmark.")
     parser.add_argument("--clean", action="store_true",
                         help="Remove and recreate the build directory before building.")
+    parser.add_argument("--filter",
+                        help="Comma-separated keywords; only configs whose report line contains ALL keywords are run. Example: get,ws=60000")
+    parser.add_argument("--exclude", action="append", default=[],
+                    help="Comma-separated keywords per group; a config is skipped if ALL keywords in ANY group match. Can be repeated. Example: --exclude DEFAULT,threads=16 --exclude Get,ids=    1")
     args = parser.parse_args()
 
     # Checking if the script has been executed from the repository root
@@ -74,14 +58,12 @@ if __name__ == "__main__":
     compile_nebulastream(cmake_flags, build_dir)
 
     # Run the benchmark
-    benchmark_command = (f"{benchmark_executable} "
-                         f"--benchmark_out={csv_file_path} "
-                         f"--benchmark_out_format=csv")
+    benchmark_command = benchmark_executable
+    if args.filter:
+        benchmark_command += f" --filter '{args.filter}'"
+    for exc in args.exclude:
+        benchmark_command += f" --exclude {shlex.quote(exc)}"
 
     printInfo("Running statistic-store-benchmark...")
-    run_command(benchmark_command)
-
-    # Clean the CSV output
-    clean_csv(csv_file_path)
-
+    run_command_and_show_output(benchmark_command)
     printInfo(f"\nCSV Measurement file can be found in {csv_file_path}")

@@ -26,7 +26,8 @@ struct LowerToPhysicalUnion : AbstractLoweringRule
 {
     explicit LowerToPhysicalUnion(QueryExecutionConfiguration conf) : conf(std::move(conf)) { }
 
-    LoweringRuleResultSubgraph apply(LogicalOperator logicalOperator) override;
+    LoweringRuleResultSubgraph
+    apply(LogicalOperator logicalOperator, const std::shared_ptr<AbstractStatisticStore>& statisticStore) override;
 
 private:
     QueryExecutionConfiguration conf;

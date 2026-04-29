@@ -22,6 +22,11 @@
 #include <Runtime/BufferManager.hpp>
 #include <Runtime/NodeEngine.hpp>
 #include <Sources/SourceProvider.hpp>
+#include <StatisticStore/AbstractStatisticStore.hpp>
+#include <StatisticStore/DefaultStatisticStore.hpp>
+#include <StatisticStore/SubStoresStatisticStore.hpp>
+#include <StatisticStore/WindowStatisticStore.hpp>
+#include <ErrorHandling.hpp>
 #include <QueryEngine.hpp>
 
 namespace NES
@@ -45,8 +50,29 @@ std::unique_ptr<NodeEngine> NodeEngineBuilder::build(const Host& host)
 
     auto sourceProvider = std::make_unique<SourceProvider>(workerConfiguration.defaultMaxInflightBuffers.getValue(), bufferManager);
 
+    const auto concurrency = workerConfiguration.queryEngine.numberOfWorkerThreads.getValue();
+    std::shared_ptr<AbstractStatisticStore> statisticStore;
+    switch (workerConfiguration.statisticStoreType.getValue())
+    {
+        case StatisticStoreType::DEFAULT:
+            statisticStore = std::make_shared<DefaultStatisticStore>();
+            break;
+        case StatisticStoreType::WINDOW:
+            statisticStore = std::make_shared<WindowStatisticStore>(concurrency);
+            break;
+        case StatisticStoreType::SUB_STORES:
+            statisticStore = std::make_shared<SubStoresStatisticStore>(concurrency);
+            break;
+    }
+    INVARIANT(statisticStore != nullptr, "Unhandled StatisticStoreType");
+
     return std::make_unique<NodeEngine>(
-        std::move(bufferManager), statisticsListener, std::move(queryLog), std::move(queryEngine), std::move(sourceProvider));
+        std::move(bufferManager),
+        statisticsListener,
+        std::move(queryLog),
+        std::move(queryEngine),
+        std::move(sourceProvider),
+        std::move(statisticStore));
 }
 
 }

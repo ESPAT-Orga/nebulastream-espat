@@ -72,7 +72,8 @@ static auto getJoinFieldNames(const Schema& inputSchema, const LogicalFunction& 
         | std::ranges::to<std::vector<std::string>>();
 };
 
-LoweringRuleResultSubgraph LowerToPhysicalNLJoin::apply(LogicalOperator logicalOperator)
+LoweringRuleResultSubgraph LowerToPhysicalNLJoin::apply(
+    LogicalOperator logicalOperator, [[maybe_unused]] const std::shared_ptr<AbstractStatisticStore>& statisticStore)
 {
     PRECONDITION(logicalOperator.tryGetAs<JoinLogicalOperator>(), "Expected a JoinLogicalOperator");
     PRECONDITION(std::ranges::size(logicalOperator.getChildren()) == 2, "Expected two children");

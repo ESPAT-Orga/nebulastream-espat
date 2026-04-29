@@ -15,7 +15,6 @@
 #include <LoweringRules/LowerToPhysical/LowerToPhysicalCountMinSketchProbe.hpp>
 
 #include <Operators/Windows/Aggregations/Sketch/CountMinSketchProbeLogicalOperator.hpp>
-#include <Runtime/NodeEngine.hpp>
 #include <Statistic/Sketch/CountMinSketchIteratorImpl.hpp>
 #include <Statistic/StatisticStore/StatisticStoreOperatorHandler.hpp>
 #include <Statistic/StatisticStore/StatisticStoreReader.hpp>
@@ -37,15 +36,15 @@ getStatisticProvider(const DataType counterType, std::string columnFieldName, st
 }
 }
 
-LoweringRuleResultSubgraph LowerToPhysicalCountMinSketchProbe::apply(LogicalOperator logicalOperator)
+LoweringRuleResultSubgraph
+LowerToPhysicalCountMinSketchProbe::apply(LogicalOperator logicalOperator, const std::shared_ptr<AbstractStatisticStore>& statisticStore)
 {
     PRECONDITION(logicalOperator.tryGetAs<CountMinSketchProbeLogicalOperator>(), "Expected a CountMinSketchProbeLogicalOperator");
     const auto memoryLayoutTypeTrait = logicalOperator.getTraitSet().tryGet<MemoryLayoutTypeTrait>();
     PRECONDITION(memoryLayoutTypeTrait.has_value(), "Expected a memory layout type trait");
     const auto memoryLayoutType = memoryLayoutTypeTrait.value()->memoryLayout;
     const auto countMinProbe = logicalOperator.getAs<CountMinSketchProbeLogicalOperator>();
-    auto statisticStore = NodeEngine::getStatisticStore();
-    auto statisticStoreReaderOperatorHandler = std::make_shared<StatisticStoreOperatorHandler>(std::move(statisticStore));
+    auto statisticStoreReaderOperatorHandler = std::make_shared<StatisticStoreOperatorHandler>(statisticStore);
     const auto operatorHandlerId = getNextOperatorHandlerId();
     auto statisticProvider = getStatisticProvider(
         countMinProbe->counterType, countMinProbe->columnIndexFieldName, countMinProbe->rowIndexFieldName, countMinProbe->counterFieldName);

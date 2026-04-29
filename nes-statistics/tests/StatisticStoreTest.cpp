@@ -36,20 +36,20 @@ Statistic createDummyStatistic(const Statistic::StatisticId statisticId, Windowi
 
     /// Picking a random statistic type value
     constexpr auto statisticTypes = magic_enum::enum_values<Statistic::StatisticType>();
-    std::uniform_int_distribution<> enumDistribution{0, magic_enum::enum_count<Statistic::StatisticType>()};
+    std::uniform_int_distribution<> enumDistribution{0, magic_enum::enum_count<Statistic::StatisticType>() - 1};
     const auto randomStatisticType = statisticTypes[enumDistribution(gen)];
 
     /// Generating random statistic data of size 1 to 100 KiB
     std::uniform_int_distribution<> sizeDistribution{1, 100 * 1024};
     const size_t statisticSize = sizeDistribution(gen);
-    std::vector<int8_t> statisticData(statisticSize);
+    auto statisticData = std::make_shared<std::byte[]>(statisticSize);
     std::uniform_int_distribution<> byteDistribution{0, 255};
     for (size_t i = 0; i < statisticSize; ++i)
     {
-        statisticData[i] = byteDistribution(gen);
+        statisticData[i] = static_cast<std::byte>(byteDistribution(gen));
     }
 
-    return {statisticId, randomStatisticType, startTs, endTs, statisticSize, statisticData.data(), statisticSize};
+    return {statisticId, randomStatisticType, startTs, endTs, statisticSize, std::move(statisticData), statisticSize};
 }
 
 }
@@ -80,7 +80,7 @@ public:
                 statisticStore = DefaultStatisticStore();
                 break;
             case StatisticStoreType::WINDOW:
-                statisticStore = WindowStatisticStore(numberOfThreads, windowSize);
+                statisticStore = WindowStatisticStore(numberOfThreads);
                 break;
             case StatisticStoreType::SUB_STORES:
                 statisticStore = SubStoresStatisticStore(numberOfThreads);
@@ -135,7 +135,7 @@ TEST_P(StatisticStoreTest, singleItem)
         { return store.getStatistics(dummyStatistic.getStatisticId(), dummyStatistic.getStartTs(), dummyStatistic.getEndTs()); },
         statisticStore);
     ASSERT_EQ(getStatistics.size(), 1);
-    EXPECT_EQ(*getStatistics[0], dummyStatistic);
+    EXPECT_EQ(getStatistics[0], dummyStatistic);
 
     /// Testing, if we get the inserted statistic via getSingleStatistic()
     auto getSingleStatistic = std::visit(
@@ -143,7 +143,7 @@ TEST_P(StatisticStoreTest, singleItem)
         { return store.getSingleStatistic(dummyStatistic.getStatisticId(), dummyStatistic.getStartTs(), dummyStatistic.getEndTs()); },
         statisticStore);
     ASSERT_TRUE(getSingleStatistic.has_value());
-    EXPECT_EQ(*getSingleStatistic.value(), dummyStatistic);
+    EXPECT_EQ(getSingleStatistic.value(), dummyStatistic);
 
     /// Now, we delete the statistic and then check that we can not retrieve it anymore
     ASSERT_TRUE(std::visit(
@@ -193,7 +193,7 @@ TEST_P(StatisticStoreTest, multipleItem)
                         },
                         statisticStore);
                     ASSERT_EQ(getStatistics.size(), 1);
-                    EXPECT_EQ(*getStatistics[0], dummyStatistic);
+                    EXPECT_EQ(getStatistics[0], dummyStatistic);
 
                     /// Testing, if we get the inserted statistic via getSingleStatistic()
                     auto getSingleStatistic = std::visit(
@@ -204,7 +204,7 @@ TEST_P(StatisticStoreTest, multipleItem)
                         },
                         statisticStore);
                     ASSERT_TRUE(getSingleStatistic.has_value());
-                    EXPECT_EQ(*getSingleStatistic.value(), dummyStatistic);
+                    EXPECT_EQ(getSingleStatistic.value(), dummyStatistic);
                 }
             });
     }
@@ -221,8 +221,8 @@ TEST_P(StatisticStoreTest, multipleItem)
     for (const auto& actualStatistic : allActualStatistics | std::views::values)
     {
         const auto foundStatistic
-            = std::ranges::any_of(allStatistics, [&actualStatistic](const auto& statistic) { return *actualStatistic == statistic; });
-        EXPECT_TRUE(foundStatistic) << fmt::format("Could not find {} in the statistics store!", *actualStatistic);
+            = std::ranges::any_of(allStatistics, [&actualStatistic](const auto& statistic) { return actualStatistic == statistic; });
+        EXPECT_TRUE(foundStatistic) << fmt::format("Could not find {} in the statistics store!", actualStatistic);
     }
 
     /// Checking, if we can retrieve all inserted statistics for a particular statistic hash
@@ -234,7 +234,7 @@ TEST_P(StatisticStoreTest, multipleItem)
             statisticStore);
 
         const auto foundStatistic
-            = std::ranges::any_of(retrievedStatistics, [&dummyStatistic](const auto& statistic) { return dummyStatistic == *statistic; });
+            = std::ranges::any_of(retrievedStatistics, [&dummyStatistic](const auto& statistic) { return dummyStatistic == statistic; });
         EXPECT_TRUE(foundStatistic) << fmt::format("Could not find {} in the statistics store!", dummyStatistic);
     }
 

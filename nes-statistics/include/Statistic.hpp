@@ -13,10 +13,11 @@
 */
 
 #pragma once
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <ostream>
-#include <vector>
 #include <Identifiers/NESStrongType.hpp>
 #include <Util/Logger/Formatter.hpp>
 #include <WindowTypes/Measures/TimeMeasure.hpp>
@@ -29,7 +30,7 @@ namespace NES
 
 
 /// @brief A statistic represents particular information of a component, stream or etc. over a period of time.
-/// As we build and probe these statistics via a query compiler, this class solely stores the statistic as a vector of bytes/int8_t
+/// As we build and probe these statistics via a query compiler, this class solely stores the statistic as a shared byte array
 class Statistic
 {
 public:
@@ -50,14 +51,15 @@ public:
         const Windowing::TimeMeasure& startTs,
         const Windowing::TimeMeasure& endTs,
         const uint64_t numberOfSeenTuples,
-        int8_t* statistic,
-        const uint64_t statisticSize)
+        std::shared_ptr<std::byte[]> statisticData,
+        const uint64_t statisticDataSize)
         : statisticId(statisticId)
         , statisticType(statisticType)
         , startTs(startTs)
         , endTs(endTs)
         , numberOfSeenTuples(numberOfSeenTuples)
-        , statistic(statistic, statistic + statisticSize)
+        , statisticData(std::move(statisticData))
+        , statisticDataSize(statisticDataSize)
     {
     }
 
@@ -72,7 +74,7 @@ public:
 
     [[nodiscard]] Windowing::TimeMeasure getEndTs() const { return endTs; }
 
-    [[nodiscard]] const int8_t* getStatisticData() const { return statistic.data(); }
+    [[nodiscard]] const int8_t* getStatisticData() const { return reinterpret_cast<const int8_t*>(statisticData.get()); }
 
     [[nodiscard]] uint64_t getNumberOfSeenTuples() const { return numberOfSeenTuples; }
 
@@ -81,7 +83,8 @@ public:
     bool operator==(const Statistic& other) const
     {
         return statisticId == other.statisticId and statisticType == other.statisticType and startTs == other.startTs
-            and endTs == other.endTs and statistic == other.statistic and numberOfSeenTuples == other.numberOfSeenTuples;
+            and endTs == other.endTs and numberOfSeenTuples == other.numberOfSeenTuples and statisticDataSize == other.statisticDataSize
+            and std::equal(statisticData.get(), statisticData.get() + statisticDataSize, other.statisticData.get());
     }
 
     friend std::ostream& operator<<(std::ostream& os, const Statistic& statistic);
@@ -92,7 +95,8 @@ private:
     Windowing::TimeMeasure startTs;
     Windowing::TimeMeasure endTs;
     uint64_t numberOfSeenTuples;
-    std::vector<int8_t> statistic;
+    std::shared_ptr<std::byte[]> statisticData;
+    uint64_t statisticDataSize;
 };
 
 /// Overload modulo operator for StatisticId as it is commonly used to index into hash maps.

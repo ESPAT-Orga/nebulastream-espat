@@ -73,7 +73,8 @@ createScanOperator(const NES::LogicalOperator& projectionOp, const size_t buffer
 namespace NES
 {
 
-LoweringRuleResultSubgraph LowerToPhysicalProjection::apply(LogicalOperator projectionLogicalOperator)
+LoweringRuleResultSubgraph LowerToPhysicalProjection::apply(
+    LogicalOperator projectionLogicalOperator, [[maybe_unused]] const std::shared_ptr<AbstractStatisticStore>& statisticStore)
 {
     auto projection = projectionLogicalOperator.getAs<ProjectionLogicalOperator>();
     auto inputSchema = projectionLogicalOperator.getInputSchemas()[0];

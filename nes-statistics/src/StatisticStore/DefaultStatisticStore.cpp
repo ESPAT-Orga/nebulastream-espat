@@ -22,19 +22,7 @@ namespace NES
 bool DefaultStatisticStore::insertStatistic(const Statistic::StatisticId& statisticId, Statistic statistic)
 {
     const auto statisticsLocked = statistics.wlock();
-    auto& statisticsVec = (*statisticsLocked)[statisticId];
-
-    const auto statisticExists = std::ranges::any_of(
-        statisticsVec,
-        [&statistic](const auto& existingStatistic)
-        { return statistic.getStartTs() == existingStatistic->getStartTs() and statistic.getEndTs() == existingStatistic->getEndTs(); });
-
-    if (statisticExists)
-    {
-        return false;
-    }
-
-    statisticsVec.emplace_back(std::make_shared<Statistic>(statistic));
+    (*statisticsLocked)[statisticId].emplace_back(std::move(statistic));
     return true;
 }
 
@@ -46,36 +34,46 @@ bool DefaultStatisticStore::deleteStatistics(
 
     const auto range = std::ranges::remove_if(
         statisticsVec,
-        [startTs, endTs](const auto statistic) { return startTs <= statistic->getStartTs() && statistic->getEndTs() <= endTs; });
+        [startTs, endTs](const Statistic& statistic) { return startTs <= statistic.getStartTs() && statistic.getEndTs() <= endTs; });
     const bool foundAnyStatistic = range.begin() != statisticsVec.end();
     statisticsVec.erase(range.begin(), statisticsVec.end());
     return foundAnyStatistic;
 }
 
-std::vector<std::shared_ptr<Statistic>> DefaultStatisticStore::getStatistics(
+std::vector<Statistic> DefaultStatisticStore::getStatistics(
     const Statistic::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs)
 {
-    std::vector<std::shared_ptr<Statistic>> returnStatisticsVector;
     const auto statisticsLocked = statistics.rlock();
-    const auto& statisticsVec = statisticsLocked->at(statisticId);
+    const auto idIt = statisticsLocked->find(statisticId);
+    if (idIt == statisticsLocked->end())
+    {
+        return {};
+    }
 
+    std::vector<Statistic> returnStatisticsVector;
+    const auto& statisticsVec = idIt->second;
     std::ranges::copy_if(
         statisticsVec,
         std::back_inserter(returnStatisticsVector),
-        [startTs, endTs](const auto statistic) { return startTs <= statistic->getStartTs() && statistic->getEndTs() <= endTs; });
+        [startTs, endTs](const Statistic& statistic) { return startTs <= statistic.getStartTs() && statistic.getEndTs() <= endTs; });
     return returnStatisticsVector;
 }
 
-std::optional<std::shared_ptr<Statistic>> DefaultStatisticStore::getSingleStatistic(
+std::optional<Statistic> DefaultStatisticStore::getSingleStatistic(
     const Statistic::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs)
 {
     const auto statisticsLocked = statistics.rlock();
-    const auto& statisticsVec = statisticsLocked->at(statisticId);
+    const auto idIt = statisticsLocked->find(statisticId);
+    if (idIt == statisticsLocked->end())
+    {
+        return std::nullopt;
+    }
+    const auto& statisticsVec = idIt->second;
 
     const auto it = std::ranges::find_if(
         statisticsVec,
-        [startTs, endTs](const auto statistic) { return startTs == statistic->getStartTs() && statistic->getEndTs() == endTs; });
-    return it != statisticsVec.end() ? std::make_optional(*it) : std::optional<std::shared_ptr<Statistic>>{};
+        [startTs, endTs](const Statistic& statistic) { return startTs == statistic.getStartTs() && statistic.getEndTs() == endTs; });
+    return it != statisticsVec.end() ? std::make_optional(*it) : std::optional<Statistic>{};
 }
 
 std::vector<DefaultStatisticStore::IdStatisticPair> DefaultStatisticStore::getAllStatistics()
@@ -85,10 +83,10 @@ std::vector<DefaultStatisticStore::IdStatisticPair> DefaultStatisticStore::getAl
 
     for (const auto& [statisticId, statisticVec] : *statisticsLocked)
     {
-        std::ranges::transform(
-            statisticVec,
-            std::back_inserter(returnStatisticsVector),
-            [statisticId](const auto& statistic) { return std::make_pair(statisticId, statistic); });
+        for (const auto& statistic : statisticVec)
+        {
+            returnStatisticsVector.emplace_back(statisticId, statistic);
+        }
     }
     return returnStatisticsVector;
 }

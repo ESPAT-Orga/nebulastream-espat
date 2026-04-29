@@ -15,6 +15,7 @@
 #pragma once
 
 #include <functional>
+#include <map>
 #include <StatisticStore/AbstractStatisticStore.hpp>
 #include <folly/Synchronized.h>
 #include <Statistic.hpp>
@@ -22,46 +23,28 @@
 namespace NES
 {
 
-/// WindowsStore: Maps each (key, window_start_time) pair to a vector of statistics.
-/// All windows are of fixed size, set at store initialization, enabling time-based partitioning of statistics per key.
+/// WindowsStore: Two-level index sharded by StatisticId across numberOfExpectedConcurrentAccess
+/// sub-stores (hash outer); each sub-store maps StatisticId to an inner ordered map keyed by the
+/// statistic's actual startTs. Point lookups are O(log N) (tree find) and range queries are
+/// O(log N + k) via lower_bound/upper_bound, so no fixed window size needs to be known upfront.
 class WindowStatisticStore final : public AbstractStatisticStore
 {
-    struct StatisticKey
-    {
-        Statistic::StatisticId statisticId;
-        Windowing::TimeMeasure startTs;
-
-        bool operator==(const StatisticKey& other) const
-        {
-            return this->statisticId == other.statisticId && this->startTs == other.startTs;
-        }
-    };
-
-    struct StatisticKeyHash
-    {
-        size_t operator()(const StatisticKey& key) const
-        {
-            const auto h1 = std::hash<Statistic::StatisticId>{}(key.statisticId);
-            const auto h2 = std::hash<Windowing::TimeMeasure>{}(key.startTs);
-            return h1 ^ (h2 << 1);
-        }
-    };
+    /// startTs -> statistics sharing that startTs
+    using WindowMap = std::map<Windowing::TimeMeasure, std::vector<Statistic>>;
+    /// statisticId -> windowMap
+    using IdWindowMap = std::unordered_map<Statistic::StatisticId, WindowMap>;
 
     uint64_t numberOfExpectedConcurrentAccess;
-    Windowing::TimeMeasure windowSize;
-    std::vector<folly::Synchronized<std::unordered_map<StatisticKey, std::vector<std::shared_ptr<Statistic>>, StatisticKeyHash>>>
-        allStatistics;
-
-    Windowing::TimeMeasure calculateWindowStartTime(Windowing::TimeMeasure statStartTime) const;
+    std::vector<folly::Synchronized<IdWindowMap>> allStatistics;
 
 public:
-    explicit WindowStatisticStore(uint64_t numberOfExpectedConcurrentAccess, Windowing::TimeMeasure windowSize);
+    explicit WindowStatisticStore(uint64_t numberOfExpectedConcurrentAccess);
     bool insertStatistic(const Statistic::StatisticId& statisticId, Statistic statistic) override;
     bool deleteStatistics(
         const Statistic::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs) override;
-    std::vector<std::shared_ptr<Statistic>> getStatistics(
+    std::vector<Statistic> getStatistics(
         const Statistic::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs) override;
-    std::optional<std::shared_ptr<Statistic>> getSingleStatistic(
+    std::optional<Statistic> getSingleStatistic(
         const Statistic::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs) override;
     std::vector<IdStatisticPair> getAllStatistics() override;
 };

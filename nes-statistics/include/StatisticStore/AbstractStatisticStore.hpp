@@ -14,7 +14,6 @@
 
 #pragma once
 
-#include <memory>
 #include <optional>
 #include <utility>
 #include <vector>
@@ -34,12 +33,14 @@ enum class StatisticStoreType : uint8_t
 class AbstractStatisticStore
 {
 public:
-    using IdStatisticPair = std::pair<Statistic::StatisticId, std::shared_ptr<Statistic>>;
+    using IdStatisticPair = std::pair<Statistic::StatisticId, Statistic>;
 
     AbstractStatisticStore() = default;
     virtual ~AbstractStatisticStore() = default;
 
-    /// Inserts a statistic with the statisticId into a StatisticStore. Returns false, if statistic already exists
+    /// Inserts a statistic with the statisticId into a StatisticStore. Does not deduplicate: if multiple statistics are inserted with the
+    /// same statisticId, startTs, and endTs, they all coexist in the store and there is no guarantee which of them is returned by
+    /// getSingleStatistic, nor in what order they appear in getStatistics / getAllStatistics.
     virtual bool insertStatistic(const Statistic::StatisticId& statisticId, Statistic statistic) = 0;
 
     /// Deletes all statistics belonging to the statisticId in the period of [startTs, endTs]. Returns true, if any statistic was deleted
@@ -48,12 +49,12 @@ public:
         = 0;
 
     /// Gets all statistics belonging to the statisticId in the period of [startTs, endTs]
-    virtual std::vector<std::shared_ptr<Statistic>>
+    virtual std::vector<Statistic>
     getStatistics(const Statistic::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs)
         = 0;
 
     /// Gets a single statistic belonging to the statisticId that has exactly the startTs and endTs
-    virtual std::optional<std::shared_ptr<Statistic>> getSingleStatistic(
+    virtual std::optional<Statistic> getSingleStatistic(
         const Statistic::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs)
         = 0;
 

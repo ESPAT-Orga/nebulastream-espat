@@ -22,6 +22,7 @@
 #include <Configurations/Enums/EnumOption.hpp>
 #include <Configurations/ScalarOption.hpp>
 #include <Configurations/Validation/NumberValidation.hpp>
+#include <StatisticStore/AbstractStatisticStore.hpp>
 #include <Util/DumpMode.hpp>
 #include <fmt/format.h>
 #include <QueryEngineConfiguration.hpp>
@@ -72,6 +73,11 @@ public:
            "Time interval in milliseconds for the throughput listener",
            {std::make_shared<NumberValidation>()}};
 
+    EnumOption<StatisticStoreType> statisticStoreType
+        = {"statistic_store_type",
+           StatisticStoreType::SUB_STORES,
+           fmt::format("Which statistic store implementation to use: {}", enumPipeList<StatisticStoreType>())};
+
 private:
     std::vector<BaseOption*> getOptions() override
     {
@@ -85,7 +91,8 @@ private:
             &dumpQueryCompilationIR,
             &dumpGraph,
             &latencyListener,
-            &throughputListenerInterval};
+            &throughputListenerInterval,
+            &statisticStoreType};
     }
 };
 }

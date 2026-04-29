@@ -596,8 +596,7 @@ public:
                 .windowAdvanceMs = windowAdvanceMs,
                 .eventTimeFieldName = std::move(eventTimeFieldName),
                 .conditionTrigger = {},
-                .options = std::move(options),
-                .onAssociatedWithQuery = {}};
+                .options = std::move(options)};
         }
         if (auto* workloadChar = dynamic_cast<AntlrSQLParser::WorkloadCharacteristicContext*>(characteristic); workloadChar != nullptr)
         {

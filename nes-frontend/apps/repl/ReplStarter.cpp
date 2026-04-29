@@ -367,6 +367,7 @@ int main(int argc, char** argv)
             [](auto&& pH1) { return NES::AntlrSQLQueryParser::bindLogicalQueryPlan(std::forward<decltype(pH1)>(pH1)); });
 
         std::optional<NES::RequestStatisticBuildStatement> companionStatisticRequest = std::nullopt;
+        std::optional<std::function<void(NES::DistributedQueryId)>> onCompanionAssociatedWithQuery = std::nullopt;
         if (program.get<bool>("--companion-statistic"))
         {
             const auto metric =
@@ -466,12 +467,12 @@ int main(int argc, char** argv)
                         std::cout << "[AdaptiveOpt] Deployed replacement query (id=" << startResult->id << ").\n";
                         std::flush(std::cout);
                     }},
-                .options = {{"host", program.get<std::string>("--companion-host")}},
-                .onAssociatedWithQuery = [swapState](NES::DistributedQueryId id)
-                {
-                    std::lock_guard lock(swapState->mutex);
-                    swapState->dataQueryId = std::move(id);
-                }};
+                .options = {{"host", program.get<std::string>("--companion-host")}}};
+            onCompanionAssociatedWithQuery = [swapState](NES::DistributedQueryId id)
+            {
+                std::lock_guard lock(swapState->mutex);
+                swapState->dataQueryId = std::move(id);
+            };
         }
 
         NES::Repl replClient{
@@ -485,7 +486,8 @@ int main(int argc, char** argv)
             defaultOutputFormat,
             interactiveMode,
             SignalHandler::terminationToken(),
-            std::move(companionStatisticRequest)};
+            std::move(companionStatisticRequest),
+            std::move(onCompanionAssociatedWithQuery)};
         replClient.run();
 
         bool hasError = false;

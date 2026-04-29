@@ -15,14 +15,12 @@
 #pragma once
 
 #include <cstdint>
-#include <functional>
 #include <optional>
 #include <string>
 #include <unordered_map>
 #include <CollectionDomain.hpp>
 #include <ConditionTrigger.hpp>
 #include <Metric.hpp>
-#include <QueryId.hpp>
 
 namespace NES
 {
@@ -38,10 +36,6 @@ struct RequestStatisticBuildStatement
     /// Optional filter predicate applied to the statistic result. Used by the trigger system.
     std::optional<ConditionTrigger> conditionTrigger;
     std::unordered_map<std::string, std::string> options;
-    /// Called by the Repl after a SELECT query is successfully deployed alongside this companion,
-    /// passing the data query's DistributedQueryId. Allows the callback to know which query to
-    /// stop when it decides to swap in a replacement.
-    std::optional<std::function<void(DistributedQueryId)>> onAssociatedWithQuery;
 };
 
 }

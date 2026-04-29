@@ -460,6 +460,14 @@ int main(int argc, char** argv)
                             return;
                         }
 
+                        std::cout << "[AdaptiveOpt] Deploying SQL:\n" << nextSql << "\n";
+                        if (auto explainResult = (*queryStatementHandler)(NES::ExplainQueryStatement{.plan = queryStmt->plan});
+                            explainResult.has_value())
+                        {
+                            std::cout << "[AdaptiveOpt] Query plan:\n" << explainResult->explainString << "\n";
+                        }
+                        std::flush(std::cout);
+
                         auto startResult = (*queryStatementHandler)(*queryStmt);
                         if (!startResult.has_value())
                         {

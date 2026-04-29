@@ -52,7 +52,7 @@ public:
         bool interactiveMode,
         std::stop_token stopToken,
         std::optional<RequestStatisticBuildStatement> companionStatisticRequest = std::nullopt,
-        std::optional<std::function<void(DistributedQueryId)>> onCompanionAssociatedWithQuery = std::nullopt);
+        std::optional<std::function<void(DistributedQueryId, const std::string&)>> onCompanionAssociatedWithQuery = std::nullopt);
     void run();
     ~Repl();
 };

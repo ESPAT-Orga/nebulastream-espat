@@ -57,7 +57,7 @@ struct Repl::Impl
     StatementBinder binder;
     std::stop_token stopToken;
     std::optional<RequestStatisticBuildStatement> companionStatisticRequest;
-    std::optional<std::function<void(DistributedQueryId)>> onCompanionAssociatedWithQuery;
+    std::optional<std::function<void(DistributedQueryId, const std::string&)>> onCompanionAssociatedWithQuery;
 
     std::unique_ptr<replxx::Replxx> rx;
     std::vector<std::string> history;
@@ -86,7 +86,7 @@ struct Repl::Impl
         const bool interactiveMode,
         std::stop_token stopToken,
         std::optional<RequestStatisticBuildStatement> companionStatisticRequest,
-        std::optional<std::function<void(DistributedQueryId)>> onCompanionAssociatedWithQuery)
+        std::optional<std::function<void(DistributedQueryId, const std::string&)>> onCompanionAssociatedWithQuery)
         : sourceStatementHandler(std::move(sourceStatementHandler))
         , sinkStatementHandler(std::move(sinkStatementHandler))
         , topologyStatementHandler(std::move(topologyStatementHandler))
@@ -434,7 +434,7 @@ struct Repl::Impl
                                     std::flush(std::cout);
                                     if (onCompanionAssociatedWithQuery.has_value())
                                     {
-                                        (*onCompanionAssociatedWithQuery)(r.value().id);
+                                        (*onCompanionAssociatedWithQuery)(r.value().id, query);
                                     }
                                 }
                                 else
@@ -606,7 +606,7 @@ Repl::Repl(
     bool interactiveMode,
     std::stop_token stopToken,
     std::optional<RequestStatisticBuildStatement> companionStatisticRequest,
-    std::optional<std::function<void(DistributedQueryId)>> onCompanionAssociatedWithQuery)
+    std::optional<std::function<void(DistributedQueryId, const std::string&)>> onCompanionAssociatedWithQuery)
     : impl(std::make_unique<Impl>(
           std::move(sourceStatementHandler),
           std::move(sinkStatementHandler),

@@ -12,6 +12,7 @@
 
 add_source_files(nes-logical-operators
         WindowAggregationLogicalFunction.cpp
+        StatisticLogicalFunction.cpp
 )
 
 add_plugin(Avg AggregationLogicalFunction nes-logical-operators AvgAggregationLogicalFunction.cpp)

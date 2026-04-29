@@ -14,12 +14,26 @@
 
 set -euo pipefail
 
+# Create a timestamped output directory for this experiment run
+OUTPUT_DIR="benchmark_run_$(date +%Y%m%d_%H%M%S)"
+mkdir -p "$OUTPUT_DIR"
+echo "Output directory: $(realpath "$OUTPUT_DIR")"
+
 # Create a Python virtual environment and install the required python libraries
 python3 -m venv myenv
 source myenv/bin/activate
 pip3 install argparse requests pandas pyyaml
 
-myenv/bin/python3 -m scripts.benchmarking.e2e.run_statistic_build --all -s SECOND_CHANCE
+# Build (throughput) — writes results_statistic_build.csv
+#myenv/bin/python3 -m scripts.benchmarking.e2e.run_statistic_build --queries ClusterMonitoring --statistic-types EquiWidthHistogram CountMin --output-dir "$OUTPUT_DIR" --statistic-store-types SUB_STORES
+myenv/bin/python3 -m scripts.benchmarking.e2e.run_statistic_build --queries ClusterMonitoring --output-dir "$OUTPUT_DIR" --statistic-store-types SUB_STORES
+#myenv/bin/python3 -m scripts.benchmarking.e2e.run_statistic_build    --all --output-dir "$OUTPUT_DIR" --statistic-store-types SUB_STORES
+
+# Accuracy — writes results_statistic_accuracy.csv.
+#myenv/bin/python3 -m scripts.benchmarking.e2e.run_statistic_accuracy --all --output-dir "$OUTPUT_DIR" --statistic-store-types SUB_STORES
+
+# Probe (probe throughput) — writes results_statistic_probe.csv
+#myenv/bin/python3 -m scripts.benchmarking.e2e.run_statistic_probe    --all --output-dir "$OUTPUT_DIR" --statistic-store-types SUB_STORES
 
 # Deactivate the virtual environment
 deactivate

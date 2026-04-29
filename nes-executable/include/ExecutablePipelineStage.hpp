@@ -43,7 +43,7 @@ public:
 
     friend std::ostream& operator<<(std::ostream& os, const ExecutablePipelineStage& eps) { return eps.toString(os); }
 
-    bool formattingTask = false;
+    bool firstPipeline = false;
 
 protected:
     virtual std::ostream& toString(std::ostream& os) const = 0;

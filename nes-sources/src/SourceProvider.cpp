@@ -37,7 +37,7 @@ std::unique_ptr<SourceHandle> SourceProvider::lower(
     OriginId originId, PipelineId pipelineId, BackpressureListener backpressureListener, const SourceDescriptor& sourceDescriptor) const
 {
     /// Todo #241: Get the new source identfier from the source descriptor and pass it to SourceHandle.
-    auto sourceArguments = SourceRegistryArguments(sourceDescriptor);
+    auto sourceArguments = SourceRegistryArguments{sourceDescriptor, bufferPool->getBufferSize()};
     if (auto source = SourceRegistry::instance().create(sourceDescriptor.getSourceType(), sourceArguments))
     {
         /// The source-specific configuration of maxInflightBuffers takes priority.

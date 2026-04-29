@@ -14,7 +14,9 @@
 
 #include <Operators/Windows/Aggregations/Histogram/EquiWidthHistogramLogicalFunction.hpp>
 
+#include <algorithm>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -23,6 +25,7 @@
 #include <DataTypes/Schema.hpp>
 #include <Functions/FieldAccessLogicalFunction.hpp>
 #include <Functions/LogicalFunction.hpp>
+#include <Operators/Windows/Aggregations/StatisticLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/WindowAggregationLogicalFunction.hpp>
 #include <Util/Reflection.hpp>
 #include <fmt/format.h>
@@ -33,18 +36,24 @@
 namespace NES
 {
 
+namespace
+{
+/// Per-bucket cost of the EquiWidthHistogram physical layout: one uint64 counter + two uint64 bounds.
+constexpr uint64_t kHistogramBucketBytes = sizeof(uint64_t) * 3;
+/// Fixed metadata overhead in the physical layout.
+constexpr uint64_t kHistogramOverheadBytes = sizeof(uint64_t);
+}
+
 EquiWidthHistogramLogicalFunction::EquiWidthHistogramLogicalFunction(
     const FieldAccessLogicalFunction& onField,
-    const uint64_t numBuckets,
+    const uint64_t memoryBudget,
     const uint64_t minValue,
     const uint64_t maxValue,
-    const Statistic::StatisticId statisticId,
-    const DataType counterType)
-    : numBuckets(numBuckets)
+    const Statistic::StatisticId statisticId)
+    : StatisticLogicalFunction(memoryBudget)
     , minValue(minValue)
     , maxValue(maxValue)
     , statisticId(statisticId)
-    , counterType(counterType)
     , inputStamp(onField.getDataType())
     , partialAggregateStamp(DataTypeProvider::provideDataType(DataType::Type::UNDEFINED, DataType::NULLABLE::NOT_NULLABLE))
     , finalAggregateStamp(DataTypeProvider::provideDataType(DataType::Type::VARSIZED, DataType::NULLABLE::NOT_NULLABLE))
@@ -56,16 +65,14 @@ EquiWidthHistogramLogicalFunction::EquiWidthHistogramLogicalFunction(
 EquiWidthHistogramLogicalFunction::EquiWidthHistogramLogicalFunction(
     const FieldAccessLogicalFunction& onField,
     const FieldAccessLogicalFunction& asField,
-    const uint64_t numBuckets,
+    const uint64_t memoryBudget,
     const uint64_t minValue,
     const uint64_t maxValue,
-    const Statistic::StatisticId statisticId,
-    const DataType counterType)
-    : numBuckets(numBuckets)
+    const Statistic::StatisticId statisticId)
+    : StatisticLogicalFunction(memoryBudget)
     , minValue(minValue)
     , maxValue(maxValue)
     , statisticId(statisticId)
-    , counterType(counterType)
     , inputStamp(onField.getDataType())
     , partialAggregateStamp(DataTypeProvider::provideDataType(DataType::Type::UNDEFINED, DataType::NULLABLE::NOT_NULLABLE))
     , finalAggregateStamp(DataTypeProvider::provideDataType(DataType::Type::VARSIZED, DataType::NULLABLE::NOT_NULLABLE))
@@ -82,10 +89,10 @@ std::string_view EquiWidthHistogramLogicalFunction::getName() const noexcept
 std::string EquiWidthHistogramLogicalFunction::toString() const
 {
     return fmt::format(
-        "EquiWidthHistogram: onField={} asField={} numBuckets={} minValue={} maxValue={}",
+        "EquiWidthHistogram: onField={} asField={} memoryBudget={} minValue={} maxValue={}",
         onField,
         asField,
-        numBuckets,
+        memoryBudget,
         minValue,
         maxValue);
 }
@@ -100,24 +107,17 @@ Reflected Reflector<EquiWidthHistogramLogicalFunction>::operator()(const EquiWid
     return reflect(detail::ReflectedEquiWidthHistogramLogicalFunction{
         .onField = function.getOnField(),
         .asField = function.getAsField(),
-        .numBuckets = function.numBuckets,
+        .memoryBudget = function.memoryBudget,
         .minValue = function.minValue,
         .maxValue = function.maxValue,
-        .statisticId = function.statisticId.getRawValue(),
-        .counterType = function.counterType});
+        .statisticId = function.statisticId.getRawValue()});
 }
 
 EquiWidthHistogramLogicalFunction Unreflector<EquiWidthHistogramLogicalFunction>::operator()(const Reflected& reflected) const
 {
     auto data = unreflect<detail::ReflectedEquiWidthHistogramLogicalFunction>(reflected);
     return EquiWidthHistogramLogicalFunction{
-        data.onField,
-        data.asField,
-        data.numBuckets,
-        data.minValue,
-        data.maxValue,
-        Statistic::StatisticId{data.statisticId},
-        data.counterType};
+        data.onField, data.asField, data.memoryBudget, data.minValue, data.maxValue, Statistic::StatisticId{data.statisticId}};
 }
 
 EquiWidthHistogramLogicalFunction EquiWidthHistogramLogicalFunction::withInferredStamp(const Schema& schema) const
@@ -217,7 +217,15 @@ bool EquiWidthHistogramLogicalFunction::shallIncludeNullValues() noexcept
 bool EquiWidthHistogramLogicalFunction::operator==(const EquiWidthHistogramLogicalFunction& rhs) const
 {
     return this->getName() == rhs.getName() && this->onField == rhs.onField && this->asField == rhs.asField
-        && this->numBuckets == rhs.numBuckets && this->minValue == rhs.minValue && this->maxValue == rhs.maxValue;
+        && this->memoryBudget == rhs.memoryBudget && this->minValue == rhs.minValue && this->maxValue == rhs.maxValue;
+}
+
+std::unique_ptr<StatisticConfig> EquiWidthHistogramLogicalFunction::calculateConfigs() const
+{
+    const uint64_t available = memoryBudget > kHistogramOverheadBytes ? memoryBudget - kHistogramOverheadBytes : 0;
+    const uint64_t numBuckets = std::max<uint64_t>(1, available / kHistogramBucketBytes);
+    return std::make_unique<EquiWidthHistogramConfig>(
+        numBuckets, minValue, maxValue, DataTypeProvider::provideDataType(DataType::Type::UINT64, DataType::NULLABLE::NOT_NULLABLE));
 }
 
 AggregationLogicalFunctionRegistryReturnType
@@ -230,20 +238,18 @@ AggregationLogicalFunctionGeneratedRegistrar::RegisterEquiWidthHistogramAggregat
     }
     /// We assume the fields vector starts with onField, asField
     PRECONDITION(arguments.fields.size() >= 2, "EquiWidthHistogramLogicalFunction requires onField and asField");
+    PRECONDITION(arguments.memoryBudget.has_value(), "EquiWidthHistogramLogicalFunction requires memoryBudget to be set");
     PRECONDITION(arguments.histogramMinValue.has_value(), "EquiWidthHistogramLogicalFunction requires min value to be set");
     PRECONDITION(arguments.histogramMaxValue.has_value(), "EquiWidthHistogramLogicalFunction requires max value be set");
-    PRECONDITION(arguments.histogramNumBuckets.has_value(), "EquiWidthHistogramLogicalFunction requires number of buckets to be set");
     PRECONDITION(arguments.statisticId.has_value(), "EquiWidthHistogramLogicalFunction requires statisticId to be set");
-    PRECONDITION(arguments.histogramCounterType.has_value(), "EquiWidthHistogramLogicalFunction requires counterType to be set");
 
     return std::make_shared<WindowAggregationLogicalFunction>(EquiWidthHistogramLogicalFunction{
         arguments.fields[0],
         arguments.fields[1],
-        arguments.histogramNumBuckets.value(),
+        arguments.memoryBudget.value(),
         arguments.histogramMinValue.value(),
         arguments.histogramMaxValue.value(),
-        arguments.statisticId.value(),
-        arguments.histogramCounterType.value()});
+        arguments.statisticId.value()});
 }
 
 }

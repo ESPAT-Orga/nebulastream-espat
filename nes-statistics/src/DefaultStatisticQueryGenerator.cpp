@@ -86,33 +86,20 @@ std::shared_ptr<WindowAggregationLogicalFunction> createAggregationFunction(
     switch (toStatisticType(metric))
     {
         case Statistic::StatisticType::Equi_Width_Histogram: {
-            const auto numBuckets = getOption(options, "buckets", 100);
+            const auto memoryBudget = getOption(options, "memory_budget", 4096);
             const auto minValue = getOption(options, "min", 0);
             const auto maxValue = getOption(options, "max", 1000);
-            return std::make_shared<WindowAggregationLogicalFunction>(EquiWidthHistogramLogicalFunction{
-                onField,
-                numBuckets,
-                minValue,
-                maxValue,
-                statisticId,
-                DataTypeProvider::provideDataType(DataType::Type::UINT64, DataType::NULLABLE::NOT_NULLABLE)});
+            return std::make_shared<WindowAggregationLogicalFunction>(
+                EquiWidthHistogramLogicalFunction{onField, memoryBudget, minValue, maxValue, statisticId});
         }
         case Statistic::StatisticType::Reservoir_Sample: {
-            const auto reservoirSize = getOption(options, "reservoir_size", 1000);
+            const auto memoryBudget = getOption(options, "memory_budget", 8192);
             return std::make_shared<WindowAggregationLogicalFunction>(
-                ReservoirSampleLogicalFunction{onField, std::vector{onField}, reservoirSize, statisticId});
+                ReservoirSampleLogicalFunction{onField, std::vector{onField}, memoryBudget, statisticId});
         }
         case Statistic::StatisticType::Count_Min_Sketch: {
-            const auto columns = getOption(options, "columns", 256);
-            const auto rows = getOption(options, "rows", 4);
-            constexpr uint64_t seed = 42;
-            return std::make_shared<WindowAggregationLogicalFunction>(CountMinSketchLogicalFunction{
-                onField,
-                NumberOfCols{columns},
-                NumberOfRows{rows},
-                seed,
-                DataTypeProvider::provideDataType(DataType::Type::UINT64, DataType::NULLABLE::NOT_NULLABLE),
-                statisticId});
+            const auto memoryBudget = getOption(options, "memory_budget", 8192);
+            return std::make_shared<WindowAggregationLogicalFunction>(CountMinSketchLogicalFunction{onField, memoryBudget, statisticId});
         }
     }
     std::unreachable();

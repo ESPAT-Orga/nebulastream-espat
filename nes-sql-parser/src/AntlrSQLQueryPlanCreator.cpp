@@ -1050,7 +1050,7 @@ void AntlrSQLQueryPlanCreator::exitFunctionCall(AntlrSQLParser::FunctionCallCont
                     throw InvalidQuerySyntax(
                         "Expected constant at the end of ReservoirSample function call, got nothing at {}", context->getText());
                 }
-                uint64_t reservoirSize = parseConstant(helpers.top().constantBuilder.back(), "reservoirSize");
+                uint64_t memoryBudget = parseConstant(helpers.top().constantBuilder.back(), "memoryBudget");
                 helpers.top().constantBuilder.pop_back();
                 /// We need to pass a field that exists in the schema. But we do not care of the actual value, as the sample gets built
                 /// across all fields for now.
@@ -1058,7 +1058,7 @@ void AntlrSQLQueryPlanCreator::exitFunctionCall(AntlrSQLParser::FunctionCallCont
                 const auto asFieldIfNotOverwritten = FieldAccessLogicalFunction{
                     LogicalStatisticFields().statisticDataField.dataType, LogicalStatisticFields().statisticDataField.name};
                 helpers.top().windowAggs.push_back(std::make_shared<WindowAggregationLogicalFunction>(
-                    ReservoirSampleLogicalFunction(uselessOnField, asFieldIfNotOverwritten, sampleFields, reservoirSize, statisticId)));
+                    ReservoirSampleLogicalFunction(uselessOnField, asFieldIfNotOverwritten, sampleFields, memoryBudget, statisticId)));
                 break;
             }
             else if (funcName == "RESERVOIR_PROBE")
@@ -1105,36 +1105,27 @@ void AntlrSQLQueryPlanCreator::exitFunctionCall(AntlrSQLParser::FunctionCallCont
                 }
                 const Statistic::StatisticId statisticId{parseConstant(helpers.top().constantBuilder.front(), "statisticId")};
                 helpers.top().statisticId = statisticId;
-                if (helpers.top().functionBuilder.size() != 2
-                    && helpers.top().functionBuilder.back().tryGetAs<FieldAccessLogicalFunction>())
+                if (helpers.top().functionBuilder.size() != 1
+                    || !helpers.top().functionBuilder.back().tryGetAs<FieldAccessLogicalFunction>().has_value())
                 {
-                    throw InvalidQuerySyntax(
-                        "EQUIWIDTHHISTOGRAM requires the second argument to be a fieldname and the last to be a datatype in lower case");
+                    throw InvalidQuerySyntax("EQUIWIDTHHISTOGRAM requires the second argument to be a fieldname");
                 }
-                auto counterDatatypeOption = helpers.top().functionBuilder.back();
-                helpers.top().functionBuilder.pop_back();
-                INVARIANT(
-                    counterDatatypeOption.tryGetAs<FieldAccessLogicalFunction>().has_value(),
-                    "counter datatype was not a FieldAccessLogicalFunction");
-                auto counterDatatypeFn = counterDatatypeOption.getAs<FieldAccessLogicalFunction>();
-                auto counterDatatype = DataTypeProvider::tryProvideDataType(counterDatatypeFn.get().getFieldName());
-                INVARIANT(counterDatatype.has_value(), "counter datatype was not a datatype");
                 const auto fieldName = helpers.top().functionBuilder.back().tryGetAs<FieldAccessLogicalFunction>().value().get();
                 helpers.top().functionBuilder.pop_back();
                 if (helpers.top().constantBuilder.size() != 4)
                 {
-                    throw InvalidQuerySyntax("EQUIWIDTHHISTOGRAM requires the arguments numBuckets, minValue, maxValue to be constants");
+                    throw InvalidQuerySyntax("EQUIWIDTHHISTOGRAM requires the arguments memoryBudget, minValue, maxValue to be constants");
                 }
                 const auto maxValue = parseConstant(helpers.top().constantBuilder.back(), "maxValue");
                 helpers.top().constantBuilder.pop_back();
                 const auto minValue = parseConstant(helpers.top().constantBuilder.back(), "minValue");
                 helpers.top().constantBuilder.pop_back();
-                const auto numBuckets = parseConstant(helpers.top().constantBuilder.back(), "numBuckets");
+                const auto memoryBudget = parseConstant(helpers.top().constantBuilder.back(), "memoryBudget");
                 helpers.top().constantBuilder.pop_back();
                 const auto asFieldIfNotOverwritten = FieldAccessLogicalFunction{
                     LogicalStatisticFields().statisticDataField.dataType, LogicalStatisticFields().statisticDataField.name};
-                helpers.top().windowAggs.push_back(std::make_shared<WindowAggregationLogicalFunction>(EquiWidthHistogramLogicalFunction{
-                    fieldName, asFieldIfNotOverwritten, numBuckets, minValue, maxValue, statisticId, counterDatatype.value()}));
+                helpers.top().windowAggs.push_back(std::make_shared<WindowAggregationLogicalFunction>(
+                    EquiWidthHistogramLogicalFunction{fieldName, asFieldIfNotOverwritten, memoryBudget, minValue, maxValue, statisticId}));
                 break;
             }
             else if (funcName == "EQUIWIDTHHISTOGRAM_PROBE")
@@ -1181,30 +1172,26 @@ void AntlrSQLQueryPlanCreator::exitFunctionCall(AntlrSQLParser::FunctionCallCont
                         "Expected constant (statistic hash) as first argument of COUNTMINSKETCH function call, got nothing at {}",
                         context->getText());
                 }
-                if (helpers.top().functionBuilder.size() != 2
-                    && helpers.top().functionBuilder.back().tryGetAs<FieldAccessLogicalFunction>())
+                if (helpers.top().functionBuilder.size() != 1
+                    || !helpers.top().functionBuilder.back().tryGetAs<FieldAccessLogicalFunction>().has_value())
                 {
-                    throw InvalidQuerySyntax("COUNTMINSKETCH requires the second argument to be a fieldname, and a datatype for the counter"
-                                             "");
+                    throw InvalidQuerySyntax("COUNTMINSKETCH requires the second argument to be a fieldname");
                 }
-                const auto counterTypeFn = helpers.top().functionBuilder.back().tryGetAs<FieldAccessLogicalFunction>().value().get();
-                auto counterDatatype = DataTypeProvider::tryProvideDataType(counterTypeFn.getFieldName()).value();
-                helpers.top().functionBuilder.pop_back();
                 const auto fieldName = helpers.top().functionBuilder.back().tryGetAs<FieldAccessLogicalFunction>().value().get();
                 helpers.top().functionBuilder.pop_back();
-                const auto seed = parseConstant(helpers.top().constantBuilder.back(), "seed");
-                helpers.top().constantBuilder.pop_back();
-                const auto rows = parseConstant(helpers.top().constantBuilder.back(), "rows");
-                helpers.top().constantBuilder.pop_back();
-                const auto columns = parseConstant(helpers.top().constantBuilder.back(), "columns");
+                if (helpers.top().constantBuilder.size() != 2)
+                {
+                    throw InvalidQuerySyntax("COUNTMINSKETCH requires statisticId and memoryBudget to be constants");
+                }
+                const auto memoryBudget = parseConstant(helpers.top().constantBuilder.back(), "memoryBudget");
                 helpers.top().constantBuilder.pop_back();
                 const Statistic::StatisticId statisticId{parseConstant(helpers.top().constantBuilder.back(), "statisticId")};
                 helpers.top().constantBuilder.pop_back();
                 helpers.top().statisticId = statisticId;
                 const auto asFieldIfNotOverwritten = FieldAccessLogicalFunction{
                     LogicalStatisticFields().statisticDataField.dataType, LogicalStatisticFields().statisticDataField.name};
-                helpers.top().windowAggs.push_back(std::make_shared<WindowAggregationLogicalFunction>(CountMinSketchLogicalFunction{
-                    fieldName, asFieldIfNotOverwritten, NumberOfCols{columns}, NumberOfRows{rows}, seed, counterDatatype, statisticId}));
+                helpers.top().windowAggs.push_back(std::make_shared<WindowAggregationLogicalFunction>(
+                    CountMinSketchLogicalFunction{fieldName, asFieldIfNotOverwritten, memoryBudget, statisticId}));
                 break;
             }
             else if (funcName == "COUNTMIN_PROBE")

@@ -91,18 +91,22 @@ void StatisticStoreReader::execute(ExecutionContext& executionCtx, Record& recor
     const nautilus::val<Timestamp> endTs{record.read(statisticEndTsFieldName).getRawValueAs<nautilus::val<Timestamp::Underlying>>()};
     const auto numberOfSeenTuples = invoke(getNumberOfSeenTuplesOfStatistic, operatorHandlerMemRef, statisticId, startTs, endTs);
     const auto statisticMemArea = invoke(getStatisticDataProxy, operatorHandlerMemRef, statisticId, startTs, endTs);
-    for (auto statisticIterator = statisticProvider.begin(statisticMemArea); statisticIterator != statisticProvider.end(statisticMemArea);
-         ++statisticIterator)
+    if (statisticMemArea != nullptr)
     {
-        /// Getting a record containing the data from the current statistic, e.g., for a histogram the upper, lower bound and counter
-        Record statisticRecord = *statisticIterator;
+        for (auto statisticIterator = statisticProvider.begin(statisticMemArea);
+             statisticIterator != statisticProvider.end(statisticMemArea);
+             ++statisticIterator)
+        {
+            /// Getting a record containing the data from the current statistic, e.g., for a histogram the upper, lower bound and counter
+            Record statisticRecord = *statisticIterator;
 
-        /// Adding additional data so that downstream operators know when and for what the statistic was created
-        statisticRecord.write(statisticStartTsFieldName, startTs.convertToValue());
-        statisticRecord.write(statisticEndTsFieldName, endTs.convertToValue());
-        statisticRecord.write(statisticIdFieldName, statisticId.convertToValue());
-        statisticRecord.write(statisticNumberOfSeenTuplesFieldName, numberOfSeenTuples);
-        executeChild(executionCtx, statisticRecord);
+            /// Adding additional data so that downstream operators know when and for what the statistic was created
+            statisticRecord.write(statisticStartTsFieldName, startTs.convertToValue());
+            statisticRecord.write(statisticEndTsFieldName, endTs.convertToValue());
+            statisticRecord.write(statisticIdFieldName, statisticId.convertToValue());
+            statisticRecord.write(statisticNumberOfSeenTuplesFieldName, numberOfSeenTuples);
+            executeChild(executionCtx, statisticRecord);
+        }
     }
 }
 

@@ -1,0 +1,20 @@
+# name: sources/MemorySourceVarSized.test
+# description: MemorySource with VARSIZED fields parsed during setup().
+# groups: [sources]
+
+CREATE LOGICAL SOURCE stream(text VARSIZED NOT NULL, text2 VARSIZED NOT NULL);
+CREATE PHYSICAL SOURCE FOR stream TYPE Memory;
+ATTACH FILE small/comma.csv
+
+CREATE SINK file_sink(stream.text VARSIZED NOT NULL, stream.text2 VARSIZED NOT NULL) TYPE File;
+
+SELECT * FROM stream INTO file_sink;
+----
+"a","1,2,3"
+",","4,5,6"
+"b","7,,8"
+"c",""
+"d",","
+"e","18,,19"
+"f","20,21,22,23,24"
+"g","27,,28,29"

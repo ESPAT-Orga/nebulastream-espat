@@ -116,13 +116,21 @@ VarVal parseFixedSizeIntoVarVal(
     if (nullable)
     {
         const auto parseResult = nautilus::invoke(
-            parseIntoVarValProxy<T, true>, fieldAddress, fieldSize, nautilus::val<const std::vector<std::string>*>{&nullValues});
+            nautilus::FunctionAttributes{.modRefInfo = nautilus::ModRefInfo::Ref, .willReturn = true, .noUnwind = true},
+            parseIntoVarValProxy<T, true>,
+            fieldAddress,
+            fieldSize,
+            nautilus::val<const std::vector<std::string>*>{&nullValues});
         const nautilus::val<T> nautilusValue = *getMemberWithOffset<T>(parseResult, offsetof(ParseResult<T>, value));
         const nautilus::val<bool> isNull = *getMemberWithOffset<bool>(parseResult, offsetof(ParseResult<T>, isNull));
         return VarVal{nautilusValue, nullable, isNull};
     }
     const auto parseResult = nautilus::invoke(
-        parseIntoVarValProxy<T, false>, fieldAddress, fieldSize, nautilus::val<const std::vector<std::string>*>{&nullValues});
+        nautilus::FunctionAttributes{.modRefInfo = nautilus::ModRefInfo::Ref, .willReturn = true, .noUnwind = true},
+        parseIntoVarValProxy<T, false>,
+        fieldAddress,
+        fieldSize,
+        nautilus::val<const std::vector<std::string>*>{&nullValues});
     const nautilus::val<T> nautilusValue = *getMemberWithOffset<T>(parseResult, offsetof(ParseResult<T>, value));
     return VarVal{nautilusValue, nullable, false};
 }

@@ -18,6 +18,7 @@
 #include <numeric>
 #include <random>
 #include <ranges>
+#include <thread>
 #include <Nautilus/Interface/PagedVector/PagedVector.hpp>
 #include <Nautilus/Interface/PagedVector/PagedVectorRef.hpp>
 #include <Nautilus/Util.hpp>
@@ -49,7 +50,9 @@ nautilus::val<uint64_t> getRecordDataSizeForSample(const Record& record, const T
 
 uint64_t getRandomNumberProxy(const uint64_t upperBound, const uint64_t seed)
 {
-    static std::mt19937 gen(seed);
+    /// Each thread gets its own RNG, seeded by combining the provided seed
+    /// with the thread id to ensure different threads produce different sequences.
+    thread_local std::mt19937 gen(seed ^ std::hash<std::thread::id>{}(std::this_thread::get_id()));
     std::uniform_int_distribution<> dis(0, upperBound);
 
     return dis(gen);
@@ -197,8 +200,9 @@ void ReservoirSamplePhysicalFunction::reset(nautilus::val<AggregationState*> agg
             auto* pagedVector = reinterpret_cast<PagedVector*>(pagedVectorMemArea);
             new (pagedVector) PagedVector();
 
-            /// MemSet the three uint64_t values to 0
-            std::memset(reinterpret_cast<int8_t*>(pagedVector) + sizeof(PagedVector), 0, stateSize);
+            /// Zero the trailing fields after the PagedVector (numberOfSeenTuples and sampleDataSize).
+            /// Writing `stateSize` bytes here would overflow past the entry's state area and corrupt the next entry.
+            std::memset(reinterpret_cast<int8_t*>(pagedVector) + sizeof(PagedVector), 0, stateSize - sizeof(PagedVector));
         },
         aggregationState,
         nautilus::val<uint64_t>{getSizeOfStateInBytes()});

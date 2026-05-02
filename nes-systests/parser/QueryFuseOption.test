@@ -1,0 +1,57 @@
+# name: parser/QueryFuseOption.test
+# description: Per-query operator-fusing toggle via SET (... as "QUERY".FUSE)
+# groups: [Parser, Aggregation, WindowOperators]
+
+CREATE LOGICAL SOURCE stream(id UINT64 NOT NULL, attr_a UINT64 NOT NULL, timestamp UINT64 NOT NULL);
+CREATE PHYSICAL SOURCE FOR stream TYPE File;
+ATTACH INLINE
+1,10,1000
+1,20,1050
+1,5,1099
+1,30,1100
+1,7,1199
+1,3,1200
+1,11,1299
+
+CREATE SINK sinkStream(stream.start UINT64 NOT NULL, stream.end UINT64 NOT NULL, stream.maxA UINT64 NOT NULL) TYPE File;
+
+# Fusion explicitly disabled per query — must produce the same result as the fused plan.
+SELECT start, end, MAX(attr_a) as maxA
+FROM stream
+WINDOW TUMBLING(timestamp, size 100 ms)
+INTO sinkStream
+SET (FALSE as "QUERY".FUSE);
+----
+1000,1100,20
+1100,1200,30
+1200,1300,11
+
+# Fusion explicitly enabled per query — same expected result.
+SELECT start, end, MAX(attr_a) as maxA
+FROM stream
+WINDOW TUMBLING(timestamp, size 100 ms)
+INTO sinkStream
+SET (TRUE as "QUERY".FUSE);
+----
+1000,1100,20
+1100,1200,30
+1200,1300,11
+
+# No SET clause — defaults to fused; same expected result.
+SELECT start, end, MAX(attr_a) as maxA
+FROM stream
+WINDOW TUMBLING(timestamp, size 100 ms)
+INTO sinkStream;
+----
+1000,1100,20
+1100,1200,30
+1200,1300,11
+
+# Negative test: non-boolean QUERY.FUSE rejected
+SELECT start, end, MAX(attr_a) as maxA
+FROM stream
+WINDOW TUMBLING(timestamp, size 100 ms)
+INTO sinkStream
+SET ('yes' as "QUERY".FUSE);
+----
+ERROR 2000 # invalid query syntax

@@ -94,6 +94,58 @@ TEST_F(StatementBinderTest, BindQuery)
     ASSERT_TRUE(std::holds_alternative<QueryStatement>(*statement));
 }
 
+TEST_F(StatementBinderTest, BindQueryWithFuseFalse)
+{
+    const std::string queryString
+        = "SELECT a FROM inputStream WHERE b < UINT32(5) INTO outputStream SET (FALSE as \"QUERY\".FUSE)";
+    const auto statement = binder->parseAndBindSingle(queryString);
+    ASSERT_TRUE(statement.has_value()) << statement.error();
+    ASSERT_TRUE(std::holds_alternative<QueryStatement>(*statement));
+    ASSERT_FALSE(std::get<QueryStatement>(*statement).plan.getOperatorFusing());
+}
+
+TEST_F(StatementBinderTest, BindQueryWithFuseTrue)
+{
+    const std::string queryString
+        = "SELECT a FROM inputStream WHERE b < UINT32(5) INTO outputStream SET (TRUE as \"QUERY\".FUSE)";
+    const auto statement = binder->parseAndBindSingle(queryString);
+    ASSERT_TRUE(statement.has_value()) << statement.error();
+    ASSERT_TRUE(std::holds_alternative<QueryStatement>(*statement));
+    ASSERT_TRUE(std::get<QueryStatement>(*statement).plan.getOperatorFusing());
+}
+
+TEST_F(StatementBinderTest, BindQueryWithoutFuseDefaultsToTrue)
+{
+    const std::string queryString = "SELECT a FROM inputStream WHERE b < UINT32(5) INTO outputStream";
+    const auto statement = binder->parseAndBindSingle(queryString);
+    ASSERT_TRUE(statement.has_value()) << statement.error();
+    ASSERT_TRUE(std::holds_alternative<QueryStatement>(*statement));
+    ASSERT_TRUE(std::get<QueryStatement>(*statement).plan.getOperatorFusing());
+}
+
+TEST_F(StatementBinderTest, BindQueryFuseRejectsNonBoolean)
+{
+    const std::string queryString
+        = "SELECT a FROM inputStream WHERE b < UINT32(5) INTO outputStream SET ('hi' as \"QUERY\".FUSE)";
+    const auto statement = binder->parseAndBindSingle(queryString);
+    ASSERT_FALSE(statement.has_value());
+    ASSERT_EQ(statement.error().code(), ErrorCode::InvalidQuerySyntax);
+}
+
+TEST_F(StatementBinderTest, BindQueryWithIdAndFuse)
+{
+    const std::string testUUID = "550e8400-e29b-41d4-a716-446655440000";
+    const auto queryString = fmt::format(
+        "SELECT a FROM inputStream WHERE b < UINT32(5) INTO outputStream SET ('{}' as \"QUERY\".ID, FALSE as \"QUERY\".FUSE)", testUUID);
+    const auto statement = binder->parseAndBindSingle(queryString);
+    ASSERT_TRUE(statement.has_value()) << statement.error();
+    ASSERT_TRUE(std::holds_alternative<QueryStatement>(*statement));
+    const auto& queryStatement = std::get<QueryStatement>(*statement);
+    ASSERT_TRUE(queryStatement.id.has_value());
+    ASSERT_EQ(queryStatement.id->getRawValue(), testUUID);
+    ASSERT_FALSE(queryStatement.plan.getOperatorFusing());
+}
+
 TEST_F(StatementBinderTest, Nullable)
 {
     const std::string createLogicalSourceStatement

@@ -647,6 +647,7 @@ public:
             if (auto* const queryAst = statementAST->queryWithOptions(); queryAst != nullptr)
             {
                 std::optional<DistributedQueryId> queryId;
+                auto plan = queryBinder(queryAst->query());
                 if (queryAst->optionsClause() != nullptr)
                 {
                     auto options = bindConfigOptions(queryAst->optionsClause()->options->namedConfigExpression());
@@ -661,9 +662,18 @@ public:
                             }
                             queryId = DistributedQueryId(std::get<std::string>(*literal));
                         }
+                        if (auto fuseIter = optionsIter->second.find("FUSE"); fuseIter != optionsIter->second.end())
+                        {
+                            auto* literal = std::get_if<Literal>(&fuseIter->second);
+                            if ((literal == nullptr) || !std::holds_alternative<bool>(*literal))
+                            {
+                                throw InvalidQuerySyntax("QUERY.FUSE must be a boolean");
+                            }
+                            plan.setOperatorFusing(std::get<bool>(*literal));
+                        }
                     }
                 }
-                return QueryStatement{.plan = queryBinder(queryAst->query()), .id = queryId};
+                return QueryStatement{.plan = std::move(plan), .id = queryId};
             }
 
             throw InvalidStatement(statementAST->toString());

@@ -53,10 +53,15 @@ void PhysicalPlanBuilder::setOperatorBufferSize(uint64_t bufferSize)
     operatorBufferSize = bufferSize;
 }
 
+void PhysicalPlanBuilder::setOperatorFusing(bool enabled)
+{
+    operatorFusing = enabled;
+}
+
 PhysicalPlan PhysicalPlanBuilder::finalize() &&
 {
     auto sources = flip(sinks);
-    return {queryId, std::move(sources), executionMode, operatorBufferSize};
+    return {queryId, std::move(sources), executionMode, operatorBufferSize, operatorFusing};
 }
 
 using PhysicalOpPtr = std::shared_ptr<PhysicalOperatorWrapper>;

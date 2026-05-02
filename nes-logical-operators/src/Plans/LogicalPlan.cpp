@@ -70,6 +70,16 @@ std::vector<LogicalOperator> LogicalPlan::getRootOperators() const
     return rootOperators;
 }
 
+bool LogicalPlan::getOperatorFusing() const
+{
+    return operatorFusing;
+}
+
+void LogicalPlan::setOperatorFusing(bool enabled)
+{
+    operatorFusing = enabled;
+}
+
 LogicalPlan LogicalPlan::withRootOperators(const std::vector<LogicalOperator>& operators) const
 {
     auto copy = *this;
@@ -85,6 +95,7 @@ LogicalPlan& LogicalPlan::operator=(const LogicalPlan& other)
         originalSql = other.originalSql;
         rootOperators = other.rootOperators;
         priority = other.priority;
+        operatorFusing = other.operatorFusing;
     }
     return *this;
 }
@@ -94,6 +105,8 @@ LogicalPlan::LogicalPlan(LogicalPlan&& other) noexcept
     , rootOperators(std::move(other.rootOperators))
     , originalSql(std::move(other.originalSql))
     , priority(other.priority)
+    , operatorFusing(other.operatorFusing)
+
 {
 }
 
@@ -105,6 +118,7 @@ LogicalPlan& LogicalPlan::operator=(LogicalPlan&& other) noexcept
         rootOperators = std::move(other.rootOperators);
         originalSql = std::move(other.originalSql);
         priority = other.priority;
+        operatorFusing = other.operatorFusing;
     }
     return *this;
 }

@@ -648,6 +648,7 @@ public:
             {
                 std::optional<DistributedQueryId> queryId;
                 std::optional<Priority> queryPriority;
+                auto plan = queryBinder(queryAst->query());
                 if (queryAst->optionsClause() != nullptr)
                 {
                     auto options = bindConfigOptions(queryAst->optionsClause()->options->namedConfigExpression());
@@ -683,9 +684,17 @@ public:
                                 throw InvalidQuerySyntax("Query priority must be 'HIGH' or 'LOW', got '{}'", value);
                             }
                         }
+                        if (auto fuseIter = optionsIter->second.find("FUSE"); fuseIter != optionsIter->second.end())
+                        {
+                            auto* literal = std::get_if<Literal>(&fuseIter->second);
+                            if ((literal == nullptr) || !std::holds_alternative<bool>(*literal))
+                            {
+                                throw InvalidQuerySyntax("QUERY.FUSE must be a boolean");
+                            }
+                            plan.setOperatorFusing(std::get<bool>(*literal));
+                        }
                     }
                 }
-                auto plan = queryBinder(queryAst->query());
                 if (queryPriority.has_value())
                 {
                     plan.setPriority(*queryPriority);

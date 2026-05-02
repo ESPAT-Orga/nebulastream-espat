@@ -51,16 +51,19 @@ public:
     [[nodiscard]] const QueryId& getQueryId() const;
     [[nodiscard]] std::string getOriginalSql() const;
     [[nodiscard]] std::vector<LogicalOperator> getRootOperators() const;
+    [[nodiscard]] bool getOperatorFusing() const;
 
     [[nodiscard]] LogicalPlan withRootOperators(const std::vector<LogicalOperator>& operators) const;
 
     void setOriginalSql(const std::string& sql);
     void setQueryId(QueryId id);
+    void setOperatorFusing(bool enabled);
 
 private:
     QueryId queryId = INVALID_QUERY_ID;
     std::vector<LogicalOperator> rootOperators;
     std::string originalSql; /// Holds the original SQL string
+    bool operatorFusing = true; /// If false, every fusible operator is placed in its own pipeline.
 };
 
 /// Get all parent operators of the target operator

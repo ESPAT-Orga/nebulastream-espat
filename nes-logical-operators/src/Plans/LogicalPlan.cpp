@@ -60,6 +60,16 @@ std::vector<LogicalOperator> LogicalPlan::getRootOperators() const
     return rootOperators;
 }
 
+bool LogicalPlan::getOperatorFusing() const
+{
+    return operatorFusing;
+}
+
+void LogicalPlan::setOperatorFusing(bool enabled)
+{
+    operatorFusing = enabled;
+}
+
 LogicalPlan LogicalPlan::withRootOperators(const std::vector<LogicalOperator>& operators) const
 {
     auto copy = *this;
@@ -74,12 +84,16 @@ LogicalPlan& LogicalPlan::operator=(const LogicalPlan& other)
         queryId = other.queryId;
         originalSql = other.originalSql;
         rootOperators = other.rootOperators;
+        operatorFusing = other.operatorFusing;
     }
     return *this;
 }
 
 LogicalPlan::LogicalPlan(LogicalPlan&& other) noexcept
-    : queryId(other.queryId), rootOperators(std::move(other.rootOperators)), originalSql(std::move(other.originalSql))
+    : queryId(other.queryId)
+    , rootOperators(std::move(other.rootOperators))
+    , originalSql(std::move(other.originalSql))
+    , operatorFusing(other.operatorFusing)
 {
 }
 
@@ -90,6 +104,7 @@ LogicalPlan& LogicalPlan::operator=(LogicalPlan&& other) noexcept
         queryId = other.queryId;
         rootOperators = std::move(other.rootOperators);
         originalSql = std::move(other.originalSql);
+        operatorFusing = other.operatorFusing;
     }
     return *this;
 }
@@ -107,7 +122,7 @@ LogicalPlan::LogicalPlan(QueryId queryId, std::vector<LogicalOperator> rootOpera
 LogicalPlan promoteOperatorToRoot(const LogicalPlan& plan, const LogicalOperator& newRoot)
 {
     auto root = newRoot.withChildren(plan.getRootOperators());
-    return LogicalPlan(plan.getQueryId(), {std::move(root)}, plan.getOriginalSql());
+    return plan.withRootOperators({std::move(root)});
 }
 
 LogicalPlan addRootOperators(const LogicalPlan& plan, const std::vector<LogicalOperator>& rootsToAdd)
@@ -164,7 +179,7 @@ std::optional<LogicalPlan> replaceOperator(const LogicalPlan& plan, const Operat
     }
     if (replaced)
     {
-        return LogicalPlan(plan.getQueryId(), std::move(newRoots), plan.getOriginalSql());
+        return plan.withRootOperators(newRoots);
     }
     return std::nullopt;
 }
@@ -213,7 +228,7 @@ std::optional<LogicalPlan> replaceSubtree(const LogicalPlan& plan, const Operato
     }
     if (replaced)
     {
-        return LogicalPlan(plan.getQueryId(), std::move(newRoots), plan.getOriginalSql());
+        return plan.withRootOperators(newRoots);
     }
     return std::nullopt;
 }

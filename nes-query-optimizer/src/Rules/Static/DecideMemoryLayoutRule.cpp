@@ -62,7 +62,7 @@ LogicalPlan DecideMemoryLayoutRule::apply(const LogicalPlan& queryPlan) const
 {
     PRECONDITION(queryPlan.getRootOperators().size() == 1, "Only single root operators are supported for now");
     PRECONDITION(not queryPlan.getRootOperators().empty(), "Query must have a sink root operator");
-    return LogicalPlan{queryPlan.getQueryId(), {apply(queryPlan.getRootOperators()[0])}};
+    return queryPlan.withRootOperators({apply(queryPlan.getRootOperators()[0])});
 }
 
 LogicalOperator DecideMemoryLayoutRule::apply(const LogicalOperator& logicalOperator) const

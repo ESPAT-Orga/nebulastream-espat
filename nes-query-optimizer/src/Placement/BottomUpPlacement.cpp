@@ -442,7 +442,7 @@ void BottomUpOperatorPlacer::apply(LogicalPlan& logicalPlan)
     {
         throw PlacementFailure("Placement is not possible under the given capacity constraints");
     }
-    logicalPlan = LogicalPlan(logicalPlan.getQueryId(), {addPlacementTrait(logicalPlan.getRootOperators().front(), *placement)});
+    logicalPlan = logicalPlan.withRootOperators({addPlacementTrait(logicalPlan.getRootOperators().front(), *placement)});
 }
 
 }

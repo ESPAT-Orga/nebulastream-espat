@@ -10,15 +10,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-query: SELECT SUM(cpu) AS sum_cpu, AVG(cpu) AS avg_cpu FROM build_source WINDOW TUMBLING(creationTS, size {window_size} sec) INTO void_sink;
+query: SELECT SUM(cpu) AS sum_cpu FROM build_source WINDOW TUMBLING(creationTS, size {window_size} sec) INTO void_sink;
 sinks:
   - name: void_sink
     host: localhost:8080
     schema:
       - name: build_source$sum_cpu
-        type: FLOAT64
-        nullable: false
-      - name: build_source$avg_cpu
         type: FLOAT64
         nullable: false
     type: Void

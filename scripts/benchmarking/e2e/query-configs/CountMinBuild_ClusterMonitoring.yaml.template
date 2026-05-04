@@ -17,12 +17,16 @@ sinks:
     schema:
       - name: build_source$statisticid
         type: UINT64
+        nullable: false
       - name: build_source$statisticstart
         type: UINT64
+        nullable: false
       - name: build_source$statisticend
         type: UINT64
+        nullable: false
       - name: build_source$statisticnumberofseentuples
         type: UINT64
+        nullable: false
     type: Void
     config: {{ }}
     parser_config: {{ }}
@@ -31,28 +35,40 @@ logical:
     schema:
       - name: creationTS
         type: UINT64
+        nullable: false
       - name: jobId
         type: UINT64
+        nullable: false
       - name: taskId
         type: UINT64
+        nullable: false
       - name: machineId
         type: INT64
+        nullable: false
       - name: eventType
         type: INT16
+        nullable: false
       - name: userId
         type: INT16
+        nullable: false
       - name: category
         type: INT16
+        nullable: false
       - name: priority
         type: INT16
+        nullable: false
       - name: cpu
         type: FLOAT64
+        nullable: false
       - name: ram
         type: FLOAT64
+        nullable: false
       - name: disk
         type: FLOAT64
+        nullable: false
       - name: constraints
         type: BOOLEAN
+        nullable: false
 physical:
   - logical: build_source
     host: localhost:8080

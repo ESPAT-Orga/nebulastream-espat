@@ -27,32 +27,46 @@ sinks:
     schema:
       - name: window_start
         type: UINT64
+        nullable: false
       - name: window_end
         type: UINT64
+        nullable: false
       - name: total_seen
         type: UINT64
+        nullable: false
       - name: probe_source$jobId
         type: UINT64
+        nullable: false
       - name: probe_source$taskId
         type: UINT64
+        nullable: false
       - name: probe_source$machineId
         type: INT64
+        nullable: false
       - name: probe_source$eventType
         type: INT16
+        nullable: false
       - name: probe_source$userId
         type: INT16
+        nullable: false
       - name: probe_source$category
         type: INT16
+        nullable: false
       - name: probe_source$priority
         type: INT16
+        nullable: false
       - name: probe_source$cpu
         type: FLOAT64
+        nullable: false
       - name: probe_source$ram
         type: FLOAT64
+        nullable: false
       - name: probe_source$disk
         type: FLOAT64
+        nullable: false
       - name: probe_source$constraints
         type: BOOLEAN
+        nullable: false
     type: File
     config:
       file_path: {output_csv_path}
@@ -63,12 +77,16 @@ logical:
     schema:
       - name: STATISTICID
         type: UINT64
+        nullable: false
       - name: STATISTICSTART
         type: UINT64
+        nullable: false
       - name: STATISTICEND
         type: UINT64
+        nullable: false
       - name: STATISTICNUMBEROFSEENTUPLES
         type: UINT64
+        nullable: false
 physical:
   - logical: probe_source
     host: localhost:8080

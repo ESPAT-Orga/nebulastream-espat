@@ -42,6 +42,7 @@ from scripts.benchmarking.e2e._console import (
 from scripts.benchmarking.e2e.configs import (
     DATASET_PATHS,
     NUM_RUNS_PER_EXPERIMENT,
+    STATISTIC_TYPES_WITHOUT_SYNOPSIS_PARAMS,
     allBufferConfigs,
     allBuildWindowSizesSec,
     allDatasets,
@@ -118,7 +119,7 @@ def make_argparser(description: str) -> argparse.ArgumentParser:
     p.add_argument("-b", "--buffer-config", nargs="+",
                    help="Buffer configs as tuples like '(1234, 100)'.")
     p.add_argument("--statistic-types", nargs="+",
-                   choices=["Reservoir", "EquiWidthHistogram", "CountMin"],
+                   choices=["Reservoir", "EquiWidthHistogram", "CountMin", "Passthrough", "SumAvg"],
                    help="Statistic types to run (default: all in dataset config).")
     p.add_argument("--memory-budgets", nargs="+", type=int,
                    help="Memory budgets to sweep. Default: configured list.")
@@ -201,14 +202,18 @@ def build_basic_trials(args, *, enable_latency_list) -> list:
         for stat_type in types:
             if stat_type not in dataset["statistics"]:
                 continue
-            for mb in memory_budgets_to_run:
+            # Passthrough / SumAvg ignore memory_budget and statisticStoreType,
+            # so pin those dimensions to one value to avoid redundant runs.
+            mbs = memory_budgets_to_run[:1] if stat_type in STATISTIC_TYPES_WITHOUT_SYNOPSIS_PARAMS else memory_budgets_to_run
+            sts = store_types[:1] if stat_type in STATISTIC_TYPES_WITHOUT_SYNOPSIS_PARAMS else store_types
+            for mb in mbs:
                 for ws in window_sizes_to_run:
                     for wc in worker_combinations(worker_threads, buffer_configs, enable_latency_list):
                         execMode, nThreads, (bufSize, buffersGBM), joinStrat, pageSize, enableLatency = wc
                         bufSize, buffersGBM = docker_buffer_override(
                             bufSize, buffersGBM, has_explicit_buffer_config=bool(args.buffer_config))
                         worker_cfg = (execMode, nThreads, bufSize, buffersGBM, joinStrat, pageSize)
-                        for store_type in store_types:
+                        for store_type in sts:
                             trials.append(Trial(
                                 dataset_name=dataset["name"], dataset_path=dataset["path"],
                                 statistic_type=stat_type, memory_budget=mb, build_window_size_sec=ws,

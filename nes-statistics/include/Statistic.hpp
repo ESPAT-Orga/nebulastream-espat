@@ -30,7 +30,7 @@ namespace NES
 
 
 /// @brief A statistic represents particular information of a component, stream or etc. over a period of time.
-/// As we build and probe these statistics via a query compiler, this class solely stores the statistic as a shared byte array
+/// As we build and probe these statistics via a query compiler, this class stores the statistic data as a shared byte array.
 class Statistic
 {
 public:

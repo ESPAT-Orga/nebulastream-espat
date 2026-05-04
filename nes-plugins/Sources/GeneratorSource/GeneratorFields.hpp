@@ -37,6 +37,7 @@ enum class FieldIdentifier : uint8_t
     NORMAL_DISTRIBUTION,
     WORDLIST,
     RANDOMSTR,
+    ALTERNATING,
     INVALID,
 };
 
@@ -147,8 +148,26 @@ private:
                                's', 't', 'u', 'v', 'w', 'x', 'y', 'z', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '+', '/'});
 };
 
+constexpr auto NUM_PARAMETERS_ALTERNATING_FIELD = 7;
+
+/// @brief Generates uniform random values cycling through phases, each with its own [min, max] range
+class AlternatingField final : public BaseGeneratorField
+{
+public:
+    explicit AlternatingField(std::string_view rawSchemaLine);
+    std::ostream& generate(std::ostream& os, std::mt19937& randEng) override;
+    static void validate(std::string_view rawSchemaLine);
+
+private:
+    DataType outputType;
+    std::size_t countPerPhase;
+    std::vector<std::pair<FieldType, FieldType>> phases;
+    std::size_t currentPhase{0};
+    std::size_t currentCount{0};
+};
+
 /// @brief Variant containing the types of base generator fields
-using GeneratorFieldType = std::variant<SequenceField, NormalDistributionField, WordListField, RandomStrField>;
+using GeneratorFieldType = std::variant<SequenceField, NormalDistributionField, WordListField, RandomStrField, AlternatingField>;
 
 struct FieldValidator
 {
@@ -158,11 +177,12 @@ struct FieldValidator
 
 /// @brief Array containing functions paired with the fields identifier used to validate the fields syntax
 /// NOLINTBEGIN(cert-err58-cpp): do not warn about static storage duration
-static const std::array<FieldValidator, 4> Validators = {
+static const std::array<FieldValidator, 5> Validators = {
     {{.identifier = FieldIdentifier::SEQUENCE, .validator = SequenceField::validate},
      {.identifier = FieldIdentifier::NORMAL_DISTRIBUTION, .validator = NormalDistributionField::validate},
      {.identifier = FieldIdentifier::WORDLIST, .validator = WordListField::validate},
-     {.identifier = FieldIdentifier::RANDOMSTR, .validator = RandomStrField::validate}},
+     {.identifier = FieldIdentifier::RANDOMSTR, .validator = RandomStrField::validate},
+     {.identifier = FieldIdentifier::ALTERNATING, .validator = AlternatingField::validate}},
 };
 /// NOLINTEND(cert-err58-cpp)
 
@@ -182,6 +202,16 @@ static const std::unordered_multimap<FieldIdentifier, DataType::Type> FieldNameT
        {FieldIdentifier::NORMAL_DISTRIBUTION, DataType::Type::FLOAT64},
        {FieldIdentifier::NORMAL_DISTRIBUTION, DataType::Type::FLOAT32},
        {FieldIdentifier::WORDLIST, DataType::Type::VARSIZED},
-       {FieldIdentifier::RANDOMSTR, DataType::Type::VARSIZED}};
+       {FieldIdentifier::RANDOMSTR, DataType::Type::VARSIZED},
+       {FieldIdentifier::ALTERNATING, DataType::Type::INT64},
+       {FieldIdentifier::ALTERNATING, DataType::Type::INT32},
+       {FieldIdentifier::ALTERNATING, DataType::Type::INT16},
+       {FieldIdentifier::ALTERNATING, DataType::Type::INT8},
+       {FieldIdentifier::ALTERNATING, DataType::Type::UINT64},
+       {FieldIdentifier::ALTERNATING, DataType::Type::UINT32},
+       {FieldIdentifier::ALTERNATING, DataType::Type::UINT16},
+       {FieldIdentifier::ALTERNATING, DataType::Type::UINT8},
+       {FieldIdentifier::ALTERNATING, DataType::Type::FLOAT64},
+       {FieldIdentifier::ALTERNATING, DataType::Type::FLOAT32}};
 /// NOLINTEND(cert-err58-cpp)
 }

@@ -184,3 +184,37 @@ INTO generator_sink_text;
 17,yellow,X
 18,brown,bl5
 19,yellow,IgiKX
+
+# ALTERNATING field: two phases [0,5] and [5,10], count_per_phase=3
+CREATE LOGICAL SOURCE generatorAlternatingGrouped(id UINT64 NOT NULL, val UINT8 NOT NULL);
+CREATE PHYSICAL SOURCE FOR generatorAlternatingGrouped TYPE Generator SET(
+       'ONE' as `SOURCE`.STOP_GENERATOR_WHEN_SEQUENCE_FINISHES,
+       1 AS `SOURCE`.SEED,
+       'SEQUENCE UINT64 0 6 1, ALTERNATING UINT8 3 0 5 5 10' AS `SOURCE`.GENERATOR_SCHEMA
+);
+CREATE SINK generator_sink_alternating_grouped(generatorAlternatingGrouped.id UINT64 NOT NULL, generatorAlternatingGrouped.val UINT8 NOT NULL) TYPE File;
+SELECT * FROM generatorAlternatingGrouped INTO generator_sink_alternating_grouped;
+----
+0 2
+1 5
+2 4
+3 10
+4 5
+5 5
+
+# ALTERNATING field: two non-overlapping phases of floats [0,2.9], [3,5.9]
+CREATE LOGICAL SOURCE generatorAlternatingFloat(id UINT64 NOT NULL, val FLOAT32 NOT NULL);
+CREATE PHYSICAL SOURCE FOR generatorAlternatingFloat TYPE Generator SET(
+       'ONE' as `SOURCE`.STOP_GENERATOR_WHEN_SEQUENCE_FINISHES,
+       1 AS `SOURCE`.SEED,
+       'SEQUENCE UINT64 0 6 1, ALTERNATING FLOAT32 1 0.0 2.9 3.0 5.9' AS `SOURCE`.GENERATOR_SCHEMA
+);
+CREATE SINK generator_sink_alternating_float(generatorAlternatingFloat.id UINT64 NOT NULL, generatorAlternatingFloat.val FLOAT32 NOT NULL) TYPE File;
+SELECT * FROM generatorAlternatingFloat INTO generator_sink_alternating_float;
+----
+0 1.20936
+1 5.89184
+2 2.08894
+3 5.70442
+4 0.000332
+5 3.37156

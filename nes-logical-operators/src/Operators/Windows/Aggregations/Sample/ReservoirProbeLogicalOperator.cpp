@@ -142,7 +142,7 @@ std::string ReservoirProbeLogicalOperator::explain(ExplainVerbosity verbosity, O
 {
     if (verbosity == ExplainVerbosity::Debug)
     {
-        return fmt::format("RESERVOIR_PROBE(opId: {}, statHash: {}, sampleSchema: {})", id, statisticId, sampleSchema);
+        return fmt::format("RESERVOIR_PROBE(opId: {}, statId: {}, sampleSchema: {})", id, statisticId, sampleSchema);
     }
     std::string joined;
     const auto& fields = sampleSchema.getFieldNames();

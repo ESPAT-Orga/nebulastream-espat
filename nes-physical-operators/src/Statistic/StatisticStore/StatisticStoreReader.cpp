@@ -30,7 +30,7 @@ namespace NES
 {
 
 const static int8_t*
-getStatisticDataProxy(OperatorHandler* ptrOpHandler, const Statistic::StatisticId hash, const Timestamp startTs, const Timestamp endTs)
+getStatisticDataProxy(OperatorHandler* ptrOpHandler, const Statistic::StatisticId statisticId, const Timestamp startTs, const Timestamp endTs)
 {
     PRECONDITION(ptrOpHandler != nullptr, "opHandler should not be null!");
 
@@ -38,7 +38,7 @@ getStatisticDataProxy(OperatorHandler* ptrOpHandler, const Statistic::StatisticI
     const auto statisticStore = opHandler->getStatisticStore();
 
     const auto statistic = statisticStore->getSingleStatistic(
-        hash, Windowing::TimeMeasure(startTs.getRawValue()), Windowing::TimeMeasure(endTs.getRawValue()));
+        statisticId, Windowing::TimeMeasure(startTs.getRawValue()), Windowing::TimeMeasure(endTs.getRawValue()));
 
     if (statistic.has_value())
     {
@@ -48,7 +48,7 @@ getStatisticDataProxy(OperatorHandler* ptrOpHandler, const Statistic::StatisticI
 }
 
 uint64_t getNumberOfSeenTuplesOfStatistic(
-    OperatorHandler* ptrOpHandler, const Statistic::StatisticId hash, const Timestamp startTs, const Timestamp endTs)
+    OperatorHandler* ptrOpHandler, const Statistic::StatisticId statisticId, const Timestamp startTs, const Timestamp endTs)
 {
     PRECONDITION(ptrOpHandler != nullptr, "opHandler should not be null!");
 
@@ -56,7 +56,7 @@ uint64_t getNumberOfSeenTuplesOfStatistic(
     const auto statisticStore = opHandler->getStatisticStore();
 
     const auto statistic = statisticStore->getSingleStatistic(
-        hash, Windowing::TimeMeasure(startTs.getRawValue()), Windowing::TimeMeasure(endTs.getRawValue()));
+        statisticId, Windowing::TimeMeasure(startTs.getRawValue()), Windowing::TimeMeasure(endTs.getRawValue()));
 
     if (statistic.has_value())
     {

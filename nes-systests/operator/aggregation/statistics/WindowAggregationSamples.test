@@ -48,7 +48,7 @@ SELECT RESERVOIR(43, id, value, timestamp, 4) FROM stream WINDOW TUMBLING(timest
 
 
 # Simple reservoir sample
-# Reservoir_Probe arguments: (Stat Hash [, fieldname, datatype, ...])
+# Reservoir_Probe arguments: (Stat Id [, fieldname, datatype, ...])
 # NOTE: datatypes cannot be all caps, otherwise Antlr will not parse them for us, otherwise they have to look like the
 # usual datatypes from DataType.hpp.
 SELECT statisticStart, statisticEnd, id, value, timestamp FROM (

@@ -96,7 +96,8 @@ SET(
 );
 SELECT timestamp, auctionId, bidValue, price FROM bid
 WHERE bidValue < FLOAT64(28.21) AND price < FLOAT64(714.03)
-INTO someSink;
+INTO someSink
+SET (FALSE as `QUERY`.FUSE);
 """
 
 # Same query with filter order reversed (price first, then bidValue).
@@ -104,7 +105,8 @@ INTO someSink;
 REVERSED_QUERY_SQL = (
     "SELECT timestamp, auctionId, bidValue, price FROM bid "
     "WHERE price < FLOAT64(714.03) AND bidValue < FLOAT64(28.21) "
-    "INTO someSink;"
+    "INTO someSink "
+    'SET (FALSE as `QUERY`.FUSE);'
 )
 
 # Matches: Throughput for queryId QueryId(local=<UUID>, distributed=<horse-name>) in window <ts>-<ts> is <val> <prefix>Tup/s

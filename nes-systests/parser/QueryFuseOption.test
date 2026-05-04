@@ -1,5 +1,5 @@
 # name: parser/QueryFuseOption.test
-# description: Per-query operator-fusing toggle via SET (... as "QUERY".FUSE)
+# description: Per-query operator-fusing toggle via SET (... as `QUERY`.FUSE)
 # groups: [Parser, Aggregation, WindowOperators]
 
 CREATE LOGICAL SOURCE stream(id UINT64 NOT NULL, attr_a UINT64 NOT NULL, timestamp UINT64 NOT NULL);
@@ -20,7 +20,7 @@ SELECT start, end, MAX(attr_a) as maxA
 FROM stream
 WINDOW TUMBLING(timestamp, size 100 ms)
 INTO sinkStream
-SET (FALSE as "QUERY".FUSE);
+SET (FALSE as `QUERY`.FUSE);
 ----
 1000,1100,20
 1100,1200,30
@@ -31,7 +31,7 @@ SELECT start, end, MAX(attr_a) as maxA
 FROM stream
 WINDOW TUMBLING(timestamp, size 100 ms)
 INTO sinkStream
-SET (TRUE as "QUERY".FUSE);
+SET (TRUE as `QUERY`.FUSE);
 ----
 1000,1100,20
 1100,1200,30
@@ -52,6 +52,6 @@ SELECT start, end, MAX(attr_a) as maxA
 FROM stream
 WINDOW TUMBLING(timestamp, size 100 ms)
 INTO sinkStream
-SET ('yes' as "QUERY".FUSE);
+SET ('yes' as `QUERY`.FUSE);
 ----
 ERROR 2000 # invalid query syntax

@@ -137,11 +137,11 @@ enableLatencyForProbe = [True]
 allDatasets = [
     {
         "name": "Nexmark",
-        "statistics": ["Reservoir", "EquiWidthHistogram", "CountMin", "Passthrough", "SumAvg"],
+        "statistics": ["Reservoir", "EquiWidthHistogram", "CountMin", "Passthrough", "Sum"],
     },
     {
         "name": "ClusterMonitoring",
-        "statistics": ["Reservoir", "EquiWidthHistogram", "CountMin", "Passthrough", "SumAvg"],
+        "statistics": ["Reservoir", "EquiWidthHistogram", "CountMin", "Passthrough", "Sum"],
     },
 ]
 
@@ -153,14 +153,14 @@ STATISTIC_IDS = {
     "EquiWidthHistogram": 200,
     "CountMin": 300,
     "Passthrough": 400,
-    "SumAvg": 500,
+    "Sum": 500,
 }
 
 # Query types that don't populate the StatisticStore. They share the build
 # pipeline (template + worker invocation) but ignore memory_budget and the
 # statisticStoreType selection, so the runner pins those dimensions to a
 # single value to avoid redundant runs.
-STATISTIC_TYPES_WITHOUT_SYNOPSIS_PARAMS = {"Passthrough", "SumAvg"}
+STATISTIC_TYPES_WITHOUT_SYNOPSIS_PARAMS = {"Passthrough", "Sum"}
 
 # Build dataset paths keyed by dataset name. Resolved relative to the build
 # directory because the systest harness symlinks them under build_dir/nes-systests/testdata.

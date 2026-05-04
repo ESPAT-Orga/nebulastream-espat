@@ -10,15 +10,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-query: SELECT SUM(price) AS sum_price, AVG(price) AS avg_price FROM build_source WINDOW TUMBLING(timestamp, size {window_size} sec) INTO void_sink;
+query: SELECT SUM(price) AS sum_price FROM build_source WINDOW TUMBLING(timestamp, size {window_size} sec) INTO void_sink;
 sinks:
   - name: void_sink
     host: localhost:8080
     schema:
       - name: build_source$sum_price
-        type: FLOAT64
-        nullable: false
-      - name: build_source$avg_price
         type: FLOAT64
         nullable: false
     type: Void

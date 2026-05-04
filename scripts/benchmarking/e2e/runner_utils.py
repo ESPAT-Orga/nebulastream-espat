@@ -119,7 +119,7 @@ def make_argparser(description: str) -> argparse.ArgumentParser:
     p.add_argument("-b", "--buffer-config", nargs="+",
                    help="Buffer configs as tuples like '(1234, 100)'.")
     p.add_argument("--statistic-types", nargs="+",
-                   choices=["Reservoir", "EquiWidthHistogram", "CountMin", "Passthrough", "SumAvg"],
+                   choices=["Reservoir", "EquiWidthHistogram", "CountMin", "Passthrough", "Sum"],
                    help="Statistic types to run (default: all in dataset config).")
     p.add_argument("--memory-budgets", nargs="+", type=int,
                    help="Memory budgets to sweep. Default: configured list.")
@@ -202,7 +202,7 @@ def build_basic_trials(args, *, enable_latency_list) -> list:
         for stat_type in types:
             if stat_type not in dataset["statistics"]:
                 continue
-            # Passthrough / SumAvg ignore memory_budget and statisticStoreType,
+            # Passthrough / Sum ignore memory_budget and statisticStoreType,
             # so pin those dimensions to one value to avoid redundant runs.
             mbs = memory_budgets_to_run[:1] if stat_type in STATISTIC_TYPES_WITHOUT_SYNOPSIS_PARAMS else memory_budgets_to_run
             sts = store_types[:1] if stat_type in STATISTIC_TYPES_WITHOUT_SYNOPSIS_PARAMS else store_types

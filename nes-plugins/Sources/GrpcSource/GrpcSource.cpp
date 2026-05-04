@@ -45,6 +45,8 @@
 namespace NES
 {
 
+const auto *const address = "0.0.0.0:";
+
 /// gRPC service handler that forwards incoming requests to the GrpcSource queue.
 class StatisticSourceServiceImpl final : public StatisticSourceService::Service
 {
@@ -80,7 +82,7 @@ void GrpcSource::open(std::shared_ptr<AbstractBufferProvider>)
     auto service = std::make_unique<StatisticSourceServiceImpl>(*this);
     grpc::ServerBuilder builder;
     int selectedPort = 0;
-    builder.AddListeningPort("0.0.0.0:" + std::to_string(configuredPort), grpc::InsecureServerCredentials(), &selectedPort);
+    builder.AddListeningPort(address + std::to_string(configuredPort), grpc::InsecureServerCredentials(), &selectedPort);
     builder.RegisterService(service.get());
     grpcServer = builder.BuildAndStart();
     if (not grpcServer)
@@ -104,10 +106,6 @@ Source::FillTupleBufferResult GrpcSource::fillTupleBuffer(TupleBuffer& tupleBuff
 
     if (requestQueue.empty())
     {
-        if (stopToken.stop_requested())
-        {
-            return FillTupleBufferResult::eos();
-        }
         /// Timeout expired with no data — caller will re-invoke.
         return FillTupleBufferResult::eos();
     }
@@ -145,6 +143,7 @@ Source::FillTupleBufferResult GrpcSource::fillTupleBuffer(TupleBuffer& tupleBuff
                 value = req.endTs;
             }
 
+            INVARIANT(fieldSize == sizeof(value), "Unexpected field size in GrpcSource.");
             std::memcpy(tupleStart + fieldOffset, &value, fieldSize);
             fieldOffset += fieldSize;
         }

@@ -165,7 +165,7 @@ std::string CountMinSketchProbeLogicalOperator::explain(ExplainVerbosity verbosi
 {
     if (verbosity == ExplainVerbosity::Debug)
     {
-        return fmt::format("COUNTMIN_PROBE(opId: {}, statHash: {}, counterType: {})", id, statisticId, counterType);
+        return fmt::format("COUNTMIN_PROBE(opId: {}, statId: {}, counterType: {})", id, statisticId, counterType);
     }
     return fmt::format("COUNTMIN_PROBE()", statisticId);
 }

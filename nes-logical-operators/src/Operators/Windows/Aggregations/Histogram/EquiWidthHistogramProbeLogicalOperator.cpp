@@ -169,7 +169,7 @@ std::string EquiWidthHistogramProbeLogicalOperator::explain(ExplainVerbosity ver
     if (verbosity == ExplainVerbosity::Debug)
     {
         return fmt::format(
-            "EQUIWIDTH_PROBE(opId: {}, statHash: {}, counterType: {}, startEndType: {})", id, statisticId, counterType, startEndType);
+            "EQUIWIDTH_PROBE(opId: {}, statId: {}, counterType: {}, startEndType: {})", id, statisticId, counterType, startEndType);
     }
     return fmt::format("EQUIWIDTH_PROBE()", statisticId);
 }

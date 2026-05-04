@@ -54,7 +54,7 @@ SELECT EQUIWIDTHHISTOGRAM(44, value, 5, 0, 25, uint64) FROM stream WINDOW TUMBLI
 44 5000 10000 5
 
 # Simple equi width histogram
-# histogram probe arguments: (Stat Hash we want to retrieve from statStore, datatype of counter, datatype of startEnd)
+# histogram probe arguments: (Stat Id we want to retrieve from statStore, datatype of counter, datatype of startEnd)
 SELECT statisticStart, statisticEnd, binStart, binCounter, binEnd FROM (
     SELECT EQUIWIDTHHISTOGRAM_PROBE(45, uint64, uint64)
     FROM (

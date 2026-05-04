@@ -47,6 +47,7 @@
 
 namespace NES
 {
+const auto *const addressAndPort = "0.0.0.0:0";
 
 /// gRPC service implementation that routes incoming reports to the StatisticCoordinator.
 class StatisticCoordinatorServiceImpl final : public StatisticCoordinatorService::Service
@@ -145,7 +146,7 @@ std::string StatisticCoordinator::startGrpcServer()
     auto service = std::make_unique<StatisticCoordinatorServiceImpl>(*this);
     grpc::ServerBuilder builder;
     int selectedPort = 0;
-    builder.AddListeningPort("0.0.0.0:0", grpc::InsecureServerCredentials(), &selectedPort);
+    builder.AddListeningPort(addressAndPort, grpc::InsecureServerCredentials(), &selectedPort);
     builder.RegisterService(service.get());
     grpcServer = builder.BuildAndStart();
     if (not grpcServer)

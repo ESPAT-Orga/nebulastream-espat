@@ -92,7 +92,6 @@ SET(
     'emit_rate 10' AS `SOURCE`.GENERATOR_RATE_CONFIG,
     10000000 AS `SOURCE`.MAX_RUNTIME_MS,
     1 AS `SOURCE`.SEED,
-    -- TODO Cool would be if we used sinus instead of sequence or even better implement a new data generator "stairs"
     'SEQUENCE UINT64 0 10000000 1' AS `SOURCE`.GENERATOR_SCHEMA,
     'localhost:8080' AS `SOURCE`.HOST
 );
@@ -119,7 +118,6 @@ SHOW QUERIES;
 -- Returns: Array with global and local query instances
 -- Query statuses: "Running" | "Registered" | "Started"
 
--- We will not use this command for the experiment (adaptive optimization experiment)
 REQUEST STATISTIC DATA CARDINALITY ON endless(value)
         WINDOW TUMBLING(SIZE 10000 MS)
         SET ("localhost:8080" AS host, 256 AS sketch.columns, 4 AS sketch.rows);

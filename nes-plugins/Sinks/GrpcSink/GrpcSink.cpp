@@ -84,6 +84,7 @@ void GrpcSink::execute(const TupleBuffer& inputTupleBuffer, PipelineExecutionCon
             const auto fieldSize = field.dataType.getSizeInBytesWithNull();
 
             uint64_t value = 0;
+            INVARIANT(fieldSize == sizeof(value), "Unexpected field size in GrpcSink.");
             std::memcpy(&value, tupleStart + fieldOffset, fieldSize);
 
             /// Map schema field names to proto fields.

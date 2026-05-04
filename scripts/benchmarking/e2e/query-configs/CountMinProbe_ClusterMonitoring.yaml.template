@@ -21,14 +21,19 @@ sinks:
     schema:
       - name: probe_source$STATISTICSTART
         type: UINT64
+        nullable: false
       - name: probe_source$STATISTICEND
         type: UINT64
+        nullable: false
       - name: probe_source$rowIndex
         type: UINT64
+        nullable: false
       - name: probe_source$columnIndex
         type: UINT64
+        nullable: false
       - name: probe_source$counter
         type: UINT64
+        nullable: false
     type: Void
     config: {{ }}
     parser_config: {{ }}
@@ -37,12 +42,16 @@ logical:
     schema:
       - name: STATISTICID
         type: UINT64
+        nullable: false
       - name: STATISTICSTART
         type: UINT64
+        nullable: false
       - name: STATISTICEND
         type: UINT64
+        nullable: false
       - name: STATISTICNUMBEROFSEENTUPLES
         type: UINT64
+        nullable: false
 physical:
   - logical: probe_source
     host: localhost:8080

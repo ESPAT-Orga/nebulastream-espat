@@ -17,12 +17,16 @@ sinks:
     schema:
       - name: build_source$timestamp
         type: UINT64
+        nullable: false
       - name: build_source$auctionId
         type: INT32
+        nullable: false
       - name: build_source$bidder
         type: INT32
+        nullable: false
       - name: build_source$price
         type: FLOAT64
+        nullable: false
     type: Void
     config: {{ }}
     parser_config: {{ }}
@@ -31,12 +35,16 @@ logical:
     schema:
       - name: timestamp
         type: UINT64
+        nullable: false
       - name: auctionId
         type: INT32
+        nullable: false
       - name: bidder
         type: INT32
+        nullable: false
       - name: price
         type: FLOAT64
+        nullable: false
 physical:
   - logical: build_source
     host: localhost:8080

@@ -17,28 +17,40 @@ sinks:
     schema:
       - name: build_source$creationTS
         type: UINT64
+        nullable: false
       - name: build_source$jobId
         type: UINT64
+        nullable: false
       - name: build_source$taskId
         type: UINT64
+        nullable: false
       - name: build_source$machineId
         type: INT64
+        nullable: false
       - name: build_source$eventType
         type: INT16
+        nullable: false
       - name: build_source$userId
         type: INT16
+        nullable: false
       - name: build_source$category
         type: INT16
+        nullable: false
       - name: build_source$priority
         type: INT16
+        nullable: false
       - name: build_source$cpu
         type: FLOAT64
+        nullable: false
       - name: build_source$ram
         type: FLOAT64
+        nullable: false
       - name: build_source$disk
         type: FLOAT64
+        nullable: false
       - name: build_source$constraints
         type: BOOLEAN
+        nullable: false
     type: Void
     config: {{ }}
     parser_config: {{ }}
@@ -47,28 +59,40 @@ logical:
     schema:
       - name: creationTS
         type: UINT64
+        nullable: false
       - name: jobId
         type: UINT64
+        nullable: false
       - name: taskId
         type: UINT64
+        nullable: false
       - name: machineId
         type: INT64
+        nullable: false
       - name: eventType
         type: INT16
+        nullable: false
       - name: userId
         type: INT16
+        nullable: false
       - name: category
         type: INT16
+        nullable: false
       - name: priority
         type: INT16
+        nullable: false
       - name: cpu
         type: FLOAT64
+        nullable: false
       - name: ram
         type: FLOAT64
+        nullable: false
       - name: disk
         type: FLOAT64
+        nullable: false
       - name: constraints
         type: BOOLEAN
+        nullable: false
 physical:
   - logical: build_source
     host: localhost:8080

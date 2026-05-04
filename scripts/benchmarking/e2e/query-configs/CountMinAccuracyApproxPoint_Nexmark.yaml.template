@@ -28,10 +28,13 @@ sinks:
     schema:
       - name: window_start
         type: UINT64
+        nullable: false
       - name: window_end
         type: UINT64
+        nullable: false
       - name: probe_source$counter
         type: UINT64
+        nullable: false
     type: File
     config:
       file_path: {output_csv_path}
@@ -42,12 +45,16 @@ logical:
     schema:
       - name: STATISTICID
         type: UINT64
+        nullable: false
       - name: STATISTICSTART
         type: UINT64
+        nullable: false
       - name: STATISTICEND
         type: UINT64
+        nullable: false
       - name: STATISTICNUMBEROFSEENTUPLES
         type: UINT64
+        nullable: false
 physical:
   - logical: probe_source
     host: localhost:8080

@@ -138,7 +138,7 @@ LogicalPlan generateForDataDomain(
     plan = LogicalPlanBuilder::addStatisticStoreWriter(plan, logicalStatisticFields, statisticId, toStatisticType(request.metric));
     if (request.conditionTrigger.has_value())
     {
-        plan = LogicalPlanBuilder::addSelection(request.conditionTrigger->condition, plan);
+        plan = LogicalPlanBuilder::addSelection(request.conditionTrigger->condition.value(), plan);
     }
 
     /// Append a gRPC sink to send results back to the StatisticCoordinator

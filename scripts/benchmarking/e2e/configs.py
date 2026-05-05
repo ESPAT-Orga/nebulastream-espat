@@ -77,13 +77,13 @@ WAIT_CHECK_INTERVAL_S = 0.1
 ## Build #######################################################################
 
 # Tumbling window sizes (sec) used by the build query.
-allBuildWindowSizesSec = [1, 60]
+allBuildWindowSizesSec = [1, 5, 10]
 
 # Memory budgets (bytes) used to size each synopsis. The actual rows / cols /
 # buckets / sample-size are derived inside the C++ logical functions'
 # calculateConfigs() during lowering.
-# memoryBudgetConfig = [1 * 1024, 5 * 1024, 10 * 1024] # [1 * 1024, 10 * 1024]
-memoryBudgetConfig =  [1 * 1024, 10 * 1024]
+memoryBudgetConfig = [1 * 1024, 5 * 1024, 10 * 1024]
+# memoryBudgetConfig =  [1 * 1024, 10 * 1024]
 
 # Legacy histogram bounds; the runner now derives min/max from the data instead.
 histogramMinValue = 0

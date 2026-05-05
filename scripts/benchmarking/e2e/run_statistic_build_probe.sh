@@ -27,7 +27,7 @@ pip3 install argparse requests pandas pyyaml
 # Build (throughput) — writes results_statistic_build.csv
 #myenv/bin/python3 -m scripts.benchmarking.e2e.run_statistic_build --queries ClusterMonitoring --statistic-types EquiWidthHistogram CountMin --output-dir "$OUTPUT_DIR" --statistic-store-types SUB_STORES
 #myenv/bin/python3 -m scripts.benchmarking.e2e.run_statistic_build --queries ClusterMonitoring --output-dir "$OUTPUT_DIR" --statistic-store-types SUB_STORES
-#myenv/bin/python3 -m scripts.benchmarking.e2e.run_statistic_build    --all --output-dir "$OUTPUT_DIR" --statistic-store-types SUB_STORES
+myenv/bin/python3 -m scripts.benchmarking.e2e.run_statistic_build    --all --output-dir "$OUTPUT_DIR" --statistic-store-types SUB_STORES
 
 # Accuracy — writes results_statistic_accuracy.csv.
 #myenv/bin/python3 -m scripts.benchmarking.e2e.run_statistic_accuracy --all --output-dir "$OUTPUT_DIR" --statistic-store-types SUB_STORES
@@ -35,7 +35,7 @@ pip3 install argparse requests pandas pyyaml
 # Probe (probe throughput) — writes results_statistic_probe.csv
 #myenv/bin/python3 -m scripts.benchmarking.e2e.run_statistic_probe    --all --output-dir "$OUTPUT_DIR" --statistic-store-types SUB_STORES
 #myenv/bin/python3 -m scripts.benchmarking.e2e.run_statistic_probe  --queries ClusterMonitoring --output-dir "$OUTPUT_DIR" --statistic-store-types WINDOW --statistic-types Reservoir EquiWidthHistogram CountMin --memory-budgets 1024 10240 --worker-threads 1 --num-runs 1
-myenv/bin/python3 -m scripts.benchmarking.e2e.run_statistic_probe  --queries ClusterMonitoring --output-dir "$OUTPUT_DIR" --statistic-store-types WINDOW --worker-threads 1 16 --num-runs 3
+#myenv/bin/python3 -m scripts.benchmarking.e2e.run_statistic_probe  --queries ClusterMonitoring --output-dir "$OUTPUT_DIR" --statistic-store-types WINDOW --worker-threads 1 16 --num-runs 3
 #myenv/bin/python3 -m scripts.benchmarking.e2e.run_statistic_probe  --all --output-dir "$OUTPUT_DIR" --statistic-store-types WINDOW --worker-threads 1 16 --num-runs 3
 
 # Deactivate the virtual environment

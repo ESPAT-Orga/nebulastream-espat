@@ -136,6 +136,7 @@ PhysicalPlan apply(const LogicalPlan& queryPlan, const QueryExecutionConfigurati
     physicalPlanBuilder.addSinkRoot(newRootOperators[0]);
     physicalPlanBuilder.setExecutionMode(conf.executionMode.getValue());
     physicalPlanBuilder.setOperatorBufferSize(conf.operatorBufferSize.getValue());
+    physicalPlanBuilder.setOperatorFusing(queryPlan.getOperatorFusing());
     return std::move(physicalPlanBuilder).finalize();
 }
 }

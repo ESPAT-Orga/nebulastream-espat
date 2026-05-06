@@ -47,7 +47,7 @@
 
 namespace NES
 {
-const auto *const addressAndPort = "0.0.0.0:0";
+const auto* const addressAndPort = "0.0.0.0:0";
 
 /// gRPC service implementation that routes incoming reports to the StatisticCoordinator.
 class StatisticCoordinatorServiceImpl final : public StatisticCoordinatorService::Service

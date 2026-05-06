@@ -444,7 +444,8 @@ StatisticRequestHandler::operator()(const RequestStatisticBuildStatement& statem
     std::unreachable();
 }
 
-std::expected<CollectStatisticResult, Exception> StatisticRequestHandler::collectNewStatistic(const RequestStatisticBuildStatement& statement)
+std::expected<CollectStatisticResult, Exception>
+StatisticRequestHandler::collectNewStatistic(const RequestStatisticBuildStatement& statement)
 {
     return statisticCoordinator->collectNewStatistic(statement);
 }

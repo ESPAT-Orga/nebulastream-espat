@@ -108,11 +108,19 @@ for i in $(seq 0 $((WORKER_COUNT - 1))); do
     CONFIG_ARG="\"--configPath=$CONTAINER_WORKDIR/configs/$HOST_NAME.yaml\","
   fi
 
+  # Optional NET_ADMIN capability so the BATS fixture can apply tc qdisc throttling inside the container.
+  # Enabled by setting WORKER_CAP_NET_ADMIN=1 in the calling environment; harmless otherwise.
+  CAP_ADD_BLOCK=""
+  if [ "${WORKER_CAP_NET_ADMIN:-0}" = "1" ]; then
+    CAP_ADD_BLOCK=$'    cap_add:\n      - NET_ADMIN'
+  fi
+
   cat <<EOF
   $HOST_NAME:
     image: $WORKER_IMAGE
     pull_policy: never
     working_dir: $CONTAINER_WORKDIR/$HOST_NAME
+${CAP_ADD_BLOCK}
     healthcheck:
       test: ["CMD", "/bin/grpc_health_probe", "-addr=$HOST_NAME:$GRPC_PORT", "-connect-timeout", "5s" ]
       interval: 1s

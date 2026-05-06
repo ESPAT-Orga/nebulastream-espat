@@ -18,3 +18,7 @@ add_executable(backpressure-channel-test BackpressureChannelTest.cpp)
 target_include_directories(backpressure-channel-test PRIVATE ${CMAKE_SOURCE_DIR}/nes-common/tests/Util/include)
 target_link_libraries(backpressure-channel-test PRIVATE nes-executable nes-common GTest::gtest GTest::gtest_main)
 
+add_nes_test(network-sink-sending-strategy-test NetworkSinkSendingStrategyTest.cpp)
+target_include_directories(network-sink-sending-strategy-test PRIVATE ${CMAKE_SOURCE_DIR}/nes-common/tests/Util/include)
+target_link_libraries(network-sink-sending-strategy-test nes-executable nes-common)
+

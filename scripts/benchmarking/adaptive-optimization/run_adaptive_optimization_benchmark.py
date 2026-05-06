@@ -94,16 +94,19 @@ SET(
     'CSV' as `SINK`.OUTPUT_FORMAT,
     '{WORKER_GRPC}' AS `SINK`.HOST
 );
-SELECT timestamp, auctionId, bidValue, price FROM bid
-WHERE bidValue < FLOAT64(28.21) AND price < FLOAT64(714.03)
+SELECT timestamp, auctionId, bidValue, price
+FROM (SELECT timestamp, auctionId, bidValue, price FROM bid WHERE bidValue < FLOAT64(28.21))
+WHERE price < FLOAT64(714.03)
 INTO someSink;
 """
 
 # Same query with filter order reversed (price first, then bidValue).
-# The companion statistic fires once and asks the system to swap to this plan.
+# Each filter is a separate logical operator (nested subquery), so the adaptive
+# optimizer can observe the reordering effect on throughput.
 REVERSED_QUERY_SQL = (
-    "SELECT timestamp, auctionId, bidValue, price FROM bid "
-    "WHERE price < FLOAT64(714.03) AND bidValue < FLOAT64(28.21) "
+    "SELECT timestamp, auctionId, bidValue, price "
+    "FROM (SELECT timestamp, auctionId, bidValue, price FROM bid WHERE price < FLOAT64(714.03)) "
+    "WHERE bidValue < FLOAT64(28.21) "
     "INTO someSink;"
 )
 

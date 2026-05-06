@@ -14,14 +14,24 @@
 #pragma once
 
 #include <memory>
+#include <SendingStrategy/NetworkSinkSendingStrategy.hpp>
 #include <Sinks/Sink.hpp>
 #include <Sinks/SinkDescriptor.hpp>
 #include <BackpressureChannel.hpp>
+#include <Priority.hpp>
+#include <QueryId.hpp>
 
 namespace NES
 {
 
 /// Takes a SinkDescriptor and in exchange returns a SinkPipeline, which Tasks can process (together with a TupleBuffer).
-std::unique_ptr<Sink> lower(BackpressureController backpressureController, const SinkDescriptor& sinkDescriptor);
+/// `queryId` identifies the query owning this sink. `priority` is the query priority, forwarded to the strategy on register.
+/// `sendingStrategy` is the worker-shared strategy that gates network sink sending and must be non-null.
+std::unique_ptr<Sink> lower(
+    BackpressureController backpressureController,
+    const SinkDescriptor& sinkDescriptor,
+    QueryId queryId,
+    Priority priority,
+    std::shared_ptr<NetworkSinkSendingStrategy> sendingStrategy);
 
 }

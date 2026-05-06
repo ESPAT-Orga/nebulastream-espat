@@ -21,20 +21,28 @@
 #include <Listeners/QueryLog.hpp>
 #include <Runtime/BufferManager.hpp>
 #include <Runtime/NodeEngine.hpp>
+#include <SendingStrategy/NetworkSinkSendingStrategy.hpp>
+#include <SendingStrategy/NetworkSinkSendingStrategyFactory.hpp>
 #include <Sources/SourceProvider.hpp>
 #include <StatisticStore/AbstractStatisticStore.hpp>
 #include <StatisticStore/DefaultStatisticStore.hpp>
 #include <StatisticStore/SubStoresStatisticStore.hpp>
 #include <StatisticStore/WindowStatisticStore.hpp>
 #include <ErrorHandling.hpp>
+#include <NetworkSinkSendingStrategyType.hpp>
 #include <QueryEngine.hpp>
 
 namespace NES
 {
 
 
-NodeEngineBuilder::NodeEngineBuilder(const WorkerConfiguration& workerConfiguration, std::shared_ptr<StatisticListener> statisticsListener)
-    : workerConfiguration(workerConfiguration), statisticsListener(std::move(statisticsListener))
+NodeEngineBuilder::NodeEngineBuilder(
+    const WorkerConfiguration& workerConfiguration,
+    std::shared_ptr<StatisticListener> statisticsListener,
+    NetworkSinkSendingStrategyType networkSinkSendingStrategy)
+    : workerConfiguration(workerConfiguration)
+    , statisticsListener(std::move(statisticsListener))
+    , networkSinkSendingStrategy(networkSinkSendingStrategy)
 {
 }
 
@@ -66,13 +74,16 @@ std::unique_ptr<NodeEngine> NodeEngineBuilder::build(const Host& host)
     }
     INVARIANT(statisticStore != nullptr, "Unhandled StatisticStoreType");
 
+    auto sendingStrategy = createNetworkSinkSendingStrategy(networkSinkSendingStrategy);
+
     return std::make_unique<NodeEngine>(
         std::move(bufferManager),
         statisticsListener,
         std::move(queryLog),
         std::move(queryEngine),
         std::move(sourceProvider),
-        std::move(statisticStore));
+        std::move(statisticStore),
+        std::move(sendingStrategy));
 }
 
 }

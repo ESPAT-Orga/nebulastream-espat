@@ -68,11 +68,11 @@ WORKER_DATA = "localhost:9090"
 #### Query to deploy (nexmark bid-like schema, generator source)
 #
 # Two filters are applied with the following selectivities (fields are independent):
-#   bidValue < 28.21  →  selectivity 0.1
-#     bidValue ~ N(mean=50, stddev=17); 10th percentile = 50 + 17 * Φ⁻¹(0.10) = 50 + 17*(-1.2816) ≈ 28.21
-#   price    < 714.03 →  selectivity 0.9
-#     price    ~ N(mean=500, stddev=167); 90th percentile = 500 + 167 * Φ⁻¹(0.90) = 500 + 167*(+1.2816) ≈ 714.03
-#   Combined selectivity (AND): 0.1 * 0.9 = 0.09
+#   bidValue < 10.45  →  selectivity 0.01
+#     bidValue ~ N(mean=50, stddev=17); 1st percentile = 50 + 17 * Φ⁻¹(0.01) = 50 + 17*(-2.3263) ≈ 10.45
+#   price    < 888.49 →  selectivity 0.99
+#     price    ~ N(mean=500, stddev=167); 99th percentile = 500 + 167 * Φ⁻¹(0.99) = 500 + 167*(+2.3263) ≈ 888.49
+#   Combined selectivity (AND): 0.01 * 0.99 ≈ 0.0099
 SETUP_SQL = f"""\
 CREATE WORKER "{WORKER_GRPC}" SET ('{WORKER_DATA}' AS DATA);
 CREATE LOGICAL SOURCE bid(timestamp UINT64 NOT NULL, auctionId INT32 NOT NULL, bidValue FLOAT64 NOT NULL, price FLOAT64 NOT NULL);
@@ -94,16 +94,19 @@ SET(
     'CSV' as `SINK`.OUTPUT_FORMAT,
     '{WORKER_GRPC}' AS `SINK`.HOST
 );
-SELECT timestamp, auctionId, bidValue, price FROM bid
-WHERE bidValue < FLOAT64(28.21) AND price < FLOAT64(714.03)
+SELECT timestamp, auctionId, bidValue, price
+FROM (SELECT timestamp, auctionId, bidValue, price FROM bid WHERE bidValue < FLOAT64(10.45))
+WHERE price < FLOAT64(888.49)
 INTO someSink;
 """
 
 # Same query with filter order reversed (price first, then bidValue).
-# The companion statistic fires once and asks the system to swap to this plan.
+# Each filter is a separate logical operator (nested subquery), so the adaptive
+# optimizer can observe the reordering effect on throughput.
 REVERSED_QUERY_SQL = (
-    "SELECT timestamp, auctionId, bidValue, price FROM bid "
-    "WHERE price < FLOAT64(714.03) AND bidValue < FLOAT64(28.21) "
+    "SELECT timestamp, auctionId, bidValue, price "
+    "FROM (SELECT timestamp, auctionId, bidValue, price FROM bid WHERE price < FLOAT64(888.49)) "
+    "WHERE bidValue < FLOAT64(10.45) "
     "INTO someSink;"
 )
 
@@ -112,6 +115,12 @@ _THROUGHPUT_RE = re.compile(
     r"Throughput for queryId QueryId\(local=[^,)]+, distributed=([^)]+)\)"
     r" in window (\d+)-(\d+) is (\d+\.\d+) (\w*)Tup/s"
 )
+
+# Matches: [{"query_id": "<horse-name>"}]  (initial SELECT deployed via REPL stdin → JSON output path)
+_JSON_QUERY_ID_RE = re.compile(r'^\[{"query_id":\s*"([^"]+)"}]')
+
+# Matches: [AdaptiveOpt] Deployed query (id=<horse-name>).  (swap callback → plain-text output path)
+_ADAPTIVE_QUERY_ID_RE = re.compile(r'\[AdaptiveOpt\] Deployed query \(id=([^)]+)\)')
 
 
 def stream_output(proc, label, lines_out):
@@ -175,15 +184,33 @@ def find_data_query_id(repl_lines, timeout=15.0):
     return None
 
 
-def parse_throughput(worker_lines, data_query_id):
-    """Return list of (window_start_ms, throughput_tup_per_s) for the data query only."""
+def collect_all_data_query_ids(repl_lines):
+    """Scan all REPL output and return the set of every data query's distributed ID.
+
+    Two output paths emit query IDs:
+      - Initial SELECT (via stdin → JSON path): [{"query_id": "<horse-name>"}]
+      - Adaptive swap (via callback → plain-text): [AdaptiveOpt] Deployed query (id=<horse-name>).
+    Statistic collection queries are deployed internally via StatisticCoordinator and never
+    print a distributed query ID to the REPL stdout, so they are excluded naturally.
+    """
+    ids = set()
+    for line in repl_lines:
+        if m := _JSON_QUERY_ID_RE.search(line):
+            ids.add(m.group(1))
+        elif m := _ADAPTIVE_QUERY_ID_RE.search(line):
+            ids.add(m.group(1))
+    return ids
+
+
+def parse_throughput(worker_lines, data_query_ids):
+    """Return list of (window_start_ms, query_id, throughput_tup_per_s) for all data queries."""
     measurements = []
     for line in worker_lines:
         m = _THROUGHPUT_RE.search(line)
-        if m and m.group(1) == data_query_id:
+        if m and m.group(1) in data_query_ids:
             window_start = int(m.group(2))
             throughput = convert_unit_prefix(float(m.group(4)), m.group(5))
-            measurements.append((window_start, throughput))
+            measurements.append((window_start, m.group(1), throughput))
     return measurements
 
 
@@ -195,9 +222,9 @@ def write_throughput_csv(measurements, output_path):
     min_ts = measurements[0][0]
     with open(output_path, "w", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow(["timestamp_ms", "throughput_tup_per_s"])
-        for ts, tput in measurements:
-            writer.writerow([ts - min_ts, tput])
+        writer.writerow(["timestamp_ms", "query_id", "throughput_tup_per_s"])
+        for ts, qid, tput in measurements:
+            writer.writerow([ts - min_ts, qid, tput])
     printSuccess(f"Throughput data ({len(measurements)} samples) written to {os.path.abspath(output_path)}")
 
 
@@ -251,7 +278,7 @@ def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str):
             "--companion-source", "bid",
             "--companion-field", "price",
             "--companion-metric", "Cardinality",
-            "--companion-window-size-ms", "100000",
+            "--companion-window-size-ms", "200000",
             "--companion-event-time-field", "BID$TIMESTAMP",
             "--companion-host", WORKER_GRPC,
             "--companion-switch-to-sql", REVERSED_QUERY_SQL,
@@ -305,7 +332,9 @@ def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str):
     worker_thread.join(timeout=5)
 
     # --- Parse and write throughput CSV ---
-    measurements = parse_throughput(worker_lines, data_query_id)
+    data_query_ids = collect_all_data_query_ids(repl_lines)
+    printInfo(f"Data query IDs observed across all deployments: {data_query_ids}")
+    measurements = parse_throughput(worker_lines, data_query_ids)
     write_throughput_csv(measurements, output)
 
     printSuccess("Benchmark complete.")
@@ -318,8 +347,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--duration",
         type=int,
-        default=60,
-        help="How long (seconds) to let the query run before tearing down (default: 60).",
+        default=120,
+        help="How long (seconds) to let the query run before tearing down (default: 120).",
     )
     parser.add_argument(
         "--skip-build",

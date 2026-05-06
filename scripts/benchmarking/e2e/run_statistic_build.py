@@ -30,7 +30,7 @@ from scripts.benchmarking.utils import (
     create_folder_and_remove_if_exists,
     printInfo,
 )
-from scripts.benchmarking.e2e._console import step
+from scripts.benchmarking.common._console import step
 from scripts.benchmarking.e2e.build_phase import run_build_phase
 from scripts.benchmarking.e2e.configs import (
     BUILD_FIELDNAMES,
@@ -49,7 +49,7 @@ from scripts.benchmarking.e2e.runner_utils import (
     resolve_datasets,
     run_grid,
 )
-from scripts.benchmarking.e2e.worker_lifecycle import (
+from scripts.benchmarking.common.worker_lifecycle import (
     check_log_for_buffer_exhaustion,
     dump_worker_log_tail,
     parse_log_to_throughput_csv,

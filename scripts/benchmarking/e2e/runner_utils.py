@@ -32,7 +32,7 @@ from datetime import datetime, timedelta
 from typing import Any, Callable
 
 from scripts.benchmarking.utils import printError, printInfo, printSuccess
-from scripts.benchmarking.e2e._console import (
+from scripts.benchmarking.common._console import (
     banner,
     clear_lines,
     get_step_counter,

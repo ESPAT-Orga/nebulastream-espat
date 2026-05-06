@@ -21,6 +21,7 @@
 #include <Sinks/SinkDescriptor.hpp>
 #include <Sources/SourceDescriptor.hpp>
 #include <ExecutablePipelineStage.hpp>
+#include <Priority.hpp>
 #include <QueryId.hpp>
 
 namespace NES
@@ -69,5 +70,6 @@ struct CompiledQueryPlan
     std::vector<std::shared_ptr<ExecutablePipeline>> pipelines;
     std::vector<Sink> sinks;
     std::vector<Source> sources;
+    Priority priority = Priority::HIGH;
 };
 }

@@ -20,8 +20,14 @@ import "SerializableQueryId.proto";
 /*
 The serializable wrapper definition for query plan
  */
+enum SerializablePriority {
+  HIGH = 0;
+  LOW = 1;
+}
+
 message SerializableQueryPlan{
   repeated string reflectedOperators = 1;
   repeated uint64 rootOperatorIds = 2;
   optional SerializableQueryId queryId = 3;
+  SerializablePriority priority = 4;
 }

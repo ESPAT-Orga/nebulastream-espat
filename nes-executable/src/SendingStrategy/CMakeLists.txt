@@ -10,10 +10,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-add_subdirectory(SendingStrategy)
-
 add_source_files(nes-executable
-        BackpressureChannel.cpp
-        CompiledQueryPlan.cpp
-        Pipeline.cpp
+        AdaptiveDifferentPrioStrategy.cpp
+        NetworkSinkSendingStrategyFactory.cpp
 )

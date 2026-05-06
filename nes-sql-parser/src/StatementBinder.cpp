@@ -647,6 +647,7 @@ public:
             if (auto* const queryAst = statementAST->queryWithOptions(); queryAst != nullptr)
             {
                 std::optional<DistributedQueryId> queryId;
+                std::optional<Priority> queryPriority;
                 if (queryAst->optionsClause() != nullptr)
                 {
                     auto options = bindConfigOptions(queryAst->optionsClause()->options->namedConfigExpression());
@@ -661,9 +662,35 @@ public:
                             }
                             queryId = DistributedQueryId(std::get<std::string>(*literal));
                         }
+                        if (auto prioIter = optionsIter->second.find("PRIORITY"); prioIter != optionsIter->second.end())
+                        {
+                            auto* literal = std::get_if<Literal>(&prioIter->second);
+                            if ((literal == nullptr) || !std::holds_alternative<std::string>(*literal))
+                            {
+                                throw InvalidQuerySyntax("Query priority must be a string ('HIGH' or 'LOW')");
+                            }
+                            const auto value = toUpperCase(std::get<std::string>(*literal));
+                            if (value == "HIGH")
+                            {
+                                queryPriority = Priority::HIGH;
+                            }
+                            else if (value == "LOW")
+                            {
+                                queryPriority = Priority::LOW;
+                            }
+                            else
+                            {
+                                throw InvalidQuerySyntax("Query priority must be 'HIGH' or 'LOW', got '{}'", value);
+                            }
+                        }
                     }
                 }
-                return QueryStatement{.plan = queryBinder(queryAst->query()), .id = queryId};
+                auto plan = queryBinder(queryAst->query());
+                if (queryPriority.has_value())
+                {
+                    plan.setPriority(*queryPriority);
+                }
+                return QueryStatement{.plan = std::move(plan), .id = queryId};
             }
 
             throw InvalidStatement(statementAST->toString());

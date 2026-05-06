@@ -33,7 +33,7 @@ from scripts.benchmarking.utils import (
     printError,
     printInfo,
 )
-from scripts.benchmarking.e2e._console import step
+from scripts.benchmarking.common._console import step
 from scripts.benchmarking.e2e.configs import (
     PROBE_FIELDNAMES,
     QUERY_CONFIGS_DIR,
@@ -64,7 +64,7 @@ from scripts.benchmarking.e2e.runner_utils import (
     select_sweeps,
     worker_combinations,
 )
-from scripts.benchmarking.e2e.worker_lifecycle import (
+from scripts.benchmarking.common.worker_lifecycle import (
     check_log_for_buffer_exhaustion,
     dump_worker_log_tail,
     parse_average_latency_from_latency_listener,

@@ -26,13 +26,24 @@ Sections (search by ``##``):
 
 import os
 
+from scripts.benchmarking.common.config import (
+    BUILD_DIR,
+    NEBULI_EXECUTABLE,
+    SINGLE_NODE_EXECUTABLE,
+    THROUGHPUT_LISTENER_INTERVAL,
+    WAIT_BETWEEN_COMMANDS_LONG,
+    WAIT_CHECK_INTERVAL_S,
+    WAIT_STABLE_CHECKS,
+    WORKING_DIR,
+)
 from scripts.benchmarking.utils import get_vcpkg_dir
 
 
 ## General #####################################################################
 
-build_dir = os.path.join(".", "build_dir")
-working_dir = os.path.abspath(os.path.join(build_dir, "working_dir"))
+# Re-exported from scripts.benchmarking.common.config for backwards compatibility with existing scripts.
+build_dir = BUILD_DIR
+working_dir = WORKING_DIR
 output_dir = "."
 cmake_flags = ("-G Ninja "
                "-DCMAKE_BUILD_TYPE=Release "
@@ -49,8 +60,8 @@ QUERY_CONFIGS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "qu
 
 ## Worker ######################################################################
 
-single_node_executable = os.path.join(build_dir, "nes-single-node-worker/nes-single-node-worker")
-nebuli_executable = [os.path.join(build_dir, "nes-frontend/apps/nes-cli"), "--debug"]
+single_node_executable = SINGLE_NODE_EXECUTABLE
+nebuli_executable = NEBULI_EXECUTABLE
 
 # Worker query-execution and runtime sweep parameters.
 allExecutionModes = ["COMPILER"]                       # ["COMPILER", "INTERPRETER"]
@@ -61,17 +72,15 @@ allBufferConfigs = [(100 * 1024, 200 * 1000)]          # (bufferSizeInBytes, buf
 allStatisticStoreTypes = ["DEFAULT", "WINDOW", "SUB_STORES"]
 
 # Throughput listener emits a measurement every X ms.
-throughputListenerInterval = 100
+throughputListenerInterval = THROUGHPUT_LISTENER_INTERVAL
 
-# Seconds to wait between starting the worker and submitting the first query.
-WAIT_BETWEEN_COMMANDS_LONG = 5
-
-# A query that finishes naturally (file source exhausted) flips its status to
-# "Stopped". We poll status WAIT_STABLE_CHECKS times, WAIT_CHECK_INTERVAL_S
-# apart; only when all polls in the window report "Stopped" do we treat the
-# query as done.
-WAIT_STABLE_CHECKS = 5
-WAIT_CHECK_INTERVAL_S = 0.1
+# WAIT_* constants re-exported from common.config; modules that already import them by these names
+# (worker_lifecycle, runner_utils, accuracy/probe runners) keep working unchanged.
+__all__ = [
+    "WAIT_BETWEEN_COMMANDS_LONG",
+    "WAIT_STABLE_CHECKS",
+    "WAIT_CHECK_INTERVAL_S",
+]
 
 
 ## Build #######################################################################

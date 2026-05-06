@@ -30,13 +30,13 @@ import subprocess
 import time
 
 from scripts.benchmarking.utils import convert_unit_prefix, printError
-from scripts.benchmarking.e2e.configs import (
+from scripts.benchmarking.common.config import (
+    NEBULI_EXECUTABLE as nebuli_executable,
+    SINGLE_NODE_EXECUTABLE as single_node_executable,
+    THROUGHPUT_LISTENER_INTERVAL as throughputListenerInterval,
     WAIT_BETWEEN_COMMANDS_LONG,
     WAIT_CHECK_INTERVAL_S,
     WAIT_STABLE_CHECKS,
-    nebuli_executable,
-    single_node_executable,
-    throughputListenerInterval,
 )
 
 

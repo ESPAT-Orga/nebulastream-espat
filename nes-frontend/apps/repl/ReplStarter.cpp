@@ -169,9 +169,7 @@ int main(int argc, char** argv)
             .help("changes optimizer default values. e.g. join_strategy=HASH_JOIN");
 
         /// companion statistic config
-        program.add_argument("--companion-statistic")
-            .flag()
-            .help("Deploy a companion statistic query alongside every SELECT query");
+        program.add_argument("--companion-statistic").flag().help("Deploy a companion statistic query alongside every SELECT query");
         program.add_argument("--companion-source")
             .default_value(std::string{"bid"})
             .help("Logical source name for the companion statistic (default: bid)");
@@ -190,12 +188,9 @@ int main(int argc, char** argv)
         program.add_argument("--companion-window-size-ms")
             .default_value(std::string{"1000000"})
             .help("Window size in milliseconds for the companion statistic (default: 1000000)");
-        program.add_argument("--companion-window-advance-ms")
-            .help("Window advance in milliseconds; if omitted, uses a tumbling window");
-        program.add_argument("--companion-event-time-field")
-            .help("Event-time field name; if omitted, uses ingestion time");
-        program.add_argument("--companion-condition")
-            .help("SQL filter expression applied to the statistic result (e.g. 'value > 100')");
+        program.add_argument("--companion-window-advance-ms").help("Window advance in milliseconds; if omitted, uses a tumbling window");
+        program.add_argument("--companion-event-time-field").help("Event-time field name; if omitted, uses ingestion time");
+        program.add_argument("--companion-condition").help("SQL filter expression applied to the statistic result (e.g. 'value > 100')");
         program.add_argument("--companion-host")
             .default_value(std::string{"localhost:8080"})
             .help("Worker host for the companion statistic sink (default: localhost:8080)");
@@ -319,8 +314,7 @@ int main(int argc, char** argv)
         NES::TopologyStatementHandler topologyStatementHandler{queryManager, workerCatalog};
         auto queryOptimizer = std::make_shared<NES::QueryOptimizer>(queryOptimizerConfig, sourceCatalog, sinkCatalog, workerCatalog);
         auto queryStatementHandler = std::make_shared<NES::QueryStatementHandler>(queryManager, queryOptimizer);
-        auto submitQueryFn
-            = [queryManager, queryOptimizer](NES::LogicalPlan plan) -> std::expected<NES::QueryId, NES::Exception>
+        auto submitQueryFn = [queryManager, queryOptimizer](NES::LogicalPlan plan) -> std::expected<NES::QueryId, NES::Exception>
         {
             std::stringstream beforeSs;
             beforeSs << plan;
@@ -363,15 +357,13 @@ int main(int argc, char** argv)
         /// which runs on a gRPC thread and cannot use the binder that was moved into Repl.
         /// Wrapped in shared_ptr so the non-copyable StatementBinder can be captured by a std::function.
         auto callbackBinder = std::make_shared<NES::StatementBinder>(
-            sourceCatalog,
-            [](auto&& pH1) { return NES::AntlrSQLQueryParser::bindLogicalQueryPlan(std::forward<decltype(pH1)>(pH1)); });
+            sourceCatalog, [](auto&& pH1) { return NES::AntlrSQLQueryParser::bindLogicalQueryPlan(std::forward<decltype(pH1)>(pH1)); });
 
         std::optional<NES::RequestStatisticBuildStatement> companionStatisticRequest = std::nullopt;
         std::optional<std::function<void(NES::DistributedQueryId, const std::string&)>> onCompanionAssociatedWithQuery = std::nullopt;
         if (program.get<bool>("--companion-statistic"))
         {
-            const auto metric =
-                magic_enum::enum_cast<NES::Metric>(program.get<std::string>("--companion-metric")).value();
+            const auto metric = magic_enum::enum_cast<NES::Metric>(program.get<std::string>("--companion-metric")).value();
 
             std::optional<uint64_t> windowAdvanceMs;
             if (program.is_used("--companion-window-advance-ms"))
@@ -393,9 +385,10 @@ int main(int argc, char** argv)
             {
                 std::mutex mutex;
                 std::optional<NES::DistributedQueryId> currentQueryId;
-                std::string currentSql; // SQL of the currently running query
-                std::string nextSql;    // SQL to deploy on the next trigger
+                std::string currentSql; /// SQL of the currently running query
+                std::string nextSql; /// SQL to deploy on the next trigger
             };
+
             auto swapState = std::make_shared<AdaptiveSwapState>();
             swapState->nextSql = switchToSql;
 
@@ -438,8 +431,8 @@ int main(int argc, char** argv)
                         auto stopResult = (*queryStatementHandler)(NES::DropQueryStatement{.id = *currentQueryId});
                         if (!stopResult.has_value())
                         {
-                            std::cout << "[AdaptiveOpt] Failed to stop query " << currentQueryId->getRawValue()
-                                      << ": " << stopResult.error().what() << "\n";
+                            std::cout << "[AdaptiveOpt] Failed to stop query " << currentQueryId->getRawValue() << ": "
+                                      << stopResult.error().what() << "\n";
                             std::flush(std::cout);
                             return;
                         }

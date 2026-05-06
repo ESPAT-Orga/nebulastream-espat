@@ -45,7 +45,7 @@
 namespace NES
 {
 
-const auto *const address = "0.0.0.0:";
+const auto* const address = "0.0.0.0:";
 
 /// gRPC service handler that forwards incoming requests to the GrpcSource queue.
 class StatisticSourceServiceImpl final : public StatisticSourceService::Service

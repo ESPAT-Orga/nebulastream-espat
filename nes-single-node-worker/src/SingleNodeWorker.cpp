@@ -141,7 +141,9 @@ SingleNodeWorker::SingleNodeWorker(const SingleNodeWorkerConfiguration& configur
     }
 
 
-    nodeEngine = NodeEngineBuilder(configuration.workerConfiguration, copyPtr(listener)).build(host);
+    nodeEngine
+        = NodeEngineBuilder(configuration.workerConfiguration, copyPtr(listener), configuration.networkSinkSendingStrategy.getValue())
+              .build(host);
     compiler = std::make_unique<QueryCompilation::QueryCompiler>(
         configuration.workerConfiguration.defaultQueryExecution, nodeEngine->getStatisticStore());
 
@@ -189,6 +191,7 @@ std::expected<QueryId, Exception> SingleNodeWorker::registerQuery(LogicalPlan pl
         request->dumpCompilationResult = dumpMode;
         auto result = compiler->compileQuery(std::move(request));
         INVARIANT(result, "expected successful query compilation or exception, but got nothing");
+        result->priority = plan.getPriority();
         nodeEngine->registerCompiledQueryPlan(plan.getQueryId(), std::move(result));
         return plan.getQueryId();
     }

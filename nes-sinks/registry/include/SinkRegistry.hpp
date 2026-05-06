@@ -14,11 +14,15 @@
 
 #pragma once
 
+#include <memory>
 #include <string>
+#include <SendingStrategy/NetworkSinkSendingStrategy.hpp>
 #include <Sinks/Sink.hpp>
 #include <Sinks/SinkDescriptor.hpp>
 #include <Util/Registry.hpp>
 #include <BackpressureChannel.hpp>
+#include <Priority.hpp>
+#include <QueryId.hpp>
 
 namespace NES
 {
@@ -29,6 +33,12 @@ struct SinkRegistryArguments
 {
     BackpressureController backpressureController;
     SinkDescriptor sinkDescriptor;
+    /// Query this sink belongs to. Used by NetworkSink to identify itself to the sending strategy.
+    QueryId queryId = INVALID_QUERY_ID;
+    /// Priority chosen by the user for this query. Forwarded to the NetworkSinkSendingStrategy on register.
+    Priority priority = Priority::HIGH;
+    /// Worker-shared strategy that decides whether NetworkSinks may send. Always non-null; defaults to AlwaysSend.
+    std::shared_ptr<NetworkSinkSendingStrategy> sendingStrategy;
 };
 
 class SinkRegistry : public BaseRegistry<SinkRegistry, std::string, SinkRegistryReturnType, SinkRegistryArguments>

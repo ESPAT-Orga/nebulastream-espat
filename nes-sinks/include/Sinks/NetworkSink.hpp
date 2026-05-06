@@ -27,6 +27,7 @@
 #include <Identifiers/Identifiers.hpp>
 #include <Identifiers/NESStrongType.hpp>
 #include <Runtime/TupleBuffer.hpp>
+#include <SendingStrategy/NetworkSinkSendingStrategy.hpp>
 #include <Sinks/Sink.hpp>
 #include <Sinks/SinkDescriptor.hpp>
 #include <folly/Synchronized.h>
@@ -34,6 +35,8 @@
 #include <rust/cxx.h>
 #include <BackpressureChannel.hpp>
 #include <PipelineExecutionContext.hpp>
+#include <Priority.hpp>
+#include <QueryId.hpp>
 
 namespace NES
 {
@@ -55,8 +58,25 @@ public:
     /// @param upperThreshold Number of buffered tuples at which backpressure is acquired.
     /// @param lowerThreshold Number of buffered tuples at which backpressure is released.
     explicit BackpressureHandler(size_t upperThreshold = 1, size_t lowerThreshold = 0); /// NOLINT(fuchsia-default-arguments-declarations)
-    std::optional<TupleBuffer> onFull(TupleBuffer buffer, BackpressureController& backpressureController);
-    std::optional<TupleBuffer> onSuccess(BackpressureController& backpressureController);
+
+    /// Result of onFull: which buffer (if any) to retry sending, and whether the call newly transitioned this sink into the
+    /// backpressure state. The caller (NetworkSink) uses didApplyBackpressure to forward an onBackpressureApplied event to the
+    /// shared NetworkSinkSendingStrategy without coupling the handler to it.
+    struct OnFullResult
+    {
+        std::optional<TupleBuffer> retryBuffer;
+        bool didApplyBackpressure = false;
+    };
+
+    /// Result of onSuccess: next buffer to send (if any) and whether this call newly transitioned the sink out of backpressure.
+    struct OnSuccessResult
+    {
+        std::optional<TupleBuffer> nextBuffer;
+        bool didReleaseBackpressure = false;
+    };
+
+    OnFullResult onFull(TupleBuffer buffer, BackpressureController& backpressureController);
+    OnSuccessResult onSuccess(BackpressureController& backpressureController);
     bool empty() const;
 };
 
@@ -71,7 +91,12 @@ public:
         return Instance;
     }
 
-    NetworkSink(BackpressureController backpressureController, const SinkDescriptor& sinkDescriptor);
+    NetworkSink(
+        BackpressureController backpressureController,
+        const SinkDescriptor& sinkDescriptor,
+        QueryId queryId,
+        Priority priority,
+        std::shared_ptr<NetworkSinkSendingStrategy> sendingStrategy);
     ~NetworkSink() override = default;
 
     NetworkSink(const NetworkSink&) = delete;
@@ -100,6 +125,9 @@ private:
     size_t senderQueueSize;
     size_t maxPendingAcks;
     std::atomic_bool closed;
+    QueryId queryId;
+    Priority priority;
+    std::shared_ptr<NetworkSinkSendingStrategy> sendingStrategy;
 };
 
 /// NOLINTBEGIN(cert-err58-cpp)

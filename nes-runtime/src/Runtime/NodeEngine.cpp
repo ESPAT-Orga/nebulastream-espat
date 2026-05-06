@@ -94,7 +94,8 @@ NodeEngine::NodeEngine(
     std::shared_ptr<QueryLog> queryLog,
     std::unique_ptr<QueryEngine> queryEngine,
     std::unique_ptr<SourceProvider> sourceProvider,
-    std::shared_ptr<AbstractStatisticStore> statisticStore)
+    std::shared_ptr<AbstractStatisticStore> statisticStore,
+    std::shared_ptr<NetworkSinkSendingStrategy> networkSinkSendingStrategy)
     : bufferManager(std::move(bufferManager))
     , queryLog(std::move(queryLog))
     , systemEventListener(std::move(systemEventListener))
@@ -102,6 +103,7 @@ NodeEngine::NodeEngine(
     , queryTracker(std::make_unique<QueryTracker>())
     , sourceProvider(std::move(sourceProvider))
     , statisticStore(std::move(statisticStore))
+    , networkSinkSendingStrategy(std::move(networkSinkSendingStrategy))
 {
 }
 
@@ -118,7 +120,7 @@ void NodeEngine::startQuery(QueryId queryId)
     if (auto qep = queryTracker->moveToExecuting(queryId))
     {
         systemEventListener->onEvent(StartQuerySystemEvent(queryId));
-        queryEngine->start(ExecutableQueryPlan::instantiate(*qep, *sourceProvider));
+        queryEngine->start(ExecutableQueryPlan::instantiate(*qep, *sourceProvider, networkSinkSendingStrategy));
     }
     else
     {

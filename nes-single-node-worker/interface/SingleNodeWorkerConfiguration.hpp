@@ -20,8 +20,11 @@
 #include <Configuration/WorkerConfiguration.hpp>
 #include <Configurations/BaseConfiguration.hpp>
 #include <Configurations/BaseOption.hpp>
+#include <Configurations/Enums/EnumOption.hpp>
 #include <Configurations/ScalarOption.hpp>
 #include <Configurations/Validation/EndpointValidation.hpp>
+#include <fmt/format.h>
+#include <NetworkSinkSendingStrategyType.hpp>
 
 namespace NES
 {
@@ -47,6 +50,13 @@ connections.  Valid values include dns:///localhost:1234,
         = {"enable_event_trace",
            "false",
            "Enable Google Event Trace logging that generates Chrome tracing compatible JSON files for performance analysis."};
+
+    /// Strategy that decides whether a query may currently send via its NetworkSink.
+    EnumOption<NetworkSinkSendingStrategyType> networkSinkSendingStrategy
+        = {"network_sink_sending_strategy",
+           NetworkSinkSendingStrategyType::ALWAYS_SEND,
+           fmt::format(
+               "Strategy that decides whether a query may send via a NetworkSink: {}", enumPipeList<NetworkSinkSendingStrategyType>())};
 
 protected:
     std::vector<BaseOption*> getOptions() override;

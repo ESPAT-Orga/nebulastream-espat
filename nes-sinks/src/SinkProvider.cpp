@@ -16,19 +16,31 @@
 
 #include <memory>
 #include <utility>
+#include <SendingStrategy/NetworkSinkSendingStrategy.hpp>
 #include <Sinks/Sink.hpp>
 #include <Sinks/SinkDescriptor.hpp>
 #include <Util/Logger/Logger.hpp>
 #include <ErrorHandling.hpp>
+#include <QueryId.hpp>
 #include <SinkRegistry.hpp>
 
 namespace NES
 {
 
-std::unique_ptr<Sink> lower(BackpressureController backpressureController, const SinkDescriptor& sinkDescriptor)
+std::unique_ptr<Sink> lower(
+    BackpressureController backpressureController,
+    const SinkDescriptor& sinkDescriptor,
+    QueryId queryId,
+    Priority priority,
+    std::shared_ptr<NetworkSinkSendingStrategy> sendingStrategy)
 {
     NES_DEBUG("The sinkDescriptor is: {}", sinkDescriptor);
-    auto sinkArguments = SinkRegistryArguments(std::move(backpressureController), sinkDescriptor);
+    auto sinkArguments = SinkRegistryArguments{
+        .backpressureController = std::move(backpressureController),
+        .sinkDescriptor = sinkDescriptor,
+        .queryId = std::move(queryId),
+        .priority = std::move(priority),
+        .sendingStrategy = std::move(sendingStrategy)};
     if (auto sink = SinkRegistry::instance().create(sinkDescriptor.getSinkType(), std::move(sinkArguments)); sink.has_value())
     {
         return std::move(sink.value());

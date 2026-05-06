@@ -19,6 +19,7 @@
 #include <Listeners/SystemEventListener.hpp>
 #include <Runtime/BufferManager.hpp>
 #include <Runtime/QueryTerminationType.hpp>
+#include <SendingStrategy/NetworkSinkSendingStrategy.hpp>
 #include <Sources/SourceProvider.hpp>
 #include <StatisticStore/AbstractStatisticStore.hpp>
 #include <CompiledQueryPlan.hpp>
@@ -48,7 +49,8 @@ public:
         std::shared_ptr<QueryLog> queryLog,
         std::unique_ptr<QueryEngine> queryEngine,
         std::unique_ptr<SourceProvider> sourceProvider,
-        std::shared_ptr<AbstractStatisticStore> statisticStore);
+        std::shared_ptr<AbstractStatisticStore> statisticStore,
+        std::shared_ptr<NetworkSinkSendingStrategy> networkSinkSendingStrategy);
 
     void registerCompiledQueryPlan(QueryId queryId, std::unique_ptr<CompiledQueryPlan> compiledQueryPlan);
     void startQuery(QueryId queryId);
@@ -73,5 +75,8 @@ private:
     std::unique_ptr<QueryTracker> queryTracker;
     std::unique_ptr<SourceProvider> sourceProvider;
     std::shared_ptr<AbstractStatisticStore> statisticStore;
+    /// State for NetworkSending needs to be accessible across queries. Thus, we use a shared ptr. For this PoC, this is fine, for
+    /// upstreaming the change, we should think about a different approach.
+    std::shared_ptr<NetworkSinkSendingStrategy> networkSinkSendingStrategy;
 };
 }

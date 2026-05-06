@@ -31,6 +31,7 @@
 #include <Identifiers/NESStrongType.hpp>
 #include <Runtime/TupleBuffer.hpp>
 #include <Runtime/VariableSizedAccess.hpp>
+#include <SendingStrategy/NetworkSinkSendingStrategy.hpp>
 #include <Sinks/Sink.hpp>
 #include <Sinks/SinkDescriptor.hpp>
 #include <Util/Logger/Logger.hpp>
@@ -41,6 +42,7 @@
 #include <BackpressureChannel.hpp>
 #include <ErrorHandling.hpp>
 #include <PipelineExecutionContext.hpp>
+#include <QueryId.hpp>
 #include <SinkRegistry.hpp>
 #include <SinkValidationRegistry.hpp>
 
@@ -57,25 +59,27 @@ BackpressureHandler::BackpressureHandler(size_t upperThreshold, size_t lowerThre
     }
 }
 
-std::optional<TupleBuffer> BackpressureHandler::onFull(TupleBuffer buffer, BackpressureController& backpressureController)
+BackpressureHandler::OnFullResult BackpressureHandler::onFull(TupleBuffer buffer, BackpressureController& backpressureController)
 {
     auto rstate = stateLock.ulock();
 
     /// If this is the pending retry buffer, re-emit it to keep the retry loop alive.
     if (buffer.getSequenceNumber() == rstate->pendingSequenceNumber && buffer.getChunkNumber() == rstate->pendingChunkNumber)
     {
-        return buffer;
+        return {.retryBuffer = std::move(buffer), .didApplyBackpressure = false};
     }
 
     const auto wstate = rstate.moveFromUpgradeToWrite();
     wstate->buffered.emplace_back(std::move(buffer));
 
     /// Apply backpressure when the buffer count reaches the upper hysteresis threshold.
+    bool didApplyBackpressure = false;
     if (!wstate->hasBackpressure && wstate->buffered.size() >= upperThreshold)
     {
         backpressureController.applyPressure();
         NES_DEBUG("Backpressure acquired: {} buffered (upper threshold: {})", wstate->buffered.size(), upperThreshold);
         wstate->hasBackpressure = true;
+        didApplyBackpressure = true;
     }
 
     /// Ensure there is always one pending buffer being retried to avoid deadlocks.
@@ -85,36 +89,38 @@ std::optional<TupleBuffer> BackpressureHandler::onFull(TupleBuffer buffer, Backp
         wstate->buffered.pop_front();
         wstate->pendingSequenceNumber = pending.getSequenceNumber();
         wstate->pendingChunkNumber = pending.getChunkNumber();
-        return pending;
+        return {.retryBuffer = std::move(pending), .didApplyBackpressure = didApplyBackpressure};
     }
 
-    return {};
+    return {.retryBuffer = std::nullopt, .didApplyBackpressure = didApplyBackpressure};
 }
 
 /// Called on a successful send of a buffer to the network channel.
 /// Clears the pending buffer and releases backpressure when the buffer count drops to the lower hysteresis threshold.
 /// Returns the next buffered tuple to send, if any.
-std::optional<TupleBuffer> BackpressureHandler::onSuccess(BackpressureController& backpressureController)
+BackpressureHandler::OnSuccessResult BackpressureHandler::onSuccess(BackpressureController& backpressureController)
 {
     const auto state = stateLock.wlock();
     state->pendingSequenceNumber = INVALID<SequenceNumber>;
     state->pendingChunkNumber = INVALID<ChunkNumber>;
 
     /// Release backpressure when the buffer count drops to the lower hysteresis threshold.
+    bool didReleaseBackpressure = false;
     if (state->hasBackpressure && state->buffered.size() <= lowerThreshold)
     {
         backpressureController.releasePressure();
         NES_DEBUG("Backpressure released: {} buffered (lower threshold: {})", state->buffered.size(), lowerThreshold);
         state->hasBackpressure = false;
+        didReleaseBackpressure = true;
     }
 
     if (not state->buffered.empty())
     {
         auto nextBuffer = std::move(state->buffered.front());
         state->buffered.pop_front();
-        return {nextBuffer};
+        return {.nextBuffer = std::move(nextBuffer), .didReleaseBackpressure = didReleaseBackpressure};
     }
-    return {};
+    return {.nextBuffer = std::nullopt, .didReleaseBackpressure = didReleaseBackpressure};
 }
 
 bool BackpressureHandler::empty() const
@@ -122,7 +128,12 @@ bool BackpressureHandler::empty() const
     return stateLock.rlock()->buffered.empty();
 }
 
-NetworkSink::NetworkSink(BackpressureController backpressureController, const SinkDescriptor& sinkDescriptor)
+NetworkSink::NetworkSink(
+    BackpressureController backpressureController,
+    const SinkDescriptor& sinkDescriptor,
+    QueryId queryId,
+    Priority priority,
+    std::shared_ptr<NetworkSinkSendingStrategy> sendingStrategy)
     : Sink(std::move(backpressureController))
     , tupleSize(sinkDescriptor.getSchema()->getSizeOfSchemaInBytes())
     , backpressureHandler(
@@ -133,7 +144,11 @@ NetworkSink::NetworkSink(BackpressureController backpressureController, const Si
     , thisConnection(sinkDescriptor.getFromConfig(ConfigParametersNetworkSink::BIND))
     , senderQueueSize(sinkDescriptor.getFromConfig(ConfigParametersNetworkSink::SENDER_QUEUE_SIZE))
     , maxPendingAcks(sinkDescriptor.getFromConfig(ConfigParametersNetworkSink::MAX_PENDING_ACKS))
+    , queryId(std::move(queryId))
+    , priority(std::move(priority))
+    , sendingStrategy(std::move(sendingStrategy))
 {
+    PRECONDITION(this->sendingStrategy != nullptr, "NetworkSink requires a non-null NetworkSinkSendingStrategy");
 }
 
 void NetworkSink::start(PipelineExecutionContext&)
@@ -145,6 +160,7 @@ void NetworkSink::start(PipelineExecutionContext&)
         .receiver_queue_size = 0,
     };
     this->channel = register_sender_channel(*server.value(), connectionAddr, rust::String(channelId), options);
+    sendingStrategy->registerChannel(queryId, priority);
     NES_DEBUG("Sender channel registered: {}", channelId);
 }
 
@@ -164,6 +180,7 @@ void NetworkSink::stop(PipelineExecutionContext& pec)
         }
     }
 
+    sendingStrategy->deregisterChannel(queryId);
     NES_DEBUG("Closing Sender channel {}", channelId);
     close_sender_channel(*std::move(this->channel));
     NES_DEBUG("Sender channel {} closed", channelId);
@@ -177,6 +194,22 @@ void NetworkSink::execute(const TupleBuffer& inputBuffer, PipelineExecutionConte
     if (closed)
     {
         NES_WARNING("Sink is closed dropping buffer: {}-{}", inputBuffer.getSequenceNumber(), inputBuffer.getChunkNumber());
+        return;
+    }
+
+    /// Strategy gate: if the configured sending strategy currently disallows this query (e.g. ADAPTIVE_DIFFERENT_PRIO
+    /// pausing a LOW-priority query while a HIGH-priority query is under backpressure), buffer and retry later.
+    if (!sendingStrategy->maySend(queryId))
+    {
+        const auto fullResult = backpressureHandler.onFull(inputBuffer, backpressureController);
+        if (fullResult.didApplyBackpressure)
+        {
+            sendingStrategy->onBackpressureApplied(queryId);
+        }
+        if (fullResult.retryBuffer)
+        {
+            pec.repeatTask(*fullResult.retryBuffer, BACKPRESSURE_RETRY_INTERVAL);
+        }
         return;
     }
 
@@ -220,14 +253,25 @@ void NetworkSink::execute(const TupleBuffer& inputBuffer, PipelineExecutionConte
             }
             case SendResult::Ok: {
                 NES_TRACE("Sending buffer {}", currentBuffer->getSequenceNumber());
+                sendingStrategy->onBufferSent(queryId, currentBuffer->getNumberOfTuples());
                 /// Sent a buffer, check the backpressure handler to send another one
-                currentBuffer = backpressureHandler.onSuccess(backpressureController);
+                const auto successResult = backpressureHandler.onSuccess(backpressureController);
+                if (successResult.didReleaseBackpressure)
+                {
+                    sendingStrategy->onBackpressureReleased(queryId);
+                }
+                currentBuffer = std::move(successResult.nextBuffer);
                 break;
             }
             case SendResult::Full: {
-                if (const auto emit = backpressureHandler.onFull(*currentBuffer, backpressureController))
+                const auto fullResult = backpressureHandler.onFull(*currentBuffer, backpressureController);
+                if (fullResult.didApplyBackpressure)
                 {
-                    pec.repeatTask(*emit, BACKPRESSURE_RETRY_INTERVAL);
+                    sendingStrategy->onBackpressureApplied(queryId);
+                }
+                if (fullResult.retryBuffer)
+                {
+                    pec.repeatTask(*fullResult.retryBuffer, BACKPRESSURE_RETRY_INTERVAL);
                 }
                 return;
             }
@@ -252,7 +296,12 @@ SinkValidationRegistryReturnType RegisterNetworkSinkValidation(SinkValidationReg
 
 SinkRegistryReturnType RegisterNetworkSink(SinkRegistryArguments sinkRegistryArguments)
 {
-    return std::make_unique<NetworkSink>(std::move(sinkRegistryArguments.backpressureController), sinkRegistryArguments.sinkDescriptor);
+    return std::make_unique<NetworkSink>(
+        std::move(sinkRegistryArguments.backpressureController),
+        sinkRegistryArguments.sinkDescriptor,
+        sinkRegistryArguments.queryId,
+        sinkRegistryArguments.priority,
+        std::move(sinkRegistryArguments.sendingStrategy));
 }
 
 }

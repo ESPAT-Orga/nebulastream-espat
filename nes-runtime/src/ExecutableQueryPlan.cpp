@@ -26,6 +26,7 @@
 #include <vector>
 #include <Identifiers/Identifiers.hpp>
 #include <Runtime/AbstractBufferProvider.hpp>
+#include <SendingStrategy/NetworkSinkSendingStrategy.hpp>
 #include <Sinks/SinkProvider.hpp>
 #include <Sources/SourceHandle.hpp>
 #include <Sources/SourceProvider.hpp>
@@ -62,8 +63,8 @@ std::ostream& operator<<(std::ostream& os, const ExecutableQueryPlan& instantiat
     return os;
 }
 
-std::unique_ptr<ExecutableQueryPlan>
-ExecutableQueryPlan::instantiate(CompiledQueryPlan& compiledQueryPlan, const SourceProvider& sourceProvider)
+std::unique_ptr<ExecutableQueryPlan> ExecutableQueryPlan::instantiate(
+    CompiledQueryPlan& compiledQueryPlan, const SourceProvider& sourceProvider, std::shared_ptr<NetworkSinkSendingStrategy> sendingStrategy)
 {
     std::vector<SourceWithSuccessor> instantiatedSources;
 
@@ -78,7 +79,10 @@ ExecutableQueryPlan::instantiate(CompiledQueryPlan& compiledQueryPlan, const Sou
 
     auto& [sinkPipelineId, sinkDescriptor, predecessors] = compiledQueryPlan.sinks.front();
 
-    auto sink = ExecutablePipeline::create(sinkPipelineId, lower(std::move(backpressureController), sinkDescriptor), {});
+    auto sink = ExecutablePipeline::create(
+        sinkPipelineId,
+        lower(std::move(backpressureController), sinkDescriptor, compiledQueryPlan.queryId, compiledQueryPlan.priority, sendingStrategy),
+        {});
     compiledQueryPlan.pipelines.push_back(sink);
     for (const auto& predecessor : predecessors)
     {

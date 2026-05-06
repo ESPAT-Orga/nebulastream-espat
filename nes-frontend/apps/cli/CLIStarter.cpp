@@ -60,6 +60,7 @@
 #include <yaml-cpp/yaml.h> ///NOLINT(misc-include-cleaner)
 #include <DistributedQuery.hpp>
 #include <ErrorHandling.hpp>
+#include <Priority.hpp>
 #include <QueryOptimizer.hpp>
 #include <QueryOptimizerConfiguration.hpp>
 #include <QueryStateBackend.hpp>
@@ -158,6 +159,7 @@ struct QueryConfig
     std::vector<PhysicalSource> physical;
     YAML::Node optimizer;
     std::vector<WorkerConfig> workers;
+    Priority priority = Priority::HIGH;
 };
 }
 
@@ -265,7 +267,7 @@ struct convert<NES::CLI::QueryConfig>
 {
     static bool decode(const Node& node, NES::CLI::QueryConfig& rhs)
     {
-        acceptKeys({"query", "sinks", "logical", "physical", "optimizer", "workers"}, node);
+        acceptKeys({"query", "sinks", "logical", "physical", "optimizer", "workers", "priority"}, node);
         rhs.sinks = node["sinks"].as<std::vector<NES::CLI::Sink>>();
         rhs.logical = node["logical"].as<std::vector<NES::CLI::LogicalSource>>();
         rhs.physical = node["physical"].as<std::vector<NES::CLI::PhysicalSource>>();
@@ -287,6 +289,22 @@ struct convert<NES::CLI::QueryConfig>
             }
         }
         rhs.workers = node["workers"].as<std::vector<NES::CLI::WorkerConfig>>();
+        if (node["priority"].IsDefined())
+        {
+            const auto priorityValue = NES::toLowerCase(node["priority"].as<std::string>());
+            if (priorityValue == "high")
+            {
+                rhs.priority = NES::Priority::HIGH;
+            }
+            else if (priorityValue == "low")
+            {
+                rhs.priority = NES::Priority::LOW;
+            }
+            else
+            {
+                throw NES::InvalidConfigParameter("Unknown query priority '{}'. Expected one of: HIGH, LOW", priorityValue);
+            }
+        }
         return true;
     }
 };
@@ -399,7 +417,7 @@ std::vector<std::string> loadQueries(
 
 std::vector<NES::Statement> loadStatements(const NES::CLI::QueryConfig& topologyConfig)
 {
-    const auto& [query, sinks, logical, physical, optimizer, workers] = topologyConfig;
+    const auto& [query, sinks, logical, physical, optimizer, workers, priority] = topologyConfig;
     std::vector<NES::Statement> statements;
     statements.reserve(workers.size());
     for (const auto& [host, dataAddress, maxOperators, downstream, config] : workers)
@@ -577,8 +595,9 @@ void doQuerySubmission(const argparse::ArgumentParser& program, const argparse::
         NES::QueryStatementHandler queryStatementHandler{queryManager, queryOptimizer};
         for (const auto& query : queries)
         {
-            auto result = queryStatementHandler(NES::QueryStatement(NES::AntlrSQLQueryParser::createLogicalQueryPlanFromSQLString(query)));
-            if (result)
+            auto plan = NES::AntlrSQLQueryParser::createLogicalQueryPlanFromSQLString(query);
+            plan.setPriority(topologyConfig.priority);
+            if (auto result = queryStatementHandler(NES::QueryStatement{std::move(plan), {}}))
             {
                 auto queryDescriptor = queryManager->getQuery(result->id);
                 INVARIANT(queryDescriptor.has_value(), "Query should exist in the query manager if statement handler succeed");

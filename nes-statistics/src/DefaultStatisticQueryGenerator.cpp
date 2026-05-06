@@ -14,6 +14,8 @@
 
 #include <DefaultStatisticQueryGenerator.hpp>
 
+#include <algorithm>
+#include <cctype>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -127,7 +129,13 @@ LogicalPlan generateForDataDomain(
         windowType = std::make_shared<Windowing::TumblingWindow>(timeChar, Windowing::TimeMeasure{request.windowSizeMs});
     }
 
-    const FieldAccessLogicalFunction onField{domain.fieldName};
+    /// The SQL parser uppercases all unquoted identifiers (via bindIdentifier). Mirror that
+    /// here so programmatic callers don't need to think about case.
+    auto sourceNameUpper = domain.logicalSourceName;
+    std::transform(sourceNameUpper.begin(), sourceNameUpper.end(), sourceNameUpper.begin(), [](unsigned char c) { return std::toupper(c); });
+    auto fieldNameUpper = domain.fieldName;
+    std::transform(fieldNameUpper.begin(), fieldNameUpper.end(), fieldNameUpper.begin(), [](unsigned char c) { return std::toupper(c); });
+    const FieldAccessLogicalFunction onField{fieldNameUpper};
     auto agg = createAggregationFunction(onField, request.metric, statisticId, request.options);
 
     /// The build and statistic store writer need to have a connection for the statistic fields, e.g., statisticDataField.
@@ -136,9 +144,9 @@ LogicalPlan generateForDataDomain(
     auto plan = LogicalPlanBuilder::createLogicalPlan(domain.logicalSourceName);
     plan = LogicalPlanBuilder::addStatisticBuild(std::move(plan), windowType, {agg}, {}, logicalStatisticFields);
     plan = LogicalPlanBuilder::addStatisticStoreWriter(plan, logicalStatisticFields, statisticId, toStatisticType(request.metric));
-    if (request.conditionTrigger.has_value())
+    if (request.conditionTrigger.has_value() && request.conditionTrigger->condition.has_value())
     {
-        plan = LogicalPlanBuilder::addSelection(request.conditionTrigger->condition.value(), plan);
+        plan = LogicalPlanBuilder::addSelection(*request.conditionTrigger->condition, plan);
     }
 
     /// Append a gRPC sink to send results back to the StatisticCoordinator
@@ -147,13 +155,27 @@ LogicalPlan generateForDataDomain(
     const auto sinkHost = coordinatorAddress.substr(0, colonPos);
     const auto sinkPort = coordinatorAddress.substr(colonPos + 1);
 
-    /// The StatisticStoreWriter outputs: startTs, endTs, and statisticId
+    /// StatisticStoreWriter qualifies its output fields with the source name (e.g. "BID$STATISTICID").
+    /// The gRPC sink schema must match exactly. The GrpcSink itself uses substring matching on field names,
+    /// so it handles the qualifier correctly at runtime.
+    const auto qualifier = sourceNameUpper + "$";
+    LogicalStatisticFields outputStatisticFields;
+    outputStatisticFields.addQualifierName(qualifier);
     Schema grpcSinkSchema;
-    const LogicalStatisticFields statisticFields;
-    grpcSinkSchema.addField(statisticFields.statisticIdField);
-    grpcSinkSchema.addField(statisticFields.statisticStartTsField);
-    grpcSinkSchema.addField(statisticFields.statisticEndTsField);
-    plan = LogicalPlanBuilder::addInlineSink("Grpc", grpcSinkSchema, {{"grpc_host", sinkHost}, {"grpc_port", sinkPort}}, {}, plan);
+    grpcSinkSchema.addField(outputStatisticFields.statisticIdField);
+    grpcSinkSchema.addField(outputStatisticFields.statisticStartTsField);
+    grpcSinkSchema.addField(outputStatisticFields.statisticEndTsField);
+    grpcSinkSchema.addField(outputStatisticFields.statisticNumberOfSeenTuplesField);
+    /// "host" specifies on which worker to place the gRPC sink. Falls back to the coordinator
+    /// host (i.e. the same machine) when not provided, which is correct for single-worker setups.
+    const auto hostIt = request.options.find("host");
+    const auto& sinkWorkerHost = hostIt != request.options.end() ? hostIt->second : sinkHost;
+    plan = LogicalPlanBuilder::addInlineSink(
+        "Grpc",
+        grpcSinkSchema,
+        {{"grpc_host", sinkHost}, {"grpc_port", sinkPort}, {"host", sinkWorkerHost}, {"output_format", "NATIVE"}},
+        {},
+        plan);
 
     return plan;
 }

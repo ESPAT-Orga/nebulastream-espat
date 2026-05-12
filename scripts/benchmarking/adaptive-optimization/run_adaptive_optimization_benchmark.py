@@ -76,29 +76,26 @@ WORKER_DATA = "localhost:9090"
 #
 # An intermediate subquery level performs 30 SQRT operations per tuple (always-true condition).
 # This creates a CPU-intensive middle pipeline whose load is proportional to the number of tuples
-# flowing through it. With bidValue-first (~1k tup/s intermediate), the SQRT pipeline is idle;
-# with price-first (~99k tup/s intermediate), it saturates and causes backpressure on the first
-# pipeline, making the throughput difference measurable.
+# flowing through it.
 #
-# The SQRT arguments are col + large_constant (>= 1000) to guarantee positive inputs to SQRT
-# regardless of the field distribution.
+# Source throughput: ~260k tup/s (64KB buffer ≈ 1300 tuples, generation takes ~5ms,
+# flush_interval_ms=1 → no sleep, source runs at full speed).
+#   bidValue-first: ~1%  × 260k = ~2.6k tup/s through SQRT pipeline  →  ~1.3M SQRT/s  (<1% CPU)
+#   price-first:   ~99% × 260k = ~257k tup/s through SQRT pipeline   → ~12.9M SQRT/s (~4–17% CPU)
+#
+# The CPU load in the price-first case is intended to saturate the intermediate pipeline, fill its
+# input queue, and cause backpressure on the first filter pipeline — visibly lowering its measured
+# throughput compared to the bidValue-first ordering.
+#
+# SQRT count: 50 terms (Python-generated, kept small to stay within Nautilus compile budget).
+# Each argument is col + constant >= 1000, guaranteeing positive inputs regardless of distribution.
 
 _EXPENSIVE_FILTER = (
-    "SQRT(bidValue + FLOAT64(1000)) + SQRT(price + FLOAT64(1000)) + "
-    "SQRT(bidValue + FLOAT64(1001)) + SQRT(price + FLOAT64(1001)) + "
-    "SQRT(bidValue + FLOAT64(1002)) + SQRT(price + FLOAT64(1002)) + "
-    "SQRT(bidValue + FLOAT64(1003)) + SQRT(price + FLOAT64(1003)) + "
-    "SQRT(bidValue + FLOAT64(1004)) + SQRT(price + FLOAT64(1004)) + "
-    "SQRT(bidValue + FLOAT64(1005)) + SQRT(price + FLOAT64(1005)) + "
-    "SQRT(bidValue + FLOAT64(1006)) + SQRT(price + FLOAT64(1006)) + "
-    "SQRT(bidValue + FLOAT64(1007)) + SQRT(price + FLOAT64(1007)) + "
-    "SQRT(bidValue + FLOAT64(1008)) + SQRT(price + FLOAT64(1008)) + "
-    "SQRT(bidValue + FLOAT64(1009)) + SQRT(price + FLOAT64(1009)) + "
-    "SQRT(bidValue + FLOAT64(1010)) + SQRT(price + FLOAT64(1010)) + "
-    "SQRT(bidValue + FLOAT64(1011)) + SQRT(price + FLOAT64(1011)) + "
-    "SQRT(bidValue + FLOAT64(1012)) + SQRT(price + FLOAT64(1012)) + "
-    "SQRT(bidValue + FLOAT64(1013)) + SQRT(price + FLOAT64(1013)) + "
-    "SQRT(bidValue + FLOAT64(1014)) + SQRT(price + FLOAT64(1014)) > FLOAT64(0.0)"
+    " + ".join(
+        f"SQRT({'bidValue' if i % 2 == 0 else 'price'} + FLOAT64({1000 + i // 2}))"
+        for i in range(50)
+    )
+    + " > FLOAT64(0.0)"
 )
 
 SETUP_SQL = f"""\
@@ -109,10 +106,11 @@ TYPE Generator
 SET(
     'NONE' as `SOURCE`.STOP_GENERATOR_WHEN_SEQUENCE_FINISHES,
     'CSV' as PARSER.`TYPE`,
-    'emit_rate 100000' AS `SOURCE`.GENERATOR_RATE_CONFIG,
+    'emit_rate 2000000' AS `SOURCE`.GENERATOR_RATE_CONFIG,
+    1 AS `SOURCE`.FLUSH_INTERVAL_MS,
     100000000 AS `SOURCE`.MAX_RUNTIME_MS,
     1 AS `SOURCE`.SEED,
-    'SEQUENCE UINT64 0 10000000 1, SEQUENCE INT32 0 1000 1, NORMAL_DISTRIBUTION FLOAT64 50.0 17.0, NORMAL_DISTRIBUTION FLOAT64 500.0 167.0' AS `SOURCE`.GENERATOR_SCHEMA,
+    'SEQUENCE UINT64 0 1000000000 1, SEQUENCE INT32 0 1000000000 1, NORMAL_DISTRIBUTION FLOAT64 50.0 17.0, NORMAL_DISTRIBUTION FLOAT64 500.0 167.0' AS `SOURCE`.GENERATOR_SCHEMA,
     '{WORKER_GRPC}' AS `SOURCE`.HOST
 );
 CREATE SINK someSink(BID.TIMESTAMP UINT64 NOT NULL, BID.AUCTIONID INT32 NOT NULL, BID.BIDVALUE FLOAT64 NOT NULL, BID.PRICE FLOAT64 NOT NULL)
@@ -286,9 +284,17 @@ def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str):
             sys.exit(1)
 
     # --- Start worker ---
+    # operator_buffer_size=65536 (64KB) lets the source fill ~1300 CSV tuples per buffer.
+    # Combined with flush_interval_ms=1 in the SQL, the source emits ~1.3M tuples/s —
+    # enough to saturate the intermediate SQRT pipeline (~40% CPU) when price comes first.
     printInfo(f"Starting nes-single-node-worker (grpc={WORKER_GRPC}, data={WORKER_DATA})...")
     worker_proc = subprocess.Popen(
-        [worker_binary, f"--grpc=0.0.0.0:8080", f"--data_address=0.0.0.0:9090"],
+        [
+            worker_binary,
+            "--grpc=0.0.0.0:8080",
+            "--data_address=0.0.0.0:9090",
+            "--worker.default_query_execution.operator_buffer_size=65536",
+        ],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
     )
@@ -316,7 +322,7 @@ def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str):
             "--companion-source", "bid",
             "--companion-field", "price",
             "--companion-metric", "Cardinality",
-            "--companion-window-size-ms", "200000",
+            "--companion-window-size-ms", "5000000",
             "--companion-event-time-field", "BID$TIMESTAMP",
             "--companion-host", WORKER_GRPC,
             "--companion-switch-to-sql", REVERSED_QUERY_SQL,
@@ -344,7 +350,7 @@ def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str):
 
     # --- Record the distributed query ID assigned to the data query ---
     printInfo("Waiting for data query deployment confirmation...")
-    data_query_id = find_data_query_id(repl_lines, timeout=15.0)
+    data_query_id = find_data_query_id(repl_lines, timeout=60.0)
     if data_query_id is None:
         printError("Timed out waiting for the SELECT query response — REPL may have crashed.")
         terminate_process(repl_proc, "nes-repl")

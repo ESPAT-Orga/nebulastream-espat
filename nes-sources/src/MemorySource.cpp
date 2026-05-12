@@ -196,38 +196,26 @@ namespace NES
 {
 
 MemorySource::MemorySource(const SourceDescriptor& sourceDescriptor, const size_t bufferSizeInBytes)
-    : filePath(sourceDescriptor.getFromConfig(ConfigParametersCSVMemory::FILEPATH))
+    : loop(sourceDescriptor.getFromConfig(ConfigParametersCSVMemory::LOOP))
+    , replaysPerFile(sourceDescriptor.getFromConfig(ConfigParametersCSVMemory::REPLAYS_PER_FILE))
+    , monotonicTimestampField(sourceDescriptor.getFromConfig(ConfigParametersCSVMemory::MONOTONIC_TIMESTAMP_FIELD))
     , schema(*sourceDescriptor.getLogicalSource().getSchema())
     , parserConfig(sourceDescriptor.getParserConfig())
     , bufferSizeInBytes(bufferSizeInBytes)
 {
+    filePaths.push_back(sourceDescriptor.getFromConfig(ConfigParametersCSVMemory::FILEPATH));
+    const auto secondPath = sourceDescriptor.getFromConfig(ConfigParametersCSVMemory::FILEPATH_2);
+    if (not secondPath.empty())
+    {
+        filePaths.push_back(secondPath);
+    }
 }
 
 bool MemorySource::setup(const std::shared_ptr<AbstractBufferProvider>& bufferProvider)
 {
     PRECONDITION(bufferProvider != nullptr, "Memory source setup requires a buffer provider");
 
-    const auto realCSVPath = std::unique_ptr<char, decltype(std::free)*>{realpath(filePath.c_str(), nullptr), std::free};
-    if (not realCSVPath)
-    {
-        throw InvalidConfigParameter("Could not determine absolute pathname: {} - {}", filePath.c_str(), getErrorMessageFromERRNO());
-    }
-
-    const auto fileSize = std::filesystem::file_size(realCSVPath.get());
-    std::vector<char> fileData(fileSize);
-    auto inputFile = std::ifstream(realCSVPath.get(), std::ios::binary);
-    if (not inputFile)
-    {
-        throw InvalidConfigParameter("Could not open file: {} - {}", filePath.c_str(), getErrorMessageFromERRNO());
-    }
-    inputFile.read(fileData.data(), static_cast<std::streamsize>(fileSize));
-    const auto bytesRead = inputFile.gcount();
-    if (static_cast<size_t>(bytesRead) != fileSize)
-    {
-        throw InvalidConfigParameter("Could not read entire file: {} (read {} of {} bytes)", filePath, bytesRead, fileSize);
-    }
-
-    /// Parse CSV -> row-layout TupleBuffers.
+    /// Parse CSV -> row-layout TupleBuffers. Shared across all file_paths.
     INVARIANT(parserConfig.tupleDelimiter.size() == 1, "MemorySource only supports single-character tuple delimiters");
     INVARIANT(parserConfig.fieldDelimiter.size() == 1, "MemorySource only supports single-character field delimiters");
     const char tupleDelimiter = parserConfig.tupleDelimiter.front();
@@ -253,116 +241,260 @@ bool MemorySource::setup(const std::shared_ptr<AbstractBufferProvider>& bufferPr
         fieldByteOffsets[i] = fieldByteOffsets[i - 1] + fields[i - 1].dataType.getSizeInBytesWithoutNull();
     }
 
-    const std::string_view fileView{fileData.data(), fileData.size()};
-    std::vector<std::string_view> fieldViews;
-    fieldViews.reserve(numberOfFields);
-
-    std::optional<TupleBuffer> currentBuffer;
-    size_t currentTupleIdx = 0;
-    size_t totalTuples = 0;
-
-    const auto finalizeCurrent = [&]()
+    /// Parse one file and append its pre-formatted buffers into `outBuffers`.
+    const auto parseFile = [&](const std::string& filePath, std::vector<TupleBuffer>& outBuffers)
     {
-        if (currentBuffer.has_value())
+        const auto realCSVPath = std::unique_ptr<char, decltype(std::free)*>{realpath(filePath.c_str(), nullptr), std::free};
+        if (not realCSVPath)
         {
-            currentBuffer->setNumberOfTuples(currentTupleIdx);
-            preFormattedBuffers.emplace_back(std::move(currentBuffer.value()));
-            currentBuffer.reset();
-        }
-        currentTupleIdx = 0;
-    };
-
-    const auto writeTuple = [&](std::string_view tuple)
-    {
-        splitFields(tuple, fieldDelimiter, parserConfig.allowCommasInStrings, fieldViews);
-        if (fieldViews.size() != numberOfFields)
-        {
-            throw CannotFormatSourceData(
-                "Number of parsed fields does not match number of fields in schema (parsed {} vs {} schema)",
-                fieldViews.size(),
-                numberOfFields);
+            throw InvalidConfigParameter("Could not determine absolute pathname: {} - {}", filePath.c_str(), getErrorMessageFromERRNO());
         }
 
-        if (not currentBuffer.has_value())
+        const auto fileSize = std::filesystem::file_size(realCSVPath.get());
+        std::vector<char> fileData(fileSize);
+        auto inputFile = std::ifstream(realCSVPath.get(), std::ios::binary);
+        if (not inputFile)
         {
-            auto unpooled = bufferProvider->getUnpooledBuffer(bufferSizeInBytes);
-            if (not unpooled.has_value())
+            throw InvalidConfigParameter("Could not open file: {} - {}", filePath.c_str(), getErrorMessageFromERRNO());
+        }
+        inputFile.read(fileData.data(), static_cast<std::streamsize>(fileSize));
+        const auto bytesRead = inputFile.gcount();
+        if (static_cast<size_t>(bytesRead) != fileSize)
+        {
+            throw InvalidConfigParameter("Could not read entire file: {} (read {} of {} bytes)", filePath, bytesRead, fileSize);
+        }
+
+        const std::string_view fileView{fileData.data(), fileData.size()};
+        std::vector<std::string_view> fieldViews;
+        fieldViews.reserve(numberOfFields);
+
+        std::optional<TupleBuffer> currentBuffer;
+        size_t currentTupleIdx = 0;
+        size_t totalTuples = 0;
+
+        const auto finalizeCurrent = [&]()
+        {
+            if (currentBuffer.has_value())
             {
-                throw CannotAllocateBuffer("Cannot allocate pre-formatted buffer of size {}", bufferSizeInBytes);
+                currentBuffer->setNumberOfTuples(currentTupleIdx);
+                outBuffers.emplace_back(std::move(currentBuffer.value()));
+                currentBuffer.reset();
             }
-            currentBuffer = std::move(unpooled.value());
-            std::memset(currentBuffer->getAvailableMemoryArea<char>().data(), 0, currentBuffer->getBufferSize());
-        }
+            currentTupleIdx = 0;
+        };
 
-        char* const rowBase = currentBuffer->getAvailableMemoryArea<char>().data() + (currentTupleIdx * tupleSize);
-        for (size_t i = 0; i < numberOfFields; ++i)
+        const auto writeTuple = [&](std::string_view tuple)
         {
-            char* const slot = rowBase + fieldByteOffsets[i];
-            const auto& dataType = fields[i].dataType;
-            if (dataType.type == DataType::Type::VARSIZED)
+            splitFields(tuple, fieldDelimiter, parserConfig.allowCommasInStrings, fieldViews);
+            if (fieldViews.size() != numberOfFields)
             {
-                const auto access = appendVarSized(*currentBuffer, *bufferProvider, fieldViews[i]);
-                std::memcpy(slot, &access, sizeof(VariableSizedAccess));
+                throw CannotFormatSourceData(
+                    "Number of parsed fields does not match number of fields in schema (parsed {} vs {} schema)",
+                    fieldViews.size(),
+                    numberOfFields);
             }
-            else
+
+            if (not currentBuffer.has_value())
             {
-                writeScalar(slot, dataType.type, fieldViews[i]);
+                auto unpooled = bufferProvider->getUnpooledBuffer(bufferSizeInBytes);
+                if (not unpooled.has_value())
+                {
+                    throw CannotAllocateBuffer("Cannot allocate pre-formatted buffer of size {}", bufferSizeInBytes);
+                }
+                currentBuffer = std::move(unpooled.value());
+                std::memset(currentBuffer->getAvailableMemoryArea<char>().data(), 0, currentBuffer->getBufferSize());
             }
-        }
 
-        ++currentTupleIdx;
-        ++totalTuples;
-        if (currentTupleIdx >= tuplesPerBuffer)
-        {
-            finalizeCurrent();
-        }
-    };
+            char* const rowBase = currentBuffer->getAvailableMemoryArea<char>().data() + (currentTupleIdx * tupleSize);
+            for (size_t i = 0; i < numberOfFields; ++i)
+            {
+                char* const slot = rowBase + fieldByteOffsets[i];
+                const auto& dataType = fields[i].dataType;
+                if (dataType.type == DataType::Type::VARSIZED)
+                {
+                    const auto access = appendVarSized(*currentBuffer, *bufferProvider, fieldViews[i]);
+                    std::memcpy(slot, &access, sizeof(VariableSizedAccess));
+                }
+                else
+                {
+                    writeScalar(slot, dataType.type, fieldViews[i]);
+                }
+            }
 
-    size_t tupleStart = 0;
-    for (size_t delimiterIdx = fileView.find(tupleDelimiter); delimiterIdx != std::string_view::npos;
-         delimiterIdx = fileView.find(tupleDelimiter, tupleStart))
-    {
-        const auto tuple = fileView.substr(tupleStart, delimiterIdx - tupleStart);
-        tupleStart = delimiterIdx + 1;
-        if (tuple.empty())
+            ++currentTupleIdx;
+            ++totalTuples;
+            if (currentTupleIdx >= tuplesPerBuffer)
+            {
+                finalizeCurrent();
+            }
+        };
+
+        size_t tupleStart = 0;
+        for (size_t delimiterIdx = fileView.find(tupleDelimiter); delimiterIdx != std::string_view::npos;
+             delimiterIdx = fileView.find(tupleDelimiter, tupleStart))
         {
-            continue;
-        }
-        writeTuple(tuple);
-    }
-    /// Trailing line without a tuple delimiter: parse it as a final record.
-    if (tupleStart < fileView.size())
-    {
-        const auto tuple = fileView.substr(tupleStart);
-        if (not tuple.empty())
-        {
+            const auto tuple = fileView.substr(tupleStart, delimiterIdx - tupleStart);
+            tupleStart = delimiterIdx + 1;
+            if (tuple.empty())
+            {
+                continue;
+            }
             writeTuple(tuple);
         }
+        /// Trailing line without a tuple delimiter: parse it as a final record.
+        if (tupleStart < fileView.size())
+        {
+            const auto tuple = fileView.substr(tupleStart);
+            if (not tuple.empty())
+            {
+                writeTuple(tuple);
+            }
+        }
+        finalizeCurrent();
+
+        std::cout << std::format(
+            "MemorySource: Loaded {} bytes from {}, pre-formatted {} tuples across {} buffers\n",
+            fileSize,
+            filePath,
+            totalTuples,
+            outBuffers.size());
+    };
+
+    preFormattedBuffers.reserve(filePaths.size());
+    for (const auto& filePath : filePaths)
+    {
+        preFormattedBuffers.emplace_back();
+        parseFile(filePath, preFormattedBuffers.back());
     }
-    finalizeCurrent();
 
-    std::cout << std::format(
-        "MemorySource: Loaded {} bytes from {}, pre-formatted {} tuples across {} buffers\n",
-        fileSize,
-        filePath,
-        totalTuples,
-        preFormattedBuffers.size());
+    if (preFormattedBuffers.empty() or preFormattedBuffers.front().empty())
+    {
+        throw InvalidConfigParameter("Memory source produced no buffers from {} file(s)", filePaths.size());
+    }
 
-    preFormattedBuffersIter = preFormattedBuffers.begin();
+    /// Cache tuple count per file (used to step globalTimestampOffset by exactly one cycle's worth).
+    tuplesPerFile.reserve(preFormattedBuffers.size());
+    for (const auto& fileBuffers : preFormattedBuffers)
+    {
+        uint64_t total = 0;
+        for (const auto& buf : fileBuffers)
+        {
+            total += buf.getNumberOfTuples();
+        }
+        tuplesPerFile.push_back(total);
+    }
+
+    /// Resolve the monotonic timestamp field (suffix match, case-insensitive).
+    monotonicTimestampOffsetBytes = -1;
+    if (not monotonicTimestampField.empty())
+    {
+        const auto needle = toUpperCase(monotonicTimestampField);
+        for (size_t i = 0; i < fields.size(); ++i)
+        {
+            if (toUpperCase(fields[i].name).ends_with(needle))
+            {
+                if (fields[i].dataType.type != DataType::Type::UINT64)
+                {
+                    throw InvalidConfigParameter(
+                        "monotonic_timestamp_field {} must resolve to a UINT64 column, but field {} is not UINT64",
+                        monotonicTimestampField,
+                        fields[i].name);
+                }
+                monotonicTimestampOffsetBytes = static_cast<int>(fieldByteOffsets[i]);
+                break;
+            }
+        }
+        if (monotonicTimestampOffsetBytes < 0)
+        {
+            throw InvalidConfigParameter(
+                "monotonic_timestamp_field '{}' did not match (suffix, case-insensitive) any field in the schema",
+                monotonicTimestampField);
+        }
+        std::cout << std::format(
+            "MemorySource: monotonic timestamp rewrite enabled on field offset {} ('{}')\n",
+            monotonicTimestampOffsetBytes,
+            monotonicTimestampField);
+    }
+
+    /// Cache for fillTupleBuffer.
+    tupleSizeBytes = tupleSize;
+    this->bufferProvider = bufferProvider;
+
+    currentFileIdx = 0;
+    currentReplayCount = 0;
+    globalTimestampOffset = 0;
+    currentBufferIter = preFormattedBuffers[0].begin();
     return true;
 }
 
 Source::FillTupleBufferResult MemorySource::fillTupleBuffer(TupleBuffer& tupleBuffer, const std::stop_token&)
 {
-    if (preFormattedBuffersIter == preFormattedBuffers.end())
+    if (currentBufferIter == preFormattedBuffers[currentFileIdx].end())
     {
-        return FillTupleBufferResult::eos();
+        /// Current file fully drained once. Bump the timestamp offset by one cycle's worth so
+        /// downstream watermarks keep advancing across loops. (No-op when the feature is off.)
+        globalTimestampOffset += tuplesPerFile[currentFileIdx];
+
+        ++currentReplayCount;
+        if (currentReplayCount >= replaysPerFile)
+        {
+            ++currentFileIdx;
+            currentReplayCount = 0;
+            if (currentFileIdx >= preFormattedBuffers.size())
+            {
+                if (not loop)
+                {
+                    return FillTupleBufferResult::eos();
+                }
+                currentFileIdx = 0;
+            }
+        }
+        if (preFormattedBuffers[currentFileIdx].empty())
+        {
+            return FillTupleBufferResult::eos();
+        }
+        currentBufferIter = preFormattedBuffers[currentFileIdx].begin();
     }
 
-    tupleBuffer = std::move(*preFormattedBuffersIter);
+    if (monotonicTimestampOffsetBytes < 0 or globalTimestampOffset == 0)
+    {
+        /// Fast path: feature disabled or first cycle of first file. Share the pre-formatted
+        /// buffer directly (refcount bump).
+        tupleBuffer = *currentBufferIter;
+    }
+    else
+    {
+        /// Allocate a fresh buffer, copy from the pre-formatted source, then patch the timestamp
+        /// column with the running offset. This is only walked on replay cycles ≥ 1.
+        const auto& sourceBuffer = *currentBufferIter;
+        auto unpooled = bufferProvider->getUnpooledBuffer(bufferSizeInBytes);
+        if (not unpooled.has_value())
+        {
+            return FillTupleBufferResult::eos();
+        }
+        TupleBuffer fresh = std::move(unpooled.value());
+        const auto numTuples = sourceBuffer.getNumberOfTuples();
+        const auto bytesToCopy = numTuples * tupleSizeBytes;
+        std::memcpy(
+            fresh.getAvailableMemoryArea<char>().data(),
+            sourceBuffer.getAvailableMemoryArea<char>().data(),
+            bytesToCopy);
+        char* const base = fresh.getAvailableMemoryArea<char>().data();
+        for (uint64_t i = 0; i < numTuples; ++i)
+        {
+            char* const slot = base + (i * tupleSizeBytes) + static_cast<size_t>(monotonicTimestampOffsetBytes);
+            uint64_t ts;
+            std::memcpy(&ts, slot, sizeof(uint64_t));
+            ts += globalTimestampOffset;
+            std::memcpy(slot, &ts, sizeof(uint64_t));
+        }
+        fresh.setNumberOfTuples(numTuples);
+        tupleBuffer = std::move(fresh);
+    }
+
     const auto numTuples = tupleBuffer.getNumberOfTuples();
     totalTuplesEmitted += numTuples;
-    ++preFormattedBuffersIter;
+    ++currentBufferIter;
     return FillTupleBufferResult::withNativeTuples(numTuples);
 }
 
@@ -373,7 +505,12 @@ DescriptorConfig::Config MemorySource::validateAndFormat(std::unordered_map<std:
 
 std::ostream& MemorySource::toString(std::ostream& str) const
 {
-    str << std::format("\nMemorySource(filepath: {}, totalTuplesEmitted: {})", this->filePath, this->totalTuplesEmitted.load());
+    str << "\nMemorySource(filepaths:";
+    for (const auto& path : this->filePaths)
+    {
+        str << " " << path;
+    }
+    str << std::format(", replaysPerFile: {}, totalTuplesEmitted: {})", this->replaysPerFile, this->totalTuplesEmitted.load());
     return str;
 }
 

@@ -25,6 +25,36 @@ service WorkerRPCService {
 
   rpc RequestQueryStatus (QueryStatusRequest) returns (QueryStatusReply) {}
   rpc RequestStatus (WorkerStatusRequest) returns (WorkerStatusResponse) {}
+
+  /// Flips a named runtime switch (see SwitchRegistry). Pipeline stages registered
+  /// against this switch start passing/dropping buffers based on the new value
+  /// without query redeploy. Used for the workload-domain swap callback.
+  rpc SetSwitch (SetSwitchRequest) returns (google.protobuf.Empty) {}
+
+  /// Registers a query plan but holds it in a pending slot inside the worker instead of
+  /// deploying it to the node engine. Use this when planning to AttachAlternatePipeline
+  /// before starting. Returns a QueryId identifying the pending plan.
+  rpc RegisterQueryDeferred (RegisterQueryRequest) returns (RegisterQueryReply) {}
+
+  /// Compiles `alternate_plan` in isolation and pairs its intermediate pipelines with
+  /// the pending plan registered under `query_id` (must be a query previously submitted
+  /// via RegisterQueryDeferred). Each pair is wrapped in a SwitchableCompiledExecutablePipelineStage
+  /// that selects between the two compiled implementations based on the named switch in
+  /// SwitchRegistry. After this RPC returns, the (now switchable) data plan is committed
+  /// to the node engine and can be started normally.
+  rpc AttachAlternatePipeline (AttachAlternatePipelineRequest) returns (google.protobuf.Empty) {}
+}
+
+message SetSwitchRequest {
+  string name = 1;
+  int64 value = 2;
+}
+
+message AttachAlternatePipelineRequest {
+  NES.SerializableQueryId query_id = 1;
+  NES.SerializableQueryPlan alternate_plan = 2;
+  string switch_name = 3;
+  int64 alternate_expected_value = 4;
 }
 
 message RegisterQueryRequest {

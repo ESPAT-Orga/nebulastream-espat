@@ -97,7 +97,7 @@ TEST_F(StatementBinderTest, BindQuery)
 TEST_F(StatementBinderTest, BindQueryWithFuseFalse)
 {
     const std::string queryString
-        = "SELECT a FROM inputStream WHERE b < UINT32(5) INTO outputStream SET (FALSE as \"QUERY\".FUSE)";
+        = "SELECT a FROM inputStream WHERE b < UINT32(5) INTO outputStream SET (FALSE as `QUERY`.FUSE)";
     const auto statement = binder->parseAndBindSingle(queryString);
     ASSERT_TRUE(statement.has_value()) << statement.error();
     ASSERT_TRUE(std::holds_alternative<QueryStatement>(*statement));
@@ -107,7 +107,7 @@ TEST_F(StatementBinderTest, BindQueryWithFuseFalse)
 TEST_F(StatementBinderTest, BindQueryWithFuseTrue)
 {
     const std::string queryString
-        = "SELECT a FROM inputStream WHERE b < UINT32(5) INTO outputStream SET (TRUE as \"QUERY\".FUSE)";
+        = "SELECT a FROM inputStream WHERE b < UINT32(5) INTO outputStream SET (TRUE as `QUERY`.FUSE)";
     const auto statement = binder->parseAndBindSingle(queryString);
     ASSERT_TRUE(statement.has_value()) << statement.error();
     ASSERT_TRUE(std::holds_alternative<QueryStatement>(*statement));
@@ -126,7 +126,7 @@ TEST_F(StatementBinderTest, BindQueryWithoutFuseDefaultsToTrue)
 TEST_F(StatementBinderTest, BindQueryFuseRejectsNonBoolean)
 {
     const std::string queryString
-        = "SELECT a FROM inputStream WHERE b < UINT32(5) INTO outputStream SET ('hi' as \"QUERY\".FUSE)";
+        = "SELECT a FROM inputStream WHERE b < UINT32(5) INTO outputStream SET ('hi' as `QUERY`.FUSE)";
     const auto statement = binder->parseAndBindSingle(queryString);
     ASSERT_FALSE(statement.has_value());
     ASSERT_EQ(statement.error().code(), ErrorCode::InvalidQuerySyntax);
@@ -136,7 +136,7 @@ TEST_F(StatementBinderTest, BindQueryWithIdAndFuse)
 {
     const std::string testUUID = "550e8400-e29b-41d4-a716-446655440000";
     const auto queryString = fmt::format(
-        "SELECT a FROM inputStream WHERE b < UINT32(5) INTO outputStream SET ('{}' as \"QUERY\".ID, FALSE as \"QUERY\".FUSE)", testUUID);
+        "SELECT a FROM inputStream WHERE b < UINT32(5) INTO outputStream SET ('{}' as `QUERY`.ID, FALSE as `QUERY`.FUSE)", testUUID);
     const auto statement = binder->parseAndBindSingle(queryString);
     ASSERT_TRUE(statement.has_value()) << statement.error();
     ASSERT_TRUE(std::holds_alternative<QueryStatement>(*statement));

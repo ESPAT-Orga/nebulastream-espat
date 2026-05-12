@@ -73,6 +73,34 @@ WORKER_DATA = "localhost:9090"
 #   price    < 888.49 →  selectivity 0.99
 #     price    ~ N(mean=500, stddev=167); 99th percentile = 500 + 167 * Φ⁻¹(0.99) = 500 + 167*(+2.3263) ≈ 888.49
 #   Combined selectivity (AND): 0.01 * 0.99 ≈ 0.0099
+#
+# An intermediate subquery level performs 30 SQRT operations per tuple (always-true condition).
+# This creates a CPU-intensive middle pipeline whose load is proportional to the number of tuples
+# flowing through it. With bidValue-first (~1k tup/s intermediate), the SQRT pipeline is idle;
+# with price-first (~99k tup/s intermediate), it saturates and causes backpressure on the first
+# pipeline, making the throughput difference measurable.
+#
+# The SQRT arguments are col + large_constant (>= 1000) to guarantee positive inputs to SQRT
+# regardless of the field distribution.
+
+_EXPENSIVE_FILTER = (
+    "SQRT(bidValue + FLOAT64(1000)) + SQRT(price + FLOAT64(1000)) + "
+    "SQRT(bidValue + FLOAT64(1001)) + SQRT(price + FLOAT64(1001)) + "
+    "SQRT(bidValue + FLOAT64(1002)) + SQRT(price + FLOAT64(1002)) + "
+    "SQRT(bidValue + FLOAT64(1003)) + SQRT(price + FLOAT64(1003)) + "
+    "SQRT(bidValue + FLOAT64(1004)) + SQRT(price + FLOAT64(1004)) + "
+    "SQRT(bidValue + FLOAT64(1005)) + SQRT(price + FLOAT64(1005)) + "
+    "SQRT(bidValue + FLOAT64(1006)) + SQRT(price + FLOAT64(1006)) + "
+    "SQRT(bidValue + FLOAT64(1007)) + SQRT(price + FLOAT64(1007)) + "
+    "SQRT(bidValue + FLOAT64(1008)) + SQRT(price + FLOAT64(1008)) + "
+    "SQRT(bidValue + FLOAT64(1009)) + SQRT(price + FLOAT64(1009)) + "
+    "SQRT(bidValue + FLOAT64(1010)) + SQRT(price + FLOAT64(1010)) + "
+    "SQRT(bidValue + FLOAT64(1011)) + SQRT(price + FLOAT64(1011)) + "
+    "SQRT(bidValue + FLOAT64(1012)) + SQRT(price + FLOAT64(1012)) + "
+    "SQRT(bidValue + FLOAT64(1013)) + SQRT(price + FLOAT64(1013)) + "
+    "SQRT(bidValue + FLOAT64(1014)) + SQRT(price + FLOAT64(1014)) > FLOAT64(0.0)"
+)
+
 SETUP_SQL = f"""\
 CREATE WORKER "{WORKER_GRPC}" SET ('{WORKER_DATA}' AS DATA);
 CREATE LOGICAL SOURCE bid(timestamp UINT64 NOT NULL, auctionId INT32 NOT NULL, bidValue FLOAT64 NOT NULL, price FLOAT64 NOT NULL);
@@ -95,19 +123,29 @@ SET(
     '{WORKER_GRPC}' AS `SINK`.HOST
 );
 SELECT timestamp, auctionId, bidValue, price
-FROM (SELECT timestamp, auctionId, bidValue, price FROM bid WHERE bidValue < FLOAT64(10.45))
+FROM (
+  SELECT timestamp, auctionId, bidValue, price
+  FROM (SELECT timestamp, auctionId, bidValue, price FROM bid WHERE bidValue < FLOAT64(10.45))
+  WHERE {_EXPENSIVE_FILTER}
+)
 WHERE price < FLOAT64(888.49)
-INTO someSink;
+INTO someSink
+SET (FALSE as `QUERY`.FUSE);
 """
 
 # Same query with filter order reversed (price first, then bidValue).
-# Each filter is a separate logical operator (nested subquery), so the adaptive
-# optimizer can observe the reordering effect on throughput.
+# The expensive intermediate pipeline now processes ~99k tup/s (vs ~1k tup/s above),
+# creating backpressure that should lower the measured throughput of the first pipeline.
 REVERSED_QUERY_SQL = (
     "SELECT timestamp, auctionId, bidValue, price "
+    "FROM ("
+    "SELECT timestamp, auctionId, bidValue, price "
     "FROM (SELECT timestamp, auctionId, bidValue, price FROM bid WHERE price < FLOAT64(888.49)) "
+    f"WHERE {_EXPENSIVE_FILTER}"
+    ") "
     "WHERE bidValue < FLOAT64(10.45) "
-    "INTO someSink;"
+    "INTO someSink "
+    "SET (FALSE as `QUERY`.FUSE);"
 )
 
 # Matches: Throughput for queryId QueryId(local=<UUID>, distributed=<horse-name>) in window <ts>-<ts> is <val> <prefix>Tup/s

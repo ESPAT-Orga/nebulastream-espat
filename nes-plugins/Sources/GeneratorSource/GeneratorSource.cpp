@@ -171,13 +171,13 @@ Source::FillTupleBufferResult GeneratorSource::fillTupleBuffer(TupleBuffer& tupl
         NES_TRACE("Wrote {} bytes", writtenBytes);
 
         /// Calculating how long to sleep. The whole method should take the duration of the flushInterval. If we have some time left, we
-        /// sleep for the remaining duration. If there is no time left, we print a warning.
+        /// sleep for the remaining duration. If there is no time left, we are running at full generator speed (no sleep needed).
         const auto durationGeneratingTuples
             = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now() - startOfInterval);
         if (durationGeneratingTuples > (flushInterval * noIntervals))
         {
-            NES_WARNING(
-                "Can not produce all required tuples in the flushInterval of {} as it took us {}",
+            NES_INFO(
+                "Generator running at full speed: target flushInterval {} exceeded by actual generation time {}",
                 (flushInterval * noIntervals),
                 durationGeneratingTuples);
         }

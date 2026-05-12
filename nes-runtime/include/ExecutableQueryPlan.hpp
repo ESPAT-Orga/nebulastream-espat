@@ -15,6 +15,7 @@
 #pragma once
 #include <memory>
 #include <ostream>
+#include <string>
 #include <utility>
 #include <vector>
 #include <Identifiers/Identifiers.hpp>
@@ -34,7 +35,24 @@ class AdaptiveSendingScheduler;
 /// In this form the Query could be executed, by starting all pipelines, sinks and passing the successor pipelines into the queries sources.
 struct ExecutableQueryPlan
 {
-    using SourceWithSuccessor = std::pair<std::unique_ptr<SourceHandle>, std::vector<std::weak_ptr<ExecutablePipeline>>>;
+    /// One source entry. In the normal case `source` is a freshly-built SourceHandle that the
+    /// engine starts on a dedicated thread. When `spliceToRunningSource == true`, `source` is
+    /// nullptr: the engine must NOT spawn a thread but instead look up the running source for
+    /// `logicalSourceName` in the worker-wide RunningSourceRegistry and graft this entry's
+    /// `successors` onto it. Strict: missing match → fail.
+    struct SourceWithSuccessor
+    {
+        std::unique_ptr<SourceHandle> source;
+        std::vector<std::weak_ptr<ExecutablePipeline>> successors;
+        bool spliceToRunningSource = false;
+        /// If true, the source is created and registered in RunningSourceRegistry but NOT
+        /// started until `deferStartExpectedSpliceCount` successful appendSuccessors() calls
+        /// have happened (or until an explicit startDeferred(name) call).
+        bool deferStart = false;
+        uint32_t deferStartExpectedSpliceCount = 1;
+        std::string logicalSourceName;
+    };
+
     /// *backpressureStatisticListener* (optional) is wired into both the controller and listener of the
     /// freshly created backpressure channel so NetworkSink emits BufferSentEvents and the source side
     /// emits BufferIngestEvents on every TupleBuffer.
@@ -47,7 +65,6 @@ struct ExecutableQueryPlan
         std::shared_ptr<NetworkSinkSendingStrategy> sendingStrategy,
         std::shared_ptr<BackpressureStatisticListener> backpressureStatisticListener = nullptr,
         std::shared_ptr<AdaptiveSendingScheduler> adaptiveSendingScheduler = nullptr);
-
     ExecutableQueryPlan(
         QueryId queryId, std::vector<std::shared_ptr<ExecutablePipeline>> pipelines, std::vector<SourceWithSuccessor> instantiatedSources);
 

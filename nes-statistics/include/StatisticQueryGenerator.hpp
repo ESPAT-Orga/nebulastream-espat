@@ -14,9 +14,15 @@
 
 #pragma once
 
+#include <cstdint>
+#include <optional>
 #include <string>
+#include <CollectionDomain.hpp>
+#include <Functions/LogicalFunction.hpp>
+#include <Operators/LogicalOperator.hpp>
 #include <Plans/LogicalPlan.hpp>
 #include <Statistic.hpp>
+#include <ErrorHandling.hpp>
 
 namespace NES
 {
@@ -39,6 +45,55 @@ public:
     [[nodiscard]] virtual LogicalPlan generateQuery(
         const RequestStatisticBuildStatement& request, Statistic::StatisticId statisticId, const std::string& coordinatorAddress) const
         = 0;
+
+    /// Builds the "build branch" sub-plan for a WorkloadDomain statistic: a chain rooted at the
+    /// gRPC sink stacked on top of `spliceLeaf` (the data query's source operator). The caller
+    /// then merges the returned plan's roots into the data query's plan so the optimizer's
+    /// LogicalSourceExpansionRule produces a single shared Union(SourceDescriptors). Default impl
+    /// throws NotImplemented — generators that don't support WorkloadDomain can leave it that way.
+    [[nodiscard]] virtual LogicalPlan generateWorkloadBranch(
+        const WorkloadDomain& domain,
+        const RequestStatisticBuildStatement& request,
+        Statistic::StatisticId statisticId,
+        const std::string& coordinatorAddress,
+        const LogicalOperator& spliceLeaf) const
+    {
+        (void)domain;
+        (void)request;
+        (void)statisticId;
+        (void)coordinatorAddress;
+        (void)spliceLeaf;
+        throw NotImplemented("This StatisticQueryGenerator does not support WorkloadDomain build-branch generation");
+    }
+
+    /// Probe used alongside the workload-domain build branch.
+    /// Two modes (selected by the `predicate` argument):
+    ///  - predicate == nullopt: a pure heartbeat. Generator → GrpcSink reports `buildStatisticId`
+    ///    every interval. The coordinator-side trigger callback handles all decision logic.
+    ///  - predicate != nullopt: a *selectivity-gated* probe. The pipeline reads the histogram via
+    ///    EquiWidthHistogramProbe(buildStatisticId), filters bin rows by `predicate`, and rewrites
+    ///    STATISTICID to `probeStatisticId` before reporting. The coordinator routes the report
+    ///    via probeStatisticId, so two probes built off the same buildStatisticId fire two distinct
+    ///    callbacks.
+    /// `probeStatisticId` is the report routing key (must differ between probes when stacking
+    /// multiple). When `predicate` is null and the caller wants the legacy single-callback flow,
+    /// they pass `probeStatisticId == buildStatisticId`.
+    [[nodiscard]] virtual LogicalPlan generateProbeQuery(
+        Statistic::StatisticId buildStatisticId,
+        Statistic::StatisticId probeStatisticId,
+        std::optional<LogicalFunction> predicate,
+        const std::string& coordinatorAddress,
+        uint64_t intervalMs,
+        const std::string& sinkWorkerHost) const
+    {
+        (void)buildStatisticId;
+        (void)probeStatisticId;
+        (void)predicate;
+        (void)coordinatorAddress;
+        (void)intervalMs;
+        (void)sinkWorkerHost;
+        throw NotImplemented("This StatisticQueryGenerator does not support workload-domain heartbeat probes");
+    }
 };
 
 }

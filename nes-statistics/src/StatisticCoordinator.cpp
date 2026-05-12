@@ -17,6 +17,7 @@
 #include <chrono>
 #include <cstdint>
 #include <future>
+#include <iostream>
 #include <memory>
 #include <optional>
 #include <string>
@@ -24,7 +25,11 @@
 #include <vector>
 #include <DataTypes/Schema.hpp>
 #include <Identifiers/Identifiers.hpp>
+#include <Operators/Sources/SourceNameLogicalOperator.hpp>
 #include <Operators/Statistic/LogicalStatisticFields.hpp>
+#include <Traits/DeferSourceStartTrait.hpp>
+#include <Traits/TraitSet.hpp>
+#include <Util/PlanRenderer.hpp>
 #include <Plans/LogicalPlan.hpp>
 #include <Plans/LogicalPlanBuilder.hpp>
 #include <Util/Logger/Logger.hpp>
@@ -129,6 +134,151 @@ std::expected<CollectStatisticResult, Exception> StatisticCoordinator::collectNe
                 registry.registerStatistic(key, queryId, statisticId, std::move(triggers));
                 return CollectStatisticResult{.queryId = queryId, .statisticId = statisticId, .alreadyExisted = false};
             });
+}
+
+std::expected<CollectStatisticResult, Exception> StatisticCoordinator::collectWorkloadStatistic(
+    const RequestStatisticBuildStatement& statement,
+    const LogicalPlan& dataQueryPlan,
+    const std::function<std::expected<QueryId, Exception>(LogicalPlan)>& submitPlan,
+    const uint64_t probeIntervalMs)
+{
+    const auto* domain = std::get_if<WorkloadDomain>(&statement.domain);
+    if (domain == nullptr)
+    {
+        return std::unexpected(InvalidConfigParameter("collectWorkloadStatistic requires a WorkloadDomain in the request"));
+    }
+
+    /// MVP: assume the data query has exactly one SourceNameLogicalOperator and splice the build
+    /// branch as a sibling consumer of that operator. This matches the adaptive-optimization use
+    /// case (single Memory source feeding a filter chain). Multi-source / join-shaped data queries
+    /// would need a richer splice (matching against domain.operatorId explicitly).
+    const auto sources = getOperatorByType<SourceNameLogicalOperator>(dataQueryPlan);
+    if (sources.empty())
+    {
+        return std::unexpected(InvalidConfigParameter("WorkloadDomain splice: data query has no source-name operator"));
+    }
+    if (sources.size() != 1)
+    {
+        return std::unexpected(NotImplemented(
+            "WorkloadDomain splice MVP requires the data query to have exactly one source (got {})", sources.size()));
+    }
+    const LogicalOperator spliceLeaf{sources.front()};
+    const auto sourceNameUpper = sources.front()->getLogicalSourceName();
+
+    const StatisticRegistry::Key key{
+        .metric = statement.metric, .collectionDomain = statement.domain, .windowSize = Windowing::TimeMeasure{statement.windowSizeMs}};
+
+    const auto hostIt = statement.options.find("host");
+    const auto& sinkWorkerHost = hostIt != statement.options.end() ? hostIt->second : std::string{"localhost:8080"};
+    (void)sinkWorkerHost; /// kept for forward-compat with future per-request host overrides
+    (void)probeIntervalMs; /// no longer used: the probe runs inline with the build chain and fires on every window-close
+
+    if (const auto existing = registry.find(key))
+    {
+        if (statement.conditionTrigger.has_value() and statement.conditionTrigger->callback)
+        {
+            /// Same registry key (same metric, domain, window): the build branch is already
+            /// running under existing->statisticId. We only need to register an additional
+            /// callback. The existing in-build probe will route to ALL callbacks registered
+            /// under this statisticId. (Multiple predicates on the same field would require
+            /// per-callback predicates instead — currently the predicate is baked into the
+            /// in-build Selection at deploy time.)
+            addProbeCallback(existing->statisticId, statement.conditionTrigger->callback);
+        }
+        return CollectStatisticResult{.queryId = existing->queryId, .statisticId = existing->statisticId, .alreadyExisted = true};
+    }
+
+    const auto statisticId = Statistic::StatisticId{nextStatisticId.fetch_add(1)};
+
+    /// Stamp DeferSourceStartTrait on the data plan's source so the runtime creates the
+    /// RunningSource but doesn't begin emission until ALL expected splices have wired in.
+    /// `expected_splice_count` in the request options carries the count (set by the REPL based
+    /// on how many companion-statistic requests it intends to deploy in this session). Default
+    /// 1 (single splice case) when the caller doesn't specify.
+    uint32_t expectedSpliceCount = 1;
+    if (const auto countIt = statement.options.find("expected_splice_count"); countIt != statement.options.end())
+    {
+        try
+        {
+            expectedSpliceCount = std::max<uint32_t>(1, static_cast<uint32_t>(std::stoul(countIt->second)));
+        }
+        catch (...)
+        {
+            /// keep default 1
+        }
+    }
+    auto dataPlanWithDeferTrait = dataQueryPlan;
+    {
+        const auto dataSources = getOperatorByType<SourceNameLogicalOperator>(dataPlanWithDeferTrait);
+        if (not dataSources.empty())
+        {
+            auto taggedSource = LogicalOperator{dataSources.front()};
+            auto ts = taggedSource.getTraitSet();
+            [[maybe_unused]] const auto inserted = tryInsert(ts, DeferSourceStartTrait{.expectedSpliceCount = expectedSpliceCount});
+            taggedSource = taggedSource.withTraitSet(ts);
+            auto replaced = replaceOperator(dataPlanWithDeferTrait, dataSources.front().getId(), taggedSource);
+            if (replaced.has_value())
+            {
+                dataPlanWithDeferTrait = std::move(*replaced);
+            }
+        }
+    }
+
+    /// Deploy the (tagged) data plan if no data query for this logical source has been deployed
+    /// yet. With multiple companion-statistic requests covering different fields of the same
+    /// source (each with its own WorkloadDomain → its own registry key → both going through this
+    /// "new" path), we must NOT deploy a duplicate data query. The cache keyed by logical source
+    /// name catches that and reuses the existing queryId.
+    std::optional<QueryId> mergedQueryIdOpt;
+    {
+        auto cache = deployedDataQueriesBySource.wlock();
+        if (const auto it = cache->find(sourceNameUpper); it != cache->end())
+        {
+            mergedQueryIdOpt = it->second;
+        }
+        else
+        {
+            auto submittedData = submitPlan(std::move(dataPlanWithDeferTrait));
+            if (not submittedData.has_value())
+            {
+                return std::unexpected(submittedData.error());
+            }
+            mergedQueryIdOpt = std::move(submittedData.value());
+            cache->emplace(sourceNameUpper, *mergedQueryIdOpt);
+        }
+    }
+    const auto mergedQueryId = *mergedQueryIdOpt;
+
+    /// Submit the build branch as its own query. Its source carries SpliceToRunningSourceTrait,
+    /// so on the worker side ExecutableQueryPlan::instantiate will redirect it to the data
+    /// query's running source instead of spawning a new source thread. Failure here is logged
+    /// but does not undo the data-query deploy — the build branch is an observability concern.
+    try
+    {
+        auto buildBranch = queryGenerator->generateWorkloadBranch(*domain, statement, statisticId, coordinatorAddress, spliceLeaf);
+        if (auto submittedBranch = submitPlan(std::move(buildBranch)); not submittedBranch.has_value())
+        {
+            NES_WARNING(
+                "Workload-domain build branch deploy failed (statisticId={}): {}",
+                statisticId.getRawValue(),
+                submittedBranch.error().what());
+        }
+    }
+    catch (const std::exception& e)
+    {
+        NES_WARNING("Workload-domain build branch construction threw (statisticId={}): {}", statisticId.getRawValue(), e.what());
+    }
+
+    /// Register the trigger's callback under the build statisticId. The build branch's in-line
+    /// probe (Probe → Selection → Projection → GrpcSink) reports to the coordinator on each
+    /// window-close that survives the Selection predicate, and the report carries this
+    /// statisticId so probeCallbacks[statisticId] is the right routing key.
+    if (statement.conditionTrigger.has_value() and statement.conditionTrigger->callback)
+    {
+        addProbeCallback(statisticId, statement.conditionTrigger->callback);
+    }
+    registry.registerStatistic(key, mergedQueryId, statisticId, /*triggers=*/{});
+    return CollectStatisticResult{.queryId = mergedQueryId, .statisticId = statisticId, .alreadyExisted = false};
 }
 
 bool StatisticCoordinator::addConditionTrigger(const StatisticRegistry::Key& key, ConditionTrigger trigger)
@@ -327,6 +477,28 @@ void StatisticCoordinator::onStatisticReport(
         }
     }
 
+    /// Selectivity-gated probe path: regime-specific statisticIds are routed directly via the
+    /// probeCallbacks map. The registry scan below wouldn't match anyway (regime ids are not
+    /// stored as entry.statisticId) so we return after firing.
+    {
+        std::vector<ProbeCallback> snapshot;
+        {
+            auto callbacks = probeCallbacks.rlock();
+            if (auto it = callbacks->find(statisticId); it != callbacks->end())
+            {
+                snapshot = it->second;
+            }
+        }
+        if (not snapshot.empty())
+        {
+            for (const auto& cb : snapshot)
+            {
+                cb(statisticId, startTs, endTs);
+            }
+            return;
+        }
+    }
+
     /// Not a probe response — check for condition triggers in the registry.
     /// We iterate over all entries to find one matching this statisticId.
     /// This is acceptable for now since the registry is typically small.
@@ -341,6 +513,12 @@ void StatisticCoordinator::onStatisticReport(
                 }
             }
         });
+}
+
+void StatisticCoordinator::addProbeCallback(Statistic::StatisticId probeStatisticId, ProbeCallback callback)
+{
+    auto callbacks = probeCallbacks.wlock();
+    (*callbacks)[probeStatisticId].push_back(std::move(callback));
 }
 
 }

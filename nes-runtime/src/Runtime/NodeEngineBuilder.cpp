@@ -14,6 +14,7 @@
 
 #include <Runtime/NodeEngineBuilder.hpp>
 
+#include <cstdio>
 #include <chrono>
 #include <map>
 #include <memory>
@@ -56,10 +57,19 @@ NodeEngineBuilder::NodeEngineBuilder(
 
 std::unique_ptr<NodeEngine> NodeEngineBuilder::build(const Host& host)
 {
-    auto bufferManager = BufferManager::create(
-        workerConfiguration.defaultQueryExecution.operatorBufferSize.getValue(),
-        workerConfiguration.numberOfBuffersInGlobalBufferManager.getValue(),
-        statisticsListener);
+    const auto bufferSize = workerConfiguration.defaultQueryExecution.operatorBufferSize.getValue();
+    const auto numBuffers = workerConfiguration.numberOfBuffersInGlobalBufferManager.getValue();
+    const auto maxInflightBuffers = workerConfiguration.defaultMaxInflightBuffers.getValue();
+    const auto numWorkerThreads = workerConfiguration.queryEngine.numberOfWorkerThreads.getValue();
+    fprintf(stderr,
+        "[NodeEngineBuilder] BufferManager: operator_buffer_size=%lu, number_of_buffers_in_global_buffer_manager=%lu, "
+        "default_max_inflight_buffers=%lu, number_of_worker_threads=%lu\n",
+        static_cast<unsigned long>(bufferSize),
+        static_cast<unsigned long>(numBuffers),
+        static_cast<unsigned long>(maxInflightBuffers),
+        static_cast<unsigned long>(numWorkerThreads));
+    fflush(stderr);
+    auto bufferManager = BufferManager::create(bufferSize, numBuffers, statisticsListener);
     auto queryLog = std::make_shared<QueryLog>();
 
     auto queryEngine = std::make_unique<QueryEngine>(workerConfiguration.queryEngine, statisticsListener, queryLog, bufferManager, host);

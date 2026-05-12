@@ -19,10 +19,12 @@
 #include <memory>
 #include <optional>
 #include <stop_token>
+#include <vector>
 #include <SQLQueryParser/StatementBinder.hpp>
 #include <Statements/StatementHandler.hpp>
 #include <QueryId.hpp>
 #include <RequestStatisticStatement.hpp>
+#include <Statistic.hpp>
 
 namespace NES
 {
@@ -51,8 +53,9 @@ public:
         StatementOutputFormat defaultOutputFormat,
         bool interactiveMode,
         std::stop_token stopToken,
-        std::optional<RequestStatisticBuildStatement> companionStatisticRequest = std::nullopt,
-        std::optional<std::function<void(DistributedQueryId, const std::string&)>> onCompanionAssociatedWithQuery = std::nullopt);
+        std::vector<RequestStatisticBuildStatement> companionStatisticRequests = {},
+        std::optional<std::function<void(DistributedQueryId, const std::string&, Statistic::StatisticId)>>
+            onCompanionAssociatedWithQuery = std::nullopt);
     void run();
     ~Repl();
 };

@@ -186,6 +186,70 @@ std::expected<void, Exception> GRPCQuerySubmissionBackend::stop(QueryId queryId)
         "Status: {}\nMessage: {}\nDetail: {}", magic_enum::enum_name(status.error_code()), status.error_message(), status.error_details())};
 }
 
+std::expected<void, Exception> GRPCQuerySubmissionBackend::setSwitch(const std::string& name, int64_t value)
+{
+    grpc::ClientContext context;
+    SetSwitchRequest request;
+    request.set_name(name);
+    request.set_value(value);
+    google::protobuf::Empty response;
+    const auto status = stub->SetSwitch(&context, request, &response);
+    if (status.ok())
+    {
+        return {};
+    }
+    return std::unexpected{UnknownException(
+        "SetSwitch RPC failed. Status: {}\nMessage: {}\nDetail: {}",
+        magic_enum::enum_name(status.error_code()),
+        status.error_message(),
+        status.error_details())};
+}
+
+std::expected<QueryId, Exception> GRPCQuerySubmissionBackend::registerQueryDeferred(LogicalPlan localPlan)
+{
+    grpc::ClientContext context;
+    RegisterQueryReply reply;
+    RegisterQueryRequest request;
+    request.mutable_queryplan()->CopyFrom(QueryPlanSerializationUtil::serializeQueryPlan(localPlan));
+    const auto status = stub->RegisterQueryDeferred(&context, request, &reply);
+    if (status.ok())
+    {
+        auto workerQueryId = QueryPlanSerializationUtil::deserializeQueryId(reply.queryid());
+        if (localPlan.getQueryId().isDistributed())
+        {
+            return QueryId::create(workerQueryId.getLocalQueryId(), localPlan.getQueryId().getDistributedQueryId());
+        }
+        return workerQueryId;
+    }
+    return std::unexpected{QueryRegistrationFailed(
+        "RegisterQueryDeferred failed. Status: {}\nMessage: {}\nDetail: {}",
+        magic_enum::enum_name(status.error_code()),
+        status.error_message(),
+        status.error_details())};
+}
+
+std::expected<void, Exception> GRPCQuerySubmissionBackend::attachAlternatePipeline(
+    QueryId queryId, LogicalPlan alternatePlan, const std::string& switchName, int64_t alternateExpectedValue)
+{
+    grpc::ClientContext context;
+    AttachAlternatePipelineRequest request;
+    *request.mutable_query_id() = QueryPlanSerializationUtil::serializeQueryId(queryId);
+    request.mutable_alternate_plan()->CopyFrom(QueryPlanSerializationUtil::serializeQueryPlan(alternatePlan));
+    request.set_switch_name(switchName);
+    request.set_alternate_expected_value(alternateExpectedValue);
+    google::protobuf::Empty response;
+    const auto status = stub->AttachAlternatePipeline(&context, request, &response);
+    if (status.ok())
+    {
+        return {};
+    }
+    return std::unexpected{UnknownException(
+        "AttachAlternatePipeline failed. Status: {}\nMessage: {}\nDetail: {}",
+        magic_enum::enum_name(status.error_code()),
+        status.error_message(),
+        status.error_details())};
+}
+
 BackendProvider createGRPCBackend()
 {
     return [](const WorkerConfig& config) { return std::make_unique<GRPCQuerySubmissionBackend>(config); };

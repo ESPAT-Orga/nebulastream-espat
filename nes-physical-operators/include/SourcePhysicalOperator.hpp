@@ -15,6 +15,7 @@
 
 #include <memory>
 #include <optional>
+#include <string>
 #include <Identifiers/Identifiers.hpp>
 #include <Sources/SourceDescriptor.hpp>
 #include <PhysicalOperator.hpp>
@@ -30,6 +31,20 @@ public:
 
     [[nodiscard]] SourceDescriptor getDescriptor() const;
     [[nodiscard]] OriginId getOriginId() const;
+
+    /// True when the lowering rule found SpliceToRunningSourceTrait on the logical source operator.
+    /// The compiled query plan / runtime use this to skip source-thread creation and graft this
+    /// query's pipelines onto the already-running source for the matching logical name.
+    bool spliceToRunningSource = false;
+    /// True when the lowering rule found DeferSourceStartTrait. The runtime registers the source
+    /// but does NOT start its emit thread until `deferStartExpectedSpliceCount` successful
+    /// appendSuccessors() calls have happened. Used by collectWorkloadStatistic so N splices can
+    /// wire in before the source emits sequence 0.
+    bool deferStart = false;
+    uint32_t deferStartExpectedSpliceCount = 1;
+    /// Logical source name resolved at lowering time, pinned so the runtime splice lookup does
+    /// not depend on the descriptor still being live.
+    std::string logicalSourceName;
 
     bool operator==(const SourcePhysicalOperator& other) const;
 

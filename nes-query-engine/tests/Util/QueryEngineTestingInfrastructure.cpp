@@ -25,6 +25,7 @@
 #include <initializer_list>
 #include <iterator>
 #include <memory>
+#include <optional>
 #include <ostream>
 #include <ranges>
 #include <span>
@@ -191,7 +192,7 @@ QueryPlanBuilder::TestPlanCtrl QueryPlanBuilder::build(QueryId queryId, std::sha
 {
     auto isSource = std::ranges::views::filter([](const std::pair<identifier_t, QueryComponentDescriptor>& kv)
                                                { return std::holds_alternative<SourceDescriptor>(kv.second); });
-    std::vector<std::pair<std::unique_ptr<SourceHandle>, std::vector<std::weak_ptr<ExecutablePipeline>>>> sources;
+    std::vector<ExecutableQueryPlan::SourceWithSuccessor> sources;
 
     std::vector<std::shared_ptr<ExecutablePipeline>> pipelines;
     std::unordered_map<identifier_t, OriginId> sourceIds;
@@ -203,7 +204,11 @@ QueryPlanBuilder::TestPlanCtrl QueryPlanBuilder::build(QueryId queryId, std::sha
     std::unordered_map<identifier_t, std::shared_ptr<TestPipelineController>> pipelineCtrls;
     std::unordered_map<identifier_t, std::shared_ptr<ExecutablePipeline>> cache{};
 
-    auto [backpressureController, backpressureListener] = createBackpressureChannel();
+    /// One backpressure channel per sink; the merged listener aggregates them for every source.
+    /// The first channel is reused for whatever sink the visitor hits first; subsequent sinks each
+    /// get their own channel and their listeners are merged into the single listener handed to sources.
+    auto [firstController, mergedListener] = createBackpressureChannel();
+    std::optional<BackpressureController> firstControllerSlot{std::move(firstController)};
     std::function<std::shared_ptr<ExecutablePipeline>(identifier_t)> getOrCreatePipeline = [&](identifier_t identifier)
     {
         if (auto it = cache.find(identifier); it != cache.end())
@@ -220,7 +225,19 @@ QueryPlanBuilder::TestPlanCtrl QueryPlanBuilder::build(QueryId queryId, std::sha
                 },
                 [&](SinkDescriptor descriptor) -> std::shared_ptr<ExecutablePipeline>
                 {
-                    auto [sink, ctrl] = createSinkPipeline(descriptor.pipelineId, std::move(backpressureController), bm);
+                    BackpressureController controller = [&]
+                    {
+                        if (firstControllerSlot.has_value())
+                        {
+                            auto c = std::move(*firstControllerSlot);
+                            firstControllerSlot.reset();
+                            return c;
+                        }
+                        auto [c, lst] = createBackpressureChannel();
+                        mergedListener.merge(std::move(lst));
+                        return std::move(c);
+                    }();
+                    auto [sink, ctrl] = createSinkPipeline(descriptor.pipelineId, std::move(controller), bm);
                     pipelines.push_back(sink);
                     stages[identifier] = sink->stage.get();
                     sinkCtrls[identifier] = ctrl;
@@ -249,12 +266,13 @@ QueryPlanBuilder::TestPlanCtrl QueryPlanBuilder::build(QueryId queryId, std::sha
         std::vector<std::weak_ptr<ExecutablePipeline>> successors;
         std::ranges::transform(forwardRelations.at(source.first), std::back_inserter(successors), getOrCreatePipeline);
         auto [s, ctrl] = getTestSource(
-            backpressureListener,
+            mergedListener,
             std::get<SourceDescriptor>(source.second).sourceId,
             std::get<SourceDescriptor>(source.second).pipelineId,
             bm);
         sourceIds.emplace(source.first, s->getSourceId());
-        sources.emplace_back(std::move(s), std::move(successors));
+        sources.emplace_back(ExecutableQueryPlan::SourceWithSuccessor{
+            .source = std::move(s), .successors = std::move(successors), .spliceToRunningSource = false, .logicalSourceName = {}});
         sourceCtrls[source.first] = ctrl;
     }
 

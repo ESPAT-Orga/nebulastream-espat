@@ -14,8 +14,13 @@
 
 #pragma once
 
+#include <optional>
 #include <string>
+#include <CollectionDomain.hpp>
+#include <Functions/LogicalFunction.hpp>
+#include <Operators/LogicalOperator.hpp>
 #include <Plans/LogicalPlan.hpp>
+#include <RequestStatisticStatement.hpp>
 #include <Statistic.hpp>
 #include <StatisticQueryGenerator.hpp>
 
@@ -31,6 +36,32 @@ public:
         const RequestStatisticBuildStatement& request,
         Statistic::StatisticId statisticId,
         const std::string& coordinatorAddress) const override;
+
+    /// Builds the "build branch" sub-plan for a WorkloadDomain statistic: a chain rooted at the
+    /// gRPC sink with WatermarkAssign → StatisticBuild → StatisticStoreWriter → GrpcSink stacked
+    /// on top of `spliceLeaf`. The caller passes the data query's source operator (a
+    /// SourceNameLogicalOperator) as `spliceLeaf`; the returned plan can then be merged into the
+    /// data query via addRootOperators, so the LogicalSourceExpansionRule produces a single
+    /// Union(SourceDescriptors) shared by both the data query's filter chain and the build branch.
+    [[nodiscard]] LogicalPlan generateWorkloadBranch(
+        const WorkloadDomain& domain,
+        const RequestStatisticBuildStatement& request,
+        Statistic::StatisticId statisticId,
+        const std::string& coordinatorAddress,
+        const LogicalOperator& spliceLeaf) const override;
+
+    /// Probe for the workload-domain build branch. See base-class docs for predicate modes.
+    /// When predicate is null: legacy ticker — Generator(STATISTICID = probeStatisticId, …) → GrpcSink.
+    /// When predicate is set: selectivity-gated — Generator(STATISTICID = buildStatisticId, …) →
+    ///   EquiWidthHistogramProbe(buildStatisticId) → Selection(predicate) →
+    ///   Projection(STATISTICID := probeStatisticId, pass-through timestamps) → GrpcSink.
+    [[nodiscard]] LogicalPlan generateProbeQuery(
+        Statistic::StatisticId buildStatisticId,
+        Statistic::StatisticId probeStatisticId,
+        std::optional<LogicalFunction> predicate,
+        const std::string& coordinatorAddress,
+        uint64_t intervalMs,
+        const std::string& sinkWorkerHost) const override;
 };
 
 }

@@ -13,14 +13,21 @@
 */
 #include <Statistic/StatisticStore/StatisticStoreReader.hpp>
 
+#include <algorithm>
 #include <cstdint>
+#include <iostream>
+#include <limits>
+#include <optional>
 #include <string_view>
+#include <vector>
 
 #include <Nautilus/Interface/NESStrongTypeRef.hpp>
 #include <Runtime/Execution/OperatorHandler.hpp>
 #include <Statistic/StatisticProvider.hpp>
 #include <Statistic/StatisticStore/StatisticStoreOperatorHandler.hpp>
+#include <StatisticStore/AbstractStatisticStore.hpp>
 #include <Time/Timestamp.hpp>
+#include <WindowTypes/Measures/TimeMeasure.hpp>
 #include <ExecutionContext.hpp>
 #include <Statistic.hpp>
 #include <function.hpp>
@@ -29,18 +36,51 @@
 namespace NES
 {
 
-const static int8_t* getStatisticDataProxy(
-    OperatorHandler* ptrOpHandler, const Statistic::StatisticId statisticId, const Timestamp startTs, const Timestamp endTs)
+/// Sentinel meaning "look up the most-recently-closed window for this statisticId" rather than
+/// requiring an exact (startTs, endTs) match. Used by live-deployed probe pipelines where the
+/// caller cannot precompute which window has just closed — the build branch and probe run
+/// concurrently. The driving Generator emits (statisticId, 0, LATEST_WINDOW_END_SENTINEL); the
+/// reader detects this pair and walks the full statistic range via getStatistics() to pick the
+/// latest. We use UINT64_MAX - 1 (not UINT64_MAX itself) so a GeneratorSource SequenceField with
+/// start = sentinel, end = sentinel + 1, step = 0 can emit it directly (SequenceField needs
+/// end > start to leave room for sequencePosition).
+constexpr uint64_t LATEST_WINDOW_END_SENTINEL = std::numeric_limits<uint64_t>::max() - 1;
+
+namespace
+{
+/// Pick the statistic with the highest endTs from a range of stored entries. Returns nullopt if
+/// the range is empty. Used by the LATEST_WINDOW_END_SENTINEL fallback path.
+std::optional<Statistic> pickLatest(const std::vector<Statistic>& statistics)
+{
+    if (statistics.empty())
+    {
+        return std::nullopt;
+    }
+    return *std::ranges::max_element(
+        statistics, {}, [](const Statistic& s) { return s.getEndTs().getTime(); });
+}
+
+std::optional<Statistic>
+resolveStatistic(AbstractStatisticStore& store, const Statistic::StatisticId statisticId, const Timestamp startTs, const Timestamp endTs)
+{
+    if (startTs.getRawValue() == 0 and endTs.getRawValue() == LATEST_WINDOW_END_SENTINEL)
+    {
+        return pickLatest(store.getStatistics(statisticId, Windowing::TimeMeasure{0}, Windowing::TimeMeasure{LATEST_WINDOW_END_SENTINEL}));
+    }
+    return store.getSingleStatistic(
+        statisticId, Windowing::TimeMeasure(startTs.getRawValue()), Windowing::TimeMeasure(endTs.getRawValue()));
+}
+}
+
+const static int8_t*
+getStatisticDataProxy(OperatorHandler* ptrOpHandler, const Statistic::StatisticId statisticId, const Timestamp startTs, const Timestamp endTs)
 {
     PRECONDITION(ptrOpHandler != nullptr, "opHandler should not be null!");
 
     const auto* opHandler = dynamic_cast<StatisticStoreOperatorHandler*>(ptrOpHandler);
     const auto statisticStore = opHandler->getStatisticStore();
 
-    const auto statistic = statisticStore->getSingleStatistic(
-        statisticId, Windowing::TimeMeasure(startTs.getRawValue()), Windowing::TimeMeasure(endTs.getRawValue()));
-
-    if (statistic.has_value())
+    if (const auto statistic = resolveStatistic(*statisticStore, statisticId, startTs, endTs); statistic.has_value())
     {
         return statistic.value().getStatisticData();
     }
@@ -55,10 +95,7 @@ uint64_t getNumberOfSeenTuplesOfStatistic(
     const auto* opHandler = dynamic_cast<StatisticStoreOperatorHandler*>(ptrOpHandler);
     const auto statisticStore = opHandler->getStatisticStore();
 
-    const auto statistic = statisticStore->getSingleStatistic(
-        statisticId, Windowing::TimeMeasure(startTs.getRawValue()), Windowing::TimeMeasure(endTs.getRawValue()));
-
-    if (statistic.has_value())
+    if (const auto statistic = resolveStatistic(*statisticStore, statisticId, startTs, endTs); statistic.has_value())
     {
         return statistic.value().getNumberOfSeenTuples();
     }

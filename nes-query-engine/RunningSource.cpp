@@ -18,22 +18,26 @@
 #include <chrono>
 #include <cstdint>
 #include <functional>
+#include <iostream>
 #include <limits>
 #include <memory>
 #include <mutex>
 #include <semaphore>
 #include <stop_token>
+#include <string>
 #include <utility>
 #include <variant>
 #include <vector>
 #include <Identifiers/Identifiers.hpp>
 #include <Sources/SourceReturnType.hpp>
 #include <Util/Overloaded.hpp>
+#include <fmt/format.h>
 #include <EngineLogger.hpp>
 #include <ErrorHandling.hpp>
 #include <Interfaces.hpp>
 #include <PipelineExecutionContext.hpp>
 #include <RunningQueryPlan.hpp>
+#include <RunningSourceRegistry.hpp>
 
 namespace NES
 {
@@ -42,15 +46,12 @@ namespace
 {
 SourceReturnType::EmitFunction emitFunction(
     QueryId queryId,
-    size_t numberOfInflightBuffers,
     std::weak_ptr<RunningSource> source,
-    std::vector<std::shared_ptr<RunningQueryPlanNode>> successors,
+    std::shared_ptr<RunningSource::SuccessorContainer> successors,
     QueryLifetimeController& controller,
     WorkEmitter& emitter)
 {
-    auto availableBuffer = std::make_shared<std::counting_semaphore<>>(
-        std::min(numberOfInflightBuffers, static_cast<size_t>(std::numeric_limits<int32_t>::max())));
-    return [&controller, successors = std::move(successors), source, &emitter, queryId, availableBuffer = std::move(availableBuffer)](
+    return [&controller, successors = std::move(successors), source, &emitter, queryId](
                const OriginId sourceId,
                SourceReturnType::SourceReturnType event,
                const std::stop_token& stopToken) -> SourceReturnType::EmitResult
@@ -59,12 +60,18 @@ SourceReturnType::EmitFunction emitFunction(
             Overloaded{
                 [&](const SourceReturnType::Data& data)
                 {
-                    for (const auto& successor : successors)
+                    /// Snapshot the successor list under the read-lock so the loop body can iterate
+                    /// without holding the lock. Splice-time appends are seen on the next buffer.
+                    /// Each entry carries its own per-successor semaphore — a slow build-branch
+                    /// pipeline will only backpressure ITS OWN slot pool, not the data path's.
+                    const auto snapshot = successors->copy();
+                    for (const auto& entry : snapshot)
                     {
+                        auto slots = entry.availableSlots;
                         {
                             /// release the semaphore in case the source wants to terminate
-                            const std::stop_callback callback(stopToken, [&]() { availableBuffer->release(); });
-                            availableBuffer->acquire();
+                            const std::stop_callback callback(stopToken, [&]() { slots->release(); });
+                            slots->acquire();
                             if (stopToken.stop_requested())
                             {
                                 return SourceReturnType::EmitResult::STOP_REQUESTED;
@@ -73,9 +80,9 @@ SourceReturnType::EmitFunction emitFunction(
                         /// The admission queue might be full, we have to reattempt
                         while (not emitter.emitWork(
                             queryId,
-                            successor,
+                            entry.node,
                             data.buffer,
-                            TaskCallback{TaskCallback::OnComplete([availableBuffer] { availableBuffer->release(); })},
+                            TaskCallback{TaskCallback::OnComplete([slots] { slots->release(); })},
                             PipelineExecutionContext::ContinuationPolicy::NEVER))
                         {
                             if (stopToken.stop_requested())
@@ -83,7 +90,7 @@ SourceReturnType::EmitFunction emitFunction(
                                 return SourceReturnType::EmitResult::STOP_REQUESTED;
                             }
                         }
-                        ENGINE_LOG_DEBUG("Source Emitted Data to successor: {}-{}", queryId, successor->id);
+                        ENGINE_LOG_DEBUG("Source Emitted Data to successor: {}-{}", queryId, entry.node->id);
                     }
                     return SourceReturnType::EmitResult::SUCCESS;
                 },
@@ -109,15 +116,29 @@ OriginId RunningSource::getOriginId() const
 }
 
 RunningSource::RunningSource(
-    std::vector<std::shared_ptr<RunningQueryPlanNode>> successors,
+    std::vector<SuccessorEntry> initialSuccessors,
     std::unique_ptr<SourceHandle> source,
     std::function<bool(std::vector<std::shared_ptr<RunningQueryPlanNode>>&&)> onSourceStopped,
-    std::function<void(Exception)> onSourceFailure)
-    : successors(std::move(successors))
+    std::function<void(Exception)> onSourceFailure,
+    std::string logicalSourceName,
+    size_t inflightBufferLimit)
+    : successors(std::make_shared<SuccessorContainer>(std::move(initialSuccessors)))
     , source(std::move(source))
     , onSourceStopped(std::move(onSourceStopped))
     , onSourceFailure(std::move(onSourceFailure))
+    , logicalSourceName(std::move(logicalSourceName))
+    , inflightBufferLimit(inflightBufferLimit)
 {
+}
+
+namespace
+{
+RunningSource::SuccessorEntry makeEntry(std::shared_ptr<RunningQueryPlanNode> node, size_t inflightBufferLimit)
+{
+    const auto slotCount = std::min(inflightBufferLimit, static_cast<size_t>(std::numeric_limits<int32_t>::max()));
+    return RunningSource::SuccessorEntry{
+        .node = std::move(node), .availableSlots = std::make_shared<std::counting_semaphore<>>(slotCount)};
+}
 }
 
 std::shared_ptr<RunningSource> RunningSource::create(
@@ -127,21 +148,125 @@ std::shared_ptr<RunningSource> RunningSource::create(
     std::function<bool(std::vector<std::shared_ptr<RunningQueryPlanNode>>&&)> onSourceStopped,
     std::function<void(Exception)> onSourceFailure,
     QueryLifetimeController& controller,
-    WorkEmitter& emitter)
+    WorkEmitter& emitter,
+    std::string logicalSourceName,
+    bool deferStart,
+    uint32_t expectedSpliceCount)
 {
     const auto maxInflightBuffers = source->getRuntimeConfiguration().inflightBufferLimit;
-    auto runningSource = std::shared_ptr<RunningSource>(
-        new RunningSource(successors, std::move(source), std::move(onSourceStopped), std::move(onSourceFailure)));
-    ENGINE_LOG_DEBUG("Starting Running Source");
+    std::vector<SuccessorEntry> initialEntries;
+    initialEntries.reserve(successors.size());
+    for (auto& node : successors)
     {
-        const std::scoped_lock lock(runningSource->mutex);
-        runningSource->source->start(emitFunction(queryId, maxInflightBuffers, runningSource, std::move(successors), controller, emitter));
+        initialEntries.push_back(makeEntry(std::move(node), maxInflightBuffers));
+    }
+    auto runningSource = std::shared_ptr<RunningSource>(new RunningSource(
+        std::move(initialEntries),
+        std::move(source),
+        std::move(onSourceStopped),
+        std::move(onSourceFailure),
+        logicalSourceName,
+        maxInflightBuffers));
+    ENGINE_LOG_DEBUG("Starting Running Source");
+    if (not logicalSourceName.empty())
+    {
+        /// Register before starting the source thread so the splice path can find us as soon as
+        /// the source begins emitting. Deregistration is in ~RunningSource.
+        RunningSourceRegistry::instance().registerSource(logicalSourceName, std::weak_ptr<RunningSource>(runningSource));
+    }
+    /// Build the start closure once. In the immediate-start path we invoke it now; in the
+    /// deferred-start path we stash it on the RunningSource and an external trigger fires it.
+    auto startFn
+        = [&controller, &emitter, queryId, weakSource = std::weak_ptr<RunningSource>(runningSource)]()
+    {
+        if (auto self = weakSource.lock())
+        {
+            const std::scoped_lock lock(self->mutex);
+            self->source->start(emitFunction(queryId, self, self->successors, controller, emitter));
+        }
+    };
+    if (deferStart)
+    {
+        runningSource->pendingSplices.store(std::max<uint32_t>(expectedSpliceCount, 1));
+        std::cout << fmt::format(
+            "[SOURCE_DEFER] queued deferred start for logical source '{}' (expectedSpliceCount={})\n",
+            logicalSourceName.empty() ? "<anon>" : logicalSourceName,
+            runningSource->pendingSplices.load());
+        std::cout.flush();
+        runningSource->deferredStart = std::move(startFn);
+    }
+    else
+    {
+        runningSource->started.store(true);
+        startFn();
     }
     return runningSource;
 }
 
+void RunningSource::startEmitting()
+{
+    if (started.exchange(true))
+    {
+        /// already started — idempotent
+        return;
+    }
+    std::function<void()> toFire;
+    {
+        const std::scoped_lock lock(mutex);
+        toFire = std::move(deferredStart);
+        deferredStart = {};
+    }
+    if (toFire)
+    {
+        std::cout << fmt::format(
+            "[SOURCE_DEFER] firing deferred start for logical source '{}'\n", logicalSourceName.empty() ? "<anon>" : logicalSourceName);
+        std::cout.flush();
+        toFire();
+    }
+}
+
+void RunningSource::appendSuccessors(std::vector<std::shared_ptr<RunningQueryPlanNode>> additionalSuccessors)
+{
+    if (additionalSuccessors.empty())
+    {
+        return;
+    }
+    {
+        auto locked = successors->wlock();
+        std::cout << fmt::format(
+            "[SOURCE_SPLICE] appending {} successor pipelines to running source for logical source '{}'\n",
+            additionalSuccessors.size(),
+            logicalSourceName);
+        std::cout.flush();
+        for (auto& node : additionalSuccessors)
+        {
+            locked->push_back(makeEntry(std::move(node), inflightBufferLimit));
+        }
+    }
+    /// Count this splice against the pending budget set by the deferStart path. If the budget
+    /// hits 0, fire the deferred start. Non-deferred sources have pendingSplices == 0 from
+    /// creation, so this is a no-op.
+    uint32_t previous = pendingSplices.load();
+    while (previous > 0 && !pendingSplices.compare_exchange_weak(previous, previous - 1))
+    {
+        /// retry
+    }
+    if (previous > 0 && pendingSplices.load() == 0)
+    {
+        std::cout << fmt::format(
+            "[SOURCE_SPLICE] last expected splice consumed for logical source '{}'; firing deferred start.\n",
+            logicalSourceName);
+        std::cout.flush();
+        startEmitting();
+    }
+}
+
 RunningSource::~RunningSource()
 {
+    if (not logicalSourceName.empty())
+    {
+        RunningSourceRegistry::instance().deregisterSource(logicalSourceName);
+    }
     if (source)
     {
         ENGINE_LOG_DEBUG("Stopping Running Source");
@@ -165,11 +290,18 @@ bool RunningSource::attemptUnregister()
         return false;
     }
 
-    if (onSourceStopped(std::move(this->successors)))
+    std::vector<std::shared_ptr<RunningQueryPlanNode>> drainedNodes;
     {
-        /// Since we moved the content of the successors vector out of the successors vector above,
-        /// we clear it to avoid accidentally working with null values
-        this->successors.clear();
+        auto locked = this->successors->wlock();
+        drainedNodes.reserve(locked->size());
+        for (auto& entry : *locked)
+        {
+            drainedNodes.push_back(std::move(entry.node));
+        }
+        locked->clear();
+    }
+    if (onSourceStopped(std::move(drainedNodes)))
+    {
         return true;
     }
     return false;

@@ -62,23 +62,39 @@ void LowerToCompiledQueryPlanPhase::processSource(const std::shared_ptr<Pipeline
 
     std::vector<std::weak_ptr<ExecutablePipeline>> executableSuccessorPipelines;
 
+    /// SpliceToRunningSourceTrait sources don't emit buffers themselves — they graft onto an
+    /// already-running source via RunningSource::appendSuccessors. Their "first pipeline" would
+    /// double-count throughput against the host source's own first pipeline (which IS already
+    /// marked firstPipeline = true on the host query). Keeping firstPipeline = false for spliced
+    /// successors makes the throughput / latency listeners report exactly one event per buffer
+    /// per real data-query first pipeline, which is what users measuring data-query throughput
+    /// expect.
+    const bool markFirstPipeline = not sourceOperator.spliceToRunningSource;
     for (const auto& successor : pipeline->getSuccessors())
     {
         if (auto executableSuccessor = processSuccessor(sourceOperator.id, successor))
         {
-            /// Pipelines directly downstream of a source are 'first pipelines'. Throughput and latency listeners
-            /// emit events from these instead of from the source itself, since the source's tuple count is only
-            /// known after the first pipeline has processed the input buffer.
-            (*executableSuccessor)->stage->firstPipeline = true;
+            /// Pipelines directly downstream of a (non-splice) source are 'first pipelines'.
+            /// Throughput and latency listeners emit events from these instead of from the
+            /// source itself, since the source's tuple count is only known after the first
+            /// pipeline has processed the input buffer.
+            if (markFirstPipeline)
+            {
+                (*executableSuccessor)->stage->firstPipeline = true;
+            }
             executableSuccessorPipelines.emplace_back(*executableSuccessor);
         }
     }
-    sources.emplace_back(
-        sourceOperator.getOriginId(),
-        pipeline->getPipelineId(),
-        sourceOperator.id,
-        sourceOperator.getDescriptor(),
-        std::move(executableSuccessorPipelines));
+    sources.emplace_back(CompiledQueryPlan::Source{
+        .originId = sourceOperator.getOriginId(),
+        .pipelineId = pipeline->getPipelineId(),
+        .operatorId = sourceOperator.id,
+        .descriptor = sourceOperator.getDescriptor(),
+        .successors = std::move(executableSuccessorPipelines),
+        .spliceToRunningSource = sourceOperator.spliceToRunningSource,
+        .deferStart = sourceOperator.deferStart,
+        .deferStartExpectedSpliceCount = sourceOperator.deferStartExpectedSpliceCount,
+        .logicalSourceName = sourceOperator.logicalSourceName});
 }
 
 void LowerToCompiledQueryPlanPhase::processSink(const Predecessor& predecessor, const std::shared_ptr<Pipeline>& pipeline)

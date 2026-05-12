@@ -19,6 +19,7 @@
 #include <memory>
 #include <stop_token>
 #include <utility>
+#include <vector>
 #include <Identifiers/Identifiers.hpp>
 #include <Priority.hpp>
 #include <QueryId.hpp>
@@ -151,22 +152,28 @@ public:
     void forgetBufferArrival(NES::SequenceNumber seq, NES::OriginId origin, NES::ChunkNumber chunk);
 };
 
-/// Listener of the backpressure channel is the Ingestion type that is used by sources.
-/// Before initiating a read of a new buffer, the source can if backpressure has been requested by a sink with a call to `wait`.
-/// This will cause the thread to block on the call if backpressure has been applied, until pressure is released by a sink, in which case
-/// the thread will be notified via the condition_variable in the channel.
+/// Listener of one or more backpressure channels, used by sources. Before initiating a read of a new buffer,
+/// the source can check whether any controller has applied backpressure by calling `wait`. The thread blocks
+/// on the call if backpressure has been applied on any of the underlying channels, until pressure is released
+/// (or the stop token is signaled). When a query plan has multiple sinks, each sink owns its own controller;
+/// the listener returned by `createBackpressureChannel` is composed via `merge` so sources only need to hold
+/// a single listener that aggregates all sinks' backpressure signals.
 class BackpressureListener
 {
-    explicit BackpressureListener(std::shared_ptr<Channel> channel) : channel(std::move(channel)) { }
+    explicit BackpressureListener(std::shared_ptr<Channel> channel) : channels{std::move(channel)} { }
 
     friend std::pair<BackpressureController, BackpressureListener> createBackpressureChannel();
-    std::shared_ptr<Channel> channel;
+    std::vector<std::shared_ptr<Channel>> channels;
     std::shared_ptr<NES::BackpressureStatisticListener> statisticListener;
     NES::QueryId statQueryId = NES::QueryId::invalid();
     NES::Priority statPriority = NES::Priority::LOW;
 
 public:
     void wait(const std::stop_token& stopToken) const;
+
+    /// Append `other`'s channels into this listener. After merge, `wait()` waits on every channel; if any
+    /// controller applies pressure, the source blocks until that controller releases.
+    void merge(BackpressureListener other);
 
     /// Mirror of BackpressureController::setStatisticListener for the source side. Wired by ExecutableQueryPlan::instantiate
     /// alongside the controller so BufferIngestEvents reference the same query identity.

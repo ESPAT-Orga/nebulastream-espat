@@ -14,20 +14,26 @@
 
 #include <SingleNodeWorker.hpp>
 
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <queue>
 #include <sstream>
 #include <string>
+#include <unordered_set>
 #include <utility>
+#include <vector>
 #include <unistd.h>
 #include <Configurations/ConfigValuePrinter.hpp>
 #include <Identifiers/Identifiers.hpp>
 #include <Identifiers/NESStrongType.hpp>
 #include <Identifiers/NESStrongTypeFormat.hpp>
 #include <Listeners/QueryLog.hpp>
+#include <Pipelines/CompiledExecutablePipelineStage.hpp>
+#include <Pipelines/SwitchableCompiledExecutablePipelineStage.hpp>
 #include <Plans/LogicalPlan.hpp>
 #include <Runtime/NodeEngineBuilder.hpp>
 #include <Runtime/QueryTerminationType.hpp>
@@ -38,6 +44,7 @@
 #include <cpptrace/from_current.hpp>
 #include <fmt/format.h>
 #include <BackpressureStatisticStdoutEmitter.hpp>
+#include <CompiledQueryPlan.hpp>
 #include <CompositeStatisticListener.hpp>
 #include <ErrorHandling.hpp>
 #include <GoogleEventTracePrinter.hpp>
@@ -46,6 +53,7 @@
 #include <QueryCompiler.hpp>
 #include <QueryStatus.hpp>
 #include <SingleNodeWorkerConfiguration.hpp>
+#include <SwitchRegistry.hpp>
 #include <ThroughputListener.hpp>
 #include <WorkerStatus.hpp>
 
@@ -54,12 +62,20 @@ extern void initNetworkServices(const std::string& connectionAddr, const NES::Ho
 namespace NES
 {
 
+struct SingleNodeWorker::PendingPlan
+{
+    std::unique_ptr<CompiledQueryPlan> qep;
+    LogicalPlan dataLogicalPlan; /// kept so attachAlternatePipeline can re-resolve compilation if needed
+};
+
 SingleNodeWorker::~SingleNodeWorker() = default;
 SingleNodeWorker::SingleNodeWorker(SingleNodeWorker&& other) noexcept = default;
 SingleNodeWorker& SingleNodeWorker::operator=(SingleNodeWorker&& other) noexcept = default;
 
 SingleNodeWorker::SingleNodeWorker(const SingleNodeWorkerConfiguration& configuration, const Host& host)
-    : listener(std::make_shared<CompositeStatisticListener>()), configuration(configuration)
+    : listener(std::make_shared<CompositeStatisticListener>())
+    , configuration(configuration)
+    , pendingPlans(std::make_unique<folly::Synchronized<std::unordered_map<QueryId, std::shared_ptr<PendingPlan>>>>())
 {
     {
         std::stringstream configStr;
@@ -206,6 +222,160 @@ std::expected<QueryId, Exception> SingleNodeWorker::registerQuery(LogicalPlan pl
         result->priority = plan.getPriority();
         nodeEngine->registerCompiledQueryPlan(plan.getQueryId(), std::move(result));
         return plan.getQueryId();
+    }
+    CPPTRACE_CATCH(...)
+    {
+        return std::unexpected(wrapExternalException());
+    }
+    std::unreachable();
+}
+
+std::expected<QueryId, Exception> SingleNodeWorker::registerQueryDeferred(LogicalPlan plan) noexcept
+{
+    CPPTRACE_TRY
+    {
+        if (plan.getQueryId().getLocalQueryId() == INVALID_LOCAL_QUERY_ID)
+        {
+            auto localId = LocalQueryId(generateUUID());
+            if (plan.getQueryId().isDistributed())
+            {
+                plan.setQueryId(QueryId::create(localId, plan.getQueryId().getDistributedQueryId()));
+            }
+            else
+            {
+                plan.setQueryId(QueryId::createLocal(localId));
+            }
+        }
+
+        const LogContext context("queryId", plan.getQueryId());
+        listener->onEvent(SubmitQuerySystemEvent{plan.getQueryId(), explain(plan, ExplainVerbosity::Debug)});
+        const DumpMode dumpMode(
+            configuration.workerConfiguration.dumpQueryCompilationIR.getValue(), configuration.workerConfiguration.dumpGraph.getValue());
+        auto request = std::make_unique<QueryCompilation::QueryCompilationRequest>(plan);
+        request->dumpCompilationResult = dumpMode;
+        auto result = compiler->compileQuery(std::move(request));
+        INVARIANT(result, "expected successful query compilation or exception, but got nothing");
+
+        auto pending = std::make_shared<PendingPlan>(PendingPlan{.qep = std::move(result), .dataLogicalPlan = plan});
+        const auto qid = plan.getQueryId();
+        pendingPlans->withWLock([&](auto& map) { map.emplace(qid, std::move(pending)); });
+        return qid;
+    }
+    CPPTRACE_CATCH(...)
+    {
+        return std::unexpected(wrapExternalException());
+    }
+    std::unreachable();
+}
+
+namespace
+{
+/// Collect the ExecutablePipelines reachable from `sources` in source-to-sink BFS order, returning
+/// only the intermediate ("compiled") stages whose stage class is CompiledExecutablePipelineStage.
+/// Sinks are skipped — their stage type is sink-specific (FileSink, GrpcSink, ...) and not paired
+/// for switching. The ordering is deterministic given a deterministic compiler: each chain visits
+/// pipelines in the same relative order, so two structurally-identical plans line up element-wise.
+std::vector<std::shared_ptr<ExecutablePipeline>>
+collectIntermediatePipelines(const std::vector<CompiledQueryPlan::Source>& sources)
+{
+    std::vector<std::shared_ptr<ExecutablePipeline>> result;
+    std::unordered_set<PipelineId::Underlying> seen;
+    std::queue<std::shared_ptr<ExecutablePipeline>> queue;
+    for (const auto& src : sources)
+    {
+        for (const auto& succWeak : src.successors)
+        {
+            if (auto succ = succWeak.lock())
+            {
+                if (seen.insert(succ->id.getRawValue()).second)
+                {
+                    queue.push(succ);
+                }
+            }
+        }
+    }
+    while (not queue.empty())
+    {
+        auto current = std::move(queue.front());
+        queue.pop();
+        if (dynamic_cast<const CompiledExecutablePipelineStage*>(current->stage.get()) != nullptr)
+        {
+            result.push_back(current);
+        }
+        for (const auto& succWeak : current->successors)
+        {
+            if (auto succ = succWeak.lock())
+            {
+                if (seen.insert(succ->id.getRawValue()).second)
+                {
+                    queue.push(succ);
+                }
+            }
+        }
+    }
+    return result;
+}
+}
+
+std::expected<void, Exception> SingleNodeWorker::attachAlternatePipeline(
+    QueryId queryId, LogicalPlan alternatePlan, std::string switchName, int64_t alternateExpectedValue) noexcept
+{
+    CPPTRACE_TRY
+    {
+        PRECONDITION(queryId != INVALID_QUERY_ID, "QueryId must be not invalid!");
+        PRECONDITION(not switchName.empty(), "switchName must be non-empty");
+
+        std::shared_ptr<PendingPlan> pending;
+        pendingPlans->withWLock(
+            [&](auto& map)
+            {
+                if (const auto it = map.find(queryId); it != map.end())
+                {
+                    pending = it->second;
+                    map.erase(it);
+                }
+            });
+        if (not pending)
+        {
+            throw QueryNotRegistered("attachAlternatePipeline: queryId {} not found in pending plans", queryId);
+        }
+
+        /// Compile the alternate plan with the same compiler pipeline as the data plan. We discard
+        /// the alternate's sources and sinks afterward; only its intermediate compiled stages are
+        /// merged into the data plan via SwitchableCompiledExecutablePipelineStage.
+        const DumpMode dumpMode(
+            configuration.workerConfiguration.dumpQueryCompilationIR.getValue(), configuration.workerConfiguration.dumpGraph.getValue());
+        auto altRequest = std::make_unique<QueryCompilation::QueryCompilationRequest>(alternatePlan);
+        altRequest->dumpCompilationResult = dumpMode;
+        auto alternateCompiled = compiler->compileQuery(std::move(altRequest));
+        INVARIANT(alternateCompiled, "expected successful query compilation of alternate plan");
+
+        auto dataStages = collectIntermediatePipelines(pending->qep->sources);
+        auto altStages = collectIntermediatePipelines(alternateCompiled->sources);
+        if (dataStages.size() != altStages.size())
+        {
+            throw NotImplemented(
+                "attachAlternatePipeline: data and alternate plans have different number of intermediate pipelines ({} vs {})",
+                dataStages.size(),
+                altStages.size());
+        }
+
+        const auto selector = SwitchRegistry::instance().getOrCreate(switchName, 0);
+        for (size_t i = 0; i < dataStages.size(); ++i)
+        {
+            /// Preserve the firstPipeline flag — the query engine's throughput listener only emits
+            /// TaskEmit events for the source's immediate successor (the "first" pipeline). Without
+            /// this propagation the SwitchableStage's default `firstPipeline = false` would
+            /// silently disable throughput reporting on the data query.
+            const bool firstPipeline = dataStages[i]->stage->firstPipeline;
+            auto switchable = std::make_unique<SwitchableCompiledExecutablePipelineStage>(
+                std::move(dataStages[i]->stage), std::move(altStages[i]->stage), selector, alternateExpectedValue);
+            switchable->firstPipeline = firstPipeline;
+            dataStages[i]->stage = std::move(switchable);
+        }
+
+        nodeEngine->registerCompiledQueryPlan(queryId, std::move(pending->qep));
+        return {};
     }
     CPPTRACE_CATCH(...)
     {

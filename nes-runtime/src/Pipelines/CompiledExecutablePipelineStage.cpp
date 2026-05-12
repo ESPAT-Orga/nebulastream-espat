@@ -116,10 +116,17 @@ std::ostream& CompiledExecutablePipelineStage::toString(std::ostream& os) const
 void CompiledExecutablePipelineStage::start(PipelineExecutionContext& pipelineExecutionContext)
 {
     pipelineExecutionContext.setOperatorHandlers(operatorHandlers);
-    Arena arena(pipelineExecutionContext.getBufferManager());
-    ExecutionContext ctx(std::addressof(pipelineExecutionContext), std::addressof(arena));
-    CompilationContext compilationCtx{engine};
-    pipeline->getRootOperator().setup(ctx, compilationCtx);
-    compiledPipelineFunction = this->compilePipeline();
+    /// Skip the (expensive) Nautilus trace + MLIR compile on subsequent starts. This makes
+    /// stop→start of the same pipeline reuse the cached compiled function pointer, which is
+    /// what allows the higher-level QueryTracker to support compile-once / activate-many.
+    if (!compiledPipelineFunctionInitialized)
+    {
+        Arena arena(pipelineExecutionContext.getBufferManager());
+        ExecutionContext ctx(std::addressof(pipelineExecutionContext), std::addressof(arena));
+        CompilationContext compilationCtx{engine};
+        pipeline->getRootOperator().setup(ctx, compilationCtx);
+        compiledPipelineFunction = this->compilePipeline();
+        compiledPipelineFunctionInitialized = true;
+    }
 }
 }

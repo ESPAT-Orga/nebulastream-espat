@@ -78,6 +78,36 @@ ExecutableQueryPlan::instantiate(CompiledQueryPlan& compiledQueryPlan, const Sou
 
     auto& [sinkPipelineId, sinkDescriptor, predecessors] = compiledQueryPlan.sinks.front();
 
+    /// Make instantiate() idempotent: if a previous instantiation already wired a sink with this
+    /// pipeline id into the plan (and into the predecessor pipelines' successor lists), strip those
+    /// links before re-adding. This lets the same CompiledQueryPlan be instantiated multiple times
+    /// (compile-once / activate-many), which is what the QueryTracker requires for stop→start reuse.
+    {
+        auto sinkIt = std::ranges::find_if(
+            compiledQueryPlan.pipelines, [sinkPipelineId](const auto& p) { return p->id == sinkPipelineId; });
+        if (sinkIt != compiledQueryPlan.pipelines.end())
+        {
+            compiledQueryPlan.pipelines.erase(sinkIt);
+        }
+        for (const auto& predecessor : predecessors)
+        {
+            if (const auto* weakPipeline = std::get_if<std::weak_ptr<ExecutablePipeline>>(&predecessor))
+            {
+                if (auto pred = weakPipeline->lock())
+                {
+                    auto& succs = pred->successors;
+                    std::erase_if(
+                        succs,
+                        [sinkPipelineId](const std::weak_ptr<ExecutablePipeline>& s)
+                        {
+                            const auto sp = s.lock();
+                            return sp && sp->id == sinkPipelineId;
+                        });
+                }
+            }
+        }
+    }
+
     auto sink = ExecutablePipeline::create(sinkPipelineId, lower(std::move(backpressureController), sinkDescriptor), {});
     compiledQueryPlan.pipelines.push_back(sink);
     for (const auto& predecessor : predecessors)

@@ -972,6 +972,13 @@ void QueryCatalog::start(
     auto queryListener = std::make_shared<RealQueryLifeTimeListener>(queryId, listener, statistic);
     const auto startTimestamp = std::chrono::system_clock::now();
     auto state = std::make_shared<StateRef>(Reserved{});
+    /// If this queryId previously executed and reached Terminated, drop the stale entry so the
+    /// fresh state can take its place. This is what allows the higher-level QueryTracker to call
+    /// QueryEngine::start a second time on the same queryId for swap-without-recompile.
+    if (auto it = this->queryStates.find(queryId); it != this->queryStates.end() && it->second->is<Terminated>())
+    {
+        this->queryStates.erase(it);
+    }
     this->queryStates.emplace(queryId, state);
     queryListener->state = state;
 

@@ -74,21 +74,26 @@ WORKER_DATA = "localhost:9090"
 #     price    ~ N(mean=500, stddev=167); 99th percentile = 500 + 167 * Φ⁻¹(0.99) = 500 + 167*(+2.3263) ≈ 888.49
 #   Combined selectivity (AND): 0.01 * 0.99 ≈ 0.0099
 #
-# An intermediate subquery level performs 30 SQRT operations per tuple (always-true condition).
-# This creates a CPU-intensive middle pipeline whose load is proportional to the number of tuples
-# flowing through it.
+# An intermediate subquery level performs 150 SQRT operations per tuple (always-true condition).
+# This makes the SQRT pipeline measurably slower per buffer than the simple-filter pipelines on
+# either side — not slow enough to saturate the CPU on its own, but slow enough that its input
+# queue grows whenever the upstream pipeline feeds it a lot of tuples.
 #
-# Source throughput: ~260k tup/s (64KB buffer ≈ 1300 tuples, generation takes ~5ms,
-# flush_interval_ms=1 → no sleep, source runs at full speed).
-#   bidValue-first: ~1%  × 260k = ~2.6k tup/s through SQRT pipeline  →  ~1.3M SQRT/s  (<1% CPU)
-#   price-first:   ~99% × 260k = ~257k tup/s through SQRT pipeline   → ~12.9M SQRT/s (~4–17% CPU)
+# Combined with a tight buffer pool (set via worker flag number_of_buffers_in_global_buffer_manager),
+# the asymmetric queueing rate produces *memory-pressure backpressure* that depends on filter order:
 #
-# The CPU load in the price-first case is intended to saturate the intermediate pipeline, fill its
-# input queue, and cause backpressure on the first filter pipeline — visibly lowering its measured
-# throughput compared to the bidValue-first ordering.
+#   bidValue-first: ~1%  of source tuples reach the SQRT pipeline (filter1 drops 99%) →
+#                   queue stays near empty → source runs at full rate.
+#   price-first:   ~99% of source tuples reach the SQRT pipeline (filter1 drops 1%) →
+#                   queue fills within seconds → buffer pool exhausts → upstream pipelines
+#                   block on buffer allocation → source rate drops → visible firstPipeline drop.
 #
-# SQRT count: 50 terms (Python-generated, kept small to stay within Nautilus compile budget).
-# Each argument is col + constant >= 1000, guaranteeing positive inputs regardless of distribution.
+# This is the mechanism the experiment is meant to illustrate: live reconfiguration of the
+# filter order changes how much intermediate work the system carries in flight, and the change
+# manifests as a measurable difference in end-to-end query throughput.
+#
+# SQRT count: 150 terms (Python-generated). Each argument is col + constant >= 1000, guaranteeing
+# positive inputs regardless of distribution.
 
 _EXPENSIVE_FILTER = (
     " + ".join(
@@ -285,8 +290,12 @@ def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str):
 
     # --- Start worker ---
     # operator_buffer_size=65536 (64KB) lets the source fill ~1300 CSV tuples per buffer.
-    # Combined with flush_interval_ms=1 in the SQL, the source emits ~1.3M tuples/s —
-    # enough to saturate the intermediate SQRT pipeline (~40% CPU) when price comes first.
+    # number_of_buffers_in_global_buffer_manager=512 caps inter-pipeline queueing at ~32MB
+    # (vs. the 2GB default). With the SQRT pipeline running slightly slower than the
+    # first-filter pipeline, queue depth grows under high-volume orderings (price-first)
+    # and exhausts the pool within seconds — producing measurable upstream backpressure.
+    # bidValue-first sends only ~1% of source tuples through the SQRT pipeline, so its
+    # queue stays near empty and the source runs at full speed.
     printInfo(f"Starting nes-single-node-worker (grpc={WORKER_GRPC}, data={WORKER_DATA})...")
     worker_proc = subprocess.Popen(
         [
@@ -294,6 +303,9 @@ def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str):
             "--grpc=0.0.0.0:8080",
             "--data_address=0.0.0.0:9090",
             "--worker.default_query_execution.operator_buffer_size=65536",
+            ## buffer pool left at default (32768) for now; tighten once the compile-once /
+            ## activate-many swap path is fully validated and we can predict whether the
+            ## statistic query will fit alongside the data query under buffer pressure.
         ],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -322,7 +334,7 @@ def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str):
             "--companion-source", "bid",
             "--companion-field", "price",
             "--companion-metric", "Cardinality",
-            "--companion-window-size-ms", "5000000",
+            "--companion-window-size-ms", "10000000",
             "--companion-event-time-field", "BID$TIMESTAMP",
             "--companion-host", WORKER_GRPC,
             "--companion-switch-to-sql", REVERSED_QUERY_SQL,

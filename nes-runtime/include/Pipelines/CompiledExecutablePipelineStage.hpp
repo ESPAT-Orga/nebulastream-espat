@@ -48,6 +48,10 @@ private:
     compilePipeline() const;
     nautilus::engine::NautilusEngine engine;
     nautilus::engine::CallableFunction<void, PipelineExecutionContext*, const TupleBuffer*, const Arena*> compiledPipelineFunction;
+    /// Latches to true the first time start() compiles the pipeline. Subsequent starts (after a
+    /// stop) reuse the cached compiledPipelineFunction instead of re-tracing and re-JITing, which
+    /// is what makes adaptive plan-swapping cheap once each variant has been compiled once.
+    bool compiledPipelineFunctionInitialized{false};
     std::unordered_map<OperatorHandlerId, std::shared_ptr<OperatorHandler>> operatorHandlers;
     std::shared_ptr<Pipeline> pipeline;
 };

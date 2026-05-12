@@ -395,6 +395,11 @@ int main(int argc, char** argv)
                 std::optional<NES::DistributedQueryId> currentQueryId;
                 std::string currentSql; // SQL of the currently running query
                 std::string nextSql;    // SQL to deploy on the next trigger
+                /// Cache of already-compiled queries: SQL string → DistributedQueryId. Populated on
+                /// first encounter of each SQL variant. Subsequent triggers that target a cached SQL
+                /// reuse the compiled pipelines on the worker side (queryManager->start on an existing
+                /// queryId), skipping the optimize/register/Nautilus-trace/MLIR cycle entirely.
+                std::unordered_map<std::string, NES::DistributedQueryId> compiledQueries;
             };
             auto swapState = std::make_shared<AdaptiveSwapState>();
             swapState->nextSql = switchToSql;
@@ -410,7 +415,7 @@ int main(int argc, char** argv)
                 .conditionTrigger = NES::ConditionTrigger{
                     .condition = condition,
                     .callback =
-                        [swapState, queryStatementHandler, callbackBinder, switchToSql](
+                        [swapState, queryStatementHandler, queryManager, callbackBinder, switchToSql](
                             NES::Statistic::StatisticId statId,
                             NES::Windowing::TimeMeasure startTs,
                             NES::Windowing::TimeMeasure endTs)
@@ -422,6 +427,7 @@ int main(int argc, char** argv)
                         std::optional<NES::DistributedQueryId> currentQueryId;
                         std::string currentSql;
                         std::string nextSql;
+                        std::optional<NES::DistributedQueryId> cachedNextId;
                         {
                             std::lock_guard lock(swapState->mutex);
                             if (!swapState->currentQueryId.has_value() || swapState->nextSql.empty())
@@ -433,64 +439,102 @@ int main(int argc, char** argv)
                             currentQueryId = swapState->currentQueryId;
                             currentSql = swapState->currentSql;
                             nextSql = swapState->nextSql;
+                            if (const auto it = swapState->compiledQueries.find(nextSql); it != swapState->compiledQueries.end())
+                            {
+                                cachedNextId = it->second;
+                            }
                         }
 
-                        auto stopResult = (*queryStatementHandler)(NES::DropQueryStatement{.id = *currentQueryId});
-                        if (!stopResult.has_value())
+                        /// Stop the currently-running query. NodeEngine::stopQuery on the worker side
+                        /// now blocks until termination is complete and transitions the queryId back
+                        /// to Idle, so it's safe to call start on the same id immediately after.
+                        if (const auto stopResult = queryManager->stop(*currentQueryId); !stopResult.has_value())
                         {
-                            std::cout << "[AdaptiveOpt] Failed to stop query " << currentQueryId->getRawValue()
-                                      << ": " << stopResult.error().what() << "\n";
+                            std::cout << "[AdaptiveOpt] Failed to stop query " << currentQueryId->getRawValue() << ".\n";
                             std::flush(std::cout);
                             return;
                         }
                         std::cout << "[AdaptiveOpt] Stopped query (id=" << currentQueryId->getRawValue() << ").\n";
 
-                        auto bindResult = callbackBinder->parseAndBindSingle(nextSql);
-                        if (!bindResult.has_value())
+                        std::optional<NES::DistributedQueryId> nextQueryIdOpt;
+                        if (cachedNextId)
                         {
-                            std::cout << "[AdaptiveOpt] Failed to parse next query: " << bindResult.error().what() << "\n";
-                            std::flush(std::cout);
-                            return;
+                            /// Cache hit: re-activate the already-compiled query. No bind, no register,
+                            /// no compile. The CompiledExecutablePipelineStage::start guard on the
+                            /// worker side ensures the cached compiled function pointer is reused.
+                            if (const auto startResult = queryManager->start(*cachedNextId); !startResult.has_value())
+                            {
+                                std::cout << "[AdaptiveOpt] Failed to reactivate cached query "
+                                          << cachedNextId->getRawValue() << ".\n";
+                                std::flush(std::cout);
+                                return;
+                            }
+                            nextQueryIdOpt = *cachedNextId;
+                            std::cout << "[AdaptiveOpt] Reactivated cached query (id=" << cachedNextId->getRawValue() << ").\n";
                         }
-                        auto* queryStmt = std::get_if<NES::QueryStatement>(&bindResult.value());
-                        if (!queryStmt)
+                        else
                         {
-                            std::cout << "[AdaptiveOpt] Next query SQL must be a SELECT statement.\n";
-                            std::flush(std::cout);
-                            return;
-                        }
+                            /// Cache miss: first time seeing this SQL. Do the full register + start
+                            /// (the compile happens here). Subsequent triggers targeting the same SQL
+                            /// will hit the cache and skip this path.
+                            auto bindResult = callbackBinder->parseAndBindSingle(nextSql);
+                            if (!bindResult.has_value())
+                            {
+                                std::cout << "[AdaptiveOpt] Failed to parse next query: " << bindResult.error().what() << "\n";
+                                std::flush(std::cout);
+                                return;
+                            }
+                            auto* queryStmt = std::get_if<NES::QueryStatement>(&bindResult.value());
+                            if (!queryStmt)
+                            {
+                                std::cout << "[AdaptiveOpt] Next query SQL must be a SELECT statement.\n";
+                                std::flush(std::cout);
+                                return;
+                            }
 
-                        std::cout << "[AdaptiveOpt] Deploying SQL:\n" << nextSql << "\n";
-                        if (auto explainResult = (*queryStatementHandler)(NES::ExplainQueryStatement{.plan = queryStmt->plan});
-                            explainResult.has_value())
-                        {
-                            std::cout << "[AdaptiveOpt] Query plan:\n" << explainResult->explainString << "\n";
-                        }
-                        std::flush(std::cout);
-
-                        auto startResult = (*queryStatementHandler)(*queryStmt);
-                        if (!startResult.has_value())
-                        {
-                            std::cout << "[AdaptiveOpt] Failed to deploy next query: " << startResult.error().what() << "\n";
+                            std::cout << "[AdaptiveOpt] Deploying SQL (first time, will compile):\n" << nextSql << "\n";
+                            if (auto explainResult = (*queryStatementHandler)(NES::ExplainQueryStatement{.plan = queryStmt->plan});
+                                explainResult.has_value())
+                            {
+                                std::cout << "[AdaptiveOpt] Query plan:\n" << explainResult->explainString << "\n";
+                            }
                             std::flush(std::cout);
-                            return;
+
+                            const auto startResult = (*queryStatementHandler)(*queryStmt);
+                            if (!startResult.has_value())
+                            {
+                                std::cout << "[AdaptiveOpt] Failed to deploy next query: " << startResult.error().what() << "\n";
+                                std::flush(std::cout);
+                                return;
+                            }
+                            nextQueryIdOpt = startResult->id;
+                            std::cout << "[AdaptiveOpt] Deployed query (id=" << startResult->id.getRawValue() << ").\n";
                         }
-                        std::cout << "[AdaptiveOpt] Deployed query (id=" << startResult->id << ").\n";
                         std::flush(std::cout);
 
                         {
                             std::lock_guard lock(swapState->mutex);
-                            swapState->currentQueryId = startResult->id;
+                            swapState->currentQueryId = *nextQueryIdOpt;
                             swapState->currentSql = nextSql;
                             swapState->nextSql = currentSql;
+                            swapState->compiledQueries.insert_or_assign(nextSql, *nextQueryIdOpt);
+                            /// Also remember the just-stopped query so the *next* trigger can swap
+                            /// back to it without recompiling.
+                            if (!swapState->compiledQueries.contains(currentSql))
+                            {
+                                swapState->compiledQueries.insert_or_assign(currentSql, *currentQueryId);
+                            }
                         }
                     }},
                 .options = {{"host", program.get<std::string>("--companion-host")}}};
             onCompanionAssociatedWithQuery = [swapState](NES::DistributedQueryId id, const std::string& sql)
             {
                 std::lock_guard lock(swapState->mutex);
-                swapState->currentQueryId = std::move(id);
+                swapState->currentQueryId = id;
                 swapState->currentSql = sql;
+                /// Seed the cache with the initial query so the first swap back to it (which the
+                /// second trigger fires) hits the compile-once / activate-many fast path.
+                swapState->compiledQueries.insert_or_assign(sql, id);
             };
         }
 

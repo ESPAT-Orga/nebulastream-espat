@@ -21,8 +21,10 @@ new benchmarks can use them without depending on a particular benchmark's config
 import os
 
 
-# Path to the local build dir relative to the cwd the benchmark is invoked from.
-BUILD_DIR = os.path.join(".", "build_dir")
+# Path to the build dir. Defaults to `./build_dir` relative to the cwd the benchmark is invoked from
+# (which must be the repo root). Override via the NES_BUILD_DIR environment variable when the build
+# lives elsewhere — e.g. a remote-mounted or symlinked CMake build tree.
+BUILD_DIR = os.environ.get("NES_BUILD_DIR", os.path.join(".", "build_dir"))
 WORKING_DIR = os.path.abspath(os.path.join(BUILD_DIR, "working_dir"))
 
 # Built executables.

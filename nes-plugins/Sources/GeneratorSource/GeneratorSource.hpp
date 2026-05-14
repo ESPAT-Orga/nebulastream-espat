@@ -41,6 +41,7 @@
 #include <GeneratorFields.hpp>
 #include <GeneratorRate.hpp>
 #include <SinusGeneratorRate.hpp>
+#include <StepGeneratorRate.hpp>
 
 namespace NES
 {
@@ -64,6 +65,10 @@ public:
 
     void open(std::shared_ptr<AbstractBufferProvider> bufferProvider) override;
     void close() override;
+
+    /// True when this source is backed by a StepGeneratorRate. The bench binner uses the resulting
+    /// StaircasePhaseStartEvent to align per-trial t=0 on the staircase phase.
+    [[nodiscard]] bool isStaircaseSource() const override { return dynamic_cast<const StepGeneratorRate*>(generatorRate.get()) != nullptr; }
 
     static DescriptorConfig::Config validateAndFormat(std::unordered_map<std::string, std::string> config);
 
@@ -139,6 +144,8 @@ struct ConfigParametersGenerator
                     return std::optional(EnumWrapper(GeneratorRate::Type::FIXED));
                 case GeneratorRate::Type::SINUS:
                     return std::optional(EnumWrapper(GeneratorRate::Type::SINUS));
+                case GeneratorRate::Type::STEP:
+                    return std::optional(EnumWrapper(GeneratorRate::Type::STEP));
             }
             return std::optional<EnumWrapper>();
         }};
@@ -154,7 +161,8 @@ struct ConfigParametersGenerator
                 return std::optional<std::string>();
             }
             if (SinusGeneratorRate::parseAndValidateConfigString(optToken.value()).has_value()
-                or FixedGeneratorRate::parseAndValidateConfigString(optToken.value()).has_value())
+                or FixedGeneratorRate::parseAndValidateConfigString(optToken.value()).has_value()
+                or StepGeneratorRate::parseAndValidateConfigString(optToken.value()).has_value())
             {
                 return DescriptorConfig::tryGet(GENERATOR_RATE_CONFIG, config);
             }

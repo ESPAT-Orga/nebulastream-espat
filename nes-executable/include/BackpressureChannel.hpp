@@ -176,4 +176,10 @@ public:
     /// count (or byte count for raw-bytes sources before the InputFormatter parses them). No-op
     /// when no listener is wired.
     void recordBufferIngested(uint64_t numberOfTuples);
+
+    /// Called from SourceThread once, at the first successful buffer produced by a staircase-
+    /// pattern source (Source::isStaircaseSource() == true). Fires StaircasePhaseStartEvent so the
+    /// python binner has a per-trial t=0 reference for staircase-phase alignment across trials.
+    /// No-op when no listener is wired.
+    void recordStaircasePhaseStart(uint32_t phaseIdx);
 };

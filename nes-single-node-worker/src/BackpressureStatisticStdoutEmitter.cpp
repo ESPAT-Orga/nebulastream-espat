@@ -94,6 +94,15 @@ void BackpressureStatisticStdoutEmitter::onEvent(BackpressureEvent event)
                     ev.priority,
                     ev.gatedNs,
                     toNanoseconds(ev.timestamp));
+            },
+            [&](const StaircasePhaseStartEvent& ev)
+            {
+                line = fmt::format(
+                    "StaircasePhaseStart for queryId {} priority {} phase_idx={} at {} ns\n",
+                    ev.queryId,
+                    ev.priority,
+                    ev.phaseIdx,
+                    toNanoseconds(ev.timestamp));
             }},
         event);
 

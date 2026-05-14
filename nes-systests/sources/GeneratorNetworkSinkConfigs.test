@@ -1,0 +1,56 @@
+# name: sources/GeneratorNetworkSinkConfigs.test
+# description: Validates the GeneratorRate config strings used by the network-sink benchmark
+#              (scripts/benchmarking/network_sink/config.py: GENERATOR_RATE_CONFIGS).
+#              The strings here MUST stay byte-identical to the dict values there. If a future
+#              change to FixedGeneratorRate / SinusGeneratorRate breaks these formats, this test
+#              fails before the benchmark does, surfacing the issue with a clear error.
+# groups: [Sources, Generator]
+
+# --- FIXED rate, matches GENERATOR_RATE_CONFIGS["FIXED"] -----------------------
+CREATE LOGICAL SOURCE generatorFixedNetworkSink(id UINT64 NOT NULL, val UINT64 NOT NULL);
+CREATE PHYSICAL SOURCE FOR generatorFixedNetworkSink TYPE Generator SET(
+       'ALL' as `SOURCE`.STOP_GENERATOR_WHEN_SEQUENCE_FINISHES,
+       1 AS `SOURCE`.SEED,
+       'FIXED' AS `SOURCE`.GENERATOR_RATE_TYPE,
+       'emit_rate 100000' AS `SOURCE`.GENERATOR_RATE_CONFIG,
+       'SEQUENCE UINT64 0 10000 1, SEQUENCE UINT64 0 100 1' AS `SOURCE`.GENERATOR_SCHEMA
+);
+CREATE SINK fixedNetworkSinkChecksum(generatorFixedNetworkSink.id UINT64 NOT NULL, generatorFixedNetworkSink.val UINT64 NOT NULL) TYPE Checksum;
+
+SELECT * FROM generatorFixedNetworkSink INTO fixedNetworkSinkChecksum;
+----
+10000 4032240
+
+
+# --- SINUS rate, matches GENERATOR_RATE_CONFIGS["SINUS"] -----------------------
+CREATE LOGICAL SOURCE generatorSinusNetworkSink(id UINT64 NOT NULL, val UINT64 NOT NULL);
+CREATE PHYSICAL SOURCE FOR generatorSinusNetworkSink TYPE Generator SET(
+       'ALL' as `SOURCE`.STOP_GENERATOR_WHEN_SEQUENCE_FINISHES,
+       1 AS `SOURCE`.SEED,
+       'SINUS' AS `SOURCE`.GENERATOR_RATE_TYPE,
+       'amplitude 50000, frequency 2' AS `SOURCE`.GENERATOR_RATE_CONFIG,
+       'SEQUENCE UINT64 0 10000 1, SEQUENCE UINT64 0 100 1' AS `SOURCE`.GENERATOR_SCHEMA
+);
+CREATE SINK sinusNetworkSinkChecksum(generatorSinusNetworkSink.id UINT64 NOT NULL, generatorSinusNetworkSink.val UINT64 NOT NULL) TYPE Checksum;
+
+SELECT * FROM generatorSinusNetworkSink INTO sinusNetworkSinkChecksum;
+----
+10000 4032240
+
+
+# --- FLOAT64 + NORMAL_DISTRIBUTION schema, matching the schema the benchmark uses ---
+# Bounded by MAX_RUNTIME_MS so the test terminates; the predicate drops every tuple because we only
+# care that the rate config parses and the source produces tuples.
+CREATE LOGICAL SOURCE generatorFloat64NetworkSink(val FLOAT64 NOT NULL);
+CREATE PHYSICAL SOURCE FOR generatorFloat64NetworkSink TYPE Generator SET(
+       'ONE' as `SOURCE`.STOP_GENERATOR_WHEN_SEQUENCE_FINISHES,
+       2000 AS `SOURCE`.MAX_RUNTIME_MS,
+       1 AS `SOURCE`.SEED,
+       'FIXED' AS `SOURCE`.GENERATOR_RATE_TYPE,
+       'emit_rate 100000' AS `SOURCE`.GENERATOR_RATE_CONFIG,
+       'NORMAL_DISTRIBUTION FLOAT64 0 1' AS `SOURCE`.GENERATOR_SCHEMA
+);
+CREATE SINK float64NetworkSinkFile(generatorFloat64NetworkSink.val FLOAT64 NOT NULL) TYPE File;
+
+SELECT * FROM generatorFloat64NetworkSink WHERE BOOLEAN(FALSE) INTO float64NetworkSinkFile;
+----

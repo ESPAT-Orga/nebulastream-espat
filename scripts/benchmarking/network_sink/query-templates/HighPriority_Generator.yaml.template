@@ -50,6 +50,7 @@ physical:
     source_config:
       generator_rate_type: ${GENERATOR_RATE_TYPE}
       generator_rate_config: ${GENERATOR_RATE_CONFIG}
+      flush_interval_ms: ${FLUSH_INTERVAL_MS}
       stop_generator_when_sequence_finishes: NONE
       seed: 1
       generator_schema: |
@@ -63,3 +64,19 @@ workers:
     data_address: 127.0.0.1:19091
     downstream: [127.0.0.1:18080]
     max_operators: 10000
+
+# Backpressure tuning — loose enough that source-side `BackpressureHandler` does not cycle ON/OFF
+# under sustained oversubscription, but tight enough that BackpressureApplied still fires reliably
+# (the kernel TCP buffer on loopback is 4-16 MB and would otherwise absorb several seconds of
+# slack at a 1 Mbit cap, hiding the strategy effect). Earlier 16/4 thresholds caused HIGH-alone
+# to deliver ~50% of cap under saturated workloads because the source paused every time the
+# in-NES queue crossed 16 buffers — wire went idle during the pause. Bumped to 64/16 so the
+# queue can absorb ~4 ticks of contingent before pausing, keeping the source producing
+# continuously while still bounded.
+optimizer:
+  network:
+    backpressure_upper_threshold: 64
+    backpressure_lower_threshold: 16
+    sender_queue_size: 96
+    max_pending_acks: 48
+    receiver_queue_size: 48

@@ -96,6 +96,11 @@ SourceImplementationTermination dataSourceThreadRoutine(
     };
 
     const bool requiresMetadata = !source.addsMetadata();
+    /// First-emit phase marker for staircase-pattern sources. Fired exactly once on the first
+    /// successful fill so the bench binner has a per-trial t=0 reference for staircase-phase
+    /// alignment. Non-staircase sources skip this — default isStaircaseSource() returns false.
+    const bool isStaircase = source.isStaircaseSource();
+    bool staircasePhaseAnnounced = false;
     while (backpressureListener.wait(stopToken), !stopToken.stop_requested())
     {
         /// 4 Things that could happen:
@@ -138,6 +143,11 @@ SourceImplementationTermination dataSourceThreadRoutine(
             /// (NetworkSource, GeneratorSource); for raw-bytes sources it's the byte count, which the
             /// InputFormatter will replace later but is fine for the BufferIngest metric.
             backpressureListener.recordBufferIngested(emptyBuffer->getNumberOfTuples());
+            if (isStaircase && !staircasePhaseAnnounced)
+            {
+                backpressureListener.recordStaircasePhaseStart(0);
+                staircasePhaseAnnounced = true;
+            }
             emit(std::move(*emptyBuffer), requiresMetadata);
         }
         else

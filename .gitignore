@@ -45,7 +45,7 @@ nes-asp/data/*.csv
 *.log
 *.undo
 
-scripts/__pycache__
+__pycache__/
 .ccache
 
 # Ignore nix symlinks
@@ -67,5 +67,3 @@ scripts/__pycache__
 .ipynb_checkpoints
 *.ipynb
 *.csv
-
-scripts/__pycache__

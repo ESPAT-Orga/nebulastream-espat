@@ -133,6 +133,11 @@ SourceImplementationTermination dataSourceThreadRoutine(
                 /// The InputFormatter expects that the source set the number of bytes this way and uses it to determine the number of tuples.
                 emptyBuffer->setNumberOfTuples(fillTupleResult.getNumberOfBytes());
             }
+            /// Fire BufferIngestEvent so the bench can correlate source-side production with sink-side delivery.
+            /// numberOfTuples is the count just set above — the wire-truth tuple count for native sources
+            /// (NetworkSource, GeneratorSource); for raw-bytes sources it's the byte count, which the
+            /// InputFormatter will replace later but is fine for the BufferIngest metric.
+            backpressureListener.recordBufferIngested(emptyBuffer->getNumberOfTuples());
             emit(std::move(*emptyBuffer), requiresMetadata);
         }
         else

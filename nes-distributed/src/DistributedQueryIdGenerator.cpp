@@ -15,7 +15,6 @@
 #include <DistributedQuery.hpp>
 
 #include <array>
-#include <ctime>
 #include <random>
 #include <string>
 #include <string_view>
@@ -33,10 +32,12 @@ constexpr std::array ATTRIBUTES = std::to_array<std::string_view>(
      "spirited", "majestic", "elegant", "strong",      "agile",     "loyal",   "bold",    "free",     "dashing",  "swift",
      "valiant",  "fearless", "regal",   "magnificent", "brilliant", "radiant", "blazing", "charging", "prancing", "soaring"});
 
-/// Generate a unique Docker-style name for distributed query identifiers
+/// Generate a unique Docker-style name for distributed query identifiers.
+/// Seeds from std::random_device so concurrent CLI invocations within the same second don't collide
+/// (std::time(nullptr) was only second-resolution).
 std::string generateHorseName()
 {
-    static std::mt19937 rng(static_cast<unsigned>(std::time(nullptr))); /// NOLINT(cert-msc51-cpp)
+    static std::mt19937 rng(std::random_device{}());
     std::uniform_int_distribution<> randomBreed(0, HORSE_BREEDS.size() - 1);
     std::uniform_int_distribution<> randomAttribute(0, ATTRIBUTES.size() - 1);
 

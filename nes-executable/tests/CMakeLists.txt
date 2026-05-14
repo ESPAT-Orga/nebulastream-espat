@@ -22,3 +22,7 @@ add_nes_test(network-sink-sending-strategy-test NetworkSinkSendingStrategyTest.c
 target_include_directories(network-sink-sending-strategy-test PRIVATE ${CMAKE_SOURCE_DIR}/nes-common/tests/Util/include)
 target_link_libraries(network-sink-sending-strategy-test nes-executable nes-common)
 
+add_nes_test(adaptive-sending-scheduler-test AdaptiveSendingSchedulerTest.cpp)
+target_include_directories(adaptive-sending-scheduler-test PRIVATE ${CMAKE_SOURCE_DIR}/nes-common/tests/Util/include)
+target_link_libraries(adaptive-sending-scheduler-test nes-executable nes-common)
+

@@ -17,7 +17,8 @@ use crate::channel::Communication;
 use crate::protocol::*;
 use crate::sender::channel::{ChannelCommand, ChannelCommandQueue};
 use std::marker::PhantomData;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use std::sync::Mutex;
 use std::time::Duration;
 use tokio::runtime::Runtime;
 use tokio::sync::oneshot;
@@ -120,6 +121,7 @@ impl SenderChannel {
             _ => unreachable!(),
         }
     }
+
     /// Flushes the network writer and checks if all data has been acknowledged.
     ///
     /// This blocking operation flushes the underlying network stream to ensure

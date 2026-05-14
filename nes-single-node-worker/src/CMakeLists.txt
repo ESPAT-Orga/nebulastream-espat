@@ -17,4 +17,5 @@ add_source_files(nes-single-node-worker
         CompositeStatisticListener.cpp
         LatencyListener.cpp
         ThroughputListener.cpp
+        BackpressureStatisticStdoutEmitter.cpp
 )

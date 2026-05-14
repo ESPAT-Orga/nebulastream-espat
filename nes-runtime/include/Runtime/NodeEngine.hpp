@@ -29,6 +29,8 @@ namespace NES
 {
 /// Forward declaration of QueryEngineTest, which includes Task, which includes SinkMedium, which includes NodeEngine
 class QueryTracker;
+struct BackpressureStatisticListener;
+class AdaptiveSendingScheduler;
 
 /// @brief this class represents the interface and entrance point into the
 /// query processing part of NES. It provides basic functionality
@@ -50,7 +52,9 @@ public:
         std::unique_ptr<QueryEngine> queryEngine,
         std::unique_ptr<SourceProvider> sourceProvider,
         std::shared_ptr<AbstractStatisticStore> statisticStore,
-        std::shared_ptr<NetworkSinkSendingStrategy> networkSinkSendingStrategy);
+        std::shared_ptr<NetworkSinkSendingStrategy> networkSinkSendingStrategy,
+        std::shared_ptr<BackpressureStatisticListener> backpressureStatisticListener,
+        std::shared_ptr<AdaptiveSendingScheduler> adaptiveSendingScheduler);
 
     void registerCompiledQueryPlan(QueryId queryId, std::unique_ptr<CompiledQueryPlan> compiledQueryPlan);
     void startQuery(QueryId queryId);
@@ -78,5 +82,12 @@ private:
     /// State for NetworkSending needs to be accessible across queries. Thus, we use a shared ptr. For this PoC, this is fine, for
     /// upstreaming the change, we should think about a different approach.
     std::shared_ptr<NetworkSinkSendingStrategy> networkSinkSendingStrategy;
+    /// Optional sink-side hook receiving BufferSent / ApplyPressure / ReleasePressure / BufferIngest events from every
+    /// NetworkSink and SourceThread. Forwarded into ExecutableQueryPlan::instantiate when each query starts.
+    std::shared_ptr<BackpressureStatisticListener> backpressureStatisticListener;
+    /// Worker-wide HTB-style scheduler used by the WEIGHTED_PRIO sending strategy. Null when the
+    /// strategy doesn't need it. Forwarded into ExecutableQueryPlan::instantiate so each query's
+    /// BackpressureController can register its channel for per-tick contingent allocation.
+    std::shared_ptr<AdaptiveSendingScheduler> adaptiveSendingScheduler;
 };
 }

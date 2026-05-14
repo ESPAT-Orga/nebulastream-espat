@@ -31,7 +31,9 @@
 #include <Sources/SourceHandle.hpp>
 #include <Sources/SourceProvider.hpp>
 #include <Util/Overloaded.hpp>
+#include <AdaptiveSendingScheduler.hpp>
 #include <BackpressureChannel.hpp>
+#include <BackpressureStatisticsListener.hpp>
 #include <CompiledQueryPlan.hpp>
 #include <ErrorHandling.hpp>
 #include <ExecutablePipelineStage.hpp>
@@ -64,13 +66,34 @@ std::ostream& operator<<(std::ostream& os, const ExecutableQueryPlan& instantiat
 }
 
 std::unique_ptr<ExecutableQueryPlan> ExecutableQueryPlan::instantiate(
-    CompiledQueryPlan& compiledQueryPlan, const SourceProvider& sourceProvider, std::shared_ptr<NetworkSinkSendingStrategy> sendingStrategy)
+    CompiledQueryPlan& compiledQueryPlan,
+    const SourceProvider& sourceProvider,
+    std::shared_ptr<NetworkSinkSendingStrategy> sendingStrategy,
+    std::shared_ptr<BackpressureStatisticListener> backpressureStatisticListener,
+    std::shared_ptr<AdaptiveSendingScheduler> adaptiveSendingScheduler)
 {
     std::vector<SourceWithSuccessor> instantiatedSources;
 
     std::unordered_map<OperatorId, std::vector<std::shared_ptr<ExecutablePipeline>>> instantiatedSinksWithSourcePredecessor;
 
     auto [backpressureController, backpressureListener] = createBackpressureChannel();
+
+    /// Wire both ends of the freshly-created channel to the (optional) statistic listener so events
+    /// downstream (NetworkSink::recordBufferSent, BackpressureListener::recordBufferIngested,
+    /// applyPressure / releasePressure) carry this query's identity.
+    if (backpressureStatisticListener)
+    {
+        backpressureController.setStatisticListener(backpressureStatisticListener, compiledQueryPlan.queryId, compiledQueryPlan.priority);
+        backpressureListener.setStatisticListener(backpressureStatisticListener, compiledQueryPlan.queryId, compiledQueryPlan.priority);
+    }
+
+    /// Wire the controller to the (optional) per-worker AdaptiveSendingScheduler so the
+    /// WEIGHTED_PRIO sending strategy can gate sends through per-channel contingents. The
+    /// scheduler tick will start allocating shares for this channel on its next tick.
+    if (adaptiveSendingScheduler)
+    {
+        backpressureController.registerWithScheduler(adaptiveSendingScheduler, compiledQueryPlan.queryId, compiledQueryPlan.priority);
+    }
 
     if (compiledQueryPlan.sinks.size() != 1)
     {

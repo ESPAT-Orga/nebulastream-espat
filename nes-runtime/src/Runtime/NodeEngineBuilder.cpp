@@ -14,6 +14,8 @@
 
 #include <Runtime/NodeEngineBuilder.hpp>
 
+#include <chrono>
+#include <map>
 #include <memory>
 #include <utility>
 #include <Configuration/WorkerConfiguration.hpp>
@@ -28,8 +30,12 @@
 #include <StatisticStore/DefaultStatisticStore.hpp>
 #include <StatisticStore/SubStoresStatisticStore.hpp>
 #include <StatisticStore/WindowStatisticStore.hpp>
+#include <AdaptiveSendingScheduler.hpp>
+#include <CapacityEstimator.hpp>
+#include <CapacityEstimatorMode.hpp>
 #include <ErrorHandling.hpp>
 #include <NetworkSinkSendingStrategyType.hpp>
+#include <Priority.hpp>
 #include <QueryEngine.hpp>
 
 namespace NES
@@ -39,10 +45,12 @@ namespace NES
 NodeEngineBuilder::NodeEngineBuilder(
     const WorkerConfiguration& workerConfiguration,
     std::shared_ptr<StatisticListener> statisticsListener,
-    NetworkSinkSendingStrategyType networkSinkSendingStrategy)
+    NetworkSinkSendingStrategyType networkSinkSendingStrategy,
+    std::shared_ptr<BackpressureStatisticListener> backpressureStatisticListener)
     : workerConfiguration(workerConfiguration)
     , statisticsListener(std::move(statisticsListener))
     , networkSinkSendingStrategy(networkSinkSendingStrategy)
+    , backpressureStatisticListener(std::move(backpressureStatisticListener))
 {
 }
 
@@ -76,6 +84,38 @@ std::unique_ptr<NodeEngine> NodeEngineBuilder::build(const Host& host)
 
     auto sendingStrategy = createNetworkSinkSendingStrategy(networkSinkSendingStrategy);
 
+    /// Construct the per-worker AdaptiveSendingScheduler unconditionally. It's cheap when no
+    /// channels register (the tick is a no-op on an empty registry), so we always have it
+    /// available for the WEIGHTED_PRIO strategy. Pick the capacity-estimation strategy from the
+    /// worker config: EMA (default) tracks observed throughput; FIXED uses a constant value (the
+    /// scheduler_fixed_capacity_bps knob, defaulting to scheduler_bootstrap_capacity_bps when 0).
+    const auto bootstrapBps = workerConfiguration.network.schedulerBootstrapCapacityBps.getValue();
+    std::shared_ptr<CapacityEstimator> capacityEstimator;
+    switch (workerConfiguration.network.schedulerCapacityMode.getValue())
+    {
+        case CapacityEstimatorMode::EMA:
+            /// emaAlpha was historically 0.3 — kept here as the canonical "tracks observed" value.
+            /// If a future config exposes it, plumb it through here.
+            capacityEstimator = std::make_shared<EmaCapacityEstimator>(bootstrapBps, /*alpha=*/0.3);
+            break;
+        case CapacityEstimatorMode::FIXED: {
+            const auto fixedBps = workerConfiguration.network.schedulerFixedCapacityBps.getValue();
+            capacityEstimator = std::make_shared<FixedCapacityEstimator>(fixedBps > 0 ? fixedBps : bootstrapBps);
+            break;
+        }
+    }
+    AdaptiveSendingScheduler::SchedulerConfig schedulerConfig{
+        .tickPeriod = std::chrono::milliseconds{workerConfiguration.network.schedulerTickMs.getValue()},
+        .priorityWeights
+        = {{Priority::HIGH, workerConfiguration.network.schedulerHighWeight.getValue()},
+           {Priority::LOW, workerConfiguration.network.schedulerLowWeight.getValue()}},
+        .burstCapPerChannelBytes = workerConfiguration.network.schedulerBurstCapBytes.getValue(),
+        .debugLog = workerConfiguration.network.schedulerDebugLog.getValue(),
+        .capacityEstimator = std::move(capacityEstimator),
+    };
+    auto adaptiveSendingScheduler = std::make_shared<AdaptiveSendingScheduler>(std::move(schedulerConfig));
+    adaptiveSendingScheduler->start();
+
     return std::make_unique<NodeEngine>(
         std::move(bufferManager),
         statisticsListener,
@@ -83,7 +123,9 @@ std::unique_ptr<NodeEngine> NodeEngineBuilder::build(const Host& host)
         std::move(queryEngine),
         std::move(sourceProvider),
         std::move(statisticStore),
-        std::move(sendingStrategy));
+        std::move(sendingStrategy),
+        backpressureStatisticListener,
+        std::move(adaptiveSendingScheduler));
 }
 
 }

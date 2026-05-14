@@ -23,6 +23,7 @@
 #include <ostream>
 #include <span>
 #include <string>
+#include <tuple>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -161,7 +162,7 @@ void NetworkSink::start(PipelineExecutionContext&)
     };
     this->channel = register_sender_channel(*server.value(), connectionAddr, rust::String(channelId), options);
     sendingStrategy->registerChannel(queryId, priority);
-    NES_DEBUG("Sender channel registered: {}", channelId);
+    NES_DEBUG("Sender channel registered: {} (priority={})", channelId, priority);
 }
 
 void NetworkSink::stop(PipelineExecutionContext& pec)
@@ -197,21 +198,10 @@ void NetworkSink::execute(const TupleBuffer& inputBuffer, PipelineExecutionConte
         return;
     }
 
-    /// Strategy gate: if the configured sending strategy currently disallows this query (e.g. ADAPTIVE_DIFFERENT_PRIO
-    /// pausing a LOW-priority query while a HIGH-priority query is under backpressure), buffer and retry later.
-    if (!sendingStrategy->maySend(queryId))
-    {
-        const auto fullResult = backpressureHandler.onFull(inputBuffer, backpressureController);
-        if (fullResult.didApplyBackpressure)
-        {
-            sendingStrategy->onBackpressureApplied(queryId);
-        }
-        if (fullResult.retryBuffer)
-        {
-            pec.repeatTask(*fullResult.retryBuffer, BACKPRESSURE_RETRY_INTERVAL);
-        }
-        return;
-    }
+    /// Sojourn-time tracking — stamp the buffer's first-arrival timestamp BEFORE any gating /
+    /// retry logic so we measure the full engine-side wait. try_emplace makes this idempotent
+    /// across pec.repeatTask retries (same sequence number / origin / chunk arrives each time).
+    backpressureController.recordBufferArrival(inputBuffer.getSequenceNumber(), inputBuffer.getOriginId(), inputBuffer.getChunkNumber());
 
     auto currentBuffer = std::optional(inputBuffer);
     while (currentBuffer)
@@ -237,15 +227,52 @@ void NetworkSink::execute(const TupleBuffer& inputBuffer, PipelineExecutionConte
 
         std::span usedBufferMemory(
             currentBuffer->getAvailableMemoryArea<const uint8_t>().data(), currentBuffer->getNumberOfTuples() * tupleSize);
-        /// Set data and send over the network
-        const auto sendResult = send_buffer(
-            *channel.value(), metadata, rust::Slice(usedBufferMemory), rust::Slice<const rust::Slice<const uint8_t>>(children));
+        const auto dataSlice = rust::Slice(usedBufferMemory);
+        const auto childrenSlice = rust::Slice<const rust::Slice<const uint8_t>>(children);
+        const auto variant = sendingStrategy->sendVariant(queryId);
+        const auto bufferSizeBytes = static_cast<uint64_t>(currentBuffer->getNumberOfTuples() * tupleSize);
+        /// Weighted strategy gates per-buffer in C++ via the AdaptiveSendingScheduler's per-
+        /// channel contingent. On denial we apply single-buffer pressure to the source and
+        /// repeat-task the buffer. We do NOT route through the BackpressureHandler so multiple
+        /// buffers don't accumulate while gated.
+        if (variant == SendVariant::Weighted && !backpressureController.isScheduledToSend(bufferSizeBytes))
+        {
+            if (!throttlePressureApplied.exchange(true))
+            {
+                backpressureController.applyPressure();
+            }
+            /// Stamp the first deny in a gating episode (compare_exchange leaves an existing
+            /// earlier timestamp intact). The matching emit happens below when a later buffer
+            /// passes isScheduledToSend.
+            const auto nowNs = static_cast<uint64_t>(
+                std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
+            uint64_t expected = 0;
+            /// compare-and-set: store only if still 0; updated `expected` intentionally ignored.
+            std::ignore = gateDenyStartNs.compare_exchange_strong(expected, nowNs);
+            pec.repeatTask(*currentBuffer, BACKPRESSURE_RETRY_INTERVAL);
+            return;
+        }
+        /// Gate passed (or strategy is not Weighted). If a gating episode was in progress, emit
+        /// SchedulerGatedEvent with the elapsed nanoseconds and clear. exchange() ensures only
+        /// the first buffer to pass after a deny streak fires the event (others see 0).
+        if (const uint64_t startNs = gateDenyStartNs.exchange(0); startNs != 0)
+        {
+            const auto nowNs = static_cast<uint64_t>(
+                std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
+            backpressureController.recordSchedulerGated(nowNs - startNs);
+        }
+        /// Both Direct and Weighted use the unconditional send_buffer; gating happens above for
+        /// Weighted via isScheduledToSend, before this point.
+        const auto sendResult = send_buffer(*channel.value(), metadata, dataSlice, childrenSlice);
         switch (sendResult)
         {
             case SendResult::Closed: {
                 /// Future buffers are voided.
                 this->closed = true;
                 [[maybe_unused]] auto droppedBuffer = backpressureHandler.onFull(*currentBuffer, backpressureController);
+                /// Buffer will never complete sending — drop its arrival entry so the map doesn't leak.
+                backpressureController.forgetBufferArrival(
+                    currentBuffer->getSequenceNumber(), currentBuffer->getOriginId(), currentBuffer->getChunkNumber());
                 /// Currently there is no way to propagate a query stop without a failure from a sink.
                 /// There is no operator that propagates a query stop in upstream direction, so receiving a query stop
                 /// from the downstream operator is unexpected, thus failing the query is reasonable.
@@ -253,26 +280,46 @@ void NetworkSink::execute(const TupleBuffer& inputBuffer, PipelineExecutionConte
             }
             case SendResult::Ok: {
                 NES_TRACE("Sending buffer {}", currentBuffer->getSequenceNumber());
+                /// Emit per-send delivered-tuple count for the benchmark.
+                backpressureController.recordBufferSent(currentBuffer->getNumberOfTuples());
+                /// Engine-side sojourn time: now - first-arrival timestamp. Captures
+                /// scheduler-gate retries + retries after send_buffer returned Full (Rust send
+                /// queue full) + the send_buffer call. Fires BufferSojournEvent and erases the
+                /// in-flight entry.
+                backpressureController.recordBufferSojourn(
+                    currentBuffer->getSequenceNumber(), currentBuffer->getOriginId(), currentBuffer->getChunkNumber());
+                /// Sender-side byte accounting for the AdaptiveSendingScheduler. Decrements
+                /// queue_depth_bytes (this buffer left the in-NES queue) and increments
+                /// delivered_bytes_last_tick so the next scheduler tick can update the EMA
+                /// capacity estimate. No-op when not registered with a scheduler.
+                backpressureController.recordBufferSentBytes(bufferSizeBytes);
                 sendingStrategy->onBufferSent(queryId, currentBuffer->getNumberOfTuples());
-                /// Sent a buffer, check the backpressure handler to send another one
-                const auto successResult = backpressureHandler.onSuccess(backpressureController);
-                if (successResult.didReleaseBackpressure)
+                /// If we previously pressured the source (via either the Full or contingent-denial
+                /// path), release it now so the source can resume producing.
+                if (throttlePressureApplied.exchange(false))
                 {
+                    backpressureController.releasePressure();
                     sendingStrategy->onBackpressureReleased(queryId);
                 }
-                currentBuffer = std::move(successResult.nextBuffer);
+                /// Sent a buffer; loop to send the next one (currentBuffer set from upstream
+                /// directly — no BackpressureHandler accumulation in the new flow).
+                currentBuffer = std::nullopt;
                 break;
             }
             case SendResult::Full: {
-                const auto fullResult = backpressureHandler.onFull(*currentBuffer, backpressureController);
-                if (fullResult.didApplyBackpressure)
+                /// Same single-buffer-pressure approach as the Weighted contingent-denial path:
+                /// pressure the source
+                /// immediately and retry just this buffer. This avoids BackpressureHandler
+                /// accumulating an arbitrarily large backlog (which the channel would then
+                /// drain across multiple wire-times, making the source's STEP-idle phase
+                /// invisible at the wire). Use the same flag so the matching releasePressure
+                /// fires on the next Ok.
+                if (!throttlePressureApplied.exchange(true))
                 {
+                    backpressureController.applyPressure();
                     sendingStrategy->onBackpressureApplied(queryId);
                 }
-                if (fullResult.retryBuffer)
-                {
-                    pec.repeatTask(*fullResult.retryBuffer, BACKPRESSURE_RETRY_INTERVAL);
-                }
+                pec.repeatTask(*currentBuffer, BACKPRESSURE_RETRY_INTERVAL);
                 return;
             }
         }

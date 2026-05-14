@@ -125,6 +125,17 @@ private:
     size_t senderQueueSize;
     size_t maxPendingAcks;
     std::atomic_bool closed;
+    /// True between the first denial-style pressure (either SendResult::Full from Rust or
+    /// isScheduledToSend == false from the AdaptiveSendingScheduler, which calls applyPressure
+    /// on the source) and the next SendResult::Ok (which calls releasePressure). Tracks
+    /// throttle-induced source pressure separately from BackpressureHandler-induced pressure so
+    /// the two paths don't stomp on each other.
+    std::atomic_bool throttlePressureApplied{false};
+    /// Start timestamp (steady_clock nanoseconds since epoch) of the current scheduler-gating
+    /// episode. 0 means "no episode active". Set on the first isScheduledToSend denial, cleared
+    /// on the next pass-through (which emits SchedulerGatedEvent with the elapsed nanoseconds).
+    /// Atomic because multiple worker threads may concurrently call execute() on this sink.
+    std::atomic<uint64_t> gateDenyStartNs{0};
     QueryId queryId;
     Priority priority;
     std::shared_ptr<NetworkSinkSendingStrategy> sendingStrategy;

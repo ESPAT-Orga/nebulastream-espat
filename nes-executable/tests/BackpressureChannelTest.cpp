@@ -18,15 +18,21 @@
 #include <barrier>
 #include <chrono>
 #include <memory>
+#include <mutex>
 #include <random>
 #include <stop_token>
+#include <string_view>
 #include <thread>
 #include <utility>
+#include <variant>
 #include <vector>
+#include <Identifiers/Identifiers.hpp>
 #include <Util/Logger/LogLevel.hpp>
 #include <Util/Logger/Logger.hpp>
 #include <gtest/gtest.h>
+#include <BackpressureStatisticsListener.hpp>
 #include <BaseUnitTest.hpp>
+#include <QueryId.hpp>
 
 namespace NES
 {
@@ -300,6 +306,176 @@ TEST_F(BackpressureChannelTest, BackpressureControllerDestruction)
 
     syncBarrier.arrive_and_wait();
     EXPECT_DEATH_DEBUG(ingestion.wait({}), "");
+}
+
+namespace
+{
+/// Mock BackpressureStatisticListener for the sojourn tests: records every event it sees so the
+/// test can assert exactly which events fired in which order. Thread-safe.
+struct RecordingListener : BackpressureStatisticListener
+{
+    void onEvent(BackpressureEvent event) override
+    {
+        const std::lock_guard guard(mtx);
+        events.push_back(std::move(event));
+    }
+
+    std::vector<BackpressureEvent> snapshot() const
+    {
+        const std::lock_guard guard(mtx);
+        return events;
+    }
+
+    mutable std::mutex mtx;
+    std::vector<BackpressureEvent> events;
+};
+
+QueryId makeQueryIdForTest(std::string_view localUuid)
+{
+    return QueryId::createLocal(LocalQueryId{localUuid});
+}
+
+template <typename EventT>
+size_t countEvents(const std::vector<BackpressureEvent>& events)
+{
+    size_t n = 0;
+    for (const auto& ev : events)
+    {
+        if (std::holds_alternative<EventT>(ev))
+        {
+            ++n;
+        }
+    }
+    return n;
+}
+}
+
+/// Test A — happy path: arrival → sleep → sojourn fires exactly one BufferSojournEvent.
+TEST_F(BackpressureChannelTest, SojournHappyPath)
+{
+    auto [backpressureController, backpressureListener] = createBackpressureChannel();
+    auto listener = std::make_shared<RecordingListener>();
+    backpressureController.setStatisticListener(listener, makeQueryIdForTest("00000000-0000-0000-0000-000000000001"), Priority::HIGH);
+
+    backpressureController.recordBufferArrival(SequenceNumber{1}, OriginId{1}, ChunkNumber{1});
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    backpressureController.recordBufferSojourn(SequenceNumber{1}, OriginId{1}, ChunkNumber{1});
+
+    const auto events = listener->snapshot();
+    ASSERT_EQ(countEvents<BufferSojournEvent>(events), 1U);
+    const auto& ev = std::get<BufferSojournEvent>(events.front());
+    EXPECT_GE(ev.sojournNs, 1'000'000U);
+    EXPECT_LT(ev.sojournNs, 1'000'000'000U);
+    EXPECT_EQ(ev.priority, Priority::HIGH);
+}
+
+/// Test B — idempotent arrival: two arrivals (simulating a pec.repeatTask retry) → only the first
+/// timestamp is preserved. Sojourn reflects time from the FIRST arrival.
+TEST_F(BackpressureChannelTest, SojournIdempotentArrival)
+{
+    auto [backpressureController, backpressureListener] = createBackpressureChannel();
+    auto listener = std::make_shared<RecordingListener>();
+    backpressureController.setStatisticListener(listener, makeQueryIdForTest("00000000-0000-0000-0000-000000000001"), Priority::HIGH);
+
+    backpressureController.recordBufferArrival(SequenceNumber{1}, OriginId{1}, ChunkNumber{1});
+    std::this_thread::sleep_for(std::chrono::milliseconds(3));
+    /// Second arrival (simulating gated retry) — must NOT reset the first-arrival timestamp.
+    backpressureController.recordBufferArrival(SequenceNumber{1}, OriginId{1}, ChunkNumber{1});
+    std::this_thread::sleep_for(std::chrono::milliseconds(3));
+    backpressureController.recordBufferSojourn(SequenceNumber{1}, OriginId{1}, ChunkNumber{1});
+
+    const auto events = listener->snapshot();
+    ASSERT_EQ(countEvents<BufferSojournEvent>(events), 1U);
+    const auto& ev = std::get<BufferSojournEvent>(events.front());
+    /// Total elapsed since first arrival is ~6ms; if the second arrival had reset the timestamp it
+    /// would only be ~3ms. Verify the larger window.
+    EXPECT_GE(ev.sojournNs, 5'000'000U);
+}
+
+/// Test C — forget path: an arrival that gets forgotten produces no event on subsequent sojourn.
+TEST_F(BackpressureChannelTest, SojournForgetDropsEntry)
+{
+    auto [backpressureController, backpressureListener] = createBackpressureChannel();
+    auto listener = std::make_shared<RecordingListener>();
+    backpressureController.setStatisticListener(listener, makeQueryIdForTest("00000000-0000-0000-0000-000000000001"), Priority::HIGH);
+
+    backpressureController.recordBufferArrival(SequenceNumber{1}, OriginId{1}, ChunkNumber{1});
+    backpressureController.forgetBufferArrival(SequenceNumber{1}, OriginId{1}, ChunkNumber{1});
+    backpressureController.recordBufferSojourn(SequenceNumber{1}, OriginId{1}, ChunkNumber{1});
+
+    EXPECT_EQ(countEvents<BufferSojournEvent>(listener->snapshot()), 0U);
+}
+
+/// Test D — multiple keys: arrivals for several buffers; only the one we sojourn fires an event,
+/// the others stay in the map.
+TEST_F(BackpressureChannelTest, SojournIsolatesByKey)
+{
+    auto [backpressureController, backpressureListener] = createBackpressureChannel();
+    auto listener = std::make_shared<RecordingListener>();
+    backpressureController.setStatisticListener(listener, makeQueryIdForTest("00000000-0000-0000-0000-000000000001"), Priority::HIGH);
+
+    backpressureController.recordBufferArrival(SequenceNumber{1}, OriginId{1}, ChunkNumber{1});
+    backpressureController.recordBufferArrival(SequenceNumber{1}, OriginId{1}, ChunkNumber{2});
+    backpressureController.recordBufferArrival(SequenceNumber{2}, OriginId{1}, ChunkNumber{1});
+
+    backpressureController.recordBufferSojourn(SequenceNumber{1}, OriginId{1}, ChunkNumber{2});
+
+    /// Exactly one BufferSojournEvent fired, for (1, 1, 2). The other two arrivals remain tracked.
+    EXPECT_EQ(countEvents<BufferSojournEvent>(listener->snapshot()), 1U);
+
+    /// And we can still sojourn the other two correctly later.
+    backpressureController.recordBufferSojourn(SequenceNumber{1}, OriginId{1}, ChunkNumber{1});
+    backpressureController.recordBufferSojourn(SequenceNumber{2}, OriginId{1}, ChunkNumber{1});
+    EXPECT_EQ(countEvents<BufferSojournEvent>(listener->snapshot()), 3U);
+}
+
+/// Test E — BackpressureBlocked happy path: a wait() that returns due to releasePressure emits
+/// exactly one BackpressureBlockedEvent with a duration that matches the elapsed wall time.
+TEST_F(BackpressureChannelTest, BackpressureBlockedFiresWhenReleased)
+{
+    auto [backpressureController, backpressureListener] = createBackpressureChannel();
+    auto listener = std::make_shared<RecordingListener>();
+    /// The block event is emitted by BackpressureListener::wait(), so the listener-side stat
+    /// hook needs the same query identity.
+    backpressureController.setStatisticListener(listener, makeQueryIdForTest("00000000-0000-0000-0000-000000000001"), Priority::HIGH);
+    backpressureListener.setStatisticListener(listener, makeQueryIdForTest("00000000-0000-0000-0000-000000000001"), Priority::HIGH);
+
+    backpressureController.applyPressure();
+
+    std::barrier syncBarrier{2};
+    std::jthread waiter(
+        [&](const std::stop_token& stopToken)
+        {
+            syncBarrier.arrive_and_wait();
+            backpressureListener.wait(stopToken);
+        });
+    syncBarrier.arrive_and_wait();
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    backpressureController.releasePressure();
+    waiter.join();
+
+    const auto events = listener->snapshot();
+    ASSERT_EQ(countEvents<BackpressureBlockedEvent>(events), 1U);
+    const auto& ev = std::get<BackpressureBlockedEvent>(events.back());
+    EXPECT_GE(ev.blockedNs, 40'000'000U); /// ≥40ms — leaves headroom on slow CI
+    EXPECT_LT(ev.blockedNs, 5'000'000'000U);
+    EXPECT_EQ(ev.priority, Priority::HIGH);
+}
+
+/// Test F — BackpressureBlocked no-op when channel is OPEN: wait() returns immediately and
+/// must not emit a BackpressureBlockedEvent (we only want events when the source was actually
+/// blocked, not for every poll of a healthy channel).
+TEST_F(BackpressureChannelTest, BackpressureBlockedSkippedWhenOpen)
+{
+    auto [backpressureController, backpressureListener] = createBackpressureChannel();
+    auto listener = std::make_shared<RecordingListener>();
+    backpressureListener.setStatisticListener(listener, makeQueryIdForTest("00000000-0000-0000-0000-000000000001"), Priority::HIGH);
+
+    /// No applyPressure — channel stays OPEN; wait() returns immediately.
+    std::jthread waiter([&](const std::stop_token& stopToken) { backpressureListener.wait(stopToken); });
+    waiter.join();
+
+    EXPECT_EQ(countEvents<BackpressureBlockedEvent>(listener->snapshot()), 0U);
 }
 
 /// Test stop token functionality

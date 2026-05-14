@@ -21,11 +21,29 @@
 namespace NES
 {
 
-/// Decides whether a query is currently allowed to send a buffer through its NetworkSink.
+/// Selects which send path the NetworkSink should invoke for a buffer. The strategy is the
+/// dispatcher — gate logic for `Weighted` lives in the C++ AdaptiveSendingScheduler consulted
+/// via the BackpressureController; `Direct` skips the gate.
+enum class SendVariant : uint8_t
+{
+    /// Call the unconditional Rust `send_buffer`. No priority gate; every buffer is queued.
+    Direct,
+    /// Consult `BackpressureController::isScheduledToSend(bufferSizeBytes)` first; if approved,
+    /// fall through to the unconditional Rust `send_buffer`. The C++ AdaptiveSendingScheduler
+    /// gives each priority class a configured share of the wire (HTB-style); empty-class slack
+    /// flows to non-empty classes in priority order. LOW gets a guaranteed liveness floor when
+    /// it has a non-zero weight (no starvation). Configure `scheduler_high_weight=1.0,
+    /// scheduler_low_weight=0.0` for strict priority (LOW silenced, HIGH gets full wire).
+    Weighted,
+};
+
+/// Strategy that picks the Rust send variant for each buffer transmission.
 ///
-/// Lifetime: a single instance per worker, owned by the NodeEngine. NetworkSinks register and deregister their
-/// channels here as queries start/stop. The strategy is consulted on the NetworkSink hot path via maySend(),
-/// and informed about backpressure events and successful sends through the on... hooks.
+/// Lifetime: a single instance per worker, owned by the NodeEngine. NetworkSinks register and
+/// deregister their channels here as queries start/stop. The strategy is consulted on the
+/// NetworkSink hot path via `sendVariant()`. The `on...` hooks remain so existing
+/// instrumentation (`BackpressureStatisticStdoutEmitter`) keeps receiving backpressure events,
+/// even though the strategy itself no longer relies on them for its decision.
 ///
 /// Implementations must be safe to call from multiple threads concurrently.
 class NetworkSinkSendingStrategy
@@ -34,35 +52,37 @@ public:
     NetworkSinkSendingStrategy() = default;
     virtual ~NetworkSinkSendingStrategy() = default;
 
-    /// The strategy holds worker-shared state (e.g. AdaptiveDifferentPrioStrategy's channels map and
-    /// backpressure counter) and is referenced concurrently from every NetworkSink on the worker via a
-    /// shared_ptr held by the NodeEngine. Copying would split the state into two unsynchronised instances;
-    /// moving would invalidate references held by sinks that still observe the original. The single instance
-    /// must remain pinned for its lifetime, so all four operations are deleted.
+    /// The strategy holds worker-shared state and is referenced concurrently from every
+    /// NetworkSink on the worker via a shared_ptr held by the NodeEngine. Copying would split
+    /// the state; moving would invalidate references held by sinks. The single instance must
+    /// remain pinned for its lifetime, so all four operations are deleted.
     NetworkSinkSendingStrategy(const NetworkSinkSendingStrategy&) = delete;
     NetworkSinkSendingStrategy& operator=(const NetworkSinkSendingStrategy&) = delete;
     NetworkSinkSendingStrategy(NetworkSinkSendingStrategy&&) = delete;
     NetworkSinkSendingStrategy& operator=(NetworkSinkSendingStrategy&&) = delete;
 
-    /// Called once per NetworkSink before the first send. Idempotent if called for an already-registered query.
+    /// Called once per NetworkSink before the first send. Idempotent if called for an
+    /// already-registered query.
     virtual void registerChannel(QueryId queryId, Priority priority) = 0;
 
-    /// Called when the NetworkSink is torn down. Removes the channel from the strategy's bookkeeping.
+    /// Called when the NetworkSink is torn down. Removes the channel from the strategy's
+    /// bookkeeping.
     virtual void deregisterChannel(QueryId queryId) = 0;
 
-    /// Hot-path gate consulted by NetworkSink::execute() before each send.
-    /// Returns true if the query may attempt to send the next buffer; false if the query should be buffered.
-    [[nodiscard]] virtual bool maySend(QueryId queryId) const = 0;
+    /// Hot-path dispatcher consulted by NetworkSink::execute() before each send. Returns which
+    /// send path (Direct or Weighted) this query should take — a C++ branch.
+    [[nodiscard]] virtual SendVariant sendVariant(QueryId queryId) const = 0;
 
-    /// Called the first time backpressure is acquired for the given query (i.e. when the underlying network
-    /// channel reports it cannot accept more data). LOW-priority backpressure may be ignored; HIGH-priority
-    /// backpressure is the signal that gates LOW-priority queries in the adaptive strategy.
+    /// Called when the underlying network channel returns Full. Informational only now: the
+    /// gating decision lives in the C++ AdaptiveSendingScheduler (consulted via
+    /// BackpressureController::isScheduledToSend).
     virtual void onBackpressureApplied(QueryId queryId) = 0;
 
-    /// Called when backpressure is released for the given query (the buffer queue drained below the lower threshold).
+    /// Called when backpressure is released for the given query. Informational only — feeds the
+    /// instrumentation listener; the strategy makes no decision from it.
     virtual void onBackpressureReleased(QueryId queryId) = 0;
 
-    /// Called after a buffer has been successfully sent. Strategies may use this for accounting or metrics.
+    /// Called after a buffer has been successfully sent. Informational only.
     virtual void onBufferSent(QueryId queryId, uint64_t numTuples) = 0;
 };
 

@@ -25,9 +25,13 @@ enum class NetworkSinkSendingStrategyType : uint8_t
 {
     /// Every query may always send. No coordination across queries.
     ALWAYS_SEND,
-    /// HIGH-priority queries always send. LOW-priority queries pause while at least one HIGH-priority
-    /// channel is currently experiencing backpressure.
-    ADAPTIVE_DIFFERENT_PRIO
+    /// Per-worker HTB-style scheduler in C++ allocates a configurable share of the wire to each
+    /// priority class (default HIGH=0.8 / LOW=0.2). Wire stays fully utilized via residual
+    /// redistribution from empty classes; LOW always has a guaranteed liveness floor — no
+    /// starvation under sustained HIGH oversubscription. Strict priority is the limit case
+    /// at HIGH=1.0 / LOW=0.0 (no operator-facing strategy enum needed — just configure the
+    /// weights). See AdaptiveSendingScheduler.
+    WEIGHTED_PRIO
 };
 
 }

@@ -16,10 +16,10 @@
 
 #include <memory>
 #include <utility>
-#include <NetworkSinkSendingStrategyType.hpp>
-#include <SendingStrategy/AdaptiveDifferentPrioStrategy.hpp>
 #include <SendingStrategy/AlwaysSendStrategy.hpp>
 #include <SendingStrategy/NetworkSinkSendingStrategy.hpp>
+#include <SendingStrategy/WeightedPriorityStrategy.hpp>
+#include <NetworkSinkSendingStrategyType.hpp>
 
 namespace NES
 {
@@ -30,8 +30,8 @@ std::shared_ptr<NetworkSinkSendingStrategy> createNetworkSinkSendingStrategy(Net
     {
         case NetworkSinkSendingStrategyType::ALWAYS_SEND:
             return std::make_shared<AlwaysSendStrategy>();
-        case NetworkSinkSendingStrategyType::ADAPTIVE_DIFFERENT_PRIO:
-            return std::make_shared<AdaptiveDifferentPrioStrategy>();
+        case NetworkSinkSendingStrategyType::WEIGHTED_PRIO:
+            return std::make_shared<WeightedPriorityStrategy>();
     }
     std::unreachable();
 }

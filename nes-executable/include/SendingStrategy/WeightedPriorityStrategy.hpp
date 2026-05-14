@@ -22,16 +22,26 @@
 namespace NES
 {
 
-/// Trivial sending strategy: every query uses the unconditional Rust `send_buffer` path.
-/// All event hooks are no-ops.
-class AlwaysSendStrategy final : public NetworkSinkSendingStrategy
+/// Bandwidth-aware weighted-priority strategy dispatcher.
+///
+/// Returns `SendVariant::Weighted` for every query. `NetworkSink::execute` interprets that
+/// variant as "consult `BackpressureController::isScheduledToSend(buffer.size_bytes)` first; on
+/// approval, fall through to the unconditional Rust `send_buffer`". The actual gate logic lives
+/// in the worker-wide `AdaptiveSendingScheduler` (HTB-style per-class share with residual
+/// redistribution + online capacity estimation).
+///
+/// This class is a thin marker — registration with the scheduler happens at query-plan
+/// instantiation via `BackpressureController::registerWithScheduler`, independent of the
+/// NetworkSinkSendingStrategy. All event hooks are no-ops; instrumentation continues to flow
+/// through the existing `BackpressureStatisticListener` path.
+class WeightedPriorityStrategy final : public NetworkSinkSendingStrategy
 {
 public:
     void registerChannel(QueryId, Priority) override { }
 
     void deregisterChannel(QueryId) override { }
 
-    [[nodiscard]] SendVariant sendVariant(QueryId) const override { return SendVariant::Direct; }
+    [[nodiscard]] SendVariant sendVariant(QueryId) const override { return SendVariant::Weighted; }
 
     void onBackpressureApplied(QueryId) override { }
 

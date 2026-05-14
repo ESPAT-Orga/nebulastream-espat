@@ -15,8 +15,8 @@
 #pragma once
 
 #include <memory>
-#include <NetworkSinkSendingStrategyType.hpp>
 #include <SendingStrategy/NetworkSinkSendingStrategy.hpp>
+#include <NetworkSinkSendingStrategyType.hpp>
 
 namespace NES
 {

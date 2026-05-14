@@ -456,13 +456,12 @@ fn register_sender_channel(
     Ok(Box::new(SenderDataChannel { chan: data_queue }))
 }
 
-fn send_buffer(
-    channel: &SenderDataChannel,
+fn build_buffer_from_metadata(
     metadata: ffi::SerializedTupleBufferHeader,
     data: &[u8],
     children: &[&[u8]],
-) -> ffi::SendResult {
-    let buffer = TupleBuffer {
+) -> TupleBuffer {
+    TupleBuffer {
         sequence_number: metadata.sequence_number,
         origin_id: metadata.origin_id,
         chunk_number: metadata.chunk_number,
@@ -471,8 +470,16 @@ fn send_buffer(
         last_chunk: metadata.last_chunk,
         data: Vec::from(data),
         child_buffers: children.iter().map(|bytes| Vec::from(*bytes)).collect(),
-    };
+    }
+}
 
+fn send_buffer(
+    channel: &SenderDataChannel,
+    metadata: ffi::SerializedTupleBufferHeader,
+    data: &[u8],
+    children: &[&[u8]],
+) -> ffi::SendResult {
+    let buffer = build_buffer_from_metadata(metadata, data, children);
     // Because we copy the data anyway, we don't have to reuse the buffer if sending failed.
     match channel.chan.try_send_data(buffer) {
         TrySendDataResult::Ok => ffi::SendResult::Ok,
@@ -480,6 +487,7 @@ fn send_buffer(
         TrySendDataResult::Closed(_) => ffi::SendResult::Closed,
     }
 }
+
 fn flush_sender_channel(channel: &SenderDataChannel) -> bool {
     // If the channel has been closed, we pretend it has been flushed
     channel.chan.flush().unwrap_or(true)

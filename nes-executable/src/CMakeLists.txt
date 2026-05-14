@@ -13,6 +13,7 @@
 add_subdirectory(SendingStrategy)
 
 add_source_files(nes-executable
+        AdaptiveSendingScheduler.cpp
         BackpressureChannel.cpp
         CompiledQueryPlan.cpp
         Pipeline.cpp

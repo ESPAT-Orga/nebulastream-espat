@@ -108,7 +108,9 @@ LogicalPlan DecideJoinTypesRule::apply(const LogicalPlan& queryPlan) const
 {
     PRECONDITION(queryPlan.getRootOperators().size() == 1, "Only single root operators are supported for now");
     PRECONDITION(not queryPlan.getRootOperators().empty(), "Query must have a sink root operator");
-    return LogicalPlan{queryPlan.getQueryId(), {apply(queryPlan.getRootOperators()[0])}};
+    /// withRootOperators copies all metadata (queryId, originalSql, priority) — the bare constructor
+    /// would default priority back to HIGH and silently drop a YAML-supplied LOW.
+    return queryPlan.withRootOperators({apply(queryPlan.getRootOperators()[0])});
 }
 
 bool DecideJoinTypesRule::operator==(const DecideJoinTypesRule& other) const

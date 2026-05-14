@@ -442,7 +442,9 @@ void BottomUpOperatorPlacer::apply(LogicalPlan& logicalPlan)
     {
         throw PlacementFailure("Placement is not possible under the given capacity constraints");
     }
-    logicalPlan = LogicalPlan(logicalPlan.getQueryId(), {addPlacementTrait(logicalPlan.getRootOperators().front(), *placement)});
+    /// withRootOperators copies all metadata (queryId, originalSql, priority) — the bare constructor
+    /// would default priority back to HIGH and silently drop a YAML-supplied LOW.
+    logicalPlan = logicalPlan.withRootOperators({addPlacementTrait(logicalPlan.getRootOperators().front(), *placement)});
 }
 
 }

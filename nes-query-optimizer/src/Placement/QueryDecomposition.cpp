@@ -230,6 +230,19 @@ DistributedLogicalPlan QueryDecomposer::decompose(const LogicalPlan& placedPlan,
     auto root = decomposePlanRecursive(context, placedPlan.getRootOperators().front());
     context.addPlanToNode(std::move(root), getPlacementFor(root));
 
+    /// Propagate the global plan's priority onto every per-worker sub-plan so the worker-side
+    /// CompiledQueryPlan and downstream NetworkSink/BackpressureController see the correct priority.
+    /// Without this, addPlanToNode constructs each LogicalPlan with the default Priority::HIGH and
+    /// LOW-priority queries lose their priority during decomposition.
+    const auto inheritedPriority = placedPlan.getPriority();
+    for (auto& [node, plans] : context.plansByNode)
+    {
+        for (auto& plan : plans)
+        {
+            plan.setPriority(inheritedPriority);
+        }
+    }
+
     for (const auto& [node, plans] : context.plansByNode)
     {
         for (const auto& plan : plans)

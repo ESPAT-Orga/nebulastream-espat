@@ -83,6 +83,18 @@ if (ENABLE_DOCKER_TESTS)
         set_tests_properties(distributed-cli-test PROPERTIES LABELS "DockerCompose" FIXTURES_REQUIRED RuntimeBaseImage)
 
         add_test(
+                NAME prometheus-cli-test
+                COMMAND
+                env NES_CLI=$<TARGET_FILE:nes-cli>
+                env NES_CLI_TESTDATA=${CMAKE_CURRENT_SOURCE_DIR}/cli/tests
+                env NEBULASTREAM=$<TARGET_FILE:nes-single-node-worker>
+                env NES_TEST_TMP_DIR=${CMAKE_BINARY_DIR}/test-tmp
+                env NES_RUNTIME_BASE_IMAGE=${NES_RUNTIME_BASE_IMAGE}
+                ${BATS} --verbose-run --timing ${CMAKE_CURRENT_SOURCE_DIR}/cli/tests/prometheus.bats
+        )
+        set_tests_properties(prometheus-cli-test PROPERTIES LABELS "DockerCompose" FIXTURES_REQUIRED RuntimeBaseImage)
+
+        add_test(
                 NAME distributed-repl-tests
                 COMMAND
                 env NES_REPL=$<TARGET_FILE:nes-repl>

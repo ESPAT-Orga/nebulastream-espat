@@ -37,6 +37,7 @@
 #include <Util/UUID.hpp>
 #include <cpptrace/from_current.hpp>
 #include <fmt/format.h>
+#include <BackpressureStatisticStdoutEmitter.hpp>
 #include <CompositeStatisticListener.hpp>
 #include <ErrorHandling.hpp>
 #include <GoogleEventTracePrinter.hpp>
@@ -141,9 +142,17 @@ SingleNodeWorker::SingleNodeWorker(const SingleNodeWorkerConfiguration& configur
     }
 
 
-    nodeEngine
-        = NodeEngineBuilder(configuration.workerConfiguration, copyPtr(listener), configuration.networkSinkSendingStrategy.getValue())
-              .build(host);
+    /// Stdout emitter ports the BackpressureStatisticListener mechanism from the adaptive-network-sinks branch.
+    /// Each NetworkSink delivery / backpressure transition / source ingest produces one line on stdout that the
+    /// network-sink benchmark parses to plot delivered tuples-per-second per priority.
+    auto backpressureStatisticListener = std::make_shared<BackpressureStatisticStdoutEmitter>();
+
+    nodeEngine = NodeEngineBuilder(
+                     configuration.workerConfiguration,
+                     copyPtr(listener),
+                     configuration.networkSinkSendingStrategy.getValue(),
+                     backpressureStatisticListener)
+                     .build(host);
     compiler = std::make_unique<QueryCompilation::QueryCompiler>(
         configuration.workerConfiguration.defaultQueryExecution, nodeEngine->getStatisticStore());
 

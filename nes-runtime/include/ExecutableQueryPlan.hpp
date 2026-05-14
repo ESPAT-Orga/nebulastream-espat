@@ -27,16 +27,26 @@
 
 namespace NES
 {
+struct BackpressureStatisticListener;
+class AdaptiveSendingScheduler;
 
 /// The ExecutableQueryPlan represents a query with completely instantiated query processing components (Sources, Pipelines, Sinks).
 /// In this form the Query could be executed, by starting all pipelines, sinks and passing the successor pipelines into the queries sources.
 struct ExecutableQueryPlan
 {
     using SourceWithSuccessor = std::pair<std::unique_ptr<SourceHandle>, std::vector<std::weak_ptr<ExecutablePipeline>>>;
+    /// *backpressureStatisticListener* (optional) is wired into both the controller and listener of the
+    /// freshly created backpressure channel so NetworkSink emits BufferSentEvents and the source side
+    /// emits BufferIngestEvents on every TupleBuffer.
+    /// *adaptiveSendingScheduler* (optional) is registered with the controller so the WEIGHTED_PRIO
+    /// sending strategy can gate sends through per-channel contingents. Null when the strategy
+    /// doesn't need it.
     static std::unique_ptr<ExecutableQueryPlan> instantiate(
         CompiledQueryPlan& compiledQueryPlan,
         const SourceProvider& sourceProvider,
-        std::shared_ptr<NetworkSinkSendingStrategy> sendingStrategy);
+        std::shared_ptr<NetworkSinkSendingStrategy> sendingStrategy,
+        std::shared_ptr<BackpressureStatisticListener> backpressureStatisticListener = nullptr,
+        std::shared_ptr<AdaptiveSendingScheduler> adaptiveSendingScheduler = nullptr);
 
     ExecutableQueryPlan(
         QueryId queryId, std::vector<std::shared_ptr<ExecutablePipeline>> pipelines, std::vector<SourceWithSuccessor> instantiatedSources);

@@ -22,6 +22,8 @@
 
 namespace NES
 {
+struct BackpressureStatisticListener;
+
 /// Create instances of NodeEngine using the builder pattern.
 class NodeEngineBuilder
 {
@@ -31,7 +33,8 @@ public:
     explicit NodeEngineBuilder(
         const WorkerConfiguration& workerConfiguration,
         std::shared_ptr<StatisticListener> statisticListener,
-        NetworkSinkSendingStrategyType networkSinkSendingStrategy);
+        NetworkSinkSendingStrategyType networkSinkSendingStrategy,
+        std::shared_ptr<BackpressureStatisticListener> backpressureStatisticListener = nullptr);
 
     std::unique_ptr<NodeEngine> build(const Host& host);
 
@@ -39,5 +42,6 @@ private:
     WorkerConfiguration workerConfiguration;
     std::shared_ptr<StatisticListener> statisticsListener;
     NetworkSinkSendingStrategyType networkSinkSendingStrategy;
+    std::shared_ptr<BackpressureStatisticListener> backpressureStatisticListener;
 };
 }

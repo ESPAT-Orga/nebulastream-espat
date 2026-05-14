@@ -25,9 +25,8 @@ namespace NES
 using ChronoClock = std::chrono::system_clock;
 
 /// Common fields recorded on every BackpressureEvent. Identifies which query the event belongs to and
-/// when it occurred. Ports the same shape as the listener on adaptive-network-sinks, but uses the
-/// full QueryId (local UUID + distributed name) instead of a bare LocalQueryId so emitted events line
-/// up with the existing throughput/latency listener log format.
+/// when it occurred. Uses the full QueryId (local UUID + distributed name) instead of a bare
+/// LocalQueryId so emitted events line up with the existing throughput/latency listener log format.
 struct BaseBackpressureEvent
 {
     BaseBackpressureEvent(QueryId queryId, Priority priority) : queryId(std::move(queryId)), priority(priority) { }
@@ -69,10 +68,10 @@ struct BufferSentEvent : BaseBackpressureEvent
     uint64_t numberOfTuples = 0;
 };
 
-/// Fired by SourceThread each time the source ingests a buffer. Mirrors the BufferIngest event on
-/// adaptive-network-sinks. numberOfTuples is the buffer's tuple count at ingest time so the bench
-/// can sum it directly into a delivered-tuples-per-second metric without having to multiply by an
-/// across-trial average buffer fill (which over-reports bursty traffic).
+/// Fired by SourceThread each time the source ingests a buffer. numberOfTuples is the buffer's tuple
+/// count at ingest time so the bench can sum it directly into a delivered-tuples-per-second metric
+/// without having to multiply by an across-trial average buffer fill (which over-reports bursty
+/// traffic).
 struct BufferIngestEvent : BaseBackpressureEvent
 {
     BufferIngestEvent(QueryId queryId, Priority priority, uint64_t numberOfTuples)
@@ -107,7 +106,7 @@ struct BufferSojournEvent : BaseBackpressureEvent
 /// block (channel reopens or is destroyed). blockedNs is the wall-clock duration the source spent
 /// blocked. Captures the upstream side of backpressure that the sojourn metric is blind to —
 /// under ALWAYS_SEND with a saturated wire, most of the per-tuple wait shows up here rather than
-/// at the sink. The event's `timestamp` is the wait-end (system_clock), so the python binner can
+/// at the sink. The event's `timestamp` is the wait-end (system_clock), so an offline consumer can
 /// reconstruct the wait window via start = end - blockedNs.
 struct BackpressureBlockedEvent : BaseBackpressureEvent
 {
@@ -127,7 +126,7 @@ struct BackpressureBlockedEvent : BaseBackpressureEvent
 /// BackpressureBlockedEvent (source-side wait on a CLOSED channel): scheduler gating happens at the
 /// sink before the source ever calls wait(), so under WEIGHTED_STRICT permanently-gated LOW
 /// produces this event but emits zero blocked events. The `timestamp` is the pass-through moment so
-/// the python binner reconstructs the gated window via start = end - gatedNs.
+/// an offline consumer reconstructs the gated window via start = end - gatedNs.
 struct SchedulerGatedEvent : BaseBackpressureEvent
 {
     SchedulerGatedEvent(QueryId queryId, Priority priority, uint64_t gatedNs)
@@ -140,6 +139,23 @@ struct SchedulerGatedEvent : BaseBackpressureEvent
     uint64_t gatedNs = 0;
 };
 
+/// Fired once per (queryId, priority) by SourceThread when a staircase-pattern source (e.g.
+/// GeneratorSource backed by StepGeneratorRate) produces its first buffer. An offline consumer
+/// uses the event timestamp as the trial's t=0 reference so HIGH-alone and contended HIGH
+/// trials align on the staircase phase regardless of warmup delay. `phaseIdx=0` for the first
+/// emission; reserved for future periodic re-anchoring.
+struct StaircasePhaseStartEvent : BaseBackpressureEvent
+{
+    StaircasePhaseStartEvent(QueryId queryId, Priority priority, uint32_t phaseIdx)
+        : BaseBackpressureEvent(std::move(queryId), priority), phaseIdx(phaseIdx)
+    {
+    }
+
+    StaircasePhaseStartEvent() = default;
+
+    uint32_t phaseIdx = 0;
+};
+
 using BackpressureEvent = std::variant<
     ApplyPressureEvent,
     ReleasePressureEvent,
@@ -147,10 +163,11 @@ using BackpressureEvent = std::variant<
     BufferIngestEvent,
     BufferSojournEvent,
     BackpressureBlockedEvent,
-    SchedulerGatedEvent>;
+    SchedulerGatedEvent,
+    StaircasePhaseStartEvent>;
 
 /// Sink-side hook invoked from worker threads — implementations must be thread-safe and non-blocking.
-/// Single-node-worker provides BackpressureStatisticStdoutEmitter; the bench script parses its lines.
+/// Single-node-worker provides BackpressureStatisticStdoutEmitter; an offline consumer parses its stdout lines.
 struct BackpressureStatisticListener
 {
     virtual ~BackpressureStatisticListener() = default;

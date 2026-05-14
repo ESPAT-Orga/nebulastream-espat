@@ -93,6 +93,12 @@ public:
 
     [[nodiscard]] virtual bool addsMetadata() const { return false; }
 
+    /// True when the source emits at a time-varying staircase rate (e.g. GeneratorSource backed by
+    /// StepGeneratorRate). SourceThread reads this once at first successful fill to decide whether
+    /// to emit a StaircasePhaseStartEvent for per-trial phase alignment in the bench binner.
+    /// Non-staircase sources keep the default `false` — no event is emitted, no behavior change.
+    [[nodiscard]] virtual bool isStaircaseSource() const { return false; }
+
 protected:
     /// Implemented by children of Source. Called by '<<'. Allows to use '<<' on abstract Source.
     [[nodiscard]] virtual std::ostream& toString(std::ostream& str) const = 0;

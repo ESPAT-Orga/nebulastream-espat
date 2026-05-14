@@ -37,6 +37,7 @@
 #include <SinusGeneratorRate.hpp>
 #include <SourceRegistry.hpp>
 #include <SourceValidationRegistry.hpp>
+#include <StepGeneratorRate.hpp>
 
 namespace NES
 {
@@ -59,13 +60,23 @@ GeneratorSource::GeneratorSource(const SourceDescriptor& sourceDescriptor)
             generatorRate
                 = std::make_unique<FixedGeneratorRate>(sourceDescriptor.getFromConfig(ConfigParametersGenerator::GENERATOR_RATE_CONFIG));
             break;
-        case GeneratorRate::Type::SINUS:
+        case GeneratorRate::Type::SINUS: {
             /// We can assume that the parsing will work, as the config has been validated
             auto [amplitude, frequency] = SinusGeneratorRate::parseAndValidateConfigString(
                                               sourceDescriptor.getFromConfig(ConfigParametersGenerator::GENERATOR_RATE_CONFIG))
                                               .value();
             generatorRate = std::make_unique<SinusGeneratorRate>(frequency, amplitude);
             break;
+        }
+        case GeneratorRate::Type::STEP: {
+            /// We can assume that the parsing will work, as the config has been validated
+            auto [highRate, lowRate, periodHigh, periodLow]
+                = StepGeneratorRate::parseAndValidateConfigString(
+                      sourceDescriptor.getFromConfig(ConfigParametersGenerator::GENERATOR_RATE_CONFIG))
+                      .value();
+            generatorRate = std::make_unique<StepGeneratorRate>(highRate, lowRate, periodHigh, periodLow);
+            break;
+        }
     }
 }
 

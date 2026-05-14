@@ -25,7 +25,8 @@ public:
     enum class Type : uint8_t
     {
         FIXED,
-        SINUS
+        SINUS,
+        STEP
     };
 
     virtual ~GeneratorRate() = default;

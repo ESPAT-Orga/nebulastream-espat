@@ -312,6 +312,14 @@ void BackpressureListener::recordBufferIngested(uint64_t numberOfTuples)
     }
 }
 
+void BackpressureListener::recordStaircasePhaseStart(uint32_t phaseIdx)
+{
+    if (statisticListener)
+    {
+        statisticListener->onEvent(NES::StaircasePhaseStartEvent{statQueryId, statPriority, phaseIdx});
+    }
+}
+
 std::pair<BackpressureController, BackpressureListener> createBackpressureChannel()
 {
     const auto channel = std::make_shared<Channel>();

@@ -10,8 +10,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-# LOW-priority generator → network sink benchmark query. Mirrors the HIGH template with a different
-# logical-source name and the priority field flipped.
+# LOW-priority generator → network sink benchmark query. ${LOW_INSTANCE_ID} is substituted into the
+# logical-source / physical-source / sink names so multiple LOW queries can be submitted concurrently
+# without colliding on the worker-side LogicalSource registry. Each spawned LOW gets a unique id
+# (0, 1, 2, …); the rendered names look like LOW_3_GENERATOR_SOURCE / LOW_3_VOID_SINK.
 
 priority: LOW
 
@@ -19,28 +21,28 @@ query: |
   SELECT
     *
   FROM
-    LOW_GENERATOR_SOURCE
+    LOW_${LOW_INSTANCE_ID}_GENERATOR_SOURCE
   INTO
-    LOW_VOID_SINK
+    LOW_${LOW_INSTANCE_ID}_VOID_SINK
 
 sinks:
-  - name: LOW_VOID_SINK
+  - name: LOW_${LOW_INSTANCE_ID}_VOID_SINK
     host: 127.0.0.1:18080
     schema:
-      - name: LOW_GENERATOR_SOURCE$VAL
+      - name: LOW_${LOW_INSTANCE_ID}_GENERATOR_SOURCE$$VAL
         type: FLOAT64
     type: Void
     config: {}
     parser_config: {}
 
 logical:
-  - name: LOW_GENERATOR_SOURCE
+  - name: LOW_${LOW_INSTANCE_ID}_GENERATOR_SOURCE
     schema:
       - name: VAL
         type: FLOAT64
 
 physical:
-  - logical: LOW_GENERATOR_SOURCE
+  - logical: LOW_${LOW_INSTANCE_ID}_GENERATOR_SOURCE
     host: 127.0.0.1:18081
     parser_config:
       type: CSV
@@ -49,6 +51,7 @@ physical:
     source_config:
       generator_rate_type: ${GENERATOR_RATE_TYPE}
       generator_rate_config: ${GENERATOR_RATE_CONFIG}
+      flush_interval_ms: ${FLUSH_INTERVAL_MS}
       stop_generator_when_sequence_finishes: NONE
       seed: 2
       generator_schema: |
@@ -62,3 +65,14 @@ workers:
     data_address: 127.0.0.1:19091
     downstream: [127.0.0.1:18080]
     max_operators: 10000
+
+# Backpressure tuning — matches HighPriority template. See that file for rationale. Bumped to
+# 64/16 (from 16/4) so the source-side BackpressureHandler doesn't cycle ON/OFF during
+# saturated workloads, which previously held HIGH-alone wire utilization to ~50% of cap.
+optimizer:
+  network:
+    backpressure_upper_threshold: 64
+    backpressure_lower_threshold: 16
+    sender_queue_size: 96
+    max_pending_acks: 48
+    receiver_queue_size: 48

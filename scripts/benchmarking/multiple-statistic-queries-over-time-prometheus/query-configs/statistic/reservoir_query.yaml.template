@@ -1,8 +1,9 @@
 query: SELECT RESERVOIR(100, id, value, {reservoir_size}) FROM {source_name} WINDOW TUMBLING(timestamp, size 10 sec) INTO void_sink;
 sinks:
   - name: void_sink
+    host: localhost:8080
     schema:
-      - name: {source_name}$statistichash
+      - name: {source_name}$statisticid
         type: UINT64
       - name: {source_name}$statisticstart
         type: UINT64
@@ -11,8 +12,8 @@ sinks:
       - name: {source_name}$statisticnumberofseentuples
         type: UINT64
     type: Void
-    config:
-      file_path: "/tmp/discard_sink.csv"
+    config: {{ }}
+    parser_config: {{ }}
 logical:
   - name: {source_name}
     schema:
@@ -24,18 +25,16 @@ logical:
         type: UINT64
 physical:
   - logical: {source_name}
-    type: Generator
+    host: localhost:8080
+    type: TCP
     parser_config:
       type: CSV
     source_config:
-      stop_generator_when_sequence_finishes: ONE
-      max_runtime_ms: 1000000000
+      socket_host: 127.0.0.1
+      socket_port: {tcp_port}
       flush_interval_ms: {flush_interval}
-      seed: 42
-      generator_rate_type: {generator_rate_type}
-      generator_rate_config: |
-        {generator_rate_config}
-      generator_schema: |
-        NORMAL_DISTRIBUTION UINT64 0 4999 1666
-        NORMAL_DISTRIBUTION UINT64 0 499999 166666
-        SEQUENCE UINT64 0 1000000000 1
+      connect_timeout_seconds: 10
+workers:
+  - host: localhost:8080
+    data_address: localhost:9090
+    max_operators: 10000

@@ -1,0 +1,40 @@
+query: SELECT EQUIWIDTHHISTOGRAM(200, value, {num_buckets}, {min_value}, {max_value}) FROM {source_name} WINDOW TUMBLING(timestamp, size 1 sec) INTO void_sink;
+sinks:
+  - name: void_sink
+    host: localhost:8080
+    schema:
+      - name: {source_name}$statisticid
+        type: UINT64
+      - name: {source_name}$statisticstart
+        type: UINT64
+      - name: {source_name}$statisticend
+        type: UINT64
+      - name: {source_name}$statisticnumberofseentuples
+        type: UINT64
+    type: Void
+    config: {{ }}
+    parser_config: {{ }}
+logical:
+  - name: {source_name}
+    schema:
+      - name: id
+        type: UINT64
+      - name: value
+        type: UINT64
+      - name: timestamp
+        type: UINT64
+physical:
+  - logical: {source_name}
+    host: localhost:8080
+    type: TCP
+    parser_config:
+      type: CSV
+    source_config:
+      socket_host: 127.0.0.1
+      socket_port: {tcp_port}
+      flush_interval_ms: {flush_interval}
+      connect_timeout_seconds: 10
+workers:
+  - host: localhost:8080
+    data_address: localhost:9090
+    max_operators: 10000

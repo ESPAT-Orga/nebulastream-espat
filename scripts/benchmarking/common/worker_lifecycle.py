@@ -63,15 +63,27 @@ def terminate_process_if_exists(process):
 def start_single_node_worker(file_path_stdout, numberOfWorkerThreads, executionMode,
                              joinStrategy, pageSize, bufferSizeInBytes,
                              buffersInGlobalBufferManager, enableLatency=False,
-                             statisticStoreType="SUB_STORES", cli_log_file=None):
+                             statisticStoreType="SUB_STORES", cli_log_file=None,
+                             grpc_address="localhost:8080",
+                             data_address="localhost:9090",
+                             throughput_listener_interval_in_ms=throughputListenerInterval,
+                             use_systemd_run=True):
     """Start the single node worker with the given configuration.
 
     When *cli_log_file* is given (a writable file handle), the launching
     command is recorded there alongside the nes-cli submit/stop commands so a
     run's full command history lives in a single log file.
+
+    *grpc_address* / *data_address* let callers move the worker off the default
+    ports when something else on the host already owns them (e.g. the prometheus
+    benchmark binds 9090 for the Prometheus HTTP server).
+
+    *use_systemd_run* wraps the worker in `systemd-run --user --scope --quiet`
+    so cgroup teardown handles stragglers; set False for environments without
+    a user systemd instance, in which case plain Popen is used.
     """
-    worker_config = (f"--grpc=localhost:8080 "
-                     f"--data_address=localhost:9090 "
+    worker_config = (f"--grpc={grpc_address} "
+                     f"--data_address={data_address} "
                      f"--worker.query_engine.number_of_worker_threads={numberOfWorkerThreads} "
                      f"--worker.default_query_execution.execution_mode={executionMode} "
                      f"--worker.number_of_buffers_in_global_buffer_manager={buffersInGlobalBufferManager} "
@@ -81,9 +93,12 @@ def start_single_node_worker(file_path_stdout, numberOfWorkerThreads, executionM
                      f"--worker.default_query_execution.operator_buffer_size={bufferSizeInBytes} "
                      f"--worker.latency_listener={enableLatency} "
                      f"--worker.statistic_store_type={statisticStoreType} "
-                     f"--worker.throughput_listener_interval_in_ms={throughputListenerInterval}")
+                     f"--worker.throughput_listener_interval_in_ms={throughput_listener_interval_in_ms}")
 
-    cmd = f"systemd-run --user --scope --quiet {single_node_executable} {worker_config}"
+    if use_systemd_run:
+        cmd = f"systemd-run --user --scope --quiet {single_node_executable} {worker_config}"
+    else:
+        cmd = f"{single_node_executable} {worker_config}"
     if cli_log_file is not None:
         cli_log_file.write(f"=== Start worker: {cmd} ===\n")
         cli_log_file.flush()

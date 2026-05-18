@@ -14,8 +14,10 @@
 
 #include <CompiledQueryPlan.hpp>
 
+#include <cstdio>
 #include <memory>
 #include <ranges>
+#include <sstream>
 #include <utility>
 #include <vector>
 #include <Identifiers/Identifiers.hpp>
@@ -27,6 +29,29 @@ namespace NES
 std::shared_ptr<ExecutablePipeline> ExecutablePipeline::create(
     PipelineId id, std::unique_ptr<ExecutablePipelineStage> stage, const std::vector<std::shared_ptr<ExecutablePipeline>>& successors)
 {
+    std::ostringstream stageRepr;
+    if (stage)
+    {
+        stageRepr << *stage;
+    }
+    else
+    {
+        stageRepr << "<null>";
+    }
+    std::ostringstream succRepr;
+    succRepr << "[";
+    bool first = true;
+    for (const auto& s : successors)
+    {
+        if (!first) { succRepr << ", "; }
+        first = false;
+        succRepr << (s ? s->id.getRawValue() : 0);
+    }
+    succRepr << "]";
+    fprintf(stderr, "[ExecutablePipeline::create] id=%lu stage=%s successors=%s\n",
+        id.getRawValue(), stageRepr.str().c_str(), succRepr.str().c_str());
+    fflush(stderr);
+
     return std::make_shared<ExecutablePipeline>(
         id,
         std::move(stage),

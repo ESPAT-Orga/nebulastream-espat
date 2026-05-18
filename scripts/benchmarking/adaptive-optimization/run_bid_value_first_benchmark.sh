@@ -18,7 +18,7 @@ set -euo pipefail
 python3 -m venv myenv
 source myenv/bin/activate
 
-myenv/bin/python3 -m scripts.benchmarking.adaptive-optimization.run_adaptive_optimization_benchmark "$@"
+myenv/bin/python3 -m scripts.benchmarking.adaptive-optimization.run_bid_value_first_benchmark "$@"
 
 # Deactivate the virtual environment
 deactivate

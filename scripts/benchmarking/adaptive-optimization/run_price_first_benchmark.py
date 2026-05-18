@@ -13,15 +13,16 @@
 # limitations under the License.
 
 """
-Adaptive optimization benchmark.
+Single-query baseline benchmark: price-filter first.
 
-Starts a nes-single-node-worker and nes-repl (distributed mode) as separate processes,
-deploys a query, lets it run for a configurable duration, then tears everything down.
+Deploys the price-first variant of the adaptive-optimization data query without any
+companion statistic query or adaptive swap. Records firstPipeline throughput to CSV so the
+result can be compared head-to-head with the bidValue-first variant
+(run_bid_value_first_benchmark.py).
 
 Usage (run from repository root):
-    python -m scripts.benchmarking.adaptive-optimization.run_adaptive_optimization_benchmark
-    python -m scripts.benchmarking.adaptive-optimization.run_adaptive_optimization_benchmark --duration 120
-    python -m scripts.benchmarking.adaptive-optimization.run_adaptive_optimization_benchmark --clean
+    python -m scripts.benchmarking.adaptive-optimization.run_price_first_benchmark
+    python -m scripts.benchmarking.adaptive-optimization.run_price_first_benchmark --duration 60
 """
 
 import argparse
@@ -65,32 +66,8 @@ repl_binary = os.path.join(build_dir, "nes-frontend", "apps", "nes-repl")
 WORKER_GRPC = "localhost:8080"
 WORKER_DATA = "localhost:9090"
 
-#### Query to deploy (nexmark bid-like schema, generator source)
-#
-# Two filters are applied with the following selectivities (fields are independent):
-#   bidValue < 10.45  →  selectivity 0.01
-#     bidValue ~ N(mean=50, stddev=17); 1st percentile = 50 + 17 * Φ⁻¹(0.01) = 50 + 17*(-2.3263) ≈ 10.45
-#   price    < 888.49 →  selectivity 0.99
-#     price    ~ N(mean=500, stddev=167); 99th percentile = 500 + 167 * Φ⁻¹(0.99) = 500 + 167*(+2.3263) ≈ 888.49
-#   Combined selectivity (AND): 0.01 * 0.99 ≈ 0.0099
-#
-# An intermediate subquery level performs 30 SQRT operations per tuple (always-true condition).
-# This creates a CPU-intensive middle pipeline whose load is proportional to the number of tuples
-# flowing through it.
-#
-# Source throughput: ~260k tup/s (64KB buffer ≈ 1300 tuples, generation takes ~5ms,
-# flush_interval_ms=1 → no sleep, source runs at full speed).
-#   bidValue-first: ~1%  × 260k = ~2.6k tup/s through SQRT pipeline  →  ~1.3M SQRT/s  (<1% CPU)
-#   price-first:   ~99% × 260k = ~257k tup/s through SQRT pipeline   → ~12.9M SQRT/s (~4–17% CPU)
-#
-# The CPU load in the price-first case is intended to saturate the intermediate pipeline, fill its
-# input queue, and cause backpressure on the first filter pipeline — visibly lowering its measured
-# throughput compared to the bidValue-first ordering.
-#
-# SQRT count: 150 terms (Python-generated; pushes the intermediate pipeline's per-tuple cost up
-# so the price-first ordering noticeably saturates it and triggers backpressure).
-# Each argument is col + constant >= 1000, guaranteeing positive inputs regardless of distribution.
-
+# Same expensive intermediate pipeline as run_adaptive_optimization_benchmark.py
+# (150 SQRT terms; bidValue/price interleaved; col + constant >= 1000 guarantees positive inputs).
 _EXPENSIVE_FILTER = (
     " + ".join(
         f"SQRT({'bidValue' if i % 2 == 0 else 'price'} + FLOAT64({1000 + i // 2}))"
@@ -99,6 +76,8 @@ _EXPENSIVE_FILTER = (
     + " > FLOAT64(0.0)"
 )
 
+# price-first ordering: non-selective filter runs first, ~99% of tuples reach the
+# expensive SQRT pipeline → CPU saturation + backpressure expected.
 SETUP_SQL = f"""\
 CREATE WORKER "{WORKER_GRPC}" SET ('{WORKER_DATA}' AS DATA);
 CREATE LOGICAL SOURCE bid(timestamp UINT64 NOT NULL, auctionId INT32 NOT NULL, bidValue FLOAT64 NOT NULL, price FLOAT64 NOT NULL);
@@ -124,44 +103,23 @@ SET(
 SELECT timestamp, auctionId, bidValue, price
 FROM (
   SELECT timestamp, auctionId, bidValue, price
-  FROM (SELECT timestamp, auctionId, bidValue, price FROM bid WHERE bidValue < FLOAT64(10.45))
+  FROM (SELECT timestamp, auctionId, bidValue, price FROM bid WHERE price < FLOAT64(888.49))
   WHERE {_EXPENSIVE_FILTER}
 )
-WHERE price < FLOAT64(888.49)
+WHERE bidValue < FLOAT64(10.45)
 INTO someSink
 SET (FALSE as `QUERY`.FUSE);
 """
 
-# Same query with filter order reversed (price first, then bidValue).
-# The expensive intermediate pipeline now processes ~99k tup/s (vs ~1k tup/s above),
-# creating backpressure that should lower the measured throughput of the first pipeline.
-REVERSED_QUERY_SQL = (
-    "SELECT timestamp, auctionId, bidValue, price "
-    "FROM ("
-    "SELECT timestamp, auctionId, bidValue, price "
-    "FROM (SELECT timestamp, auctionId, bidValue, price FROM bid WHERE price < FLOAT64(888.49)) "
-    f"WHERE {_EXPENSIVE_FILTER}"
-    ") "
-    "WHERE bidValue < FLOAT64(10.45) "
-    "INTO someSink "
-    "SET (FALSE as `QUERY`.FUSE);"
-)
-
-# Matches: Throughput for queryId QueryId(local=<UUID>, distributed=<horse-name>) in window <ts>-<ts> is <val> <prefix>Tup/s
 _THROUGHPUT_RE = re.compile(
     r"Throughput for queryId QueryId\(local=[^,)]+, distributed=([^)]+)\)"
     r" in window (\d+)-(\d+) is (\d+\.\d+) (\w*)Tup/s"
 )
 
-# Matches: [{"query_id": "<horse-name>"}]  (initial SELECT deployed via REPL stdin → JSON output path)
 _JSON_QUERY_ID_RE = re.compile(r'^\[{"query_id":\s*"([^"]+)"}]')
-
-# Matches: [AdaptiveOpt] Deployed query (id=<horse-name>).  (swap callback → plain-text output path)
-_ADAPTIVE_QUERY_ID_RE = re.compile(r'\[AdaptiveOpt\] Deployed query \(id=([^)]+)\)')
 
 
 def stream_output(proc, label, lines_out):
-    """Read lines from a process stdout/stderr and print them with a label prefix."""
     for line in iter(proc.stdout.readline, b""):
         decoded = line.decode(errors="replace").rstrip()
         print(f"[{label}] {decoded}", flush=True)
@@ -169,9 +127,7 @@ def stream_output(proc, label, lines_out):
 
 
 def wait_for_port(host, port, timeout=10.0, interval=0.2):
-    """Poll until a TCP port accepts connections or timeout is reached."""
     import socket
-
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         try:
@@ -183,7 +139,6 @@ def wait_for_port(host, port, timeout=10.0, interval=0.2):
 
 
 def terminate_process(proc, name, timeout=5):
-    """Gracefully terminate a process, escalating to SIGKILL if needed."""
     if proc.poll() is not None:
         printInfo(f"{name} already exited (code {proc.returncode})")
         return
@@ -198,12 +153,7 @@ def terminate_process(proc, name, timeout=5):
         proc.wait()
 
 
-def find_data_query_id(repl_lines, timeout=15.0):
-    """Poll repl_lines until the SELECT response appears and return its distributed query ID.
-
-    The REPL emits [{"query_id": "<horse-name>"}] (exactly one key) for a deployed SELECT.
-    All other setup statement responses have additional keys (worker, source_name, sink_name, …).
-    """
+def find_data_query_id(repl_lines, timeout=60.0):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         for line in repl_lines:
@@ -221,30 +171,11 @@ def find_data_query_id(repl_lines, timeout=15.0):
     return None
 
 
-def collect_all_data_query_ids(repl_lines):
-    """Scan all REPL output and return the set of every data query's distributed ID.
-
-    Two output paths emit query IDs:
-      - Initial SELECT (via stdin → JSON path): [{"query_id": "<horse-name>"}]
-      - Adaptive swap (via callback → plain-text): [AdaptiveOpt] Deployed query (id=<horse-name>).
-    Statistic collection queries are deployed internally via StatisticCoordinator and never
-    print a distributed query ID to the REPL stdout, so they are excluded naturally.
-    """
-    ids = set()
-    for line in repl_lines:
-        if m := _JSON_QUERY_ID_RE.search(line):
-            ids.add(m.group(1))
-        elif m := _ADAPTIVE_QUERY_ID_RE.search(line):
-            ids.add(m.group(1))
-    return ids
-
-
-def parse_throughput(worker_lines, data_query_ids):
-    """Return list of (window_start_ms, query_id, throughput_tup_per_s) for all data queries."""
+def parse_throughput(worker_lines, data_query_id):
     measurements = []
     for line in worker_lines:
         m = _THROUGHPUT_RE.search(line)
-        if m and m.group(1) in data_query_ids:
+        if m and m.group(1) == data_query_id:
             window_start = int(m.group(2))
             throughput = convert_unit_prefix(float(m.group(4)), m.group(5))
             measurements.append((window_start, m.group(1), throughput))
@@ -252,7 +183,6 @@ def parse_throughput(worker_lines, data_query_ids):
 
 
 def write_throughput_csv(measurements, output_path):
-    """Write all per-window throughput samples to a CSV for time-series plotting."""
     if not measurements:
         printError("No throughput data collected for the data query.")
         return
@@ -284,10 +214,6 @@ def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str):
             printError("Run without --skip-build to compile first.")
             sys.exit(1)
 
-    # --- Start worker ---
-    # operator_buffer_size=65536 (64KB) lets the source fill ~1300 CSV tuples per buffer.
-    # Combined with flush_interval_ms=1 in the SQL, the source emits ~1.3M tuples/s —
-    # enough to saturate the intermediate SQRT pipeline (~40% CPU) when price comes first.
     printInfo(f"Starting nes-single-node-worker (grpc={WORKER_GRPC}, data={WORKER_DATA})...")
     worker_proc = subprocess.Popen(
         [
@@ -295,9 +221,6 @@ def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str):
             "--grpc=0.0.0.0:8080",
             "--data_address=0.0.0.0:9090",
             "--worker.default_query_execution.operator_buffer_size=65536",
-            # Shrink the global buffer pool (default 32768 × 64KB = 2GB) so the expensive
-            # intermediate pipeline runs out of buffers quickly when its input queue fills,
-            # producing visible backpressure on the first filter pipeline.
             "--worker.number_of_buffers_in_global_buffer_manager=1024",
         ],
         stdout=subprocess.PIPE,
@@ -317,21 +240,9 @@ def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str):
         sys.exit(1)
     printSuccess("Worker is up.")
 
-    # --- Start REPL ---
-    printInfo("Starting nes-repl (distributed mode)...")
+    printInfo("Starting nes-repl (distributed mode, no companion)...")
     repl_proc = subprocess.Popen(
-        [
-            repl_binary,
-            "-f", "JSON",
-            "--companion-statistic",
-            "--companion-source", "bid",
-            "--companion-field", "price",
-            "--companion-metric", "Cardinality",
-            "--companion-window-size-ms", "5000000",
-            "--companion-event-time-field", "BID$TIMESTAMP",
-            "--companion-host", WORKER_GRPC,
-            "--companion-switch-to-sql", REVERSED_QUERY_SQL,
-        ],
+        [repl_binary, "-f", "JSON"],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -342,7 +253,6 @@ def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str):
     )
     repl_thread.start()
 
-    # --- Send SQL setup commands ---
     printInfo("Sending SQL setup commands to REPL...")
     try:
         repl_proc.stdin.write(SETUP_SQL.encode())
@@ -353,7 +263,6 @@ def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str):
         terminate_process(worker_proc, "nes-single-node-worker")
         sys.exit(1)
 
-    # --- Record the distributed query ID assigned to the data query ---
     printInfo("Waiting for data query deployment confirmation...")
     data_query_id = find_data_query_id(repl_lines, timeout=60.0)
     if data_query_id is None:
@@ -365,25 +274,19 @@ def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str):
 
     printSuccess(f"Query deployed. Running for {duration} seconds...")
 
-    # --- Run for the configured duration ---
     try:
         time.sleep(duration)
     except KeyboardInterrupt:
         printInfo("Interrupted by user — tearing down early.")
 
-    # --- Tear down ---
     printInfo("Tearing down...")
     terminate_process(repl_proc, "nes-repl")
     terminate_process(worker_proc, "nes-single-node-worker")
 
-    # Wait for streaming threads to drain the remaining pipe output
     repl_thread.join(timeout=5)
     worker_thread.join(timeout=5)
 
-    # --- Parse and write throughput CSV ---
-    data_query_ids = collect_all_data_query_ids(repl_lines)
-    printInfo(f"Data query IDs observed across all deployments: {data_query_ids}")
-    measurements = parse_throughput(worker_lines, data_query_ids)
+    measurements = parse_throughput(worker_lines, data_query_id)
     write_throughput_csv(measurements, output)
 
     printSuccess("Benchmark complete.")
@@ -391,29 +294,15 @@ def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Adaptive optimization benchmark: single worker + distributed REPL."
+        description="Single-query baseline: price-filter first (no companion / no adaptive swap)."
     )
-    parser.add_argument(
-        "--duration",
-        type=int,
-        default=120,
-        help="How long (seconds) to let the query run before tearing down (default: 120).",
-    )
-    parser.add_argument(
-        "--skip-build",
-        action="store_true",
-        help="Skip the cmake configure + build step (binaries must already exist).",
-    )
-    parser.add_argument(
-        "--clean",
-        action="store_true",
-        help="Remove and recreate the build directory before building.",
-    )
+    parser.add_argument("--duration", type=int, default=120, help="Run duration in seconds (default: 120).")
+    parser.add_argument("--skip-build", action="store_true", help="Skip the cmake configure + build step.")
+    parser.add_argument("--clean", action="store_true", help="Remove and recreate the build directory before building.")
     parser.add_argument(
         "--output",
-        default="data_throughput_adaptive.csv",
-        help="Path for the throughput CSV output (default: data_throughput_adaptive.csv).",
+        default="data_throughput_price_first.csv",
+        help="Path for the throughput CSV output (default: data_throughput_price_first.csv).",
     )
     args = parser.parse_args()
-
     run_benchmark(duration=args.duration, skip_build=args.skip_build, clean=args.clean, output=args.output)

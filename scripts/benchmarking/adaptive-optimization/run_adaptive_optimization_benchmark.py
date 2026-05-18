@@ -87,13 +87,14 @@ WORKER_DATA = "localhost:9090"
 # input queue, and cause backpressure on the first filter pipeline — visibly lowering its measured
 # throughput compared to the bidValue-first ordering.
 #
-# SQRT count: 50 terms (Python-generated, kept small to stay within Nautilus compile budget).
+# SQRT count: 150 terms (Python-generated; pushes the intermediate pipeline's per-tuple cost up
+# so the price-first ordering noticeably saturates it and triggers backpressure).
 # Each argument is col + constant >= 1000, guaranteeing positive inputs regardless of distribution.
 
 _EXPENSIVE_FILTER = (
     " + ".join(
         f"SQRT({'bidValue' if i % 2 == 0 else 'price'} + FLOAT64({1000 + i // 2}))"
-        for i in range(50)
+        for i in range(150)
     )
     + " > FLOAT64(0.0)"
 )
@@ -294,6 +295,10 @@ def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str):
             "--grpc=0.0.0.0:8080",
             "--data_address=0.0.0.0:9090",
             "--worker.default_query_execution.operator_buffer_size=65536",
+            # Shrink the global buffer pool (default 32768 × 64KB = 2GB) so the expensive
+            # intermediate pipeline runs out of buffers quickly when its input queue fills,
+            # producing visible backpressure on the first filter pipeline.
+            "--worker.number_of_buffers_in_global_buffer_manager=1024",
         ],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,

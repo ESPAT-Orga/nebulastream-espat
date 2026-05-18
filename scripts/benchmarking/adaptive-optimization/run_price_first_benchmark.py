@@ -66,18 +66,6 @@ repl_binary = os.path.join(build_dir, "nes-frontend", "apps", "nes-repl")
 WORKER_GRPC = "localhost:8080"
 WORKER_DATA = "localhost:9090"
 
-# Same expensive intermediate pipeline as run_adaptive_optimization_benchmark.py
-# (150 SQRT terms; bidValue/price interleaved; col + constant >= 1000 guarantees positive inputs).
-_EXPENSIVE_FILTER = (
-    " + ".join(
-        f"SQRT({'bidValue' if i % 2 == 0 else 'price'} + FLOAT64({1000 + i // 2}))"
-        for i in range(150)
-    )
-    + " > FLOAT64(0.0)"
-)
-
-# price-first ordering: non-selective filter runs first, ~99% of tuples reach the
-# expensive SQRT pipeline → CPU saturation + backpressure expected.
 SETUP_SQL = f"""\
 CREATE WORKER "{WORKER_GRPC}" SET ('{WORKER_DATA}' AS DATA);
 CREATE LOGICAL SOURCE bid(timestamp UINT64 NOT NULL, auctionId INT32 NOT NULL, bidValue FLOAT64 NOT NULL, price FLOAT64 NOT NULL);
@@ -101,11 +89,7 @@ SET(
     '{WORKER_GRPC}' AS `SINK`.HOST
 );
 SELECT timestamp, auctionId, bidValue, price
-FROM (
-  SELECT timestamp, auctionId, bidValue, price
-  FROM (SELECT timestamp, auctionId, bidValue, price FROM bid WHERE price < FLOAT64(888.49))
-  WHERE {_EXPENSIVE_FILTER}
-)
+FROM (SELECT timestamp, auctionId, bidValue, price FROM bid WHERE price < FLOAT64(888.49))
 WHERE bidValue < FLOAT64(10.45)
 INTO someSink
 SET (FALSE as `QUERY`.FUSE);
@@ -220,12 +204,8 @@ def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str):
             worker_binary,
             "--grpc=0.0.0.0:8080",
             "--data_address=0.0.0.0:9090",
-            "--worker.default_query_execution.operator_buffer_size=65536",
-            "--worker.number_of_buffers_in_global_buffer_manager=16",
-            # Single worker thread so the expensive intermediate pipeline cannot be parallelized
-            # away; combined with the small buffer pool this should force visible backpressure
-            # whenever the SQRT pipeline can't keep up.
-            "--worker.query_engine.number_of_worker_threads=1",
+            "--worker.default_query_execution.operator_buffer_size=4194304",
+            "--worker.number_of_buffers_in_global_buffer_manager=1024",
         ],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,

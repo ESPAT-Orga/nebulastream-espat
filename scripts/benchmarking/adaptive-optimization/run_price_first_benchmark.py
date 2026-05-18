@@ -221,7 +221,11 @@ def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str):
             "--grpc=0.0.0.0:8080",
             "--data_address=0.0.0.0:9090",
             "--worker.default_query_execution.operator_buffer_size=65536",
-            "--worker.number_of_buffers_in_global_buffer_manager=1024",
+            "--worker.number_of_buffers_in_global_buffer_manager=16",
+            # Single worker thread so the expensive intermediate pipeline cannot be parallelized
+            # away; combined with the small buffer pool this should force visible backpressure
+            # whenever the SQRT pipeline can't keep up.
+            "--worker.query_engine.number_of_worker_threads=1",
         ],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,

@@ -59,14 +59,21 @@ public:
     [[nodiscard]] std::ostream& toString(std::ostream& str) const override;
 
 private:
-    std::string filePath;
+    /// One or two CSV files. When FILE_PATH_2 is set, the source alternates between the two
+    /// after REPLAYS_PER_FILE full passes of the current one — used by the adaptive benchmark
+    /// to simulate a workload-distribution shift on a deterministic schedule.
+    std::vector<std::string> filePaths;
     bool loop;
+    uint64_t replaysPerFile;
     Schema schema;
     ParserConfig parserConfig;
     size_t bufferSizeInBytes;
     std::atomic<size_t> totalTuplesEmitted{0};
-    std::vector<TupleBuffer> preFormattedBuffers;
-    std::vector<TupleBuffer>::iterator preFormattedBuffersIter;
+    /// Outer vector: one entry per loaded file. Inner vector: pre-formatted row-layout buffers.
+    std::vector<std::vector<TupleBuffer>> preFormattedBuffers;
+    size_t currentFileIdx{0};
+    uint64_t currentReplayCount{0};
+    std::vector<TupleBuffer>::iterator currentBufferIter;
 };
 
 struct ConfigParametersCSVMemory
@@ -76,13 +83,27 @@ struct ConfigParametersCSVMemory
         std::nullopt,
         [](const std::unordered_map<std::string, std::string>& config) { return DescriptorConfig::tryGet(FILEPATH, config); }};
 
+    /// Optional second CSV. When set, the source alternates between the two files; switching
+    /// from one to the other after REPLAYS_PER_FILE full passes of the current file.
+    static inline const DescriptorConfig::ConfigParameter<std::string> FILEPATH_2{
+        "file_path_2",
+        std::string{},
+        [](const std::unordered_map<std::string, std::string>& config) { return DescriptorConfig::tryGet(FILEPATH_2, config); }};
+
+    /// How many full passes of the current file before advancing to the next one. Default 1 means
+    /// "as soon as a file is fully drained, switch" — equivalent to seamless concatenation.
+    static inline const DescriptorConfig::ConfigParameter<uint64_t> REPLAYS_PER_FILE{
+        "replays_per_file",
+        uint64_t{1},
+        [](const std::unordered_map<std::string, std::string>& config) { return DescriptorConfig::tryGet(REPLAYS_PER_FILE, config); }};
+
     static inline const DescriptorConfig::ConfigParameter<bool> LOOP{
         "loop",
         false,
         [](const std::unordered_map<std::string, std::string>& config) { return DescriptorConfig::tryGet(LOOP, config); }};
 
     static inline std::unordered_map<std::string, DescriptorConfig::ConfigParameterContainer> parameterMap
-        = DescriptorConfig::createConfigParameterContainerMap(SourceDescriptor::parameterMap, FILEPATH, LOOP);
+        = DescriptorConfig::createConfigParameterContainerMap(SourceDescriptor::parameterMap, FILEPATH, FILEPATH_2, REPLAYS_PER_FILE, LOOP);
 };
 
 }

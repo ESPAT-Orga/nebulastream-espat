@@ -50,8 +50,12 @@ from scripts.benchmarking.utils import (
 # `scripts.benchmarking.adaptive-optimization.generate_bid_data` cannot be imported, so we
 # add the local directory to sys.path and import by short name.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from generate_bid_data import DEFAULT_OUTPUT as DEFAULT_DATA_PATH
-from generate_bid_data import ensure_dataset
+from generate_bid_data import DEFAULT_OUTPUT_A, DEFAULT_OUTPUT_B, ensure_dataset_a, ensure_dataset_b
+
+# How many full passes through the current dataset before MemorySource flips to the other one.
+# At ~400 MTup/s and 30M-row datasets one pass is ~75 ms, so 130 ≈ 10 s of one regime —
+# enough for the adaptive optimizer to notice a histogram shift and trigger a swap.
+REPLAYS_PER_FILE = 130
 
 #### Build Configuration
 build_dir = os.path.join(".", "build_dir")
@@ -85,7 +89,7 @@ WORKER_DATA = "localhost:9090"
 # plumbing working; reintroduce it (see git history for the 150-SQRT _EXPENSIVE_FILTER) once
 # the baseline measures cleanly.
 
-def make_setup_sql(data_path: str) -> str:
+def make_setup_sql(data_path_a: str, data_path_b: str) -> str:
     return f"""\
 CREATE WORKER "{WORKER_GRPC}" SET ('{WORKER_DATA}' AS DATA);
 CREATE LOGICAL SOURCE bid(timestamp UINT64 NOT NULL, auctionId INT32 NOT NULL, bidValue FLOAT64 NOT NULL, price FLOAT64 NOT NULL);
@@ -93,7 +97,9 @@ CREATE PHYSICAL SOURCE FOR bid
 TYPE Memory
 SET(
     'NATIVE' as PARSER.`TYPE`,
-    '{data_path}' AS `SOURCE`.FILE_PATH,
+    '{data_path_a}' AS `SOURCE`.FILE_PATH,
+    '{data_path_b}' AS `SOURCE`.FILE_PATH_2,
+    '{REPLAYS_PER_FILE}' AS `SOURCE`.REPLAYS_PER_FILE,
     'true' AS `SOURCE`.LOOP,
     '{WORKER_GRPC}' AS `SOURCE`.HOST
 );
@@ -257,8 +263,9 @@ def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str):
             printError("Run without --skip-build to compile first.")
             sys.exit(1)
 
-    data_path = ensure_dataset(path=DEFAULT_DATA_PATH)
-    setup_sql = make_setup_sql(data_path)
+    data_path_a = ensure_dataset_a(path=DEFAULT_OUTPUT_A)
+    data_path_b = ensure_dataset_b(path=DEFAULT_OUTPUT_B)
+    setup_sql = make_setup_sql(data_path_a, data_path_b)
 
     # --- Start worker ---
     printInfo(f"Starting nes-single-node-worker (grpc={WORKER_GRPC}, data={WORKER_DATA})...")

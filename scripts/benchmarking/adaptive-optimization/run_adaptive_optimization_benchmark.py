@@ -305,7 +305,11 @@ def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str):
             "--companion-source", "bid",
             "--companion-field", "price",
             "--companion-metric", "Cardinality",
-            "--companion-window-size-ms", "5000000",
+            # With BOTH data query and companion running, each query sees ~30 MTup/s on its
+            # firstPipeline (vs ~390 MTup/s when only the data query was deployed). With
+            # MONOTONIC_TIMESTAMP_FIELD on, BID$TIMESTAMP advances 1 per tuple, so 300 M units
+            # ≈ 10 s wall-clock at 30 MTup/s. Tune as needed.
+            "--companion-window-size-ms", "300000000",
             "--companion-event-time-field", "BID$TIMESTAMP",
             "--companion-host", WORKER_GRPC,
             "--companion-switch-to-sql", REVERSED_QUERY_SQL,

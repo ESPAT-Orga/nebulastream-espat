@@ -198,6 +198,7 @@ namespace NES
 MemorySource::MemorySource(const SourceDescriptor& sourceDescriptor, const size_t bufferSizeInBytes)
     : loop(sourceDescriptor.getFromConfig(ConfigParametersCSVMemory::LOOP))
     , replaysPerFile(sourceDescriptor.getFromConfig(ConfigParametersCSVMemory::REPLAYS_PER_FILE))
+    , monotonicTimestampField(sourceDescriptor.getFromConfig(ConfigParametersCSVMemory::MONOTONIC_TIMESTAMP_FIELD))
     , schema(*sourceDescriptor.getLogicalSource().getSchema())
     , parserConfig(sourceDescriptor.getParserConfig())
     , bufferSizeInBytes(bufferSizeInBytes)
@@ -370,8 +371,58 @@ bool MemorySource::setup(const std::shared_ptr<AbstractBufferProvider>& bufferPr
     {
         throw InvalidConfigParameter("Memory source produced no buffers from {} file(s)", filePaths.size());
     }
+
+    /// Cache tuple count per file (used to step globalTimestampOffset by exactly one cycle's worth).
+    tuplesPerFile.reserve(preFormattedBuffers.size());
+    for (const auto& fileBuffers : preFormattedBuffers)
+    {
+        uint64_t total = 0;
+        for (const auto& buf : fileBuffers)
+        {
+            total += buf.getNumberOfTuples();
+        }
+        tuplesPerFile.push_back(total);
+    }
+
+    /// Resolve the monotonic timestamp field (suffix match, case-insensitive).
+    monotonicTimestampOffsetBytes = -1;
+    if (not monotonicTimestampField.empty())
+    {
+        const auto needle = toUpperCase(monotonicTimestampField);
+        for (size_t i = 0; i < fields.size(); ++i)
+        {
+            if (toUpperCase(fields[i].name).ends_with(needle))
+            {
+                if (fields[i].dataType.type != DataType::Type::UINT64)
+                {
+                    throw InvalidConfigParameter(
+                        "monotonic_timestamp_field {} must resolve to a UINT64 column, but field {} is not UINT64",
+                        monotonicTimestampField,
+                        fields[i].name);
+                }
+                monotonicTimestampOffsetBytes = static_cast<int>(fieldByteOffsets[i]);
+                break;
+            }
+        }
+        if (monotonicTimestampOffsetBytes < 0)
+        {
+            throw InvalidConfigParameter(
+                "monotonic_timestamp_field '{}' did not match (suffix, case-insensitive) any field in the schema",
+                monotonicTimestampField);
+        }
+        std::cout << std::format(
+            "MemorySource: monotonic timestamp rewrite enabled on field offset {} ('{}')\n",
+            monotonicTimestampOffsetBytes,
+            monotonicTimestampField);
+    }
+
+    /// Cache for fillTupleBuffer.
+    tupleSizeBytes = tupleSize;
+    this->bufferProvider = bufferProvider;
+
     currentFileIdx = 0;
     currentReplayCount = 0;
+    globalTimestampOffset = 0;
     currentBufferIter = preFormattedBuffers[0].begin();
     return true;
 }
@@ -380,7 +431,10 @@ Source::FillTupleBufferResult MemorySource::fillTupleBuffer(TupleBuffer& tupleBu
 {
     if (currentBufferIter == preFormattedBuffers[currentFileIdx].end())
     {
-        /// Current file fully drained once. Count it and decide whether to replay, advance, or EOS.
+        /// Current file fully drained once. Bump the timestamp offset by one cycle's worth so
+        /// downstream watermarks keep advancing across loops. (No-op when the feature is off.)
+        globalTimestampOffset += tuplesPerFile[currentFileIdx];
+
         ++currentReplayCount;
         if (currentReplayCount >= replaysPerFile)
         {
@@ -402,8 +456,42 @@ Source::FillTupleBufferResult MemorySource::fillTupleBuffer(TupleBuffer& tupleBu
         currentBufferIter = preFormattedBuffers[currentFileIdx].begin();
     }
 
-    /// Copy (refcount bump) rather than move so the buffer survives in preFormattedBuffers for replay.
-    tupleBuffer = *currentBufferIter;
+    if (monotonicTimestampOffsetBytes < 0 or globalTimestampOffset == 0)
+    {
+        /// Fast path: feature disabled or first cycle of first file. Share the pre-formatted
+        /// buffer directly (refcount bump).
+        tupleBuffer = *currentBufferIter;
+    }
+    else
+    {
+        /// Allocate a fresh buffer, copy from the pre-formatted source, then patch the timestamp
+        /// column with the running offset. This is only walked on replay cycles ≥ 1.
+        const auto& sourceBuffer = *currentBufferIter;
+        auto unpooled = bufferProvider->getUnpooledBuffer(bufferSizeInBytes);
+        if (not unpooled.has_value())
+        {
+            return FillTupleBufferResult::eos();
+        }
+        TupleBuffer fresh = std::move(unpooled.value());
+        const auto numTuples = sourceBuffer.getNumberOfTuples();
+        const auto bytesToCopy = numTuples * tupleSizeBytes;
+        std::memcpy(
+            fresh.getAvailableMemoryArea<char>().data(),
+            sourceBuffer.getAvailableMemoryArea<char>().data(),
+            bytesToCopy);
+        char* const base = fresh.getAvailableMemoryArea<char>().data();
+        for (uint64_t i = 0; i < numTuples; ++i)
+        {
+            char* const slot = base + (i * tupleSizeBytes) + static_cast<size_t>(monotonicTimestampOffsetBytes);
+            uint64_t ts;
+            std::memcpy(&ts, slot, sizeof(uint64_t));
+            ts += globalTimestampOffset;
+            std::memcpy(slot, &ts, sizeof(uint64_t));
+        }
+        fresh.setNumberOfTuples(numTuples);
+        tupleBuffer = std::move(fresh);
+    }
+
     const auto numTuples = tupleBuffer.getNumberOfTuples();
     totalTuplesEmitted += numTuples;
     ++currentBufferIter;

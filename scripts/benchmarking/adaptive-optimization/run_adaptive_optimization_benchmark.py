@@ -100,6 +100,7 @@ SET(
     '{data_path_a}' AS `SOURCE`.FILE_PATH,
     '{data_path_b}' AS `SOURCE`.FILE_PATH_2,
     '{REPLAYS_PER_FILE}' AS `SOURCE`.REPLAYS_PER_FILE,
+    'timestamp' AS `SOURCE`.MONOTONIC_TIMESTAMP_FIELD,
     'true' AS `SOURCE`.LOOP,
     '{WORKER_GRPC}' AS `SOURCE`.HOST
 );

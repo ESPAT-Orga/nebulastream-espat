@@ -60,6 +60,7 @@ public:
 
 private:
     std::string filePath;
+    bool loop;
     Schema schema;
     ParserConfig parserConfig;
     size_t bufferSizeInBytes;
@@ -75,8 +76,13 @@ struct ConfigParametersCSVMemory
         std::nullopt,
         [](const std::unordered_map<std::string, std::string>& config) { return DescriptorConfig::tryGet(FILEPATH, config); }};
 
+    static inline const DescriptorConfig::ConfigParameter<bool> LOOP{
+        "loop",
+        false,
+        [](const std::unordered_map<std::string, std::string>& config) { return DescriptorConfig::tryGet(LOOP, config); }};
+
     static inline std::unordered_map<std::string, DescriptorConfig::ConfigParameterContainer> parameterMap
-        = DescriptorConfig::createConfigParameterContainerMap(SourceDescriptor::parameterMap, FILEPATH);
+        = DescriptorConfig::createConfigParameterContainerMap(SourceDescriptor::parameterMap, FILEPATH, LOOP);
 };
 
 }

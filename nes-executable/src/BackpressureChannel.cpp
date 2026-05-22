@@ -167,12 +167,9 @@ void BackpressureController::registerWithScheduler(
 
 bool BackpressureController::isScheduledToSend(uint64_t bufferSizeBytes)
 {
-    if (!schedulerRegistered)
-    {
-        /// No scheduler attached — strategy must be expressing weighted semantics by mistake.
-        /// Pass through so we don't accidentally gate ALWAYS_SEND-style traffic.
-        return true;
-    }
+    /// Only the Weighted send path calls this, and Weighted is only selected when a scheduler is
+    /// configured — so reaching here unregistered is an internal inconsistency, not a runtime case.
+    INVARIANT(schedulerRegistered, "isScheduledToSend called without a registered scheduler");
     auto current = schedulerState->contingent_bytes.load(std::memory_order_acquire);
     while (current >= bufferSizeBytes)
     {
@@ -208,7 +205,6 @@ void BackpressureController::recordSchedulerGated(uint64_t gatedNs)
 
 void BackpressureController::recordBufferArrival(NES::SequenceNumber seq, NES::OriginId origin, NES::ChunkNumber chunk)
 {
-    /// Skip tracking when no listener is wired — saves a mutex acquire on the hot path.
     if (!statisticListener)
     {
         return;
@@ -290,8 +286,7 @@ void BackpressureListener::wait(const std::stop_token& stopToken) const
     /// paths on the controller side).
     if (statisticListener)
     {
-        const auto blockedNs
-            = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(blockEnd - blockStart).count());
+        const auto blockedNs = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(blockEnd - blockStart).count());
         statisticListener->onEvent(NES::BackpressureBlockedEvent{statQueryId, statPriority, blockedNs});
     }
 }

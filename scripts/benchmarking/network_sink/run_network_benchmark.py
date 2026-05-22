@@ -144,6 +144,11 @@ def _spawn_worker(grpc_addr, data_addr, sink_strategy, log_path, latency_enabled
         f"--network_sink_sending_strategy={sink_strategy}",
         f"--worker.throughput_listener_interval_in_ms={THROUGHPUT_LISTENER_INTERVAL}",
         f"--worker.latency_listener={str(latency_enabled).lower()}",
+        # Required for this benchmark — the BackpressureStatisticStdoutEmitter is what produces
+        # the per-event stdout lines that get parsed into network_sending_timeseries.csv,
+        # blocked_timeseries.csv, gated_timeseries.csv, and sojourn_timeseries.csv. The worker
+        # gates this listener behind a config flag (off by default), so we must turn it on here.
+        "--worker.backpressure_statistic_listener=true",
         f"--worker.query_engine.number_of_worker_threads={num_worker_threads}",
         f"--worker.network.sender_io_threads={SENDER_IO_THREADS}",
         f"--worker.network.receiver_io_threads={RECEIVER_IO_THREADS}",

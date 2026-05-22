@@ -143,9 +143,12 @@ SingleNodeWorker::SingleNodeWorker(const SingleNodeWorkerConfiguration& configur
 
 
     /// Stdout emitter ports the BackpressureStatisticListener mechanism from the adaptive-network-sinks branch.
-    /// Each NetworkSink delivery / backpressure transition / source ingest produces one line on stdout that the
-    /// network-sink benchmark parses to plot delivered tuples-per-second per priority.
-    auto backpressureStatisticListener = std::make_shared<BackpressureStatisticStdoutEmitter>();
+    /// Disabled by default; only the network-sink benchmark consumes the per-event stdout lines.
+    std::shared_ptr<BackpressureStatisticListener> backpressureStatisticListener;
+    if (configuration.workerConfiguration.backpressureStatisticListener.getValue())
+    {
+        backpressureStatisticListener = std::make_shared<BackpressureStatisticStdoutEmitter>();
+    }
 
     nodeEngine = NodeEngineBuilder(
                      configuration.workerConfiguration,

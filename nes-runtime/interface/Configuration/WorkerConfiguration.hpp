@@ -67,6 +67,11 @@ public:
 
     BoolOption latencyListener = {"latency_listener", "false", "Should add the latency listener to the query engine listeners"};
 
+    BoolOption backpressureStatisticListener = {
+        "backpressure_statistic_listener",
+        "false",
+        "Should emit one stdout line per NetworkSink backpressure event / delivery / source ingest (used by the network-sink benchmark)"};
+
     UIntOption throughputListenerInterval
         = {"throughput_listener_interval_in_ms",
            "200",
@@ -91,6 +96,7 @@ private:
             &dumpQueryCompilationIR,
             &dumpGraph,
             &latencyListener,
+            &backpressureStatisticListener,
             &throughputListenerInterval,
             &statisticStoreType};
     }

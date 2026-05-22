@@ -355,7 +355,9 @@ def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str):
 
     # --- Record the distributed query ID assigned to the data query ---
     printInfo("Waiting for data query deployment confirmation...")
-    data_query_id = find_data_query_id(repl_lines, timeout=60.0)
+    # Memory source parses the whole CSV at setup() before reporting deployed.
+    # A 2.4 GB file takes ~1–2 min on this box, so give the REPL plenty of slack.
+    data_query_id = find_data_query_id(repl_lines, timeout=300.0)
     if data_query_id is None:
         printError("Timed out waiting for the SELECT query response — REPL may have crashed.")
         terminate_process(repl_proc, "nes-repl")

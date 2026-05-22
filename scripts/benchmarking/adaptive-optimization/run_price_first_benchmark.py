@@ -73,19 +73,10 @@ repl_binary = os.path.join(build_dir, "nes-frontend", "apps", "nes-repl")
 WORKER_GRPC = "localhost:8080"
 WORKER_DATA = "localhost:9090"
 
-# Same expensive intermediate pipeline as run_adaptive_optimization_benchmark.py
-# (150 SQRT terms; bidValue/price interleaved; col + constant >= 1000 guarantees positive inputs).
-_EXPENSIVE_FILTER = (
-    " + ".join(
-        f"SQRT({'bidValue' if i % 2 == 0 else 'price'} + FLOAT64({1000 + i // 2}))"
-        for i in range(150)
-    )
-    + " > FLOAT64(0.0)"
-)
-
-# price-first ordering: non-selective filter runs first, ~99% of tuples reach the
-# expensive SQRT pipeline → CPU saturation + backpressure expected. Memory source is
-# single-pass; the default 60M-row dataset is expected to outlast a 60-second benchmark.
+# price-first ordering: non-selective filter (price) runs first, then bidValue filter.
+# Both filters go into their own pipelines because FUSE=FALSE. The expensive SQRT-based
+# middle filter has been removed for now while we get the plumbing working; reintroduce it
+# (see git history for the 150-SQRT _EXPENSIVE_FILTER) once the baseline measures cleanly.
 def make_setup_sql(data_path: str) -> str:
     return f"""\
 CREATE WORKER "{WORKER_GRPC}" SET ('{WORKER_DATA}' AS DATA);
@@ -105,11 +96,7 @@ SET(
     '{WORKER_GRPC}' AS `SINK`.HOST
 );
 SELECT timestamp, auctionId, bidValue, price
-FROM (
-  SELECT timestamp, auctionId, bidValue, price
-  FROM (SELECT timestamp, auctionId, bidValue, price FROM bid WHERE price < FLOAT64(888.49))
-  WHERE {_EXPENSIVE_FILTER}
-)
+FROM (SELECT timestamp, auctionId, bidValue, price FROM bid WHERE price < FLOAT64(888.49))
 WHERE bidValue < FLOAT64(10.45)
 INTO someSink
 SET (FALSE as `QUERY`.FUSE);
@@ -227,12 +214,11 @@ def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str):
             worker_binary,
             "--grpc=0.0.0.0:8080",
             "--data_address=0.0.0.0:9090",
-            "--worker.default_query_execution.operator_buffer_size=65536",
+            # 4 MB buffers so the parsed 60M-tuple dataset (~1.68 GB row-layout) fits in ~420
+            # buffers — well within the 1024-buffer pool. At 65 KB each it needed ~25k buffers,
+            # blowing the pool at setup.
+            "--worker.default_query_execution.operator_buffer_size=4194304",
             "--worker.number_of_buffers_in_global_buffer_manager=1024",
-            # Single worker thread so the expensive intermediate pipeline cannot be parallelized
-            # away; combined with the small buffer pool this should force visible backpressure
-            # whenever the SQRT pipeline can't keep up.
-            "--worker.query_engine.number_of_worker_threads=1",
         ],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -275,7 +261,9 @@ def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str):
         sys.exit(1)
 
     printInfo("Waiting for data query deployment confirmation...")
-    data_query_id = find_data_query_id(repl_lines, timeout=60.0)
+    # Memory source parses the whole CSV at setup() before reporting deployed.
+    # A 2.4 GB file takes ~1–2 min on this box, so give the REPL plenty of slack.
+    data_query_id = find_data_query_id(repl_lines, timeout=300.0)
     if data_query_id is None:
         printError("Timed out waiting for the SELECT query response — REPL may have crashed.")
         terminate_process(repl_proc, "nes-repl")

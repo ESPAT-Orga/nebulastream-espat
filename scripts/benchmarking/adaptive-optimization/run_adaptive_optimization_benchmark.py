@@ -72,39 +72,18 @@ repl_binary = os.path.join(build_dir, "nes-frontend", "apps", "nes-repl")
 WORKER_GRPC = "localhost:8080"
 WORKER_DATA = "localhost:9090"
 
-#### Query to deploy (nexmark bid-like schema, generator source)
+#### Query to deploy (nexmark bid-like schema, Memory source with LOOP)
 #
 # Two filters are applied with the following selectivities (fields are independent):
 #   bidValue < 10.45  →  selectivity 0.01
-#     bidValue ~ N(mean=50, stddev=17); 1st percentile = 50 + 17 * Φ⁻¹(0.01) = 50 + 17*(-2.3263) ≈ 10.45
+#     bidValue ~ N(mean=50, stddev=17); 1st percentile = 50 + 17 * Φ⁻¹(0.01) ≈ 10.45
 #   price    < 888.49 →  selectivity 0.99
-#     price    ~ N(mean=500, stddev=167); 99th percentile = 500 + 167 * Φ⁻¹(0.99) = 500 + 167*(+2.3263) ≈ 888.49
+#     price    ~ N(mean=500, stddev=167); 99th percentile = 500 + 167 * Φ⁻¹(0.99) ≈ 888.49
 #   Combined selectivity (AND): 0.01 * 0.99 ≈ 0.0099
 #
-# An intermediate subquery level performs 30 SQRT operations per tuple (always-true condition).
-# This creates a CPU-intensive middle pipeline whose load is proportional to the number of tuples
-# flowing through it.
-#
-# Source throughput: ~260k tup/s (64KB buffer ≈ 1300 tuples, generation takes ~5ms,
-# flush_interval_ms=1 → no sleep, source runs at full speed).
-#   bidValue-first: ~1%  × 260k = ~2.6k tup/s through SQRT pipeline  →  ~1.3M SQRT/s  (<1% CPU)
-#   price-first:   ~99% × 260k = ~257k tup/s through SQRT pipeline   → ~12.9M SQRT/s (~4–17% CPU)
-#
-# The CPU load in the price-first case is intended to saturate the intermediate pipeline, fill its
-# input queue, and cause backpressure on the first filter pipeline — visibly lowering its measured
-# throughput compared to the bidValue-first ordering.
-#
-# SQRT count: 150 terms (Python-generated; pushes the intermediate pipeline's per-tuple cost up
-# so the price-first ordering noticeably saturates it and triggers backpressure).
-# Each argument is col + constant >= 1000, guaranteeing positive inputs regardless of distribution.
-
-_EXPENSIVE_FILTER = (
-    " + ".join(
-        f"SQRT({'bidValue' if i % 2 == 0 else 'price'} + FLOAT64({1000 + i // 2}))"
-        for i in range(150)
-    )
-    + " > FLOAT64(0.0)"
-)
+# The SQRT-based expensive intermediate filter has been removed for now while we get the
+# plumbing working; reintroduce it (see git history for the 150-SQRT _EXPENSIVE_FILTER) once
+# the baseline measures cleanly.
 
 def make_setup_sql(data_path: str) -> str:
     return f"""\
@@ -126,26 +105,16 @@ SET(
     '{WORKER_GRPC}' AS `SINK`.HOST
 );
 SELECT timestamp, auctionId, bidValue, price
-FROM (
-  SELECT timestamp, auctionId, bidValue, price
-  FROM (SELECT timestamp, auctionId, bidValue, price FROM bid WHERE bidValue < FLOAT64(10.45))
-  WHERE {_EXPENSIVE_FILTER}
-)
+FROM (SELECT timestamp, auctionId, bidValue, price FROM bid WHERE bidValue < FLOAT64(10.45))
 WHERE price < FLOAT64(888.49)
 INTO someSink
 SET (FALSE as `QUERY`.FUSE);
 """
 
 # Same query with filter order reversed (price first, then bidValue).
-# The expensive intermediate pipeline now processes ~99k tup/s (vs ~1k tup/s above),
-# creating backpressure that should lower the measured throughput of the first pipeline.
 REVERSED_QUERY_SQL = (
     "SELECT timestamp, auctionId, bidValue, price "
-    "FROM ("
-    "SELECT timestamp, auctionId, bidValue, price "
     "FROM (SELECT timestamp, auctionId, bidValue, price FROM bid WHERE price < FLOAT64(888.49)) "
-    f"WHERE {_EXPENSIVE_FILTER}"
-    ") "
     "WHERE bidValue < FLOAT64(10.45) "
     "INTO someSink "
     "SET (FALSE as `QUERY`.FUSE);"

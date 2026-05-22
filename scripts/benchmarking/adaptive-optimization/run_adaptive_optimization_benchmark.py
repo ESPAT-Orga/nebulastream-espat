@@ -46,6 +46,13 @@ from scripts.benchmarking.utils import (
     printSuccess,
 )
 
+# generate_bid_data.py sits in this same directory; the dotted hyphenated path
+# `scripts.benchmarking.adaptive-optimization.generate_bid_data` cannot be imported, so we
+# add the local directory to sys.path and import by short name.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from generate_bid_data import DEFAULT_OUTPUT as DEFAULT_DATA_PATH
+from generate_bid_data import ensure_dataset
+
 #### Build Configuration
 build_dir = os.path.join(".", "build_dir")
 
@@ -99,19 +106,16 @@ _EXPENSIVE_FILTER = (
     + " > FLOAT64(0.0)"
 )
 
-SETUP_SQL = f"""\
+def make_setup_sql(data_path: str) -> str:
+    return f"""\
 CREATE WORKER "{WORKER_GRPC}" SET ('{WORKER_DATA}' AS DATA);
 CREATE LOGICAL SOURCE bid(timestamp UINT64 NOT NULL, auctionId INT32 NOT NULL, bidValue FLOAT64 NOT NULL, price FLOAT64 NOT NULL);
 CREATE PHYSICAL SOURCE FOR bid
-TYPE Generator
+TYPE Memory
 SET(
-    'NONE' as `SOURCE`.STOP_GENERATOR_WHEN_SEQUENCE_FINISHES,
     'CSV' as PARSER.`TYPE`,
-    'emit_rate 8000000' AS `SOURCE`.GENERATOR_RATE_CONFIG,
-    1 AS `SOURCE`.FLUSH_INTERVAL_MS,
-    100000000 AS `SOURCE`.MAX_RUNTIME_MS,
-    1 AS `SOURCE`.SEED,
-    'SEQUENCE UINT64 0 1000000000 1, SEQUENCE INT32 0 1000000000 1, NORMAL_DISTRIBUTION FLOAT64 50.0 17.0, NORMAL_DISTRIBUTION FLOAT64 500.0 167.0' AS `SOURCE`.GENERATOR_SCHEMA,
+    '{data_path}' AS `SOURCE`.FILE_PATH,
+    'true' AS `SOURCE`.LOOP,
     '{WORKER_GRPC}' AS `SOURCE`.HOST
 );
 CREATE SINK someSink(BID.TIMESTAMP UINT64 NOT NULL, BID.AUCTIONID INT32 NOT NULL, BID.BIDVALUE FLOAT64 NOT NULL, BID.PRICE FLOAT64 NOT NULL)
@@ -284,20 +288,17 @@ def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str):
             printError("Run without --skip-build to compile first.")
             sys.exit(1)
 
+    data_path = ensure_dataset(path=DEFAULT_DATA_PATH)
+    setup_sql = make_setup_sql(data_path)
+
     # --- Start worker ---
-    # operator_buffer_size=65536 (64KB) lets the source fill ~1300 CSV tuples per buffer.
-    # Combined with flush_interval_ms=1 in the SQL, the source emits ~1.3M tuples/s —
-    # enough to saturate the intermediate SQRT pipeline (~40% CPU) when price comes first.
     printInfo(f"Starting nes-single-node-worker (grpc={WORKER_GRPC}, data={WORKER_DATA})...")
     worker_proc = subprocess.Popen(
         [
             worker_binary,
             "--grpc=0.0.0.0:8080",
             "--data_address=0.0.0.0:9090",
-            "--worker.default_query_execution.operator_buffer_size=65536",
-            # Shrink the global buffer pool (default 32768 × 64KB = 2GB) so the expensive
-            # intermediate pipeline runs out of buffers quickly when its input queue fills,
-            # producing visible backpressure on the first filter pipeline.
+            "--worker.default_query_execution.operator_buffer_size=4194304",
             "--worker.number_of_buffers_in_global_buffer_manager=1024",
         ],
         stdout=subprocess.PIPE,
@@ -345,7 +346,7 @@ def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str):
     # --- Send SQL setup commands ---
     printInfo("Sending SQL setup commands to REPL...")
     try:
-        repl_proc.stdin.write(SETUP_SQL.encode())
+        repl_proc.stdin.write(setup_sql.encode())
         repl_proc.stdin.flush()
     except BrokenPipeError:
         printError("REPL stdin closed unexpectedly — did the REPL crash?")

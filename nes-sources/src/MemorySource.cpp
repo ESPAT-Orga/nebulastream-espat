@@ -197,6 +197,7 @@ namespace NES
 
 MemorySource::MemorySource(const SourceDescriptor& sourceDescriptor, const size_t bufferSizeInBytes)
     : filePath(sourceDescriptor.getFromConfig(ConfigParametersCSVMemory::FILEPATH))
+    , loop(sourceDescriptor.getFromConfig(ConfigParametersCSVMemory::LOOP))
     , schema(*sourceDescriptor.getLogicalSource().getSchema())
     , parserConfig(sourceDescriptor.getParserConfig())
     , bufferSizeInBytes(bufferSizeInBytes)
@@ -356,10 +357,15 @@ Source::FillTupleBufferResult MemorySource::fillTupleBuffer(TupleBuffer& tupleBu
 {
     if (preFormattedBuffersIter == preFormattedBuffers.end())
     {
-        return FillTupleBufferResult::eos();
+        if (not loop or preFormattedBuffers.empty())
+        {
+            return FillTupleBufferResult::eos();
+        }
+        preFormattedBuffersIter = preFormattedBuffers.begin();
     }
 
-    tupleBuffer = std::move(*preFormattedBuffersIter);
+    /// Copy (refcount bump) rather than move so the buffer survives in preFormattedBuffers for replay.
+    tupleBuffer = *preFormattedBuffersIter;
     const auto numTuples = tupleBuffer.getNumberOfTuples();
     totalTuplesEmitted += numTuples;
     ++preFormattedBuffersIter;

@@ -46,6 +46,13 @@ from scripts.benchmarking.utils import (
     printSuccess,
 )
 
+# generate_bid_data.py sits in this same directory; the dotted hyphenated path
+# `scripts.benchmarking.adaptive-optimization.generate_bid_data` cannot be imported, so we
+# add the local directory to sys.path and import by short name.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from generate_bid_data import DEFAULT_OUTPUT as DEFAULT_DATA_PATH
+from generate_bid_data import ensure_dataset
+
 #### Build Configuration
 build_dir = os.path.join(".", "build_dir")
 
@@ -76,20 +83,17 @@ _EXPENSIVE_FILTER = (
 )
 
 # bidValue-first ordering: cheap selective filter runs first, only ~1% of tuples reach the
-# expensive SQRT pipeline.
-SETUP_SQL = f"""\
+# expensive SQRT pipeline. Memory source replays the pre-formatted CSV indefinitely (LOOP=true).
+def make_setup_sql(data_path: str) -> str:
+    return f"""\
 CREATE WORKER "{WORKER_GRPC}" SET ('{WORKER_DATA}' AS DATA);
 CREATE LOGICAL SOURCE bid(timestamp UINT64 NOT NULL, auctionId INT32 NOT NULL, bidValue FLOAT64 NOT NULL, price FLOAT64 NOT NULL);
 CREATE PHYSICAL SOURCE FOR bid
-TYPE Generator
+TYPE Memory
 SET(
-    'NONE' as `SOURCE`.STOP_GENERATOR_WHEN_SEQUENCE_FINISHES,
     'CSV' as PARSER.`TYPE`,
-    'emit_rate 8000000' AS `SOURCE`.GENERATOR_RATE_CONFIG,
-    1 AS `SOURCE`.FLUSH_INTERVAL_MS,
-    100000000 AS `SOURCE`.MAX_RUNTIME_MS,
-    1 AS `SOURCE`.SEED,
-    'SEQUENCE UINT64 0 1000000000 1, SEQUENCE INT32 0 1000000000 1, NORMAL_DISTRIBUTION FLOAT64 50.0 17.0, NORMAL_DISTRIBUTION FLOAT64 500.0 167.0' AS `SOURCE`.GENERATOR_SCHEMA,
+    '{data_path}' AS `SOURCE`.FILE_PATH,
+    'true' AS `SOURCE`.LOOP,
     '{WORKER_GRPC}' AS `SOURCE`.HOST
 );
 CREATE SINK someSink(BID.TIMESTAMP UINT64 NOT NULL, BID.AUCTIONID INT32 NOT NULL, BID.BIDVALUE FLOAT64 NOT NULL, BID.PRICE FLOAT64 NOT NULL)
@@ -213,6 +217,9 @@ def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str):
             printError("Run without --skip-build to compile first.")
             sys.exit(1)
 
+    data_path = ensure_dataset(path=DEFAULT_DATA_PATH)
+    setup_sql = make_setup_sql(data_path)
+
     printInfo(f"Starting nes-single-node-worker (grpc={WORKER_GRPC}, data={WORKER_DATA})...")
     worker_proc = subprocess.Popen(
         [
@@ -220,7 +227,7 @@ def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str):
             "--grpc=0.0.0.0:8080",
             "--data_address=0.0.0.0:9090",
             "--worker.default_query_execution.operator_buffer_size=65536",
-            "--worker.number_of_buffers_in_global_buffer_manager=16",
+            "--worker.number_of_buffers_in_global_buffer_manager=1024",
             # Single worker thread so the expensive intermediate pipeline cannot be parallelized
             # away; combined with the small buffer pool this should force visible backpressure
             # whenever the SQRT pipeline can't keep up.
@@ -258,7 +265,7 @@ def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str):
 
     printInfo("Sending SQL setup commands to REPL...")
     try:
-        repl_proc.stdin.write(SETUP_SQL.encode())
+        repl_proc.stdin.write(setup_sql.encode())
         repl_proc.stdin.flush()
     except BrokenPipeError:
         printError("REPL stdin closed unexpectedly — did the REPL crash?")

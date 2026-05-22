@@ -14,12 +14,14 @@
 
 set -euo pipefail
 
-# Create a Python virtual environment (argparse is in stdlib; no pip install needed).
-python3 -m venv myenv
+# Create a Python virtual environment and install numpy (used by generate_bid_data.py).
+# The venv is kept across runs so numpy isn't reinstalled every invocation.
+if [ ! -d myenv ]; then
+    python3 -m venv myenv
+    myenv/bin/pip install --quiet numpy
+fi
 source myenv/bin/activate
 
 myenv/bin/python3 -m scripts.benchmarking.adaptive-optimization.run_bid_value_first_benchmark "$@"
 
-# Deactivate the virtual environment
 deactivate
-rm -rf myenv

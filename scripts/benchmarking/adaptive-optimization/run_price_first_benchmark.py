@@ -84,8 +84,8 @@ _EXPENSIVE_FILTER = (
 )
 
 # price-first ordering: non-selective filter runs first, ~99% of tuples reach the
-# expensive SQRT pipeline → CPU saturation + backpressure expected. Memory source replays
-# the pre-formatted CSV indefinitely (LOOP=true).
+# expensive SQRT pipeline → CPU saturation + backpressure expected. Memory source is
+# single-pass; the default 60M-row dataset is expected to outlast a 60-second benchmark.
 def make_setup_sql(data_path: str) -> str:
     return f"""\
 CREATE WORKER "{WORKER_GRPC}" SET ('{WORKER_DATA}' AS DATA);
@@ -93,9 +93,8 @@ CREATE LOGICAL SOURCE bid(timestamp UINT64 NOT NULL, auctionId INT32 NOT NULL, b
 CREATE PHYSICAL SOURCE FOR bid
 TYPE Memory
 SET(
-    'CSV' as PARSER.`TYPE`,
+    'NATIVE' as PARSER.`TYPE`,
     '{data_path}' AS `SOURCE`.FILE_PATH,
-    'true' AS `SOURCE`.LOOP,
     '{WORKER_GRPC}' AS `SOURCE`.HOST
 );
 CREATE SINK someSink(BID.TIMESTAMP UINT64 NOT NULL, BID.AUCTIONID INT32 NOT NULL, BID.BIDVALUE FLOAT64 NOT NULL, BID.PRICE FLOAT64 NOT NULL)

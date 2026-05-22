@@ -77,8 +77,8 @@ WORKER_DATA = "localhost:9090"
 
 # Pure passthrough: no filters, no expressions, no expensive intermediate pipeline.
 # The Memory source parses the CSV once at setup() and replays pre-formatted row-layout
-# buffers; LOOP=true makes it cycle the buffers indefinitely so the benchmark duration is
-# decoupled from the dataset size.
+# buffers. It's single-pass — the dataset must be large enough to keep the benchmark
+# running for `--duration` seconds (default dataset = 60M rows).
 def make_setup_sql(data_path: str) -> str:
     return f"""\
 CREATE WORKER "{WORKER_GRPC}" SET ('{WORKER_DATA}' AS DATA);
@@ -86,9 +86,8 @@ CREATE LOGICAL SOURCE bid(timestamp UINT64 NOT NULL, auctionId INT32 NOT NULL, b
 CREATE PHYSICAL SOURCE FOR bid
 TYPE Memory
 SET(
-    'CSV' as PARSER.`TYPE`,
+    'NATIVE' as PARSER.`TYPE`,
     '{data_path}' AS `SOURCE`.FILE_PATH,
-    'true' AS `SOURCE`.LOOP,
     '{WORKER_GRPC}' AS `SOURCE`.HOST
 );
 CREATE SINK someSink(BID.TIMESTAMP UINT64 NOT NULL, BID.AUCTIONID INT32 NOT NULL, BID.BIDVALUE FLOAT64 NOT NULL, BID.PRICE FLOAT64 NOT NULL)

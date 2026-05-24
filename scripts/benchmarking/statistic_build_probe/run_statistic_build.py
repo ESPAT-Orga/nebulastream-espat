@@ -31,8 +31,8 @@ from scripts.benchmarking.utils import (
     printInfo,
 )
 from scripts.benchmarking.common._console import step
-from scripts.benchmarking.e2e.build_phase import run_build_phase
-from scripts.benchmarking.e2e.configs import (
+from scripts.benchmarking.statistic_build_probe.build_phase import run_build_phase
+from scripts.benchmarking.statistic_build_probe.configs import (
     BUILD_FIELDNAMES,
     STATISTIC_IDS,
     WAIT_BETWEEN_COMMANDS_LONG,
@@ -40,7 +40,7 @@ from scripts.benchmarking.e2e.configs import (
     cmake_flags,
     enableLatencyForBuild,
 )
-from scripts.benchmarking.e2e.runner_utils import (
+from scripts.benchmarking.statistic_build_probe.runner_utils import (
     RunnerConfig,
     Trial,
     build_basic_trials,

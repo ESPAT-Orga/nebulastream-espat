@@ -27,8 +27,8 @@ import time
 from typing import NamedTuple
 
 from scripts.benchmarking.common._console import step
-from scripts.benchmarking.e2e.dataset_quantiles import min_max, predicate_column
-from scripts.benchmarking.e2e.configs import QUERY_CONFIGS_DIR
+from scripts.benchmarking.statistic_build_probe.dataset_quantiles import min_max, predicate_column
+from scripts.benchmarking.statistic_build_probe.configs import QUERY_CONFIGS_DIR
 from scripts.benchmarking.common.worker_lifecycle import (
     parse_average_throughput_from_throughput_listener,
     stop_queries_and_wait,

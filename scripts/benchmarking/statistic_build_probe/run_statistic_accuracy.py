@@ -38,8 +38,8 @@ from scripts.benchmarking.utils import (
     printInfo,
 )
 from scripts.benchmarking.common._console import ProgressBar, step
-from scripts.benchmarking.e2e.build_phase import run_build_phase
-from scripts.benchmarking.e2e.configs import (
+from scripts.benchmarking.statistic_build_probe.build_phase import run_build_phase
+from scripts.benchmarking.statistic_build_probe.configs import (
     ACCURACY_FIELDNAMES,
     COUNTMIN_RANGE_MAX_VALUES,
     QUERY_CONFIGS_DIR,
@@ -52,8 +52,8 @@ from scripts.benchmarking.e2e.configs import (
     kCountMinRows,
     kCountMinSeed,
 )
-from scripts.benchmarking.e2e.dataset_quantiles import min_max, predicate_column, quantiles
-from scripts.benchmarking.e2e.runner_utils import (
+from scripts.benchmarking.statistic_build_probe.dataset_quantiles import min_max, predicate_column, quantiles
+from scripts.benchmarking.statistic_build_probe.runner_utils import (
     RunnerConfig,
     Trial,
     build_basic_trials,

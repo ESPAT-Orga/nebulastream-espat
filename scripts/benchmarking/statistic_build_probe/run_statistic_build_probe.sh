@@ -1,0 +1,43 @@
+#!/bin/bash
+
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+
+#    https://www.apache.org/licenses/LICENSE-2.0
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+set -euo pipefail
+
+# Create a timestamped output directory for this experiment run
+OUTPUT_DIR="benchmark_run_$(date +%Y%m%d_%H%M%S)"
+mkdir -p "$OUTPUT_DIR"
+echo "Output directory: $(realpath "$OUTPUT_DIR")"
+
+# Create a Python virtual environment and install the required python libraries
+python3 -m venv myenv
+source myenv/bin/activate
+pip3 install argparse requests pandas pyyaml
+
+# Build (throughput) — writes results_statistic_build.csv
+#myenv/bin/python3 -m scripts.benchmarking.statistic_build_probe.run_statistic_build --queries ClusterMonitoring --statistic-types EquiWidthHistogram CountMin --output-dir "$OUTPUT_DIR" --statistic-store-types SUB_STORES
+#myenv/bin/python3 -m scripts.benchmarking.statistic_build_probe.run_statistic_build --queries ClusterMonitoring --output-dir "$OUTPUT_DIR" --statistic-store-types SUB_STORES
+myenv/bin/python3 -m scripts.benchmarking.statistic_build_probe.run_statistic_build    --all --output-dir "$OUTPUT_DIR" --statistic-store-types SUB_STORES
+
+# Accuracy — writes results_statistic_accuracy.csv.
+#myenv/bin/python3 -m scripts.benchmarking.statistic_build_probe.run_statistic_accuracy --all --output-dir "$OUTPUT_DIR" --statistic-store-types SUB_STORES
+
+# Probe (probe throughput) — writes results_statistic_probe.csv
+#myenv/bin/python3 -m scripts.benchmarking.statistic_build_probe.run_statistic_probe    --all --output-dir "$OUTPUT_DIR" --statistic-store-types SUB_STORES
+#myenv/bin/python3 -m scripts.benchmarking.statistic_build_probe.run_statistic_probe  --queries ClusterMonitoring --output-dir "$OUTPUT_DIR" --statistic-store-types WINDOW --statistic-types Reservoir EquiWidthHistogram CountMin --memory-budgets 1024 10240 --worker-threads 1 --num-runs 1
+#myenv/bin/python3 -m scripts.benchmarking.statistic_build_probe.run_statistic_probe  --queries ClusterMonitoring --output-dir "$OUTPUT_DIR" --statistic-store-types WINDOW --worker-threads 1 16 --num-runs 3
+#myenv/bin/python3 -m scripts.benchmarking.statistic_build_probe.run_statistic_probe  --all --output-dir "$OUTPUT_DIR" --statistic-store-types WINDOW --worker-threads 1 16 --num-runs 3
+
+# Deactivate the virtual environment
+deactivate
+rm -rf myenv

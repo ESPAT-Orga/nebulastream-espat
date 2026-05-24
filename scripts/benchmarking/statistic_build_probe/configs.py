@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""All benchmark configuration constants for the e2e statistic benchmarks.
+"""All benchmark configuration constants for the statistic_build_probe benchmarks.
 
 Sections (search by ``##``):
   ## General    — paths, cmake flags, run repetition count, query-config dir

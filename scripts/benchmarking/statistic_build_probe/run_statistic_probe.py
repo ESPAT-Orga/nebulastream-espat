@@ -34,7 +34,7 @@ from scripts.benchmarking.utils import (
     printInfo,
 )
 from scripts.benchmarking.common._console import step
-from scripts.benchmarking.e2e.configs import (
+from scripts.benchmarking.statistic_build_probe.configs import (
     PROBE_FIELDNAMES,
     QUERY_CONFIGS_DIR,
     STATISTIC_IDS,
@@ -52,7 +52,7 @@ from scripts.benchmarking.e2e.configs import (
     histogramMinValue,
     memoryBudgetConfig,
 )
-from scripts.benchmarking.e2e.runner_utils import (
+from scripts.benchmarking.statistic_build_probe.runner_utils import (
     RunnerConfig,
     Trial,
     docker_buffer_override,

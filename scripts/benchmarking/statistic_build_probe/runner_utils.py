@@ -39,7 +39,7 @@ from scripts.benchmarking.common._console import (
     reset_step_counter,
     step,
 )
-from scripts.benchmarking.e2e.configs import (
+from scripts.benchmarking.statistic_build_probe.configs import (
     DATASET_PATHS,
     NUM_RUNS_PER_EXPERIMENT,
     STATISTIC_TYPES_WITHOUT_SYNOPSIS_PARAMS,

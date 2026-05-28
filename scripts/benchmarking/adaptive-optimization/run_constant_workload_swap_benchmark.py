@@ -13,15 +13,23 @@
 # limitations under the License.
 
 """
-Adaptive optimization benchmark.
+Swap-cost-only benchmark: same redeployment loop as the adaptive script, but with a
+single, non-changing input distribution. Used to visualize the bare cost of periodic
+query swaps independent of any actual workload shift.
 
-Starts a nes-single-node-worker and nes-repl (distributed mode) as separate processes,
-deploys a query, lets it run for a configurable duration, then tears everything down.
+Compared to run_adaptive_optimization_benchmark.py the only differences are:
+  - the Memory source loads exactly one dataset (regime A); no FILE_PATH_2; no
+    REPLAYS_PER_FILE — every replayed pass produces the same distribution.
+  - all other plumbing (MONOTONIC_TIMESTAMP_FIELD, LOOP, companion, REVERSED_QUERY_SQL,
+    --companion-switch-to-sql, window size) is identical so the swap cadence matches.
+
+The companion will still fire every ~N event-time units and trigger query swaps; the
+throughput curve will show the gaps / dips caused by those redeployments, not by any
+data-distribution change.
 
 Usage (run from repository root):
-    python -m scripts.benchmarking.adaptive-optimization.run_adaptive_optimization_benchmark
-    python -m scripts.benchmarking.adaptive-optimization.run_adaptive_optimization_benchmark --duration 120
-    python -m scripts.benchmarking.adaptive-optimization.run_adaptive_optimization_benchmark --clean
+    python -m scripts.benchmarking.adaptive-optimization.run_constant_workload_swap_benchmark
+    python -m scripts.benchmarking.adaptive-optimization.run_constant_workload_swap_benchmark --duration 120
 """
 
 import argparse
@@ -46,16 +54,8 @@ from scripts.benchmarking.utils import (
     printSuccess,
 )
 
-# generate_bid_data.py sits in this same directory; the dotted hyphenated path
-# `scripts.benchmarking.adaptive-optimization.generate_bid_data` cannot be imported, so we
-# add the local directory to sys.path and import by short name.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from generate_bid_data import DEFAULT_OUTPUT_A, DEFAULT_OUTPUT_B, ensure_dataset_a, ensure_dataset_b
-
-# How many full passes through the current dataset before MemorySource flips to the other one.
-# At ~400 MTup/s and 30M-row datasets one pass is ~75 ms, so 130 ≈ 10 s of one regime —
-# enough for the adaptive optimizer to notice a histogram shift and trigger a swap.
-REPLAYS_PER_FILE = 130
+from generate_bid_data import DEFAULT_OUTPUT_A, ensure_dataset_a
 
 #### Build Configuration
 build_dir = os.path.join(".", "build_dir")
@@ -76,20 +76,9 @@ repl_binary = os.path.join(build_dir, "nes-frontend", "apps", "nes-repl")
 WORKER_GRPC = "localhost:8080"
 WORKER_DATA = "localhost:9090"
 
-#### Query to deploy (nexmark bid-like schema, Memory source with LOOP)
-#
-# Two filters are applied with the following selectivities (fields are independent):
-#   bidValue < 10.45  →  selectivity 0.01
-#     bidValue ~ N(mean=50, stddev=17); 1st percentile = 50 + 17 * Φ⁻¹(0.01) ≈ 10.45
-#   price    < 888.49 →  selectivity 0.99
-#     price    ~ N(mean=500, stddev=167); 99th percentile = 500 + 167 * Φ⁻¹(0.99) ≈ 888.49
-#   Combined selectivity (AND): 0.01 * 0.99 ≈ 0.0099
-#
-# The SQRT-based expensive intermediate filter has been removed for now while we get the
-# plumbing working; reintroduce it (see git history for the 150-SQRT _EXPENSIVE_FILTER) once
-# the baseline measures cleanly.
 
-def make_setup_sql(data_path_a: str, data_path_b: str) -> str:
+def make_setup_sql(data_path: str) -> str:
+    """Same SQL shape as the adaptive script, but with only one Memory-source file."""
     return f"""\
 CREATE WORKER "{WORKER_GRPC}" SET ('{WORKER_DATA}' AS DATA);
 CREATE LOGICAL SOURCE bid(timestamp UINT64 NOT NULL, auctionId INT32 NOT NULL, bidValue FLOAT64 NOT NULL, price FLOAT64 NOT NULL);
@@ -97,9 +86,7 @@ CREATE PHYSICAL SOURCE FOR bid
 TYPE Memory
 SET(
     'NATIVE' as PARSER.`TYPE`,
-    '{data_path_a}' AS `SOURCE`.FILE_PATH,
-    '{data_path_b}' AS `SOURCE`.FILE_PATH_2,
-    '{REPLAYS_PER_FILE}' AS `SOURCE`.REPLAYS_PER_FILE,
+    '{data_path}' AS `SOURCE`.FILE_PATH,
     'timestamp' AS `SOURCE`.MONOTONIC_TIMESTAMP_FIELD,
     'true' AS `SOURCE`.LOOP,
     '{WORKER_GRPC}' AS `SOURCE`.HOST
@@ -118,7 +105,8 @@ INTO someSink
 SET (FALSE as `QUERY`.FUSE);
 """
 
-# Same query with filter order reversed (price first, then bidValue).
+# Same query with filter order reversed (price first, then bidValue). The companion's swap
+# callback redeploys the data query as this every time a window closes.
 REVERSED_QUERY_SQL = (
     "SELECT timestamp, auctionId, bidValue, price "
     "FROM (SELECT timestamp, auctionId, bidValue, price FROM bid WHERE price < FLOAT64(888.49)) "
@@ -127,21 +115,17 @@ REVERSED_QUERY_SQL = (
     "SET (FALSE as `QUERY`.FUSE);"
 )
 
-# Matches: Throughput for queryId QueryId(local=<UUID>, distributed=<horse-name>) in window <ts>-<ts> is <val> <prefix>Tup/s
 _THROUGHPUT_RE = re.compile(
     r"Throughput for queryId QueryId\(local=[^,)]+, distributed=([^)]+)\)"
     r" in window (\d+)-(\d+) is (\d+\.\d+) (\w*)Tup/s"
 )
 
-# Matches: [{"query_id": "<horse-name>"}]  (initial SELECT deployed via REPL stdin → JSON output path)
 _JSON_QUERY_ID_RE = re.compile(r'^\[{"query_id":\s*"([^"]+)"}]')
 
-# Matches: [AdaptiveOpt] Deployed query (id=<horse-name>).  (swap callback → plain-text output path)
 _ADAPTIVE_QUERY_ID_RE = re.compile(r'\[AdaptiveOpt\] Deployed query \(id=([^)]+)\)')
 
 
 def stream_output(proc, label, lines_out):
-    """Read lines from a process stdout/stderr and print them with a label prefix."""
     for line in iter(proc.stdout.readline, b""):
         decoded = line.decode(errors="replace").rstrip()
         print(f"[{label}] {decoded}", flush=True)
@@ -149,9 +133,7 @@ def stream_output(proc, label, lines_out):
 
 
 def wait_for_port(host, port, timeout=10.0, interval=0.2):
-    """Poll until a TCP port accepts connections or timeout is reached."""
     import socket
-
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         try:
@@ -163,7 +145,6 @@ def wait_for_port(host, port, timeout=10.0, interval=0.2):
 
 
 def terminate_process(proc, name, timeout=5):
-    """Gracefully terminate a process, escalating to SIGKILL if needed."""
     if proc.poll() is not None:
         printInfo(f"{name} already exited (code {proc.returncode})")
         return
@@ -178,12 +159,7 @@ def terminate_process(proc, name, timeout=5):
         proc.wait()
 
 
-def find_data_query_id(repl_lines, timeout=15.0):
-    """Poll repl_lines until the SELECT response appears and return its distributed query ID.
-
-    The REPL emits [{"query_id": "<horse-name>"}] (exactly one key) for a deployed SELECT.
-    All other setup statement responses have additional keys (worker, source_name, sink_name, …).
-    """
+def find_data_query_id(repl_lines, timeout=300.0):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         for line in repl_lines:
@@ -202,14 +178,6 @@ def find_data_query_id(repl_lines, timeout=15.0):
 
 
 def collect_all_data_query_ids(repl_lines):
-    """Scan all REPL output and return the set of every data query's distributed ID.
-
-    Two output paths emit query IDs:
-      - Initial SELECT (via stdin → JSON path): [{"query_id": "<horse-name>"}]
-      - Adaptive swap (via callback → plain-text): [AdaptiveOpt] Deployed query (id=<horse-name>).
-    Statistic collection queries are deployed internally via StatisticCoordinator and never
-    print a distributed query ID to the REPL stdout, so they are excluded naturally.
-    """
     ids = set()
     for line in repl_lines:
         if m := _JSON_QUERY_ID_RE.search(line):
@@ -223,9 +191,8 @@ def parse_throughput(worker_lines, data_query_ids):
     """Return list of (window_start_ms, query_id, query_type, throughput_tup_per_s).
 
     `query_type` is "data" if the queryId was observed in REPL output (initial SELECT or
-    adaptive swap), otherwise "stat" — the statistic-collection queries are deployed
-    internally by StatisticCoordinator and never print a distributed query ID to REPL stdout,
-    so they fall through to the "stat" bucket.
+    adaptive swap), otherwise "stat" — statistic-collection queries don't print a distributed
+    query ID to REPL stdout so they fall through to the "stat" bucket.
     """
     measurements = []
     for line in worker_lines:
@@ -240,7 +207,6 @@ def parse_throughput(worker_lines, data_query_ids):
 
 
 def write_throughput_csv(measurements, output_path):
-    """Write all per-window throughput samples to a CSV for time-series plotting."""
     if not measurements:
         printError("No throughput data collected.")
         return
@@ -272,11 +238,9 @@ def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str):
             printError("Run without --skip-build to compile first.")
             sys.exit(1)
 
-    data_path_a = ensure_dataset_a(path=DEFAULT_OUTPUT_A)
-    data_path_b = ensure_dataset_b(path=DEFAULT_OUTPUT_B)
-    setup_sql = make_setup_sql(data_path_a, data_path_b)
+    data_path = ensure_dataset_a(path=DEFAULT_OUTPUT_A)
+    setup_sql = make_setup_sql(data_path)
 
-    # --- Start worker ---
     printInfo(f"Starting nes-single-node-worker (grpc={WORKER_GRPC}, data={WORKER_DATA})...")
     worker_proc = subprocess.Popen(
         [
@@ -303,7 +267,6 @@ def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str):
         sys.exit(1)
     printSuccess("Worker is up.")
 
-    # --- Start REPL ---
     printInfo("Starting nes-repl (distributed mode)...")
     repl_proc = subprocess.Popen(
         [
@@ -313,10 +276,7 @@ def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str):
             "--companion-source", "bid",
             "--companion-field", "price",
             "--companion-metric", "Cardinality",
-            # With BOTH data query and companion running, each query sees ~30 MTup/s on its
-            # firstPipeline (vs ~390 MTup/s when only the data query was deployed). With
-            # MONOTONIC_TIMESTAMP_FIELD on, BID$TIMESTAMP advances 1 per tuple, so 300 M units
-            # ≈ 10 s wall-clock at 30 MTup/s. Tune as needed.
+            # Same as adaptive script — keeps swap cadence comparable across both runs.
             "--companion-window-size-ms", "300000000",
             "--companion-event-time-field", "BID$TIMESTAMP",
             "--companion-host", WORKER_GRPC,
@@ -332,7 +292,6 @@ def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str):
     )
     repl_thread.start()
 
-    # --- Send SQL setup commands ---
     printInfo("Sending SQL setup commands to REPL...")
     try:
         repl_proc.stdin.write(setup_sql.encode())
@@ -343,10 +302,7 @@ def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str):
         terminate_process(worker_proc, "nes-single-node-worker")
         sys.exit(1)
 
-    # --- Record the distributed query ID assigned to the data query ---
     printInfo("Waiting for data query deployment confirmation...")
-    # Memory source parses the whole CSV at setup() before reporting deployed.
-    # A 2.4 GB file takes ~1–2 min on this box, so give the REPL plenty of slack.
     data_query_id = find_data_query_id(repl_lines, timeout=300.0)
     if data_query_id is None:
         printError("Timed out waiting for the SELECT query response — REPL may have crashed.")
@@ -357,22 +313,18 @@ def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str):
 
     printSuccess(f"Query deployed. Running for {duration} seconds...")
 
-    # --- Run for the configured duration ---
     try:
         time.sleep(duration)
     except KeyboardInterrupt:
         printInfo("Interrupted by user — tearing down early.")
 
-    # --- Tear down ---
     printInfo("Tearing down...")
     terminate_process(repl_proc, "nes-repl")
     terminate_process(worker_proc, "nes-single-node-worker")
 
-    # Wait for streaming threads to drain the remaining pipe output
     repl_thread.join(timeout=5)
     worker_thread.join(timeout=5)
 
-    # --- Parse and write throughput CSV ---
     data_query_ids = collect_all_data_query_ids(repl_lines)
     printInfo(f"Data query IDs observed across all deployments: {data_query_ids}")
     measurements = parse_throughput(worker_lines, data_query_ids)
@@ -383,29 +335,15 @@ def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Adaptive optimization benchmark: single worker + distributed REPL."
+        description="Swap-cost-only benchmark: same redeployment loop as adaptive, constant workload."
     )
-    parser.add_argument(
-        "--duration",
-        type=int,
-        default=120,
-        help="How long (seconds) to let the query run before tearing down (default: 120).",
-    )
-    parser.add_argument(
-        "--skip-build",
-        action="store_true",
-        help="Skip the cmake configure + build step (binaries must already exist).",
-    )
-    parser.add_argument(
-        "--clean",
-        action="store_true",
-        help="Remove and recreate the build directory before building.",
-    )
+    parser.add_argument("--duration", type=int, default=120, help="Run duration in seconds (default: 120).")
+    parser.add_argument("--skip-build", action="store_true", help="Skip the cmake configure + build step.")
+    parser.add_argument("--clean", action="store_true", help="Remove and recreate the build directory before building.")
     parser.add_argument(
         "--output",
-        default="data_throughput_adaptive.csv",
-        help="Path for the throughput CSV output (default: data_throughput_adaptive.csv).",
+        default="data_throughput_constant_workload_swap.csv",
+        help="Path for the throughput CSV output (default: data_throughput_constant_workload_swap.csv).",
     )
     args = parser.parse_args()
-
     run_benchmark(duration=args.duration, skip_build=args.skip_build, clean=args.clean, output=args.output)

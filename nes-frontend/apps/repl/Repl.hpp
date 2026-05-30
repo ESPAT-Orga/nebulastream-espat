@@ -23,6 +23,7 @@
 #include <Statements/StatementHandler.hpp>
 #include <QueryId.hpp>
 #include <RequestStatisticStatement.hpp>
+#include <Statistic.hpp>
 
 namespace NES
 {
@@ -52,7 +53,8 @@ public:
         bool interactiveMode,
         std::stop_token stopToken,
         std::optional<RequestStatisticBuildStatement> companionStatisticRequest = std::nullopt,
-        std::optional<std::function<void(DistributedQueryId, const std::string&)>> onCompanionAssociatedWithQuery = std::nullopt);
+        std::optional<std::function<void(DistributedQueryId, const std::string&, Statistic::StatisticId)>>
+            onCompanionAssociatedWithQuery = std::nullopt);
     void run();
     ~Repl();
 };

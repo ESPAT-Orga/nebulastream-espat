@@ -176,6 +176,13 @@ std::optional<LogicalPlan> replaceOperator(const LogicalPlan& plan, const Operat
             newRoots.push_back(root);
             replaced = true;
         }
+        else
+        {
+            /// Root does not contain the target. Preserve it so multi-root plans
+            /// (e.g. workload-domain splice: data subtree + statistic build branch)
+            /// don't lose unrelated roots when replacing a node in one subtree.
+            newRoots.push_back(root);
+        }
     }
     if (replaced)
     {

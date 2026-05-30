@@ -73,6 +73,19 @@ public:
     /// Otherwise generates a unique StatisticId, creates the collection query, submits it, and registers the entry.
     [[nodiscard]] std::expected<CollectStatisticResult, Exception> collectNewStatistic(const RequestStatisticBuildStatement& statement);
 
+    /// Workload-domain orchestration: instead of submitting a separate self-contained build query,
+    /// splice the build branch into the running data query's plan and submit the merged plan as
+    /// the new data query (terminated by a VoidSink so it doesn't ship per-window-close reports to
+    /// the coordinator). Then deploy a separate heartbeat probe at `probeIntervalMs` cadence that
+    /// pings the coordinator with the registered statisticId so condition triggers continue firing.
+    /// The same `submitPlan` callback is used for both plans — the caller is responsible for
+    /// stopping the running data query before the merged plan is submitted.
+    [[nodiscard]] std::expected<CollectStatisticResult, Exception> collectWorkloadStatistic(
+        const RequestStatisticBuildStatement& statement,
+        const LogicalPlan& dataQueryPlan,
+        const std::function<std::expected<QueryId, Exception>(LogicalPlan)>& submitPlan,
+        uint64_t probeIntervalMs = 10000);
+
     /// Adds a condition trigger to an existing statistic entry.
     /// Returns false if the key is not found in the registry.
     bool addConditionTrigger(const StatisticRegistry::Key& key, ConditionTrigger trigger);

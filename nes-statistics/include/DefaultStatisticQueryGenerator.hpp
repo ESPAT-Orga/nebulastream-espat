@@ -15,7 +15,10 @@
 #pragma once
 
 #include <string>
+#include <CollectionDomain.hpp>
+#include <Operators/LogicalOperator.hpp>
 #include <Plans/LogicalPlan.hpp>
+#include <RequestStatisticStatement.hpp>
 #include <Statistic.hpp>
 #include <StatisticQueryGenerator.hpp>
 
@@ -31,6 +34,31 @@ public:
         const RequestStatisticBuildStatement& request,
         Statistic::StatisticId statisticId,
         const std::string& coordinatorAddress) const override;
+
+    /// Builds the "build branch" sub-plan for a WorkloadDomain statistic: a chain rooted at the
+    /// gRPC sink with WatermarkAssign → StatisticBuild → StatisticStoreWriter → GrpcSink stacked
+    /// on top of `spliceLeaf`. The caller passes the data query's source operator (a
+    /// SourceNameLogicalOperator) as `spliceLeaf`; the returned plan can then be merged into the
+    /// data query via addRootOperators, so the LogicalSourceExpansionRule produces a single
+    /// Union(SourceDescriptors) shared by both the data query's filter chain and the build branch.
+    [[nodiscard]] LogicalPlan generateWorkloadBranch(
+        const WorkloadDomain& domain,
+        const RequestStatisticBuildStatement& request,
+        Statistic::StatisticId statisticId,
+        const std::string& coordinatorAddress,
+        const LogicalOperator& spliceLeaf) const override;
+
+    /// Heartbeat probe for the workload-domain build branch. Builds a tiny standalone query:
+    ///   Generator(constant {statisticId, 0, 0, 0}, 1 tuple / intervalMs) → GrpcSink → coordinator
+    /// The probe lets the coordinator's StatisticRegistry fire condition triggers at a fixed
+    /// wall-clock cadence, decoupled from the data query's window-close rate. The probe records
+    /// don't carry meaningful start/end timestamps — they're heartbeat pings; the swap callback
+    /// in the adaptive setup uses only the statisticId.
+    [[nodiscard]] LogicalPlan generateProbeQuery(
+        Statistic::StatisticId statisticId,
+        const std::string& coordinatorAddress,
+        uint64_t intervalMs,
+        const std::string& sinkWorkerHost) const override;
 };
 
 }

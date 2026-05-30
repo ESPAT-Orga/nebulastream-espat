@@ -310,13 +310,20 @@ def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str):
             repl_binary,
             "-f", "JSON",
             "--companion-statistic",
+            # Splice the build branch into the data query (one source thread feeds both subtrees)
+            # and run a low-rate heartbeat probe to keep the swap callback firing. Without this
+            # flag the REPL falls back to the legacy DataDomain path, which deploys the companion
+            # as an independent query reading from the same logical source — that path
+            # re-instantiates MemorySource per query, doubling CSV parse + RAM and creating
+            # CPU/bandwidth contention with the data query (visible as a ~5-50× throughput drop).
+            "--companion-domain", "workload",
             "--companion-source", "bid",
             "--companion-field", "price",
             "--companion-metric", "Cardinality",
-            # With BOTH data query and companion running, each query sees ~30 MTup/s on its
-            # firstPipeline (vs ~390 MTup/s when only the data query was deployed). With
-            # MONOTONIC_TIMESTAMP_FIELD on, BID$TIMESTAMP advances 1 per tuple, so 300 M units
-            # ≈ 10 s wall-clock at 30 MTup/s. Tune as needed.
+            # With MONOTONIC_TIMESTAMP_FIELD on, BID$TIMESTAMP advances 1 per tuple. The build
+            # branch's window-close cadence determines how often new entries land in the statistic
+            # store; the heartbeat probe (configured via --companion-probe-interval-ms) decouples
+            # the trigger-callback rate from window-close rate.
             "--companion-window-size-ms", "300000000",
             "--companion-event-time-field", "BID$TIMESTAMP",
             "--companion-host", WORKER_GRPC,

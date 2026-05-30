@@ -35,6 +35,7 @@
 
 #include <Identifiers/Identifiers.hpp>
 #include <Operators/SelectionLogicalOperator.hpp>
+#include <Operators/Sources/SourceNameLogicalOperator.hpp>
 #include <Plans/LogicalPlan.hpp>
 #include <QueryManager/GRPCQuerySubmissionBackend.hpp>
 #include <QueryManager/QueryManager.hpp>
@@ -201,6 +202,18 @@ int main(int argc, char** argv)
             .help("Worker host for the companion statistic sink (default: localhost:8080)");
         program.add_argument("--companion-switch-to-sql")
             .help("Full SELECT SQL to deploy when the companion statistic first fires, replacing the original query");
+        program.add_argument("--companion-domain")
+            .default_value(std::string{"data"})
+            .choices("data", "workload")
+            .help(
+                "Companion collection domain. 'data' (default) deploys the companion as an independent query reading "
+                "from --companion-source. 'workload' splices the companion's build branch into the data query's plan "
+                "so a single source thread feeds both — requires the data query to have a single source operator.");
+        program.add_argument("--companion-probe-interval-ms")
+            .default_value(std::string{"10000"})
+            .help(
+                "Heartbeat probe interval in milliseconds for --companion-domain workload (default: 10000). "
+                "Controls how often the coordinator's trigger callbacks fire. Ignored for --companion-domain data.");
 
 #ifdef EMBED_ENGINE
         /// single node worker config
@@ -367,7 +380,8 @@ int main(int argc, char** argv)
             [](auto&& pH1) { return NES::AntlrSQLQueryParser::bindLogicalQueryPlan(std::forward<decltype(pH1)>(pH1)); });
 
         std::optional<NES::RequestStatisticBuildStatement> companionStatisticRequest = std::nullopt;
-        std::optional<std::function<void(NES::DistributedQueryId, const std::string&)>> onCompanionAssociatedWithQuery = std::nullopt;
+        std::optional<std::function<void(NES::DistributedQueryId, const std::string&, NES::Statistic::StatisticId)>>
+            onCompanionAssociatedWithQuery = std::nullopt;
         if (program.get<bool>("--companion-statistic"))
         {
             const auto metric =
@@ -395,22 +409,60 @@ int main(int argc, char** argv)
                 std::optional<NES::DistributedQueryId> currentQueryId;
                 std::string currentSql; // SQL of the currently running query
                 std::string nextSql;    // SQL to deploy on the next trigger
+                /// Set by onCompanionAssociatedWithQuery after the initial workload-companion deploy.
+                /// The swap callback reuses this id so a single registry entry remains valid across
+                /// all re-deployments — the build branch on every spliced plan reports under the same
+                /// statisticId and therefore matches the same trigger entry.
+                std::optional<NES::Statistic::StatisticId> statisticId;
             };
             auto swapState = std::make_shared<AdaptiveSwapState>();
             swapState->nextSql = switchToSql;
 
+            const auto companionDomain = program.get<std::string>("--companion-domain");
+            NES::CollectionDomain collectionDomain = NES::DataDomain{
+                .logicalSourceName = program.get<std::string>("--companion-source"),
+                .fieldName = program.get<std::string>("--companion-field")};
+            if (companionDomain == "workload")
+            {
+                /// WorkloadDomain.queryId / operatorId are placeholders here — collectWorkloadStatistic
+                /// resolves the actual splice target from the data query's LogicalPlan at deploy time.
+                collectionDomain = NES::WorkloadDomain{
+                    .queryId = NES::QueryId::invalid(),
+                    .operatorId = NES::INVALID_OPERATOR_ID,
+                    .fieldName = program.get<std::string>("--companion-field")};
+            }
+
+            /// Splice-related captures for the swap callback re-deploy path. Built once here so the
+            /// swap callback can re-generate the build branch on every fire without having to look
+            /// up either the original request or the coordinator's generator.
+            const auto windowSizeMs = std::stoull(program.get<std::string>("--companion-window-size-ms"));
+            const auto companionField = program.get<std::string>("--companion-field");
+            const auto companionHost = program.get<std::string>("--companion-host");
+            const auto swapCoordinatorAddr = coordinatorAddr;
+            auto swapGenerator = std::make_shared<NES::DefaultStatisticQueryGenerator>();
             companionStatisticRequest = NES::RequestStatisticBuildStatement{
-                .domain = NES::DataDomain{
-                    .logicalSourceName = program.get<std::string>("--companion-source"),
-                    .fieldName = program.get<std::string>("--companion-field")},
+                .domain = collectionDomain,
                 .metric = metric,
-                .windowSizeMs = std::stoull(program.get<std::string>("--companion-window-size-ms")),
+                .windowSizeMs = windowSizeMs,
                 .windowAdvanceMs = windowAdvanceMs,
                 .eventTimeFieldName = eventTimeFieldName,
                 .conditionTrigger = NES::ConditionTrigger{
                     .condition = condition,
                     .callback =
-                        [swapState, queryStatementHandler, callbackBinder, switchToSql](
+                        [swapState,
+                         queryStatementHandler,
+                         callbackBinder,
+                         switchToSql,
+                         companionDomain,
+                         metric,
+                         windowSizeMs,
+                         windowAdvanceMs,
+                         eventTimeFieldName,
+                         condition,
+                         companionField,
+                         companionHost,
+                         swapCoordinatorAddr,
+                         swapGenerator](
                             NES::Statistic::StatisticId statId,
                             NES::Windowing::TimeMeasure startTs,
                             NES::Windowing::TimeMeasure endTs)
@@ -460,6 +512,66 @@ int main(int argc, char** argv)
                             return;
                         }
 
+                        /// Re-splice the workload build branch into the new query's plan so the
+                        /// merged plan keeps reporting under the original statisticId — the existing
+                        /// registry entry continues firing this very callback on each window close.
+                        if (companionDomain == "workload")
+                        {
+                            std::optional<NES::Statistic::StatisticId> originalStatisticId;
+                            {
+                                std::lock_guard lock(swapState->mutex);
+                                originalStatisticId = swapState->statisticId;
+                            }
+                            if (not originalStatisticId.has_value())
+                            {
+                                std::cout
+                                    << "[AdaptiveOpt] Workload-domain swap: no statisticId remembered from the initial deploy; "
+                                       "submitting the next plan without a build branch.\n";
+                                std::flush(std::cout);
+                            }
+                            else
+                            {
+                                try
+                                {
+                                    const auto sources = NES::getOperatorByType<NES::SourceNameLogicalOperator>(queryStmt->plan);
+                                    if (sources.size() != 1)
+                                    {
+                                        std::cout << "[AdaptiveOpt] Workload-domain swap: expected exactly one source operator in the "
+                                                     "next query plan, got " << sources.size() << ". Submitting without build branch.\n";
+                                        std::flush(std::cout);
+                                    }
+                                    else
+                                    {
+                                        const NES::WorkloadDomain workloadDomain{
+                                            .queryId = NES::QueryId::invalid(),
+                                            .operatorId = NES::INVALID_OPERATOR_ID,
+                                            .fieldName = companionField};
+                                        NES::RequestStatisticBuildStatement swapRequest{
+                                            .domain = workloadDomain,
+                                            .metric = metric,
+                                            .windowSizeMs = windowSizeMs,
+                                            .windowAdvanceMs = windowAdvanceMs,
+                                            .eventTimeFieldName = eventTimeFieldName,
+                                            .conditionTrigger = NES::ConditionTrigger{.condition = condition, .callback = {}},
+                                            .options = {{"host", companionHost}}};
+                                        const NES::LogicalOperator spliceLeaf{sources.front()};
+                                        auto branch = swapGenerator->generateWorkloadBranch(
+                                            workloadDomain, swapRequest, *originalStatisticId, swapCoordinatorAddr, spliceLeaf);
+                                        queryStmt->plan = NES::addRootOperators(queryStmt->plan, branch.getRootOperators());
+                                        std::cout << "[AdaptiveOpt] Re-spliced workload build branch (statId="
+                                                  << originalStatisticId->getRawValue() << ").\n";
+                                        std::flush(std::cout);
+                                    }
+                                }
+                                catch (const std::exception& e)
+                                {
+                                    std::cout << "[AdaptiveOpt] Failed to re-splice workload build branch: " << e.what()
+                                              << ". Submitting without build branch.\n";
+                                    std::flush(std::cout);
+                                }
+                            }
+                        }
+
                         std::cout << "[AdaptiveOpt] Deploying SQL:\n" << nextSql << "\n";
                         if (auto explainResult = (*queryStatementHandler)(NES::ExplainQueryStatement{.plan = queryStmt->plan});
                             explainResult.has_value())
@@ -485,12 +597,19 @@ int main(int argc, char** argv)
                             swapState->nextSql = currentSql;
                         }
                     }},
-                .options = {{"host", program.get<std::string>("--companion-host")}}};
-            onCompanionAssociatedWithQuery = [swapState](NES::DistributedQueryId id, const std::string& sql)
+                .options
+                = {{"host", program.get<std::string>("--companion-host")},
+                   {"probe_interval_ms", program.get<std::string>("--companion-probe-interval-ms")}}};
+            onCompanionAssociatedWithQuery
+                = [swapState](NES::DistributedQueryId id, const std::string& sql, NES::Statistic::StatisticId statId)
             {
                 std::lock_guard lock(swapState->mutex);
                 swapState->currentQueryId = std::move(id);
                 swapState->currentSql = sql;
+                if (not swapState->statisticId.has_value())
+                {
+                    swapState->statisticId = statId;
+                }
             };
         }
 

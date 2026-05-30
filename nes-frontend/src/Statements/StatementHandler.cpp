@@ -449,6 +449,15 @@ std::expected<CollectStatisticResult, Exception> StatisticRequestHandler::collec
     return statisticCoordinator->collectNewStatistic(statement);
 }
 
+std::expected<CollectStatisticResult, Exception> StatisticRequestHandler::collectWorkloadStatistic(
+    const RequestStatisticBuildStatement& statement,
+    const LogicalPlan& dataQueryPlan,
+    const std::function<std::expected<QueryId, Exception>(LogicalPlan)>& submitPlan,
+    uint64_t probeIntervalMs)
+{
+    return statisticCoordinator->collectWorkloadStatistic(statement, dataQueryPlan, submitPlan, probeIntervalMs);
+}
+
 std::string StatisticRequestHandler::startGrpcServer()
 {
     return statisticCoordinator->startGrpcServer();

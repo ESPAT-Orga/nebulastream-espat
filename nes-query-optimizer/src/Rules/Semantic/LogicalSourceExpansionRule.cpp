@@ -19,6 +19,7 @@
 #include <string_view>
 #include <typeindex>
 #include <typeinfo>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -63,8 +64,18 @@ bool LogicalSourceExpansionRule::operator==(const LogicalSourceExpansionRule& ot
 
 LogicalPlan LogicalSourceExpansionRule::apply(LogicalPlan queryPlan) const
 {
+    /// A SourceNameLogicalOperator reachable from multiple root operators (e.g. a workload-domain
+    /// splice where a stat-build subtree shares the data-query's source) appears multiple times in
+    /// the BFS getOperatorByType traversal. Deduplicate by OperatorId so we expand each unique
+    /// source once and let replaceSubtree update every occurrence in the plan in one pass.
+    std::unordered_set<OperatorId> processed;
     for (const auto& sourceOp : getOperatorByType<SourceNameLogicalOperator>(queryPlan))
     {
+        if (not processed.insert(sourceOp.getId()).second)
+        {
+            continue;
+        }
+
         const auto logicalSourceOpt = sourceCatalog->getLogicalSource(sourceOp->getLogicalSourceName());
         if (not logicalSourceOpt.has_value())
         {
@@ -87,20 +98,19 @@ LogicalPlan LogicalSourceExpansionRule::apply(LogicalPlan queryPlan) const
             | std::views::transform([](const auto& entry) { return LogicalOperator{SourceDescriptorLogicalOperator{entry}}; })
             | std::ranges::to<std::vector>();
 
-        INVARIANT(getParents(queryPlan, sourceOp).size() == 1, "Source name operator must have exactly one parent");
-        auto parent = getParents(queryPlan, sourceOp).front();
-        INVARIANT(
-            parent.getChildren().size() == 1 && parent.getChildren().front() == sourceOp,
-            "Parent of source name operator must have exactly one child, the source itself");
-
-        auto newParent = parent.withChildren({UnionLogicalOperator{}.withChildren(std::move(expandedSourceOperators))});
-        auto replaceResult = replaceSubtree(queryPlan, parent.getId(), newParent);
+        /// Replace the source-name op (rather than its parent) with the Union(SourceDescriptors)
+        /// subtree. This handles both single-parent (the historical assumption) and multi-parent
+        /// DAG-shaped plans uniformly: replaceSubtree by id substitutes every occurrence in the
+        /// plan, so all parents converge on the same expanded subtree without further bookkeeping.
+        const auto unionWithExpansion
+            = LogicalOperator{UnionLogicalOperator{}.withChildren(std::move(expandedSourceOperators))};
+        auto replaceResult = replaceSubtree(queryPlan, sourceOp.getId(), unionWithExpansion);
 
         INVARIANT(
             replaceResult.has_value(),
-            "Failed to replace operator {} with {}",
-            parent.explain(ExplainVerbosity::Debug),
-            newParent.explain(ExplainVerbosity::Debug));
+            "Failed to replace SourceNameLogicalOperator {} with expansion {}",
+            sourceOp.explain(ExplainVerbosity::Debug),
+            unionWithExpansion.explain(ExplainVerbosity::Debug));
         queryPlan = std::move(replaceResult.value());
     }
     return queryPlan;

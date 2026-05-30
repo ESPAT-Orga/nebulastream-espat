@@ -14,9 +14,13 @@
 
 #pragma once
 
+#include <cstdint>
 #include <string>
+#include <CollectionDomain.hpp>
+#include <Operators/LogicalOperator.hpp>
 #include <Plans/LogicalPlan.hpp>
 #include <Statistic.hpp>
+#include <ErrorHandling.hpp>
 
 namespace NES
 {
@@ -39,6 +43,40 @@ public:
     [[nodiscard]] virtual LogicalPlan generateQuery(
         const RequestStatisticBuildStatement& request, Statistic::StatisticId statisticId, const std::string& coordinatorAddress) const
         = 0;
+
+    /// Builds the "build branch" sub-plan for a WorkloadDomain statistic: a chain rooted at the
+    /// gRPC sink stacked on top of `spliceLeaf` (the data query's source operator). The caller
+    /// then merges the returned plan's roots into the data query's plan so the optimizer's
+    /// LogicalSourceExpansionRule produces a single shared Union(SourceDescriptors). Default impl
+    /// throws NotImplemented — generators that don't support WorkloadDomain can leave it that way.
+    [[nodiscard]] virtual LogicalPlan generateWorkloadBranch(
+        const WorkloadDomain& domain,
+        const RequestStatisticBuildStatement& request,
+        Statistic::StatisticId statisticId,
+        const std::string& coordinatorAddress,
+        const LogicalOperator& spliceLeaf) const
+    {
+        (void)domain;
+        (void)request;
+        (void)statisticId;
+        (void)coordinatorAddress;
+        (void)spliceLeaf;
+        throw NotImplemented("This StatisticQueryGenerator does not support WorkloadDomain build-branch generation");
+    }
+
+    /// Heartbeat probe used alongside the workload-domain build branch. Default throws.
+    [[nodiscard]] virtual LogicalPlan generateProbeQuery(
+        Statistic::StatisticId statisticId,
+        const std::string& coordinatorAddress,
+        uint64_t intervalMs,
+        const std::string& sinkWorkerHost) const
+    {
+        (void)statisticId;
+        (void)coordinatorAddress;
+        (void)intervalMs;
+        (void)sinkWorkerHost;
+        throw NotImplemented("This StatisticQueryGenerator does not support workload-domain heartbeat probes");
+    }
 };
 
 }

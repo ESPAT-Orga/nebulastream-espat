@@ -106,9 +106,10 @@ std::set<std::type_index> DecideJoinTypesRule::requiredBy() const
 
 LogicalPlan DecideJoinTypesRule::apply(const LogicalPlan& queryPlan) const
 {
-    PRECONDITION(queryPlan.getRootOperators().size() == 1, "Only single root operators are supported for now");
-    PRECONDITION(not queryPlan.getRootOperators().empty(), "Query must have a sink root operator");
-    return queryPlan.withRootOperators({apply(queryPlan.getRootOperators()[0])});
+    PRECONDITION(not queryPlan.getRootOperators().empty(), "Query must have at least one root operator");
+    auto roots = queryPlan.getRootOperators() | std::views::transform([this](const auto& root) { return apply(root); })
+        | std::ranges::to<std::vector>();
+    return queryPlan.withRootOperators(std::move(roots));
 }
 
 bool DecideJoinTypesRule::operator==(const DecideJoinTypesRule& other) const

@@ -24,6 +24,7 @@
 #include <vector>
 #include <DataTypes/Schema.hpp>
 #include <Identifiers/Identifiers.hpp>
+#include <Operators/Sources/SourceNameLogicalOperator.hpp>
 #include <Operators/Statistic/LogicalStatisticFields.hpp>
 #include <Plans/LogicalPlan.hpp>
 #include <Plans/LogicalPlanBuilder.hpp>
@@ -129,6 +130,88 @@ std::expected<CollectStatisticResult, Exception> StatisticCoordinator::collectNe
                 registry.registerStatistic(key, queryId, statisticId, std::move(triggers));
                 return CollectStatisticResult{.queryId = queryId, .statisticId = statisticId, .alreadyExisted = false};
             });
+}
+
+std::expected<CollectStatisticResult, Exception> StatisticCoordinator::collectWorkloadStatistic(
+    const RequestStatisticBuildStatement& statement,
+    const LogicalPlan& dataQueryPlan,
+    const std::function<std::expected<QueryId, Exception>(LogicalPlan)>& submitPlan,
+    const uint64_t probeIntervalMs)
+{
+    const auto* domain = std::get_if<WorkloadDomain>(&statement.domain);
+    if (domain == nullptr)
+    {
+        return std::unexpected(InvalidConfigParameter("collectWorkloadStatistic requires a WorkloadDomain in the request"));
+    }
+
+    /// MVP: assume the data query has exactly one SourceNameLogicalOperator and splice the build
+    /// branch as a sibling consumer of that operator. This matches the adaptive-optimization use
+    /// case (single Memory source feeding a filter chain). Multi-source / join-shaped data queries
+    /// would need a richer splice (matching against domain.operatorId explicitly).
+    const auto sources = getOperatorByType<SourceNameLogicalOperator>(dataQueryPlan);
+    if (sources.empty())
+    {
+        return std::unexpected(InvalidConfigParameter("WorkloadDomain splice: data query has no source-name operator"));
+    }
+    if (sources.size() != 1)
+    {
+        return std::unexpected(NotImplemented(
+            "WorkloadDomain splice MVP requires the data query to have exactly one source (got {})", sources.size()));
+    }
+    const LogicalOperator spliceLeaf{sources.front()};
+
+    const StatisticRegistry::Key key{
+        .metric = statement.metric, .collectionDomain = statement.domain, .windowSize = Windowing::TimeMeasure{statement.windowSizeMs}};
+    if (const auto existing = registry.find(key))
+    {
+        if (statement.conditionTrigger.has_value())
+        {
+            registry.addTrigger(key, statement.conditionTrigger.value());
+        }
+        return CollectStatisticResult{.queryId = existing->queryId, .statisticId = existing->statisticId, .alreadyExisted = true};
+    }
+
+    const auto statisticId = Statistic::StatisticId{nextStatisticId.fetch_add(1)};
+    auto buildBranch = queryGenerator->generateWorkloadBranch(*domain, statement, statisticId, coordinatorAddress, spliceLeaf);
+    auto mergedPlan = addRootOperators(dataQueryPlan, buildBranch.getRootOperators());
+    auto submittedMerged = submitPlan(std::move(mergedPlan));
+    if (not submittedMerged.has_value())
+    {
+        return std::unexpected(submittedMerged.error());
+    }
+    const auto mergedQueryId = std::move(submittedMerged.value());
+
+    /// Deploy the heartbeat probe separately. It ticks at probeIntervalMs and pings the
+    /// coordinator with the registered statisticId; the registry entry then fires whichever
+    /// condition triggers are registered for this statistic. If the probe fails to deploy we
+    /// still register the statistic so subsequent re-splices on swap reuse the same id — the
+    /// trigger just won't fire until a probe is up.
+    const auto hostIt = statement.options.find("host");
+    const auto& sinkWorkerHost = hostIt != statement.options.end() ? hostIt->second : std::string{"localhost:8080"};
+    try
+    {
+        auto probePlan = queryGenerator->generateProbeQuery(statisticId, coordinatorAddress, probeIntervalMs, sinkWorkerHost);
+        auto submittedProbe = submitPlan(std::move(probePlan));
+        if (not submittedProbe.has_value())
+        {
+            NES_WARNING(
+                "Workload-domain probe deploy failed (statisticId={}): {}",
+                statisticId.getRawValue(),
+                submittedProbe.error().what());
+        }
+    }
+    catch (const std::exception& e)
+    {
+        NES_WARNING("Workload-domain probe construction threw (statisticId={}): {}", statisticId.getRawValue(), e.what());
+    }
+
+    std::vector<ConditionTrigger> triggers;
+    if (statement.conditionTrigger.has_value())
+    {
+        triggers.emplace_back(*statement.conditionTrigger);
+    }
+    registry.registerStatistic(key, mergedQueryId, statisticId, std::move(triggers));
+    return CollectStatisticResult{.queryId = mergedQueryId, .statisticId = statisticId, .alreadyExisted = false};
 }
 
 bool StatisticCoordinator::addConditionTrigger(const StatisticRegistry::Key& key, ConditionTrigger trigger)

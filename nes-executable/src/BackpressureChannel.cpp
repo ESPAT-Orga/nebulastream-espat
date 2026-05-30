@@ -76,25 +76,39 @@ bool BackpressureController::releasePressure()
 
 void BackpressureListener::wait(const std::stop_token& stopToken) const
 {
-    auto state = channel->stateMtx.lock();
-    /// If the channel is open, backpressureListener can proceed
-    if (*state == Channel::State::OPEN)
+    /// Block while ANY channel is closed; resume when all are open (or stop is requested).
+    for (const auto& channel : channels)
     {
-        return;
-    }
-
-    bool destroyed = false;
-    /// Wait for the channel state to change
-    channel->change.wait(
-        state.as_lock(),
-        stopToken,
-        [&destroyed, &state] -> bool
+        if (stopToken.stop_requested())
         {
-            destroyed = *state == Channel::DESTROYED;
-            return destroyed || *state == Channel::OPEN;
-        });
+            return;
+        }
+        auto state = channel->stateMtx.lock();
+        if (*state == Channel::State::OPEN)
+        {
+            continue;
+        }
 
-    INVARIANT(!destroyed, "Backpressure Controller was destroyed before the BackpressureListener");
+        bool destroyed = false;
+        channel->change.wait(
+            state.as_lock(),
+            stopToken,
+            [&destroyed, &state] -> bool
+            {
+                destroyed = *state == Channel::DESTROYED;
+                return destroyed || *state == Channel::OPEN;
+            });
+
+        INVARIANT(!destroyed, "Backpressure Controller was destroyed before the BackpressureListener");
+    }
+}
+
+void BackpressureListener::merge(BackpressureListener other)
+{
+    for (auto& channel : other.channels)
+    {
+        channels.push_back(std::move(channel));
+    }
 }
 
 std::pair<BackpressureController, BackpressureListener> createBackpressureChannel()

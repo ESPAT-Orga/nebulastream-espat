@@ -82,7 +82,32 @@ WORKER_DATA = "localhost:9090"
 # Memory source alternates between regime-A and regime-B datasets every REPLAYS_PER_FILE
 # full passes — for the passthrough the regime doesn't matter, but keeping the same source
 # config across all four scripts makes them directly comparable.
-def make_setup_sql(data_path_a: str, data_path_b: str) -> str:
+def _expensive_filter_clause(sqrts: int) -> str:
+    """Per-tuple SQRT chain summed > 0 (always passes). Empty for sqrts <= 0."""
+    if sqrts <= 0:
+        return ""
+    terms = " + ".join(
+        f"SQRT({'bidValue' if i % 2 == 0 else 'price'} + FLOAT64({1000 + i // 2}))"
+        for i in range(sqrts)
+    )
+    return f"{terms} > FLOAT64(0.0)"
+
+
+def make_setup_sql(data_path_a: str, data_path_b: str, sqrts: int) -> str:
+    expensive = _expensive_filter_clause(sqrts)
+    # Passthrough has no real filters; inject the SQRT chain as the sole always-true WHERE so this
+    # script is comparable to the filter-bearing baselines under the same per-tuple CPU load.
+    if expensive:
+        select_block = (
+            f"SELECT timestamp, auctionId, bidValue, price FROM bid WHERE {expensive} "
+            "INTO someSink "
+            "SET (FALSE as `QUERY`.FUSE);"
+        )
+    else:
+        select_block = (
+            "SELECT timestamp, auctionId, bidValue, price FROM bid INTO someSink "
+            "SET (FALSE as `QUERY`.FUSE);"
+        )
     return f"""\
 CREATE WORKER "{WORKER_GRPC}" SET ('{WORKER_DATA}' AS DATA);
 CREATE LOGICAL SOURCE bid(timestamp UINT64 NOT NULL, auctionId INT32 NOT NULL, bidValue FLOAT64 NOT NULL, price FLOAT64 NOT NULL);
@@ -103,8 +128,7 @@ SET(
     'CSV' as `SINK`.OUTPUT_FORMAT,
     '{WORKER_GRPC}' AS `SINK`.HOST
 );
-SELECT timestamp, auctionId, bidValue, price FROM bid INTO someSink
-SET (FALSE as `QUERY`.FUSE);
+{select_block}
 """
 
 _THROUGHPUT_RE = re.compile(
@@ -191,7 +215,7 @@ def write_throughput_csv(measurements, output_path):
     printSuccess(f"Throughput data ({len(measurements)} samples) written to {os.path.abspath(output_path)}")
 
 
-def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str):
+def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str, sqrts: int = 0):
     check_repository_root()
 
     if clean:
@@ -212,7 +236,8 @@ def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str):
 
     data_path_a = ensure_dataset_a(path=DEFAULT_OUTPUT_A)
     data_path_b = ensure_dataset_b(path=DEFAULT_OUTPUT_B)
-    setup_sql = make_setup_sql(data_path_a, data_path_b)
+    setup_sql = make_setup_sql(data_path_a, data_path_b, sqrts)
+    printInfo(f"Using {sqrts} SQRT operators (passthrough: applied as always-true WHERE).")
 
     printInfo(f"Starting nes-single-node-worker (grpc={WORKER_GRPC}, data={WORKER_DATA})...")
     worker_proc = subprocess.Popen(
@@ -306,5 +331,19 @@ if __name__ == "__main__":
         default="data_throughput_passthrough.csv",
         help="Path for the throughput CSV output (default: data_throughput_passthrough.csv).",
     )
+    parser.add_argument(
+        "--sqrts",
+        type=int,
+        default=0,
+        help="Number of SQRT operators to inject as an always-true WHERE on the source (default: 0). "
+        "Passthrough has no filters to sit between, so this adds per-tuple CPU load directly after "
+        "the source for comparison with the filter-bearing baselines.",
+    )
     args = parser.parse_args()
-    run_benchmark(duration=args.duration, skip_build=args.skip_build, clean=args.clean, output=args.output)
+    run_benchmark(
+        duration=args.duration,
+        skip_build=args.skip_build,
+        clean=args.clean,
+        output=args.output,
+        sqrts=args.sqrts,
+    )

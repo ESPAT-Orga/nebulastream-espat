@@ -77,8 +77,43 @@ WORKER_GRPC = "localhost:8080"
 WORKER_DATA = "localhost:9090"
 
 
-def make_setup_sql(data_path: str) -> str:
+def _expensive_filter_clause(sqrts: int) -> str:
+    """Builds a per-tuple SQRT chain whose sum is trivially > 0 (always passes), so it can be
+    used as an intermediate `WHERE` between the two real filters to make the middle pipeline
+    CPU-bound. Each argument is `col + 1000+i/2` to guarantee positive SQRT inputs regardless of
+    the field's distribution. Returns an empty string for sqrts <= 0 — callers must skip the
+    enclosing subquery in that case so the original two-filter SQL is unchanged.
+    """
+    if sqrts <= 0:
+        return ""
+    terms = " + ".join(
+        f"SQRT({'bidValue' if i % 2 == 0 else 'price'} + FLOAT64({1000 + i // 2}))"
+        for i in range(sqrts)
+    )
+    return f"{terms} > FLOAT64(0.0)"
+
+
+def make_setup_sql(data_path: str, sqrts: int) -> str:
     """Same SQL shape as the adaptive script, but with only one Memory-source file."""
+    expensive = _expensive_filter_clause(sqrts)
+    if expensive:
+        select_block = f"""\
+SELECT timestamp, auctionId, bidValue, price
+FROM (
+  SELECT timestamp, auctionId, bidValue, price
+  FROM (SELECT timestamp, auctionId, bidValue, price FROM bid WHERE bidValue < FLOAT64(10.45))
+  WHERE {expensive}
+)
+WHERE price < FLOAT64(888.49)
+INTO someSink
+SET (FALSE as `QUERY`.FUSE);"""
+    else:
+        select_block = """\
+SELECT timestamp, auctionId, bidValue, price
+FROM (SELECT timestamp, auctionId, bidValue, price FROM bid WHERE bidValue < FLOAT64(10.45))
+WHERE price < FLOAT64(888.49)
+INTO someSink
+SET (FALSE as `QUERY`.FUSE);"""
     return f"""\
 CREATE WORKER "{WORKER_GRPC}" SET ('{WORKER_DATA}' AS DATA);
 CREATE LOGICAL SOURCE bid(timestamp UINT64 NOT NULL, auctionId INT32 NOT NULL, bidValue FLOAT64 NOT NULL, price FLOAT64 NOT NULL);
@@ -98,22 +133,33 @@ SET(
     'CSV' as `SINK`.OUTPUT_FORMAT,
     '{WORKER_GRPC}' AS `SINK`.HOST
 );
-SELECT timestamp, auctionId, bidValue, price
-FROM (SELECT timestamp, auctionId, bidValue, price FROM bid WHERE bidValue < FLOAT64(10.45))
-WHERE price < FLOAT64(888.49)
-INTO someSink
-SET (FALSE as `QUERY`.FUSE);
+{select_block}
 """
 
-# Same query with filter order reversed (price first, then bidValue). The companion's swap
-# callback redeploys the data query as this every time a window closes.
-REVERSED_QUERY_SQL = (
-    "SELECT timestamp, auctionId, bidValue, price "
-    "FROM (SELECT timestamp, auctionId, bidValue, price FROM bid WHERE price < FLOAT64(888.49)) "
-    "WHERE bidValue < FLOAT64(10.45) "
-    "INTO someSink "
-    "SET (FALSE as `QUERY`.FUSE);"
-)
+
+def make_reversed_query_sql(sqrts: int) -> str:
+    """Filter-reversed alternate that the workload-switch flow attaches as the alternate
+    pipeline. Same SQRT injection point as the data query."""
+    expensive = _expensive_filter_clause(sqrts)
+    if expensive:
+        return (
+            "SELECT timestamp, auctionId, bidValue, price "
+            "FROM ("
+            "SELECT timestamp, auctionId, bidValue, price "
+            "FROM (SELECT timestamp, auctionId, bidValue, price FROM bid WHERE price < FLOAT64(888.49)) "
+            f"WHERE {expensive}"
+            ") "
+            "WHERE bidValue < FLOAT64(10.45) "
+            "INTO someSink "
+            "SET (FALSE as `QUERY`.FUSE);"
+        )
+    return (
+        "SELECT timestamp, auctionId, bidValue, price "
+        "FROM (SELECT timestamp, auctionId, bidValue, price FROM bid WHERE price < FLOAT64(888.49)) "
+        "WHERE bidValue < FLOAT64(10.45) "
+        "INTO someSink "
+        "SET (FALSE as `QUERY`.FUSE);"
+    )
 
 _THROUGHPUT_RE = re.compile(
     r"Throughput for queryId QueryId\(local=[^,)]+, distributed=([^)]+)\)"
@@ -219,7 +265,7 @@ def write_throughput_csv(measurements, output_path):
     printSuccess(f"Throughput data ({len(measurements)} samples) written to {os.path.abspath(output_path)}")
 
 
-def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str):
+def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str, sqrts: int = 0):
     check_repository_root()
 
     if clean:
@@ -239,7 +285,8 @@ def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str):
             sys.exit(1)
 
     data_path = ensure_dataset_a(path=DEFAULT_OUTPUT_A)
-    setup_sql = make_setup_sql(data_path)
+    setup_sql = make_setup_sql(data_path, sqrts)
+    printInfo(f"Using {sqrts} SQRT operators between filters.")
 
     printInfo(f"Starting nes-single-node-worker (grpc={WORKER_GRPC}, data={WORKER_DATA})...")
     worker_proc = subprocess.Popen(
@@ -284,7 +331,7 @@ def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str):
             "--companion-window-size-ms", "300000000",
             "--companion-event-time-field", "BID$TIMESTAMP",
             "--companion-host", WORKER_GRPC,
-            "--companion-switch-to-sql", REVERSED_QUERY_SQL,
+            "--companion-switch-to-sql", make_reversed_query_sql(sqrts),
         ],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
@@ -349,5 +396,19 @@ if __name__ == "__main__":
         default="data_throughput_constant_workload_swap.csv",
         help="Path for the throughput CSV output (default: data_throughput_constant_workload_swap.csv).",
     )
+    parser.add_argument(
+        "--sqrts",
+        type=int,
+        default=0,
+        help="Number of SQRT operators to insert between the two filters (default: 0). The SQRT chain "
+        "is an always-true WHERE that adds per-tuple CPU cost in the middle pipeline — useful for "
+        "exposing throughput differences between filter orderings.",
+    )
     args = parser.parse_args()
-    run_benchmark(duration=args.duration, skip_build=args.skip_build, clean=args.clean, output=args.output)
+    run_benchmark(
+        duration=args.duration,
+        skip_build=args.skip_build,
+        clean=args.clean,
+        output=args.output,
+        sqrts=args.sqrts,
+    )

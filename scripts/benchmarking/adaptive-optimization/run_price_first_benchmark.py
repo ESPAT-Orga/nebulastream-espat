@@ -79,7 +79,37 @@ WORKER_DATA = "localhost:9090"
 # price-first ordering: filter on price first, then bidValue. Memory source alternates between
 # regime-A (price-filter non-selective → this query's order is suboptimal) and regime-B
 # (price-filter selective → this query's order is the cheap one).
-def make_setup_sql(data_path_a: str, data_path_b: str) -> str:
+def _expensive_filter_clause(sqrts: int) -> str:
+    """Per-tuple SQRT chain summed > 0 (always passes). Empty for sqrts <= 0."""
+    if sqrts <= 0:
+        return ""
+    terms = " + ".join(
+        f"SQRT({'bidValue' if i % 2 == 0 else 'price'} + FLOAT64({1000 + i // 2}))"
+        for i in range(sqrts)
+    )
+    return f"{terms} > FLOAT64(0.0)"
+
+
+def make_setup_sql(data_path_a: str, data_path_b: str, sqrts: int) -> str:
+    expensive = _expensive_filter_clause(sqrts)
+    if expensive:
+        select_block = f"""\
+SELECT timestamp, auctionId, bidValue, price
+FROM (
+  SELECT timestamp, auctionId, bidValue, price
+  FROM (SELECT timestamp, auctionId, bidValue, price FROM bid WHERE price < FLOAT64(888.49))
+  WHERE {expensive}
+)
+WHERE bidValue < FLOAT64(10.45)
+INTO someSink
+SET (FALSE as `QUERY`.FUSE);"""
+    else:
+        select_block = """\
+SELECT timestamp, auctionId, bidValue, price
+FROM (SELECT timestamp, auctionId, bidValue, price FROM bid WHERE price < FLOAT64(888.49))
+WHERE bidValue < FLOAT64(10.45)
+INTO someSink
+SET (FALSE as `QUERY`.FUSE);"""
     return f"""\
 CREATE WORKER "{WORKER_GRPC}" SET ('{WORKER_DATA}' AS DATA);
 CREATE LOGICAL SOURCE bid(timestamp UINT64 NOT NULL, auctionId INT32 NOT NULL, bidValue FLOAT64 NOT NULL, price FLOAT64 NOT NULL);
@@ -100,11 +130,7 @@ SET(
     'CSV' as `SINK`.OUTPUT_FORMAT,
     '{WORKER_GRPC}' AS `SINK`.HOST
 );
-SELECT timestamp, auctionId, bidValue, price
-FROM (SELECT timestamp, auctionId, bidValue, price FROM bid WHERE price < FLOAT64(888.49))
-WHERE bidValue < FLOAT64(10.45)
-INTO someSink
-SET (FALSE as `QUERY`.FUSE);
+{select_block}
 """
 
 _THROUGHPUT_RE = re.compile(
@@ -191,7 +217,7 @@ def write_throughput_csv(measurements, output_path):
     printSuccess(f"Throughput data ({len(measurements)} samples) written to {os.path.abspath(output_path)}")
 
 
-def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str):
+def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str, sqrts: int = 0):
     check_repository_root()
 
     if clean:
@@ -212,7 +238,8 @@ def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str):
 
     data_path_a = ensure_dataset_a(path=DEFAULT_OUTPUT_A)
     data_path_b = ensure_dataset_b(path=DEFAULT_OUTPUT_B)
-    setup_sql = make_setup_sql(data_path_a, data_path_b)
+    setup_sql = make_setup_sql(data_path_a, data_path_b, sqrts)
+    printInfo(f"Using {sqrts} SQRT operators between filters.")
 
     printInfo(f"Starting nes-single-node-worker (grpc={WORKER_GRPC}, data={WORKER_DATA})...")
     worker_proc = subprocess.Popen(
@@ -309,5 +336,18 @@ if __name__ == "__main__":
         default="data_throughput_price_first.csv",
         help="Path for the throughput CSV output (default: data_throughput_price_first.csv).",
     )
+    parser.add_argument(
+        "--sqrts",
+        type=int,
+        default=0,
+        help="Number of SQRT operators to insert between the two filters (default: 0). The SQRT chain "
+        "is an always-true WHERE adding per-tuple CPU cost in the middle pipeline.",
+    )
     args = parser.parse_args()
-    run_benchmark(duration=args.duration, skip_build=args.skip_build, clean=args.clean, output=args.output)
+    run_benchmark(
+        duration=args.duration,
+        skip_build=args.skip_build,
+        clean=args.clean,
+        output=args.output,
+        sqrts=args.sqrts,
+    )

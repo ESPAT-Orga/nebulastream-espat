@@ -15,6 +15,7 @@
 #pragma once
 #include <memory>
 #include <ostream>
+#include <string>
 #include <utility>
 #include <vector>
 #include <Identifiers/Identifiers.hpp>
@@ -31,7 +32,19 @@ namespace NES
 /// In this form the Query could be executed, by starting all pipelines, sinks and passing the successor pipelines into the queries sources.
 struct ExecutableQueryPlan
 {
-    using SourceWithSuccessor = std::pair<std::unique_ptr<SourceHandle>, std::vector<std::weak_ptr<ExecutablePipeline>>>;
+    /// One source entry. In the normal case `source` is a freshly-built SourceHandle that the
+    /// engine starts on a dedicated thread. When `spliceToRunningSource == true`, `source` is
+    /// nullptr: the engine must NOT spawn a thread but instead look up the running source for
+    /// `logicalSourceName` in the worker-wide RunningSourceRegistry and graft this entry's
+    /// `successors` onto it. Strict: missing match → fail.
+    struct SourceWithSuccessor
+    {
+        std::unique_ptr<SourceHandle> source;
+        std::vector<std::weak_ptr<ExecutablePipeline>> successors;
+        bool spliceToRunningSource = false;
+        std::string logicalSourceName;
+    };
+
     static std::unique_ptr<ExecutableQueryPlan> instantiate(CompiledQueryPlan& compiledQueryPlan, const SourceProvider& sourceProvider);
 
     ExecutableQueryPlan(

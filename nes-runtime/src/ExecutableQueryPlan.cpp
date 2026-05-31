@@ -51,10 +51,21 @@ std::ostream& operator<<(std::ostream& os, const ExecutableQueryPlan& instantiat
         }
     };
 
-    for (const auto& [source, successors] : instantiatedQueryPlan.sources)
+    for (const auto& entry : instantiatedQueryPlan.sources)
     {
-        os << *source << '\n';
-        for (const auto& successor : successors)
+        if (entry.spliceToRunningSource)
+        {
+            os << "<splice into running source: '" << entry.logicalSourceName << "'>\n";
+        }
+        else if (entry.source)
+        {
+            os << *entry.source << '\n';
+        }
+        else
+        {
+            os << "<null source>\n";
+        }
+        for (const auto& successor : entry.successors)
         {
             printNode(successor, 1);
         }
@@ -103,11 +114,28 @@ ExecutableQueryPlan::instantiate(CompiledQueryPlan& compiledQueryPlan, const Sou
         }
     }
 
-    for (auto [originId, sourcePipelineId, operatorId, sourceDescriptor, successors] : compiledQueryPlan.sources)
+    for (auto& compiledSource : compiledQueryPlan.sources)
     {
-        std::ranges::copy(instantiatedSinksWithSourcePredecessor[operatorId], std::back_inserter(successors));
-        instantiatedSources.emplace_back(
-            sourceProvider.lower(originId, sourcePipelineId, mergedListener, sourceDescriptor), std::move(successors));
+        std::ranges::copy(
+            instantiatedSinksWithSourcePredecessor[compiledSource.operatorId], std::back_inserter(compiledSource.successors));
+        if (compiledSource.spliceToRunningSource)
+        {
+            /// Defer the registry lookup to RunningQueryPlan::start where our RunningQueryPlanNodes
+            /// have been created. Here we only flag the entry; the runtime fan-out happens later.
+            instantiatedSources.emplace_back(ExecutableQueryPlan::SourceWithSuccessor{
+                .source = nullptr,
+                .successors = std::move(compiledSource.successors),
+                .spliceToRunningSource = true,
+                .logicalSourceName = compiledSource.logicalSourceName});
+        }
+        else
+        {
+            instantiatedSources.emplace_back(ExecutableQueryPlan::SourceWithSuccessor{
+                .source = sourceProvider.lower(compiledSource.originId, compiledSource.pipelineId, mergedListener, compiledSource.descriptor),
+                .successors = std::move(compiledSource.successors),
+                .spliceToRunningSource = false,
+                .logicalSourceName = compiledSource.logicalSourceName});
+        }
     }
 
 

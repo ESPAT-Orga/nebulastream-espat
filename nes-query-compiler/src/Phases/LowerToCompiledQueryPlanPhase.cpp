@@ -73,12 +73,14 @@ void LowerToCompiledQueryPlanPhase::processSource(const std::shared_ptr<Pipeline
             executableSuccessorPipelines.emplace_back(*executableSuccessor);
         }
     }
-    sources.emplace_back(
-        sourceOperator.getOriginId(),
-        pipeline->getPipelineId(),
-        sourceOperator.id,
-        sourceOperator.getDescriptor(),
-        std::move(executableSuccessorPipelines));
+    sources.emplace_back(CompiledQueryPlan::Source{
+        .originId = sourceOperator.getOriginId(),
+        .pipelineId = pipeline->getPipelineId(),
+        .operatorId = sourceOperator.id,
+        .descriptor = sourceOperator.getDescriptor(),
+        .successors = std::move(executableSuccessorPipelines),
+        .spliceToRunningSource = sourceOperator.spliceToRunningSource,
+        .logicalSourceName = sourceOperator.logicalSourceName});
 }
 
 void LowerToCompiledQueryPlanPhase::processSink(const Predecessor& predecessor, const std::shared_ptr<Pipeline>& pipeline)

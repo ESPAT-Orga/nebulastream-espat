@@ -15,6 +15,7 @@
 #pragma once
 
 #include <memory>
+#include <string>
 #include <variant>
 #include <vector>
 #include <Identifiers/Identifiers.hpp>
@@ -49,6 +50,14 @@ struct CompiledQueryPlan
 
         /// Sources do not have any predecessors
         std::vector<std::weak_ptr<ExecutablePipeline>> successors;
+
+        /// If true, the query lowering tagged this source with SpliceToRunningSourceTrait. At
+        /// instantiation time the engine MUST NOT spawn a source thread; instead it looks up the
+        /// already-running source for `logicalSourceName` and grafts this entry's successors onto
+        /// it. logicalSourceName is taken from descriptor.getLogicalSource() at lowering time and
+        /// pinned here so the runtime path doesn't depend on the descriptor still being live.
+        bool spliceToRunningSource = false;
+        std::string logicalSourceName;
     };
 
     struct Sink

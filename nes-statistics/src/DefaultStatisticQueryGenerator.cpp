@@ -33,6 +33,8 @@
 #include <Identifiers/SketchDimensions.hpp>
 #include <Operators/Sources/SourceNameLogicalOperator.hpp>
 #include <Operators/Statistic/LogicalStatisticFields.hpp>
+#include <Traits/SpliceToRunningSourceTrait.hpp>
+#include <Traits/TraitSet.hpp>
 #include <Operators/Windows/Aggregations/Histogram/EquiWidthHistogramLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/Sample/ReservoirSampleLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/Sketch/CountMinSketchLogicalFunction.hpp>
@@ -289,7 +291,18 @@ LogicalPlan DefaultStatisticQueryGenerator::generateWorkloadBranch(
     }
     const auto sourceNameUpper = toUpper((*sourceNameOp)->getLogicalSourceName());
     const auto fieldNameUpper = toUpper(domain.fieldName);
-    LogicalPlan basePlan{INVALID_QUERY_ID, {spliceLeaf}};
+
+    /// Stamp SpliceToRunningSourceTrait on the build branch's source operator so the worker, on
+    /// instantiating this source, splices into the already-running data-query source thread for
+    /// the same logical source instead of spawning a second source thread.
+    auto taggedSource = spliceLeaf;
+    {
+        auto ts = taggedSource.getTraitSet();
+        [[maybe_unused]] const auto inserted = tryInsert(ts, SpliceToRunningSourceTrait{});
+        taggedSource = taggedSource.withTraitSet(ts);
+    }
+
+    LogicalPlan basePlan{INVALID_QUERY_ID, {taggedSource}};
     auto plan = stackBuildChainOnTop(std::move(basePlan), fieldNameUpper, request, statisticId);
     /// Build branch terminates at VoidSink — the heartbeat probe is responsible for reporting to
     /// the coordinator. Avoids per-window-close gRPC traffic on the data-query source thread.

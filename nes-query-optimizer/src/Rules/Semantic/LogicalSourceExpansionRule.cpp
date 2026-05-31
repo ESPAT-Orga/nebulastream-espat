@@ -29,6 +29,8 @@
 #include <Operators/UnionLogicalOperator.hpp>
 #include <Plans/LogicalPlan.hpp>
 #include <Rules/Semantic/SourceInferenceRule.hpp>
+#include <Traits/SpliceToRunningSourceTrait.hpp>
+#include <Traits/TraitSet.hpp>
 #include <Util/PlanRenderer.hpp>
 #include <ErrorHandling.hpp>
 
@@ -94,8 +96,23 @@ LogicalPlan LogicalSourceExpansionRule::apply(LogicalPlan queryPlan) const
             throw UnknownSourceName("No physical sources present for logical source \"{}\"", sourceOp->getLogicalSourceName());
         }
 
+        /// Preserve SpliceToRunningSourceTrait across expansion: if the source-name op was tagged
+        /// (workload-domain build branch), every expanded SourceDescriptor must carry the same
+        /// marker so the runtime splice hook can recognize it at instantiation time.
+        const bool spliceMarker = hasTrait<SpliceToRunningSourceTrait>(sourceOp.getTraitSet());
         auto expandedSourceOperators = entries
-            | std::views::transform([](const auto& entry) { return LogicalOperator{SourceDescriptorLogicalOperator{entry}}; })
+            | std::views::transform(
+                [spliceMarker](const auto& entry)
+                {
+                    LogicalOperator op{SourceDescriptorLogicalOperator{entry}};
+                    if (spliceMarker)
+                    {
+                        auto ts = op.getTraitSet();
+                        [[maybe_unused]] const auto inserted = tryInsert(ts, SpliceToRunningSourceTrait{});
+                        op = op.withTraitSet(ts);
+                    }
+                    return op;
+                })
             | std::ranges::to<std::vector>();
 
         /// Replace the source-name op (rather than its parent) with the Union(SourceDescriptors)

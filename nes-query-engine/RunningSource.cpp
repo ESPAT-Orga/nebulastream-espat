@@ -18,22 +18,26 @@
 #include <chrono>
 #include <cstdint>
 #include <functional>
+#include <iostream>
 #include <limits>
 #include <memory>
 #include <mutex>
 #include <semaphore>
 #include <stop_token>
+#include <string>
 #include <utility>
 #include <variant>
 #include <vector>
 #include <Identifiers/Identifiers.hpp>
 #include <Sources/SourceReturnType.hpp>
 #include <Util/Overloaded.hpp>
+#include <fmt/format.h>
 #include <EngineLogger.hpp>
 #include <ErrorHandling.hpp>
 #include <Interfaces.hpp>
 #include <PipelineExecutionContext.hpp>
 #include <RunningQueryPlan.hpp>
+#include <RunningSourceRegistry.hpp>
 
 namespace NES
 {
@@ -44,7 +48,7 @@ SourceReturnType::EmitFunction emitFunction(
     QueryId queryId,
     size_t numberOfInflightBuffers,
     std::weak_ptr<RunningSource> source,
-    std::vector<std::shared_ptr<RunningQueryPlanNode>> successors,
+    std::shared_ptr<RunningSource::SuccessorContainer> successors,
     QueryLifetimeController& controller,
     WorkEmitter& emitter)
 {
@@ -59,7 +63,11 @@ SourceReturnType::EmitFunction emitFunction(
             Overloaded{
                 [&](const SourceReturnType::Data& data)
                 {
-                    for (const auto& successor : successors)
+                    /// Snapshot the successor list under the registry's read-lock so the loop body
+                    /// can iterate without holding the lock. Splice-time appends are seen on the
+                    /// next buffer.
+                    const auto snapshot = successors->copy();
+                    for (const auto& successor : snapshot)
                     {
                         {
                             /// release the semaphore in case the source wants to terminate
@@ -109,14 +117,16 @@ OriginId RunningSource::getOriginId() const
 }
 
 RunningSource::RunningSource(
-    std::vector<std::shared_ptr<RunningQueryPlanNode>> successors,
+    std::vector<std::shared_ptr<RunningQueryPlanNode>> initialSuccessors,
     std::unique_ptr<SourceHandle> source,
     std::function<bool(std::vector<std::shared_ptr<RunningQueryPlanNode>>&&)> onSourceStopped,
-    std::function<void(Exception)> onSourceFailure)
-    : successors(std::move(successors))
+    std::function<void(Exception)> onSourceFailure,
+    std::string logicalSourceName)
+    : successors(std::make_shared<SuccessorContainer>(std::move(initialSuccessors)))
     , source(std::move(source))
     , onSourceStopped(std::move(onSourceStopped))
     , onSourceFailure(std::move(onSourceFailure))
+    , logicalSourceName(std::move(logicalSourceName))
 {
 }
 
@@ -127,21 +137,47 @@ std::shared_ptr<RunningSource> RunningSource::create(
     std::function<bool(std::vector<std::shared_ptr<RunningQueryPlanNode>>&&)> onSourceStopped,
     std::function<void(Exception)> onSourceFailure,
     QueryLifetimeController& controller,
-    WorkEmitter& emitter)
+    WorkEmitter& emitter,
+    std::string logicalSourceName)
 {
     const auto maxInflightBuffers = source->getRuntimeConfiguration().inflightBufferLimit;
-    auto runningSource = std::shared_ptr<RunningSource>(
-        new RunningSource(successors, std::move(source), std::move(onSourceStopped), std::move(onSourceFailure)));
+    auto runningSource = std::shared_ptr<RunningSource>(new RunningSource(
+        std::move(successors), std::move(source), std::move(onSourceStopped), std::move(onSourceFailure), logicalSourceName));
     ENGINE_LOG_DEBUG("Starting Running Source");
+    if (not logicalSourceName.empty())
+    {
+        /// Register before starting the source thread so the splice path can find us as soon as
+        /// the source begins emitting. Deregistration is in ~RunningSource.
+        RunningSourceRegistry::instance().registerSource(logicalSourceName, std::weak_ptr<RunningSource>(runningSource));
+    }
     {
         const std::scoped_lock lock(runningSource->mutex);
-        runningSource->source->start(emitFunction(queryId, maxInflightBuffers, runningSource, std::move(successors), controller, emitter));
+        runningSource->source->start(emitFunction(queryId, maxInflightBuffers, runningSource, runningSource->successors, controller, emitter));
     }
     return runningSource;
 }
 
+void RunningSource::appendSuccessors(std::vector<std::shared_ptr<RunningQueryPlanNode>> additionalSuccessors)
+{
+    if (additionalSuccessors.empty())
+    {
+        return;
+    }
+    auto locked = successors->wlock();
+    std::cout << fmt::format(
+        "[SOURCE_SPLICE] appending {} successor pipelines to running source for logical source '{}'\n",
+        additionalSuccessors.size(),
+        logicalSourceName);
+    std::cout.flush();
+    locked->insert(locked->end(), std::make_move_iterator(additionalSuccessors.begin()), std::make_move_iterator(additionalSuccessors.end()));
+}
+
 RunningSource::~RunningSource()
 {
+    if (not logicalSourceName.empty())
+    {
+        RunningSourceRegistry::instance().deregisterSource(logicalSourceName);
+    }
     if (source)
     {
         ENGINE_LOG_DEBUG("Stopping Running Source");
@@ -165,11 +201,14 @@ bool RunningSource::attemptUnregister()
         return false;
     }
 
-    if (onSourceStopped(std::move(this->successors)))
+    std::vector<std::shared_ptr<RunningQueryPlanNode>> drained;
     {
-        /// Since we moved the content of the successors vector out of the successors vector above,
-        /// we clear it to avoid accidentally working with null values
-        this->successors.clear();
+        auto locked = this->successors->wlock();
+        drained = std::move(*locked);
+        locked->clear();
+    }
+    if (onSourceStopped(std::move(drained)))
+    {
         return true;
     }
     return false;

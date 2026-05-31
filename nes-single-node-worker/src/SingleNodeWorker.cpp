@@ -255,13 +255,73 @@ std::expected<QueryId, Exception> SingleNodeWorker::registerQueryDeferred(Logica
 
 namespace
 {
+/// Returns the set of pipeline ids that lie on at least one path from a source to a non-VoidSink.
+/// The workload-domain data plan has two sinks: the real data sink (e.g. FileSink) and the build
+/// branch's VoidSink. Pairing for the workload-switch must include only the filter-chain pipelines
+/// (those reaching the real sink); the build-branch pipelines are kept untouched. This helper
+/// drives that filter so the data and alternate plans line up element-wise even when the data side
+/// has extra build-branch pipelines that the alternate doesn't.
+std::unordered_set<PipelineId::Underlying> pipelinesReachingNonVoidSinks(const CompiledQueryPlan& qep)
+{
+    std::unordered_set<PipelineId::Underlying> isVoidSinkPipeline;
+    for (const auto& sink : qep.sinks)
+    {
+        if (sink.descriptor.getSinkType() == "Void")
+        {
+            isVoidSinkPipeline.insert(sink.id.getRawValue());
+        }
+    }
+
+    /// Memoized DFS: a pipeline is "useful" if it IS a non-VoidSink terminal OR has any successor
+    /// that is useful. We compute via forward DFS with a memo to handle DAGs (shared successors).
+    std::unordered_map<PipelineId::Underlying, bool> memo;
+    auto reaches = [&](const std::shared_ptr<ExecutablePipeline>& p, auto&& self) -> bool
+    {
+        if (auto it = memo.find(p->id.getRawValue()); it != memo.end())
+        {
+            return it->second;
+        }
+        const bool isVoid = isVoidSinkPipeline.contains(p->id.getRawValue());
+        const bool isSink = dynamic_cast<const CompiledExecutablePipelineStage*>(p->stage.get()) == nullptr;
+        bool result = isSink && not isVoid;
+        if (not result)
+        {
+            for (const auto& succWeak : p->successors)
+            {
+                if (auto succ = succWeak.lock())
+                {
+                    if (self(succ, self))
+                    {
+                        result = true;
+                        break;
+                    }
+                }
+            }
+        }
+        memo[p->id.getRawValue()] = result;
+        return result;
+    };
+
+    std::unordered_set<PipelineId::Underlying> reachingNonVoid;
+    for (const auto& p : qep.pipelines)
+    {
+        if (reaches(p, reaches))
+        {
+            reachingNonVoid.insert(p->id.getRawValue());
+        }
+    }
+    return reachingNonVoid;
+}
+
 /// Collect the ExecutablePipelines reachable from `sources` in source-to-sink BFS order, returning
-/// only the intermediate ("compiled") stages whose stage class is CompiledExecutablePipelineStage.
-/// Sinks are skipped — their stage type is sink-specific (FileSink, GrpcSink, ...) and not paired
-/// for switching. The ordering is deterministic given a deterministic compiler: each chain visits
-/// pipelines in the same relative order, so two structurally-identical plans line up element-wise.
-std::vector<std::shared_ptr<ExecutablePipeline>>
-collectIntermediatePipelines(const std::vector<CompiledQueryPlan::Source>& sources)
+/// only the intermediate ("compiled") stages whose stage class is CompiledExecutablePipelineStage
+/// AND whose pipeline id is in `allowed` (used to exclude build-branch pipelines that lead to a
+/// VoidSink — they shouldn't participate in alternate-stage pairing). Sinks are skipped — their
+/// stage type is sink-specific (FileSink, GrpcSink, VoidSink, ...) and not paired for switching.
+/// The ordering is deterministic given a deterministic compiler: each chain visits pipelines in
+/// the same relative order, so two structurally-identical plans line up element-wise.
+std::vector<std::shared_ptr<ExecutablePipeline>> collectIntermediatePipelines(
+    const std::vector<CompiledQueryPlan::Source>& sources, const std::unordered_set<PipelineId::Underlying>& allowed)
 {
     std::vector<std::shared_ptr<ExecutablePipeline>> result;
     std::unordered_set<PipelineId::Underlying> seen;
@@ -283,10 +343,8 @@ collectIntermediatePipelines(const std::vector<CompiledQueryPlan::Source>& sourc
     {
         auto current = std::move(queue.front());
         queue.pop();
-        /// Skip sink pipelines: a CompiledQueryPlan's `sinks` list identifies which pipelines are
-        /// sinks. We use a stage dynamic_cast as a quicker proxy — sink stages aren't of type
-        /// CompiledExecutablePipelineStage.
-        if (dynamic_cast<const CompiledExecutablePipelineStage*>(current->stage.get()) != nullptr)
+        if (dynamic_cast<const CompiledExecutablePipelineStage*>(current->stage.get()) != nullptr
+            && allowed.contains(current->id.getRawValue()))
         {
             result.push_back(current);
         }
@@ -338,8 +396,13 @@ std::expected<void, Exception> SingleNodeWorker::attachAlternatePipeline(
         auto alternateCompiled = compiler->compileQuery(std::move(altRequest));
         INVARIANT(alternateCompiled, "expected successful query compilation of alternate plan");
 
-        auto dataStages = collectIntermediatePipelines(pending->qep->sources);
-        auto altStages = collectIntermediatePipelines(alternateCompiled->sources);
+        /// Restrict to pipelines reaching a non-VoidSink — the workload-domain data plan has both a
+        /// filter chain (→ FileSink) and a statistic build branch (→ VoidSink). Only the filter
+        /// chain pipelines should be wrapped with the alternate.
+        const auto dataAllowed = pipelinesReachingNonVoidSinks(*pending->qep);
+        const auto altAllowed = pipelinesReachingNonVoidSinks(*alternateCompiled);
+        auto dataStages = collectIntermediatePipelines(pending->qep->sources, dataAllowed);
+        auto altStages = collectIntermediatePipelines(alternateCompiled->sources, altAllowed);
         if (dataStages.size() != altStages.size())
         {
             throw NotImplemented(

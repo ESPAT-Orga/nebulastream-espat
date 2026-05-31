@@ -24,6 +24,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -49,6 +50,27 @@ namespace NES
 {
 namespace
 {
+/// Collects every unique operator reachable from any root of `plan`, deduplicated by OperatorId.
+/// Replaces the single-root `BFSRange(plan.getRootOperators().front())` walks below so multi-root
+/// plans (e.g. workload-domain data + statistic build branch sharing a source) place every operator
+/// instead of silently missing those reachable only from the second root.
+std::vector<LogicalOperator> allOperators(const LogicalPlan& plan)
+{
+    std::vector<LogicalOperator> result;
+    std::unordered_set<OperatorId::Underlying> seen;
+    for (const auto& root : plan.getRootOperators())
+    {
+        for (const LogicalOperator& op : BFSRange(root))
+        {
+            if (seen.insert(op.getId().getRawValue()).second)
+            {
+                result.push_back(op);
+            }
+        }
+    }
+    return result;
+}
+
 size_t operatorCapacityDemand(const LogicalOperator& op)
 {
     if (op.tryGetAs<SourceDescriptorLogicalOperator>())
@@ -163,18 +185,20 @@ void validatePlan(const NetworkTopology& topology, const LogicalPlan& plan)
 /// instead of a generic "placement is not possible" from the solver.
 void validateConnectivity(const NetworkTopology& topology, const LogicalPlan& plan)
 {
-    auto sinkOperator = plan.getRootOperators().front().getAs<SinkLogicalOperator>().get();
-    const auto& sinkDescriptorOpt = sinkOperator.getSinkDescriptor();
-    INVARIANT(sinkDescriptorOpt, "BUG: sink operator must have a sink descriptor");
-    auto sinkHost = sinkDescriptorOpt->getHost();
-
     std::vector<std::string> errors;
-    for (const auto& sourceOperator : getOperatorByType<SourceDescriptorLogicalOperator>(plan))
+    for (const auto& root : plan.getRootOperators())
     {
-        auto sourceHost = sourceOperator->getSourceDescriptor().getHost();
-        if (topology.findPaths(sinkHost, sourceHost, NetworkTopology::Upstream).empty())
+        const auto sinkOperator = root.getAs<SinkLogicalOperator>().get();
+        const auto& sinkDescriptorOpt = sinkOperator.getSinkDescriptor();
+        INVARIANT(sinkDescriptorOpt, "BUG: sink operator must have a sink descriptor");
+        const auto sinkHost = sinkDescriptorOpt->getHost();
+        for (const auto& sourceOperator : getOperatorByType<SourceDescriptorLogicalOperator>(plan))
         {
-            errors.emplace_back(fmt::format("No path from source worker '{}' to sink worker '{}'", sourceHost, sinkHost));
+            const auto sourceHost = sourceOperator->getSourceDescriptor().getHost();
+            if (topology.findPaths(sinkHost, sourceHost, NetworkTopology::Upstream).empty())
+            {
+                errors.emplace_back(fmt::format("No path from source worker '{}' to sink worker '{}'", sourceHost, sinkHost));
+            }
         }
     }
 
@@ -225,7 +249,7 @@ PlacementModel createPlacementModel()
 /// If an operator o is placed on a node n then placementMatrix[o][n] = true
 void addPlacementVariables(PlacementModel& model, const LogicalPlan& logicalPlan, const NetworkTopology& topology)
 {
-    for (const LogicalOperator& op : BFSRange(logicalPlan.getRootOperators().front()))
+    for (const LogicalOperator& op : allOperators(logicalPlan))
     {
         for (const NetworkTopology::NodeId& node : topology | std::views::keys)
         {
@@ -243,7 +267,7 @@ void addPlacementVariables(PlacementModel& model, const LogicalPlan& logicalPlan
 /// Constraint: Each operator assigned to exactly one node
 void addExactlyOneNodeConstraint(PlacementModel& model, const LogicalPlan& logicalPlan, const NetworkTopology& topology)
 {
-    for (const LogicalOperator& op : BFSRange(logicalPlan.getRootOperators().front()))
+    for (const LogicalOperator& op : allOperators(logicalPlan))
     {
         std::vector<int> index;
         std::vector<double> value;
@@ -275,7 +299,7 @@ void addCapacityConstraints(
                 {
                     std::vector<int> index;
                     std::vector<double> value;
-                    for (const LogicalOperator& op : BFSRange(logicalPlan.getRootOperators().front()))
+                    for (const LogicalOperator& op : allOperators(logicalPlan))
                     {
                         index.push_back(model.operatorPlacementMatrix.at({op.getId(), nodeId}));
                         value.push_back(static_cast<double>(operatorCapacityDemand(op)));
@@ -297,7 +321,7 @@ void addCapacityConstraints(
 /// Constraint: Fix source operators to their host nodes
 void addSourcePlacementConstraints(PlacementModel& model, const LogicalPlan& logicalPlan)
 {
-    for (const LogicalOperator& op : BFSRange(logicalPlan.getRootOperators().front()))
+    for (const LogicalOperator& op : allOperators(logicalPlan))
     {
         if (auto sourceOperator = op.tryGetAs<SourceDescriptorLogicalOperator>())
         {
@@ -308,23 +332,27 @@ void addSourcePlacementConstraints(PlacementModel& model, const LogicalPlan& log
     }
 }
 
-/// Constraint: Fix sink operator to its host node
+/// Constraint: Fix every sink operator to its host node. Multi-root plans (workload-domain
+/// data + statistic build) constrain every root sink independently.
 void addSinkPlacementConstraint(PlacementModel& model, const LogicalPlan& logicalPlan)
 {
-    auto rootOperatorId = logicalPlan.getRootOperators().front().getId();
-    auto sinkOperator = logicalPlan.getRootOperators().front().getAs<SinkLogicalOperator>().get();
-    const auto& sinkDescriptorOpt = sinkOperator.getSinkDescriptor();
-    INVARIANT(sinkDescriptorOpt, "BUG: sink operator must have a sink descriptor");
-    auto sinkPlacement = sinkDescriptorOpt->getHost();
+    for (const auto& root : logicalPlan.getRootOperators())
+    {
+        const auto rootOperatorId = root.getId();
+        const auto sinkOperator = root.getAs<SinkLogicalOperator>().get();
+        const auto& sinkDescriptorOpt = sinkOperator.getSinkDescriptor();
+        INVARIANT(sinkDescriptorOpt, "BUG: sink operator must have a sink descriptor");
+        const auto sinkPlacement = sinkDescriptorOpt->getHost();
 
-    const auto sinkVar = model.operatorPlacementMatrix.at({rootOperatorId, sinkPlacement});
-    checkError(Highs_changeColBounds(model.highs, sinkVar, 1.0, 1.0), model.highs);
+        const auto sinkVar = model.operatorPlacementMatrix.at({rootOperatorId, sinkPlacement});
+        checkError(Highs_changeColBounds(model.highs, sinkVar, 1.0, 1.0), model.highs);
+    }
 }
 
 /// Constraint: Parent-child placement must respect network connectivity
 void addConnectivityConstraints(PlacementModel& model, const LogicalPlan& logicalPlan, const NetworkTopology& topology)
 {
-    for (const LogicalOperator& op : BFSRange(logicalPlan.getRootOperators().front()))
+    for (const LogicalOperator& op : allOperators(logicalPlan))
     {
         for (const LogicalOperator& child : op.getChildren())
         {
@@ -350,7 +378,7 @@ void addConnectivityConstraints(PlacementModel& model, const LogicalPlan& logica
 /// Objective: minimize the sum of distances for all operator placements to their descendant sources
 void addDistanceObjective(PlacementModel& model, const LogicalPlan& logicalPlan, const NetworkTopology& topology)
 {
-    for (const LogicalOperator& op : BFSRange(logicalPlan.getRootOperators().front()))
+    for (const LogicalOperator& op : allOperators(logicalPlan))
     {
         for (const auto& nodeId : topology | std::views::keys)
         {
@@ -442,7 +470,13 @@ void BottomUpOperatorPlacer::apply(LogicalPlan& logicalPlan)
     {
         throw PlacementFailure("Placement is not possible under the given capacity constraints");
     }
-    logicalPlan = logicalPlan.withRootOperators({addPlacementTrait(logicalPlan.getRootOperators().front(), *placement)});
+    /// Apply the placement trait to every root's subtree. Multi-root plans (workload-domain
+    /// data + statistic build branch sharing a source) need every root traited; previously only
+    /// `front()` was kept, silently dropping the other chains' subtrees.
+    auto newRoots = logicalPlan.getRootOperators()
+        | std::views::transform([&placement](const LogicalOperator& root) { return addPlacementTrait(root, *placement); })
+        | std::ranges::to<std::vector>();
+    logicalPlan = logicalPlan.withRootOperators(newRoots);
 }
 
 }

@@ -17,6 +17,7 @@
 #include <memory>
 #include <ranges>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 #include <LoweringRules/AbstractLoweringRule.hpp>
@@ -74,9 +75,21 @@ resolveLoweringRule(const LogicalOperator& logicalOperator, const LoweringRuleRe
 }
 }
 
-LoweringRuleResultSubgraph::SubGraphRoot
-lowerOperatorRecursively(const LogicalOperator& logicalOperator, const LoweringRuleRegistryArguments& registryArgument)
+using LoweringMemo = std::unordered_map<OperatorId::Underlying, LoweringRuleResultSubgraph::SubGraphRoot>;
+
+LoweringRuleResultSubgraph::SubGraphRoot lowerOperatorRecursively(
+    const LogicalOperator& logicalOperator, const LoweringRuleRegistryArguments& registryArgument, LoweringMemo& memo)
 {
+    /// Multi-root plans (workload-domain data + statistic build branch sharing a source) reach the
+    /// shared logical operator from multiple roots. Without memoization each path would create its
+    /// own PhysicalOperatorWrapper for the shared operator (and most importantly a duplicate
+    /// SourcePhysicalOperator → an extra source thread per root). Memoize by OperatorId so the
+    /// same logical operator lowers to exactly one physical wrapper.
+    if (const auto it = memo.find(logicalOperator.getId().getRawValue()); it != memo.end())
+    {
+        return it->second;
+    }
+
     /// Try to resolve lowering rule for the current logical operator
     const auto rule = resolveLoweringRule(logicalOperator, registryArgument);
 
@@ -97,8 +110,11 @@ lowerOperatorRecursively(const LogicalOperator& logicalOperator, const LoweringR
                 logicalOperator.getChildren().size() == 1,
                 "Empty lowering results of operators with multiple keys are not supported for {}",
                 logicalOperator);
-            return lowerOperatorRecursively(logicalOperator.getChildren()[0], registryArgument);
+            auto bypassed = lowerOperatorRecursively(logicalOperator.getChildren()[0], registryArgument, memo);
+            memo.emplace(logicalOperator.getId().getRawValue(), bypassed);
+            return bypassed;
         }
+        memo.emplace(logicalOperator.getId().getRawValue(), LoweringRuleResultSubgraph::SubGraphRoot{});
         return {};
     }
     /// We embed the subgraph into the resulting plan of physical operator wrappers
@@ -112,12 +128,13 @@ lowerOperatorRecursively(const LogicalOperator& logicalOperator, const LoweringR
 
     std::ranges::for_each(
         std::views::zip(children, leafs),
-        [&registryArgument](const auto& zippedPair)
+        [&registryArgument, &memo](const auto& zippedPair)
         {
             const auto& [child, leaf] = zippedPair;
-            auto rootNodeOfLoweredChild = lowerOperatorRecursively(child, registryArgument);
+            auto rootNodeOfLoweredChild = lowerOperatorRecursively(child, registryArgument, memo);
             leaf->addChild(rootNodeOfLoweredChild);
         });
+    memo.emplace(logicalOperator.getId().getRawValue(), root);
     return root;
 }
 
@@ -129,14 +146,20 @@ PhysicalPlan apply(
     const auto registryArgument = LoweringRuleRegistryArguments{conf, std::move(statisticStore)};
     std::vector<std::shared_ptr<PhysicalOperatorWrapper>> newRootOperators;
     newRootOperators.reserve(queryPlan.getRootOperators().size());
+    LoweringMemo memo;
     for (const auto& logicalRoot : queryPlan.getRootOperators())
     {
-        newRootOperators.push_back(lowerOperatorRecursively(logicalRoot, registryArgument));
+        newRootOperators.push_back(lowerOperatorRecursively(logicalRoot, registryArgument, memo));
     }
 
     INVARIANT(not newRootOperators.empty(), "Plan must have at least one root operator");
     auto physicalPlanBuilder = PhysicalPlanBuilder(queryPlan.getQueryId());
-    physicalPlanBuilder.addSinkRoot(newRootOperators[0]);
+    /// Multi-root plans (e.g. workload-domain data + statistic build branch) must keep every root.
+    /// The earlier `addSinkRoot(newRootOperators[0])` silently dropped every additional root.
+    for (const auto& root : newRootOperators)
+    {
+        physicalPlanBuilder.addSinkRoot(root);
+    }
     physicalPlanBuilder.setExecutionMode(conf.executionMode.getValue());
     physicalPlanBuilder.setOperatorBufferSize(conf.operatorBufferSize.getValue());
     physicalPlanBuilder.setOperatorFusing(queryPlan.getOperatorFusing());

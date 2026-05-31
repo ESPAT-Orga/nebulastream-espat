@@ -83,8 +83,10 @@ WORKER_2_DATA = "127.0.0.1:19091"
 # notebook (so the policy difference can be compared at multiple wire capacities). HIGH/LOW rates
 # in the grid configs below are expressed as fractions of cap_tps and resolved per-cap by the
 # driver, so the same workload shape is replayed at every cap.
-# SMOKE: single headline cap (1mbit) — restore ["500kbit", "1mbit", "2mbit"] for the full sweep.
-EXPERIMENT_CAPS = ["1mbit"]
+# Two-cap sweep: 1mbit (throttled) + none (skip tc, no cap). The "none" cap feeds the right
+# column of headline_throughput_selection_greedy.pdf — it's the "what does the system do without
+# any throttle?" reference. Restore ["500kbit", "1mbit", "2mbit"] for the full throttle sweep.
+EXPERIMENT_CAPS = ["1mbit", "none"]
 
 # Grid row axis: HIGH staircase configs. `label` becomes a CSV column and the subplot row title.
 # Each entry parameterizes the STEP GeneratorRate of the HIGH query — a 2-rate square-wave

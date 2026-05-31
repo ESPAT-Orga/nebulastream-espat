@@ -192,7 +192,7 @@ QueryPlanBuilder::TestPlanCtrl QueryPlanBuilder::build(QueryId queryId, std::sha
 {
     auto isSource = std::ranges::views::filter([](const std::pair<identifier_t, QueryComponentDescriptor>& kv)
                                                { return std::holds_alternative<SourceDescriptor>(kv.second); });
-    std::vector<std::pair<std::unique_ptr<SourceHandle>, std::vector<std::weak_ptr<ExecutablePipeline>>>> sources;
+    std::vector<ExecutableQueryPlan::SourceWithSuccessor> sources;
 
     std::vector<std::shared_ptr<ExecutablePipeline>> pipelines;
     std::unordered_map<identifier_t, OriginId> sourceIds;
@@ -271,7 +271,8 @@ QueryPlanBuilder::TestPlanCtrl QueryPlanBuilder::build(QueryId queryId, std::sha
             std::get<SourceDescriptor>(source.second).pipelineId,
             bm);
         sourceIds.emplace(source.first, s->getSourceId());
-        sources.emplace_back(std::move(s), std::move(successors));
+        sources.emplace_back(ExecutableQueryPlan::SourceWithSuccessor{
+            .source = std::move(s), .successors = std::move(successors), .spliceToRunningSource = false, .logicalSourceName = {}});
         sourceCtrls[source.first] = ctrl;
     }
 

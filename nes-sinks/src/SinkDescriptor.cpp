@@ -47,15 +47,13 @@ SinkDescriptor::SinkDescriptor(
     const std::string_view sinkType,
     Host host,
     const std::unordered_map<std::string, std::string>& formatConfig,
-    DescriptorConfig::Config config,
-    std::unordered_map<std::string, std::string> metadata)
+    DescriptorConfig::Config config)
     : Descriptor(std::move(config))
     , sinkName(std::move(sinkName))
     , schema(std::make_shared<Schema>(schema))
     , sinkType(sinkType)
     , host(std::move(host))
     , formatConfig(formatConfig)
-    , metadata(std::move(metadata))
 {
 }
 
@@ -95,21 +93,6 @@ std::string SinkDescriptor::getSinkName() const
 std::unordered_map<std::string, std::string> SinkDescriptor::getOutputFormatterConfig() const
 {
     return formatConfig;
-}
-
-SinkDescriptor SinkDescriptor::withMetadataEntries(const std::unordered_map<std::string, std::string>& entries) const
-{
-    auto merged = metadata;
-    for (const auto& [k, v] : entries)
-    {
-        merged[k] = v;
-    }
-    return SinkDescriptor{sinkName, *schema, sinkType, host, formatConfig, getConfig(), std::move(merged)};
-}
-
-const std::unordered_map<std::string, std::string>& SinkDescriptor::getMetadata() const
-{
-    return metadata;
 }
 
 bool SinkDescriptor::isInline() const
@@ -155,14 +138,13 @@ Reflected Reflector<SinkDescriptor>::operator()(const SinkDescriptor& descriptor
         .host = descriptor.host,
         .formatConfig = descriptor.formatConfig,
         .config = descriptor.getReflectedConfig(),
-        .metadata = descriptor.metadata,
     });
 }
 
 SinkDescriptor Unreflector<SinkDescriptor>::operator()(const Reflected& reflected) const
 {
-    auto [name, schema, type, host, formatConfig, config, metadata] = unreflect<detail::ReflectedSinkDescriptor>(reflected);
-    return SinkDescriptor{name, schema, type, host, formatConfig, Descriptor::unreflectConfig(config), std::move(metadata)};
+    auto [name, schema, type, host, formatConfig, config] = unreflect<detail::ReflectedSinkDescriptor>(reflected);
+    return SinkDescriptor{name, schema, type, host, formatConfig, Descriptor::unreflectConfig(config)};
 }
 
 }

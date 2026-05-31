@@ -20,7 +20,6 @@
 #include <string_view>
 #include <typeindex>
 #include <typeinfo>
-#include <unordered_set>
 #include <utility>
 
 #include <DataTypes/Schema.hpp>
@@ -68,18 +67,8 @@ LogicalPlan SourceInferenceRule::apply(LogicalPlan queryPlan) const
     PRECONDITION(
         not(sourceOperators.empty() && sourceDescriptorOperators.empty()), "Query plan did not contain sources during type inference.");
 
-    /// A SourceNameLogicalOperator reachable from multiple root operators (workload-domain splice
-    /// shares the data query's source between its data subtree and the build branch) is visited
-    /// multiple times by the BFS-based getOperatorByType. Replace each unique source once: the
-    /// replacement is applied at every occurrence of the OperatorId in a single replaceOperator
-    /// call (same fix pattern as LogicalSourceExpansionRule).
-    std::unordered_set<OperatorId> processed;
     for (auto& source : sourceOperators)
     {
-        if (not processed.insert(source.getId()).second)
-        {
-            continue;
-        }
         /// if the source descriptor has no schema set and is only a logical source we replace it with the correct
         /// source descriptor form the catalog.
         auto schema = Schema();

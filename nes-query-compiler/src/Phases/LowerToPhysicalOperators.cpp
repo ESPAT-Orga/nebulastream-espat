@@ -14,7 +14,6 @@
 #include <Phases/LowerToPhysicalOperators.hpp>
 
 #include <algorithm>
-#include <cstdio>
 #include <memory>
 #include <ranges>
 #include <string>
@@ -136,13 +135,8 @@ PhysicalPlan apply(
     }
 
     INVARIANT(not newRootOperators.empty(), "Plan must have at least one root operator");
-    fprintf(stderr, "[LowerToPhysicalOperators DEBUG] roots=%zu\n", newRootOperators.size());
-    fflush(stderr);
     auto physicalPlanBuilder = PhysicalPlanBuilder(queryPlan.getQueryId());
-    for (const auto& root : newRootOperators)
-    {
-        physicalPlanBuilder.addSinkRoot(root);
-    }
+    physicalPlanBuilder.addSinkRoot(newRootOperators[0]);
     physicalPlanBuilder.setExecutionMode(conf.executionMode.getValue());
     physicalPlanBuilder.setOperatorBufferSize(conf.operatorBufferSize.getValue());
     physicalPlanBuilder.setOperatorFusing(queryPlan.getOperatorFusing());

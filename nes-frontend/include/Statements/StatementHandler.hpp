@@ -225,6 +225,14 @@ public:
     std::expected<ExplainQueryStatementResult, Exception> operator()(const ExplainQueryStatement& statement);
     std::expected<ShowQueriesStatementResult, Exception> operator()(const ShowQueriesStatement& statement);
     std::expected<DropQueryStatementResult, Exception> operator()(const DropQueryStatement& statement);
+
+    /// Workload-switch deploy: compiles `data` and `alternate` (both single-sink filter chains),
+    /// registers the data plan deferred, attaches the alternate so each intermediate pipeline
+    /// stage becomes a SwitchableCompiledExecutablePipelineStage selecting between the two
+    /// compiled functions via the named switch in SwitchRegistry, then starts. The swap callback
+    /// flips the named switch via SetSwitch instead of redeploying.
+    [[nodiscard]] std::expected<QueryStatementResult, Exception> deployWithSwitchableAlternate(
+        const QueryStatement& data, const QueryStatement& alternate, const std::string& switchName, int64_t alternateExpectedValue = 1);
 };
 
 class TopologyStatementHandler final : public StatementHandler<TopologyStatementHandler>

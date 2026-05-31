@@ -14,14 +14,12 @@
 
 #include <StatisticCoordinator.hpp>
 
-#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <future>
 #include <memory>
 #include <optional>
 #include <string>
-#include <unordered_set>
 #include <utility>
 #include <vector>
 #include <DataTypes/Schema.hpp>
@@ -146,15 +144,11 @@ std::expected<CollectStatisticResult, Exception> StatisticCoordinator::collectWo
         return std::unexpected(InvalidConfigParameter("collectWorkloadStatistic requires a WorkloadDomain in the request"));
     }
 
-    /// MVP: the data query may have one logical source shared across multiple roots (e.g. the
-    /// workload-switch merger places one source under two filter chains). getOperatorByType
-    /// runs BFS from each root and so revisits a shared source once per root — dedup by OperatorId
-    /// before checking the single-source precondition.
-    auto sources = getOperatorByType<SourceNameLogicalOperator>(dataQueryPlan);
-    std::unordered_set<OperatorId::Underlying> seenIds;
-    sources.erase(
-        std::remove_if(sources.begin(), sources.end(), [&seenIds](const auto& op) { return not seenIds.insert(op.getId().getRawValue()).second; }),
-        sources.end());
+    /// MVP: assume the data query has exactly one SourceNameLogicalOperator and splice the build
+    /// branch as a sibling consumer of that operator. This matches the adaptive-optimization use
+    /// case (single Memory source feeding a filter chain). Multi-source / join-shaped data queries
+    /// would need a richer splice (matching against domain.operatorId explicitly).
+    const auto sources = getOperatorByType<SourceNameLogicalOperator>(dataQueryPlan);
     if (sources.empty())
     {
         return std::unexpected(InvalidConfigParameter("WorkloadDomain splice: data query has no source-name operator"));
@@ -162,7 +156,7 @@ std::expected<CollectStatisticResult, Exception> StatisticCoordinator::collectWo
     if (sources.size() != 1)
     {
         return std::unexpected(NotImplemented(
-            "WorkloadDomain splice MVP requires the data query to have exactly one (deduplicated) source (got {})", sources.size()));
+            "WorkloadDomain splice MVP requires the data query to have exactly one source (got {})", sources.size()));
     }
     const LogicalOperator spliceLeaf{sources.front()};
 
@@ -178,9 +172,14 @@ std::expected<CollectStatisticResult, Exception> StatisticCoordinator::collectWo
     }
 
     const auto statisticId = Statistic::StatisticId{nextStatisticId.fetch_add(1)};
-    auto buildBranch = queryGenerator->generateWorkloadBranch(*domain, statement, statisticId, coordinatorAddress, spliceLeaf);
-    auto mergedPlan = addRootOperators(dataQueryPlan, buildBranch.getRootOperators());
-    auto submittedMerged = submitPlan(std::move(mergedPlan));
+    /// Workload-domain build branch was previously attached as a second root of `dataQueryPlan` to
+    /// share the source thread. Multi-root plans are not supported through LowerToPhysicalOperators
+    /// and downstream phases (the second root was silently dropped). We now deploy the data query
+    /// as-is and rely solely on the heartbeat probe (registered below) to drive trigger callbacks.
+    /// The build branch / StatisticStoreWriter chain is not deployed in this MVP — the workload-
+    /// switch design uses gRPC SetSwitch (via SwitchableCompiledExecutablePipelineStage, attached
+    /// post-deploy) to flip filter orderings without a build-branch on the data query path.
+    auto submittedMerged = submitPlan(dataQueryPlan);
     if (not submittedMerged.has_value())
     {
         return std::unexpected(submittedMerged.error());

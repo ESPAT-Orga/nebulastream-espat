@@ -44,6 +44,21 @@ public:
     virtual std::expected<void, Exception> stop(QueryId) = 0;
     [[nodiscard]] virtual std::expected<LocalQueryStatusSnapshot, Exception> status(QueryId) const = 0;
     [[nodiscard]] virtual std::expected<WorkerStatus, Exception> workerStatus(std::chrono::system_clock::time_point after) const = 0;
+
+    /// Optional: register a plan without deploying it. Backends that don't implement this return
+    /// NotImplemented. Used by the workload-switch flow (gRPC backend supports it; embedded backend
+    /// can implement later if needed).
+    [[nodiscard]] virtual std::expected<QueryId, Exception> registerQueryDeferred(LogicalPlan)
+    {
+        return std::unexpected{NotImplemented("registerQueryDeferred is not implemented for this backend")};
+    }
+
+    /// Optional: attach an alternate plan to a pending-registered query (see registerQueryDeferred).
+    virtual std::expected<void, Exception>
+    attachAlternatePipeline(QueryId /*queryId*/, LogicalPlan /*alternatePlan*/, const std::string& /*switchName*/, int64_t /*alternateExpectedValue*/)
+    {
+        return std::unexpected{NotImplemented("attachAlternatePipeline is not implemented for this backend")};
+    }
 };
 
 /// std::move_only_function is the C++23 equivalent but is not yet available in libc++19.
@@ -108,6 +123,20 @@ public:
     QueryManager(SharedPtr<WorkerCatalog> workerCatalog, BackendProvider provider, QueryManagerState state);
     QueryManager(SharedPtr<WorkerCatalog> workerCatalog, BackendProvider provider);
     [[nodiscard]] std::expected<DistributedQueryId, Exception> registerQuery(const DistributedLogicalPlan& plan);
+    /// Same as `registerQuery` but the underlying backends keep the compiled plan in a pending slot
+    /// instead of deploying. Follow up with `attachAlternatePipeline` before `start` — used by the
+    /// workload-switch flow to wrap stages with SwitchableCompiledExecutablePipelineStage.
+    [[nodiscard]] std::expected<DistributedQueryId, Exception> registerQueryDeferred(const DistributedLogicalPlan& plan);
+
+    /// Attaches an alternate plan to a pending-registered query so each intermediate pipeline stage
+    /// becomes switchable between the data and alternate compiled functions. After this returns
+    /// successfully, the data plan is committed to the worker's node engine and `start` can run.
+    std::expected<void, std::vector<Exception>> attachAlternatePipeline(
+        DistributedQueryId queryId,
+        const DistributedLogicalPlan& alternatePlan,
+        const std::string& switchName,
+        int64_t alternateExpectedValue = 1);
+
     /// Starts a pre-registered query. Start may potentially block waiting for the query state to change (even if it fails).
     std::expected<void, std::vector<Exception>> start(DistributedQueryId query);
     std::expected<void, std::vector<Exception>> stop(DistributedQueryId query);

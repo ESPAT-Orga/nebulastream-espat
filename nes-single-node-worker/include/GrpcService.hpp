@@ -39,6 +39,10 @@ public:
 
     grpc::Status SetSwitch(grpc::ServerContext*, const SetSwitchRequest*, google::protobuf::Empty*) override;
 
+    grpc::Status RegisterQueryDeferred(grpc::ServerContext*, const RegisterQueryRequest*, RegisterQueryReply*) override;
+
+    grpc::Status AttachAlternatePipeline(grpc::ServerContext*, const AttachAlternatePipelineRequest*, google::protobuf::Empty*) override;
+
     explicit GRPCServer(SingleNodeWorker&& delegate) : delegate(std::move(delegate)) { }
 
 private:

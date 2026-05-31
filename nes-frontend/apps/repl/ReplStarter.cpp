@@ -660,9 +660,9 @@ int main(int argc, char** argv)
                 .options
                 = {{"host", program.get<std::string>("--companion-host")},
                    {"probe_interval_ms", program.get<std::string>("--companion-probe-interval-ms")},
-                   /// Stashing paired_sql + switch_name in the request options threads them through to
-                   /// Repl::Impl::executeQuery where buildWorkloadSwitchPlan reads them. Empty if the
-                   /// user didn't pass --companion-switch-to-sql.
+                   /// paired_sql + switch_name carry the workload-switch alternate plan through to
+                   /// Repl::Impl::executeQuery. Empty paired_sql means: no alternate, use the normal
+                   /// collectWorkloadStatistic flow.
                    {"paired_sql", switchToSql},
                    {"switch_name", program.get<std::string>("--companion-switch-name")}}};
             onCompanionAssociatedWithQuery
@@ -685,7 +685,6 @@ int main(int argc, char** argv)
             queryStatementHandler,
             std::move(statisticRequestHandler),
             std::move(binder),
-            sinkCatalog,
             errorBehaviour,
             defaultOutputFormat,
             interactiveMode,

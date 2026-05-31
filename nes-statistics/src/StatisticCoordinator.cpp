@@ -172,19 +172,37 @@ std::expected<CollectStatisticResult, Exception> StatisticCoordinator::collectWo
     }
 
     const auto statisticId = Statistic::StatisticId{nextStatisticId.fetch_add(1)};
-    /// Attach the StatisticBuild → StatisticStoreWriter → VoidSink chain as a second root of the
-    /// data plan so it shares the source pipeline with the data filter chain (one source thread,
-    /// build branch sees the same buffers). Multi-root plans now travel cleanly through the
-    /// optimizer + compiler + serializer (see the multi-root fixes in LowerToPhysicalOperators,
-    /// PhysicalPlanBuilder::flip, BottomUpPlacement, QueryDecomposition, QueryPlanSerializationUtil).
-    auto buildBranch = queryGenerator->generateWorkloadBranch(*domain, statement, statisticId, coordinatorAddress, spliceLeaf);
-    auto mergedPlan = addRootOperators(dataQueryPlan, buildBranch.getRootOperators());
-    auto submittedMerged = submitPlan(std::move(mergedPlan));
-    if (not submittedMerged.has_value())
+    /// Deploy the data plan as-is. The statistic build branch is submitted as a *separate* query
+    /// below; its source carries SpliceToRunningSourceTrait so at runtime instantiation the build
+    /// branch splices into the data query's already-running source pipeline instead of spawning
+    /// its own source thread. This keeps both plans single-root and avoids the cross-cutting
+    /// multi-root work in the optimizer/compiler/serializer.
+    auto submittedData = submitPlan(dataQueryPlan);
+    if (not submittedData.has_value())
     {
-        return std::unexpected(submittedMerged.error());
+        return std::unexpected(submittedData.error());
     }
-    const auto mergedQueryId = std::move(submittedMerged.value());
+    const auto mergedQueryId = std::move(submittedData.value());
+
+    /// Submit the build branch as its own query. Its source carries SpliceToRunningSourceTrait,
+    /// so on the worker side ExecutableQueryPlan::instantiate will redirect it to the data
+    /// query's running source instead of spawning a new source thread. Failure here is logged
+    /// but does not undo the data-query deploy — the build branch is an observability concern.
+    try
+    {
+        auto buildBranch = queryGenerator->generateWorkloadBranch(*domain, statement, statisticId, coordinatorAddress, spliceLeaf);
+        if (auto submittedBranch = submitPlan(std::move(buildBranch)); not submittedBranch.has_value())
+        {
+            NES_WARNING(
+                "Workload-domain build branch deploy failed (statisticId={}): {}",
+                statisticId.getRawValue(),
+                submittedBranch.error().what());
+        }
+    }
+    catch (const std::exception& e)
+    {
+        NES_WARNING("Workload-domain build branch construction threw (statisticId={}): {}", statisticId.getRawValue(), e.what());
+    }
 
     /// Deploy the heartbeat probe separately. It ticks at probeIntervalMs and pings the
     /// coordinator with the registered statisticId; the registry entry then fires whichever

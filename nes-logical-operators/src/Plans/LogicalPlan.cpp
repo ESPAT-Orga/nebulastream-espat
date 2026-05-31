@@ -176,13 +176,6 @@ std::optional<LogicalPlan> replaceOperator(const LogicalPlan& plan, const Operat
             newRoots.push_back(root);
             replaced = true;
         }
-        else
-        {
-            /// Multi-root plans (e.g. workload-domain data + statistic build branch sharing a source)
-            /// must preserve roots whose subtrees don't contain the target — otherwise an unrelated
-            /// chain is silently dropped when we mutate one root's subtree.
-            newRoots.push_back(root);
-        }
     }
     if (replaced)
     {

@@ -216,11 +216,13 @@ QueryDecomposer::QueryDecomposer(
 
 DistributedLogicalPlan QueryDecomposer::decompose(const LogicalPlan& placedPlan, const QueryOptimizerNetworkConfiguration& configuration)
 {
-    PRECONDITION(placedPlan.getRootOperators().size() == 1, "BUG: query decomposition requires a single root operator");
-    PRECONDITION(
-        std::ranges::all_of(
-            BFSRange(placedPlan.getRootOperators().front()), [](const auto& op) { return hasTrait<PlacementTrait>(op.getTraitSet()); }),
-        "BUG: query decomposition requires placement of all operators");
+    PRECONDITION(not placedPlan.getRootOperators().empty(), "BUG: query decomposition requires at least one root operator");
+    for (const auto& root : placedPlan.getRootOperators())
+    {
+        PRECONDITION(
+            std::ranges::all_of(BFSRange(root), [](const auto& op) { return hasTrait<PlacementTrait>(op.getTraitSet()); }),
+            "BUG: query decomposition requires placement of all operators");
+    }
 
     DecompositionContext context{
         .plansByNode = {},
@@ -230,8 +232,23 @@ DistributedLogicalPlan QueryDecomposer::decompose(const LogicalPlan& placedPlan,
         .workerCatalog = copyPtr(workerCatalog),
         .operatorFusing = placedPlan.getOperatorFusing()};
 
-    auto root = decomposePlanRecursive(context, placedPlan.getRootOperators().front());
-    context.addPlanToNode(std::move(root), getPlacementFor(root));
+    /// Multi-root plans (e.g. workload-switch merged plan with two filter-chain sinks sharing one
+    /// source) are decomposed by running decomposePlanRecursive once per root. Roots placed on the
+    /// same node are coalesced into a single multi-root LogicalPlan so the downstream phases
+    /// recognize that they share subtrees (same OperatorIds) — emitting them as separate plans
+    /// would cause the worker to instantiate one physical source thread per root.
+    std::unordered_map<NetworkTopology::NodeId, std::vector<LogicalOperator>> rootsByNode;
+    for (const auto& root : placedPlan.getRootOperators())
+    {
+        auto decomposedRoot = decomposePlanRecursive(context, root);
+        const auto placement = getPlacementFor(decomposedRoot);
+        rootsByNode[placement].push_back(std::move(decomposedRoot));
+    }
+    for (auto& [node, roots] : rootsByNode)
+    {
+        auto& plan = context.plansByNode[node].emplace_back(INVALID_QUERY_ID, std::move(roots));
+        plan.setOperatorFusing(placedPlan.getOperatorFusing());
+    }
 
     for (const auto& [node, plans] : context.plansByNode)
     {

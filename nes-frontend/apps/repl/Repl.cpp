@@ -557,7 +557,10 @@ struct Repl::Impl
                                     }
                                     dataQueryPlan = buildWorkloadSwitchPlan(stmt.plan, pairedQuery->plan, switchName, *sinkCatalog);
                                     std::cout << "[Statistic] Workload-switch merged plan: 2 filter chains gated by '" << switchName
-                                              << "' (data=0, paired=1)\n";
+                                              << "' (data=0, paired=1), merged roots=" << dataQueryPlan.getRootOperators().size() << "\n";
+                                    std::stringstream ss;
+                                    ss << dataQueryPlan;
+                                    std::cout << "[Statistic DEBUG] merged plan:\n" << ss.str() << "\n";
                                     std::flush(std::cout);
                                 }
 

@@ -141,7 +141,7 @@ void verifyFlippedGraph(
 
 PhysicalPlanBuilder::Roots PhysicalPlanBuilder::flip(const Roots& rootOperators)
 {
-    PRECONDITION(rootOperators.size() == 1, "For now we can only flip graphs with a single root");
+    PRECONDITION(not rootOperators.empty(), "flip requires at least one sink root");
 
     /// DFS visit states for cycle detection.
     enum class VisitState : uint8_t
@@ -172,7 +172,12 @@ PhysicalPlanBuilder::Roots PhysicalPlanBuilder::flip(const Roots& rootOperators)
         }
         it->second = VisitState::Completed;
     };
-    collectNodes(rootOperators[0], collectNodes);
+    /// Iterate every sink root so multi-sink plans (e.g. the workload-switch merger's two filter
+    /// chains sharing one source) flip correctly. Shared subtrees are visited once via the state map.
+    for (const auto& root : rootOperators)
+    {
+        collectNodes(root, collectNodes);
+    }
 
     /// Count edges before clearing children.
     size_t edgeCountBefore = 0;

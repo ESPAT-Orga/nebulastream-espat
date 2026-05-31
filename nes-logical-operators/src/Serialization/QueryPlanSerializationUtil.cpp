@@ -37,33 +37,37 @@ namespace NES
 {
 SerializableQueryPlan QueryPlanSerializationUtil::serializeQueryPlan(const LogicalPlan& queryPlan)
 {
-    INVARIANT(queryPlan.getRootOperators().size() == 1, "Query plan should currently have only one root operator");
-    auto rootOperator = queryPlan.getRootOperators().front();
+    PRECONDITION(not queryPlan.getRootOperators().empty(), "Query plan must have at least one root operator");
 
     SerializableQueryPlan serializableQueryPlan;
     if (queryPlan.getQueryId().isValid())
     {
         *serializableQueryPlan.mutable_queryid() = serializeQueryId(queryPlan.getQueryId());
     }
-    /// Serialize Query Plan operators
+    /// Serialize all operators reachable from any root. Shared subtrees (same OperatorId visited
+    /// from multiple roots) are emitted once.
     std::set<OperatorId> alreadySerialized;
-    for (auto itr : BFSRange(rootOperator))
+    for (const auto& root : queryPlan.getRootOperators())
     {
-        if (alreadySerialized.contains(itr.getId()))
+        for (auto itr : BFSRange(root))
         {
-            /// Skip rest of the steps as the operator is already serialized
-            continue;
+            if (alreadySerialized.contains(itr.getId()))
+            {
+                continue;
+            }
+            alreadySerialized.insert(itr.getId());
+            NES_TRACE("QueryPlan: Inserting operator in collection of already visited node.");
+            auto reflectedOperator = OperatorSerializationUtil::serializeOperator(itr);
+            const auto serializedString = rfl::json::write(reflectedOperator);
+            serializableQueryPlan.add_reflectedoperators(serializedString);
         }
-        alreadySerialized.insert(itr.getId());
-        NES_TRACE("QueryPlan: Inserting operator in collection of already visited node.");
-        auto reflectedOperator = OperatorSerializationUtil::serializeOperator(itr);
-        const auto serializedString = rfl::json::write(reflectedOperator);
-        serializableQueryPlan.add_reflectedoperators(serializedString);
     }
 
-    /// Serialize the root operator ids
-    auto rootOperatorId = rootOperator.getId();
-    serializableQueryPlan.add_rootoperatorids(rootOperatorId.getRawValue());
+    /// Serialize every root operator id so the deserializer reconstructs all of them.
+    for (const auto& root : queryPlan.getRootOperators())
+    {
+        serializableQueryPlan.add_rootoperatorids(root.getId().getRawValue());
+    }
     serializableQueryPlan.set_operatorfusing(queryPlan.getOperatorFusing());
     return serializableQueryPlan;
 }
@@ -169,26 +173,25 @@ LogicalPlan QueryPlanSerializationUtil::deserializeQueryPlan(const SerializableQ
         rootOperators.push_back(build(rootId, {}));
     }
 
-    if (rootOperators.size() != 1)
+    /// Multi-root plans (workload-switch merger) carry multiple sinks; validate each.
+    for (const auto& rootOp : rootOperators)
     {
-        throw CannotDeserialize("Plan contains multiple root operators!");
-    }
+        auto sink = rootOp.tryGetAs<SinkLogicalOperator>();
+        if (!sink)
+        {
+            throw CannotDeserialize(
+                "Plan root has to be a sink, but got {} from\n{}", rootOp, serializedQueryPlan.DebugString());
+        }
 
-    auto sink = rootOperators.at(0).tryGetAs<SinkLogicalOperator>();
-    if (!sink)
-    {
-        throw CannotDeserialize(
-            "Plan root has to be a source, but got {} from\n{}", rootOperators.at(0), serializedQueryPlan.DebugString());
-    }
+        if (sink->getChildren().empty())
+        {
+            throw CannotDeserialize("Sink has no children! From\n{}", serializedQueryPlan.DebugString());
+        }
 
-    if (sink->getChildren().empty())
-    {
-        throw CannotDeserialize("Sink has no children! From\n{}", serializedQueryPlan.DebugString());
-    }
-
-    if (not sink.value()->getSinkDescriptor())
-    {
-        throw CannotDeserialize("Sink has no descriptor!");
+        if (not sink.value()->getSinkDescriptor())
+        {
+            throw CannotDeserialize("Sink has no descriptor!");
+        }
     }
 
     /// 4) Finalize plan

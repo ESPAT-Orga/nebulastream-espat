@@ -273,6 +273,10 @@ def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str):
             repl_binary,
             "-f", "JSON",
             "--companion-statistic",
+            # workload domain triggers the REPL's plan merger: both filter chains run side by side
+            # under one shared source, gated by a SwitchRegistry atomic that the swap callback
+            # flips via gRPC SetSwitch (no stop/redeploy, source thread keeps running).
+            "--companion-domain", "workload",
             "--companion-source", "bid",
             "--companion-field", "price",
             "--companion-metric", "Cardinality",

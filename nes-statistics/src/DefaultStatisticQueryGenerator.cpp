@@ -324,7 +324,11 @@ LogicalPlan DefaultStatisticQueryGenerator::generateProbeQuery(
     const auto rawId = statisticId.getRawValue();
     const auto generatorSchema = std::format(
         "SEQUENCE UINT64 {} {} 0, SEQUENCE UINT64 0 1 0, SEQUENCE UINT64 0 1 0, SEQUENCE UINT64 0 1 0", rawId, rawId + 1);
-    const auto emitRate = std::max<uint64_t>(1, 1000ULL / intervalMs);
+    /// emit_rate is parsed as double by FixedGeneratorRate, so fractional rates (sub-1 tuple/sec)
+    /// are supported. We want one probe tuple every `intervalMs`, i.e. `1000/intervalMs` tup/sec.
+    /// Integer arithmetic here previously clamped the rate to 1 tuple/sec for any intervalMs > 1000,
+    /// which caused the swap callback to fire too often (e.g. 1× per second for intervalMs=10000).
+    const auto emitRate = 1000.0 / static_cast<double>(intervalMs);
     const auto emitRateConfig = std::format("emit_rate {}", emitRate);
 
     auto plan = LogicalPlanBuilder::createLogicalPlan(

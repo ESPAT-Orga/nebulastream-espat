@@ -40,6 +40,10 @@ public:
     std::expected<void, Exception> stop(QueryId) override;
     [[nodiscard]] std::expected<LocalQueryStatusSnapshot, Exception> status(QueryId) const override;
     [[nodiscard]] std::expected<WorkerStatus, Exception> workerStatus(std::chrono::system_clock::time_point after) const override;
+
+    /// Flips a named runtime switch on the worker. See SwitchRegistry. Used by the workload-domain
+    /// adaptive swap callback to flip a gate atomic instead of stopping and redeploying the query.
+    std::expected<void, Exception> setSwitch(const std::string& name, int64_t value);
 };
 
 BackendProvider createGRPCBackend();

@@ -37,6 +37,8 @@ public:
 
     grpc::Status RequestStatus(grpc::ServerContext* context, const WorkerStatusRequest* request, WorkerStatusResponse* response) override;
 
+    grpc::Status SetSwitch(grpc::ServerContext*, const SetSwitchRequest*, google::protobuf::Empty*) override;
+
     explicit GRPCServer(SingleNodeWorker&& delegate) : delegate(std::move(delegate)) { }
 
 private:

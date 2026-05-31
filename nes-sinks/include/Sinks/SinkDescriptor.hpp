@@ -64,6 +64,14 @@ public:
     [[nodiscard]] Host getHost() const;
     [[nodiscard]] std::unordered_map<std::string, std::string> getOutputFormatterConfig() const;
 
+    /// Returns a copy of this descriptor with the given key/value pairs merged into the
+    /// out-of-band metadata map. Unlike formatConfig, metadata is NOT subject to any
+    /// formatter or sink-type validator and is the right place for cross-cutting tags
+    /// such as workload-switch gate metadata read by the query compiler.
+    [[nodiscard]] SinkDescriptor withMetadataEntries(const std::unordered_map<std::string, std::string>& entries) const;
+
+    [[nodiscard]] const std::unordered_map<std::string, std::string>& getMetadata() const;
+
 private:
     SinkDescriptor(
         std::variant<std::string, uint64_t> sinkName,
@@ -71,13 +79,15 @@ private:
         std::string_view sinkType,
         Host host,
         const std::unordered_map<std::string, std::string>& formatConfig,
-        DescriptorConfig::Config config);
+        DescriptorConfig::Config config,
+        std::unordered_map<std::string, std::string> metadata = {});
 
     std::variant<std::string, uint64_t> sinkName;
     std::shared_ptr<const Schema> schema;
     std::string sinkType;
     Host host;
     std::unordered_map<std::string, std::string> formatConfig;
+    std::unordered_map<std::string, std::string> metadata;
 
     friend Reflector<SinkDescriptor>;
 
@@ -139,6 +149,7 @@ struct ReflectedSinkDescriptor
     Host host;
     std::unordered_map<std::string, std::string> formatConfig;
     Reflected config;
+    std::unordered_map<std::string, std::string> metadata;
 };
 }
 

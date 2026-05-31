@@ -35,6 +35,9 @@
 #include <PipelinedQueryPlan.hpp>
 #include <SinkPhysicalOperator.hpp>
 #include <SourcePhysicalOperator.hpp>
+#include <SwitchRegistry.hpp>
+#include <Util/Logger/Logger.hpp>
+#include <charconv>
 #include <options.hpp>
 
 namespace NES
@@ -91,6 +94,40 @@ void LowerToCompiledQueryPlanPhase::processSink(const Predecessor& predecessor, 
         it = sinks.end() - 1;
     }
     it->predecessor.emplace_back(predecessor);
+
+    /// Apply runtime gate to the predecessor operator pipeline if the sink's metadata carries
+    /// gate tags (keys "gate_switch_name" and "gate_expected_value"). The merged plan for the
+    /// workload-domain switch design tags each filter-chain sink so the chain's pipeline stage drops
+    /// buffers whenever the named switch in SwitchRegistry doesn't match the expected value.
+    /// `metadata` is the right carrier here (not formatConfig) because formatConfig is validated by
+    /// the output formatter and rejects unknown keys.
+    const auto& sinkMetadata = sinkOperator.getMetadata();
+    const auto switchNameIt = sinkMetadata.find("gate_switch_name");
+    const auto expectedIt = sinkMetadata.find("gate_expected_value");
+    if (switchNameIt == sinkMetadata.end() || expectedIt == sinkMetadata.end())
+    {
+        return;
+    }
+    int64_t expected = 0;
+    if (const auto result = std::from_chars(expectedIt->second.data(), expectedIt->second.data() + expectedIt->second.size(), expected);
+        result.ec != std::errc{})
+    {
+        NES_WARNING("Sink {} has gate_expected_value='{}' that does not parse as int64; skipping gate", sinkOperator, expectedIt->second);
+        return;
+    }
+    if (not std::holds_alternative<std::weak_ptr<ExecutablePipeline>>(predecessor))
+    {
+        NES_WARNING("Sink {} has gate metadata but its predecessor is a source; gates on source pipelines are unsupported", sinkOperator);
+        return;
+    }
+    const auto predPipeline = std::get<std::weak_ptr<ExecutablePipeline>>(predecessor).lock();
+    if (not predPipeline)
+    {
+        NES_WARNING("Sink {} has gate metadata but its predecessor pipeline has been released; skipping gate", sinkOperator);
+        return;
+    }
+    predPipeline->stage->gateAtomic = SwitchRegistry::instance().getOrCreate(switchNameIt->second, expected);
+    predPipeline->stage->gateExpected = expected;
 }
 
 std::unique_ptr<ExecutablePipelineStage> LowerToCompiledQueryPlanPhase::getStage(const std::shared_ptr<Pipeline>& pipeline)

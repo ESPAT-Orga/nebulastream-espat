@@ -29,6 +29,7 @@
 #include <grpcpp/support/status.h>
 #include <ErrorHandling.hpp>
 #include <SingleNodeWorkerRPCService.pb.h>
+#include <SwitchRegistry.hpp>
 #include <WorkerStatus.hpp>
 
 namespace NES
@@ -204,6 +205,24 @@ grpc::Status GRPCServer::RequestStatus(grpc::ServerContext* context, const Worke
 
         serializeWorkerStatus(status, response);
 
+        return grpc::Status::OK;
+    }
+    CPPTRACE_CATCH(const Exception& e)
+    {
+        return handleError(e, context);
+    }
+    CPPTRACE_CATCH_ALT(const std::exception& e)
+    {
+        return handleError(e, context);
+    }
+    return {grpc::INTERNAL, "unknown exception"};
+}
+
+grpc::Status GRPCServer::SetSwitch(grpc::ServerContext* context, const SetSwitchRequest* request, google::protobuf::Empty*)
+{
+    CPPTRACE_TRY
+    {
+        SwitchRegistry::instance().set(request->name(), request->value());
         return grpc::Status::OK;
     }
     CPPTRACE_CATCH(const Exception& e)

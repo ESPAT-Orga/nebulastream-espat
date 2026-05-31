@@ -13,6 +13,7 @@
 */
 
 #pragma once
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <ostream>
@@ -44,6 +45,13 @@ public:
     friend std::ostream& operator<<(std::ostream& os, const ExecutablePipelineStage& eps) { return eps.toString(os); }
 
     bool firstPipeline = false;
+
+    /// Runtime gate: when set, the stage drops incoming buffers whenever
+    /// `gateAtomic->load() != gateExpected`. Used by the workload-switch mechanism
+    /// to redirect a shared source's buffers between sibling filter chains without
+    /// stopping and redeploying the query.
+    std::shared_ptr<std::atomic<int64_t>> gateAtomic;
+    int64_t gateExpected = 0;
 
 protected:
     virtual std::ostream& toString(std::ostream& os) const = 0;

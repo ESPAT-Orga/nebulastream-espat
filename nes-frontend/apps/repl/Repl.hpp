@@ -20,6 +20,7 @@
 #include <optional>
 #include <stop_token>
 #include <SQLQueryParser/StatementBinder.hpp>
+#include <Sinks/SinkCatalog.hpp>
 #include <Statements/StatementHandler.hpp>
 #include <QueryId.hpp>
 #include <RequestStatisticStatement.hpp>
@@ -48,6 +49,7 @@ public:
         std::shared_ptr<QueryStatementHandler> queryStatementHandler,
         StatisticRequestHandler statisticRequestHandler,
         StatementBinder binder,
+        std::shared_ptr<SinkCatalog> sinkCatalog,
         ErrorBehaviour errorBehaviour,
         StatementOutputFormat defaultOutputFormat,
         bool interactiveMode,

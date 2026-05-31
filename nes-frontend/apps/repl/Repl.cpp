@@ -33,9 +33,13 @@
 #include <unistd.h>
 
 #include <CollectionDomain.hpp>
+#include <Operators/Sinks/SinkLogicalOperator.hpp>
+#include <Operators/Sources/SourceNameLogicalOperator.hpp>
+#include <Plans/LogicalPlan.hpp>
 #include <RequestStatisticStatement.hpp>
 #include <SQLQueryParser/AntlrSQLQueryParser.hpp>
 #include <SQLQueryParser/StatementBinder.hpp>
+#include <Sinks/SinkDescriptor.hpp>
 #include <Statements/JsonOutputFormatter.hpp> /// NOLINT(misc-include-cleaner)
 #include <Statements/StatementHandler.hpp>
 #include <Statements/StatementOutputAssembler.hpp>
@@ -49,6 +53,98 @@
 namespace NES
 {
 
+namespace
+{
+
+/// Tags a sink operator's formatConfig with workload-switch gate metadata. The compiler
+/// reads "gate_switch_name"/"gate_expected_value" in LowerToCompiledQueryPlanPhase::processSink
+/// and binds the predecessor pipeline stage's gateAtomic via SwitchRegistry.
+///
+/// SinkLogicalOperator from the parser usually carries only a name; the descriptor is bound
+/// by SinkBindingRule downstream. We resolve the descriptor up-front via the sink catalog so
+/// the tagged operator has the full descriptor and SinkBindingRule treats it as already bound.
+LogicalOperator tagSinkWithGate(
+    const LogicalOperator& sinkOp,
+    const std::string& switchName,
+    int64_t expectedValue,
+    const SinkCatalog& sinkCatalog)
+{
+    const auto typed = sinkOp.getAs<SinkLogicalOperator>();
+    auto descriptor = typed->getSinkDescriptor();
+    if (not descriptor.has_value())
+    {
+        descriptor = sinkCatalog.getSinkDescriptor(typed->getSinkName());
+    }
+    if (not descriptor.has_value())
+    {
+        throw UnknownSinkName(
+            "Cannot tag sink '{}' with workload-switch gate: descriptor not found in catalog", typed->getSinkName());
+    }
+    const auto newDescriptor = descriptor->withMetadataEntries(
+        {{"gate_switch_name", switchName}, {"gate_expected_value", std::to_string(expectedValue)}});
+    return LogicalOperator{typed->withSinkDescriptor(newDescriptor).withChildren(sinkOp.getChildren())};
+}
+
+/// Builds a workload-switch merged plan from two LogicalPlans (`dataPlan` and `pairedPlan`),
+/// each expected to be a single-source, single-sink filter chain over the SAME logical source.
+///
+/// The result has:
+///   - The data plan's source operator shared between both chains (one source thread).
+///   - Both sinks tagged with switch metadata: data sink → expected=0, paired sink → expected=1.
+///   - Two root operators (one per chain) — multi-root plans are supported by the optimizer
+///     after the LogicalPlan/SourceInferenceRule/DecideJoinTypesRule/DecideMemoryLayoutRule
+///     and replaceOperator multi-root fixes.
+///
+/// Throws if either plan does not have exactly one source-name operator.
+LogicalPlan buildWorkloadSwitchPlan(
+    const LogicalPlan& dataPlan, const LogicalPlan& pairedPlan, const std::string& switchName, const SinkCatalog& sinkCatalog)
+{
+    const auto dataSources = getOperatorByType<SourceNameLogicalOperator>(dataPlan);
+    const auto pairedSources = getOperatorByType<SourceNameLogicalOperator>(pairedPlan);
+    if (dataSources.size() != 1)
+    {
+        throw NotImplemented("Workload-switch merger requires the data query to have exactly one source (got {})", dataSources.size());
+    }
+    if (pairedSources.size() != 1)
+    {
+        throw NotImplemented("Workload-switch merger requires the paired query to have exactly one source (got {})", pairedSources.size());
+    }
+
+    const LogicalOperator dataSource{dataSources.front()};
+    const LogicalOperator pairedSourceOp{pairedSources.front()};
+
+    /// Tag both sinks. Data plan's roots are sinks (single root) — same for pairedPlan.
+    auto dataPlanWithGate = dataPlan;
+    {
+        const auto& roots = dataPlanWithGate.getRootOperators();
+        INVARIANT(roots.size() == 1, "Data plan must have exactly one root (sink), got {}", roots.size());
+        const auto taggedSink = tagSinkWithGate(roots.front(), switchName, 0, sinkCatalog);
+        auto result = replaceOperator(dataPlanWithGate, roots.front().getId(), taggedSink);
+        INVARIANT(result.has_value(), "Failed to tag data plan's sink with gate metadata");
+        dataPlanWithGate = std::move(*result);
+    }
+
+    auto pairedPlanWithGate = pairedPlan;
+    {
+        const auto& roots = pairedPlanWithGate.getRootOperators();
+        INVARIANT(roots.size() == 1, "Paired plan must have exactly one root (sink), got {}", roots.size());
+        const auto taggedSink = tagSinkWithGate(roots.front(), switchName, 1, sinkCatalog);
+        auto result = replaceOperator(pairedPlanWithGate, roots.front().getId(), taggedSink);
+        INVARIANT(result.has_value(), "Failed to tag paired plan's sink with gate metadata");
+        pairedPlanWithGate = std::move(*result);
+    }
+
+    /// Replace the paired plan's source with the data plan's source operator (sharing OperatorId)
+    /// so the optimizer recognizes them as the same source after the merge.
+    auto sharedPairedResult = replaceSubtree(pairedPlanWithGate, pairedSourceOp.getId(), dataSource);
+    INVARIANT(sharedPairedResult.has_value(), "Failed to splice shared source into paired plan");
+    const auto sharedPairedPlan = std::move(*sharedPairedResult);
+
+    return addRootOperators(dataPlanWithGate, sharedPairedPlan.getRootOperators());
+}
+
+}
+
 struct Repl::Impl
 {
     SourceStatementHandler sourceStatementHandler;
@@ -57,6 +153,7 @@ struct Repl::Impl
     std::shared_ptr<QueryStatementHandler> queryStatementHandler;
     StatisticRequestHandler statisticRequestHandler;
     StatementBinder binder;
+    std::shared_ptr<SinkCatalog> sinkCatalog;
     std::stop_token stopToken;
     std::optional<RequestStatisticBuildStatement> companionStatisticRequest;
     std::optional<std::function<void(DistributedQueryId, const std::string&, Statistic::StatisticId)>> onCompanionAssociatedWithQuery;
@@ -83,6 +180,7 @@ struct Repl::Impl
         std::shared_ptr<QueryStatementHandler> queryStatementHandler,
         StatisticRequestHandler statisticRequestHandler,
         StatementBinder binder,
+        std::shared_ptr<SinkCatalog> sinkCatalog,
         const ErrorBehaviour errorBehaviour,
         const StatementOutputFormat defaultOutputFormat,
         const bool interactiveMode,
@@ -95,6 +193,7 @@ struct Repl::Impl
         , queryStatementHandler(std::move(queryStatementHandler))
         , statisticRequestHandler(std::move(statisticRequestHandler))
         , binder(std::move(binder))
+        , sinkCatalog(std::move(sinkCatalog))
         , stopToken(std::move(stopToken))
         , companionStatisticRequest(std::move(companionStatisticRequest))
         , onCompanionAssociatedWithQuery(std::move(onCompanionAssociatedWithQuery))
@@ -433,6 +532,35 @@ struct Repl::Impl
                         {
                             try
                             {
+                                /// Workload-switch merger: if a paired SQL is supplied (via
+                                /// --companion-switch-to-sql, stashed by ReplStarter in the request's
+                                /// options as "paired_sql"), parse it and merge both filter chains into
+                                /// a single shared-source plan with gate-tagged sinks. The swap callback
+                                /// flips the named switch instead of redeploying.
+                                LogicalPlan dataQueryPlan = stmt.plan;
+                                if (const auto pairedIt = companionStatisticRequest->options.find("paired_sql");
+                                    pairedIt != companionStatisticRequest->options.end() && not pairedIt->second.empty())
+                                {
+                                    const auto switchIt = companionStatisticRequest->options.find("switch_name");
+                                    const std::string switchName
+                                        = (switchIt != companionStatisticRequest->options.end()) ? switchIt->second : "filter_order";
+                                    auto pairedBind = binder.parseAndBindSingle(pairedIt->second);
+                                    if (not pairedBind.has_value())
+                                    {
+                                        return std::unexpected<Exception>(std::move(pairedBind.error()));
+                                    }
+                                    auto* pairedQuery = std::get_if<QueryStatement>(&pairedBind.value());
+                                    if (pairedQuery == nullptr)
+                                    {
+                                        return std::unexpected<Exception>(Exception(
+                                            "Workload-switch paired SQL must be a SELECT statement", ErrorCode::UnknownException));
+                                    }
+                                    dataQueryPlan = buildWorkloadSwitchPlan(stmt.plan, pairedQuery->plan, switchName, *sinkCatalog);
+                                    std::cout << "[Statistic] Workload-switch merged plan: 2 filter chains gated by '" << switchName
+                                              << "' (data=0, paired=1)\n";
+                                    std::flush(std::cout);
+                                }
+
                                 auto submitMerged = [&](LogicalPlan mergedPlan) -> std::expected<QueryId, Exception>
                                 {
                                     QueryStatement mergedStmt = stmt;
@@ -455,7 +583,7 @@ struct Repl::Impl
                                     catch (...) { /* keep default */ }
                                 }
                                 auto statResult = statisticRequestHandler.collectWorkloadStatistic(
-                                    *companionStatisticRequest, stmt.plan, submitMerged, probeIntervalMs);
+                                    *companionStatisticRequest, dataQueryPlan, submitMerged, probeIntervalMs);
                                 if (not statResult.has_value())
                                 {
                                     std::cout << "[Statistic] Failed to deploy workload companion: " << statResult.error().what()
@@ -667,6 +795,7 @@ Repl::Repl(
     std::shared_ptr<QueryStatementHandler> queryStatementHandler,
     StatisticRequestHandler statisticRequestHandler,
     StatementBinder binder,
+    std::shared_ptr<SinkCatalog> sinkCatalog,
     ErrorBehaviour errorBehaviour,
     StatementOutputFormat defaultOutputFormat,
     bool interactiveMode,
@@ -680,6 +809,7 @@ Repl::Repl(
           std::move(queryStatementHandler),
           std::move(statisticRequestHandler),
           std::move(binder),
+          std::move(sinkCatalog),
           errorBehaviour,
           defaultOutputFormat,
           interactiveMode,

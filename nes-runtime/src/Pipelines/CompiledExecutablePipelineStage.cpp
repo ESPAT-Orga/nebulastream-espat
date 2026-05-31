@@ -49,6 +49,12 @@ CompiledExecutablePipelineStage::CompiledExecutablePipelineStage(
 
 void CompiledExecutablePipelineStage::execute(const TupleBuffer& inputTupleBuffer, PipelineExecutionContext& pipelineExecutionContext)
 {
+    /// Runtime gate: drop the buffer without running the compiled pipeline when the gate is set
+    /// and its atomic doesn't match the expected value. One relaxed atomic load per buffer.
+    if (gateAtomic && gateAtomic->load(std::memory_order_relaxed) != gateExpected)
+    {
+        return;
+    }
     /// we call the compiled pipeline function with an input buffer and the execution context
     pipelineExecutionContext.setOperatorHandlers(operatorHandlers);
     Arena arena(pipelineExecutionContext.getBufferManager());

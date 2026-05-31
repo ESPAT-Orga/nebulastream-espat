@@ -39,6 +39,12 @@
 #include <Plans/LogicalPlan.hpp>
 #include <QueryManager/GRPCQuerySubmissionBackend.hpp>
 #include <QueryManager/QueryManager.hpp>
+#include <SingleNodeWorkerRPCService.grpc.pb.h>
+#include <SingleNodeWorkerRPCService.pb.h>
+#include <google/protobuf/empty.pb.h>
+#include <grpcpp/client_context.h>
+#include <grpcpp/create_channel.h>
+#include <grpcpp/security/credentials.h>
 #include <SQLQueryParser/AntlrSQLQueryParser.hpp>
 #include <SQLQueryParser/StatementBinder.hpp>
 #include <Sinks/SinkCatalog.hpp>
@@ -214,6 +220,12 @@ int main(int argc, char** argv)
             .help(
                 "Heartbeat probe interval in milliseconds for --companion-domain workload (default: 10000). "
                 "Controls how often the coordinator's trigger callbacks fire. Ignored for --companion-domain data.");
+        program.add_argument("--companion-switch-name")
+            .default_value(std::string{"filter_order"})
+            .help(
+                "Name of the workload-switch gate (SwitchRegistry slot) used by --companion-domain workload "
+                "to flip between two filter-chain pipelines without redeploying. The data sink is gated with "
+                "expected=0, the paired sink (--companion-switch-to-sql) with expected=1. Default: filter_order");
 
 #ifdef EMBED_ENGINE
         /// single node worker config
@@ -414,9 +426,20 @@ int main(int argc, char** argv)
                 /// all re-deployments — the build branch on every spliced plan reports under the same
                 /// statisticId and therefore matches the same trigger entry.
                 std::optional<NES::Statistic::StatisticId> statisticId;
+                /// Workload-switch mode: current gate value. The callback flips this between 0 and 1
+                /// on each fire instead of redeploying. Updated under `mutex`.
+                int64_t currentSwitchValue = 0;
             };
             auto swapState = std::make_shared<AdaptiveSwapState>();
             swapState->nextSql = switchToSql;
+
+            /// Workload-switch mode is active when paired SQL is provided AND the domain is workload.
+            /// In that case the swap callback flips the named gate via gRPC SetSwitch instead of
+            /// stopping and redeploying the query.
+            const auto switchName = program.get<std::string>("--companion-switch-name");
+            const auto workerServerUri = program.get<std::string>("-s");
+            const bool workloadSwitchMode
+                = (program.get<std::string>("--companion-domain") == "workload") && not switchToSql.empty();
 
             const auto companionDomain = program.get<std::string>("--companion-domain");
             NES::CollectionDomain collectionDomain = NES::DataDomain{
@@ -462,7 +485,10 @@ int main(int argc, char** argv)
                          companionField,
                          companionHost,
                          swapCoordinatorAddr,
-                         swapGenerator](
+                         swapGenerator,
+                         workloadSwitchMode,
+                         switchName,
+                         workerServerUri](
                             NES::Statistic::StatisticId statId,
                             NES::Windowing::TimeMeasure startTs,
                             NES::Windowing::TimeMeasure endTs)
@@ -470,6 +496,40 @@ int main(int argc, char** argv)
                         std::cout << "[StatisticTrigger] id=" << statId.getRawValue() << " window=[" << startTs.getTime() << ", "
                                   << endTs.getTime() << "]\n";
                         std::flush(std::cout);
+
+                        /// Workload-switch path: flip the named gate via gRPC. No query stop/redeploy —
+                        /// the source thread keeps running, and the merged plan's two chains see the
+                        /// new gate value on their next buffer.
+                        if (workloadSwitchMode)
+                        {
+                            int64_t newValue = 0;
+                            {
+                                std::lock_guard lock(swapState->mutex);
+                                swapState->currentSwitchValue = (swapState->currentSwitchValue == 0) ? 1 : 0;
+                                newValue = swapState->currentSwitchValue;
+                            }
+                            /// Direct stub bypasses WorkerConfig/QueryManager — the swap callback only needs
+                            /// the worker's gRPC address. Fresh stub per fire is fine; flips happen every
+                            /// probe interval (10s by default).
+                            auto stub = WorkerRPCService::NewStub(
+                                grpc::CreateChannel(workerServerUri, grpc::InsecureChannelCredentials()));
+                            grpc::ClientContext ctx;
+                            SetSwitchRequest req;
+                            req.set_name(switchName);
+                            req.set_value(newValue);
+                            google::protobuf::Empty resp;
+                            auto status = stub->SetSwitch(&ctx, req, &resp);
+                            if (not status.ok())
+                            {
+                                std::cout << "[AdaptiveOpt] Workload-switch flip failed: " << status.error_message() << "\n";
+                                std::flush(std::cout);
+                                return;
+                            }
+                            std::cout << "[AdaptiveOpt] Flipped workload-switch '" << switchName << "' to " << newValue
+                                      << " (no redeploy).\n";
+                            std::flush(std::cout);
+                            return;
+                        }
 
                         std::optional<NES::DistributedQueryId> currentQueryId;
                         std::string currentSql;
@@ -599,7 +659,12 @@ int main(int argc, char** argv)
                     }},
                 .options
                 = {{"host", program.get<std::string>("--companion-host")},
-                   {"probe_interval_ms", program.get<std::string>("--companion-probe-interval-ms")}}};
+                   {"probe_interval_ms", program.get<std::string>("--companion-probe-interval-ms")},
+                   /// Stashing paired_sql + switch_name in the request options threads them through to
+                   /// Repl::Impl::executeQuery where buildWorkloadSwitchPlan reads them. Empty if the
+                   /// user didn't pass --companion-switch-to-sql.
+                   {"paired_sql", switchToSql},
+                   {"switch_name", program.get<std::string>("--companion-switch-name")}}};
             onCompanionAssociatedWithQuery
                 = [swapState](NES::DistributedQueryId id, const std::string& sql, NES::Statistic::StatisticId statId)
             {
@@ -620,6 +685,7 @@ int main(int argc, char** argv)
             queryStatementHandler,
             std::move(statisticRequestHandler),
             std::move(binder),
+            sinkCatalog,
             errorBehaviour,
             defaultOutputFormat,
             interactiveMode,

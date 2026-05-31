@@ -186,6 +186,25 @@ std::expected<void, Exception> GRPCQuerySubmissionBackend::stop(QueryId queryId)
         "Status: {}\nMessage: {}\nDetail: {}", magic_enum::enum_name(status.error_code()), status.error_message(), status.error_details())};
 }
 
+std::expected<void, Exception> GRPCQuerySubmissionBackend::setSwitch(const std::string& name, int64_t value)
+{
+    grpc::ClientContext context;
+    SetSwitchRequest request;
+    request.set_name(name);
+    request.set_value(value);
+    google::protobuf::Empty response;
+    const auto status = stub->SetSwitch(&context, request, &response);
+    if (status.ok())
+    {
+        return {};
+    }
+    return std::unexpected{UnknownException(
+        "SetSwitch RPC failed. Status: {}\nMessage: {}\nDetail: {}",
+        magic_enum::enum_name(status.error_code()),
+        status.error_message(),
+        status.error_details())};
+}
+
 BackendProvider createGRPCBackend()
 {
     return [](const WorkerConfig& config) { return std::make_unique<GRPCQuerySubmissionBackend>(config); };

@@ -46,15 +46,12 @@ namespace
 {
 SourceReturnType::EmitFunction emitFunction(
     QueryId queryId,
-    size_t numberOfInflightBuffers,
     std::weak_ptr<RunningSource> source,
     std::shared_ptr<RunningSource::SuccessorContainer> successors,
     QueryLifetimeController& controller,
     WorkEmitter& emitter)
 {
-    auto availableBuffer = std::make_shared<std::counting_semaphore<>>(
-        std::min(numberOfInflightBuffers, static_cast<size_t>(std::numeric_limits<int32_t>::max())));
-    return [&controller, successors = std::move(successors), source, &emitter, queryId, availableBuffer = std::move(availableBuffer)](
+    return [&controller, successors = std::move(successors), source, &emitter, queryId](
                const OriginId sourceId,
                SourceReturnType::SourceReturnType event,
                const std::stop_token& stopToken) -> SourceReturnType::EmitResult
@@ -63,16 +60,18 @@ SourceReturnType::EmitFunction emitFunction(
             Overloaded{
                 [&](const SourceReturnType::Data& data)
                 {
-                    /// Snapshot the successor list under the registry's read-lock so the loop body
-                    /// can iterate without holding the lock. Splice-time appends are seen on the
-                    /// next buffer.
+                    /// Snapshot the successor list under the read-lock so the loop body can iterate
+                    /// without holding the lock. Splice-time appends are seen on the next buffer.
+                    /// Each entry carries its own per-successor semaphore — a slow build-branch
+                    /// pipeline will only backpressure ITS OWN slot pool, not the data path's.
                     const auto snapshot = successors->copy();
-                    for (const auto& successor : snapshot)
+                    for (const auto& entry : snapshot)
                     {
+                        auto slots = entry.availableSlots;
                         {
                             /// release the semaphore in case the source wants to terminate
-                            const std::stop_callback callback(stopToken, [&]() { availableBuffer->release(); });
-                            availableBuffer->acquire();
+                            const std::stop_callback callback(stopToken, [&]() { slots->release(); });
+                            slots->acquire();
                             if (stopToken.stop_requested())
                             {
                                 return SourceReturnType::EmitResult::STOP_REQUESTED;
@@ -81,9 +80,9 @@ SourceReturnType::EmitFunction emitFunction(
                         /// The admission queue might be full, we have to reattempt
                         while (not emitter.emitWork(
                             queryId,
-                            successor,
+                            entry.node,
                             data.buffer,
-                            TaskCallback{TaskCallback::OnComplete([availableBuffer] { availableBuffer->release(); })},
+                            TaskCallback{TaskCallback::OnComplete([slots] { slots->release(); })},
                             PipelineExecutionContext::ContinuationPolicy::NEVER))
                         {
                             if (stopToken.stop_requested())
@@ -91,7 +90,7 @@ SourceReturnType::EmitFunction emitFunction(
                                 return SourceReturnType::EmitResult::STOP_REQUESTED;
                             }
                         }
-                        ENGINE_LOG_DEBUG("Source Emitted Data to successor: {}-{}", queryId, successor->id);
+                        ENGINE_LOG_DEBUG("Source Emitted Data to successor: {}-{}", queryId, entry.node->id);
                     }
                     return SourceReturnType::EmitResult::SUCCESS;
                 },
@@ -117,17 +116,29 @@ OriginId RunningSource::getOriginId() const
 }
 
 RunningSource::RunningSource(
-    std::vector<std::shared_ptr<RunningQueryPlanNode>> initialSuccessors,
+    std::vector<SuccessorEntry> initialSuccessors,
     std::unique_ptr<SourceHandle> source,
     std::function<bool(std::vector<std::shared_ptr<RunningQueryPlanNode>>&&)> onSourceStopped,
     std::function<void(Exception)> onSourceFailure,
-    std::string logicalSourceName)
+    std::string logicalSourceName,
+    size_t inflightBufferLimit)
     : successors(std::make_shared<SuccessorContainer>(std::move(initialSuccessors)))
     , source(std::move(source))
     , onSourceStopped(std::move(onSourceStopped))
     , onSourceFailure(std::move(onSourceFailure))
     , logicalSourceName(std::move(logicalSourceName))
+    , inflightBufferLimit(inflightBufferLimit)
 {
+}
+
+namespace
+{
+RunningSource::SuccessorEntry makeEntry(std::shared_ptr<RunningQueryPlanNode> node, size_t inflightBufferLimit)
+{
+    const auto slotCount = std::min(inflightBufferLimit, static_cast<size_t>(std::numeric_limits<int32_t>::max()));
+    return RunningSource::SuccessorEntry{
+        .node = std::move(node), .availableSlots = std::make_shared<std::counting_semaphore<>>(slotCount)};
+}
 }
 
 std::shared_ptr<RunningSource> RunningSource::create(
@@ -141,8 +152,19 @@ std::shared_ptr<RunningSource> RunningSource::create(
     std::string logicalSourceName)
 {
     const auto maxInflightBuffers = source->getRuntimeConfiguration().inflightBufferLimit;
+    std::vector<SuccessorEntry> initialEntries;
+    initialEntries.reserve(successors.size());
+    for (auto& node : successors)
+    {
+        initialEntries.push_back(makeEntry(std::move(node), maxInflightBuffers));
+    }
     auto runningSource = std::shared_ptr<RunningSource>(new RunningSource(
-        std::move(successors), std::move(source), std::move(onSourceStopped), std::move(onSourceFailure), logicalSourceName));
+        std::move(initialEntries),
+        std::move(source),
+        std::move(onSourceStopped),
+        std::move(onSourceFailure),
+        logicalSourceName,
+        maxInflightBuffers));
     ENGINE_LOG_DEBUG("Starting Running Source");
     if (not logicalSourceName.empty())
     {
@@ -152,7 +174,7 @@ std::shared_ptr<RunningSource> RunningSource::create(
     }
     {
         const std::scoped_lock lock(runningSource->mutex);
-        runningSource->source->start(emitFunction(queryId, maxInflightBuffers, runningSource, runningSource->successors, controller, emitter));
+        runningSource->source->start(emitFunction(queryId, runningSource, runningSource->successors, controller, emitter));
     }
     return runningSource;
 }
@@ -169,7 +191,10 @@ void RunningSource::appendSuccessors(std::vector<std::shared_ptr<RunningQueryPla
         additionalSuccessors.size(),
         logicalSourceName);
     std::cout.flush();
-    locked->insert(locked->end(), std::make_move_iterator(additionalSuccessors.begin()), std::make_move_iterator(additionalSuccessors.end()));
+    for (auto& node : additionalSuccessors)
+    {
+        locked->push_back(makeEntry(std::move(node), inflightBufferLimit));
+    }
 }
 
 RunningSource::~RunningSource()
@@ -201,13 +226,17 @@ bool RunningSource::attemptUnregister()
         return false;
     }
 
-    std::vector<std::shared_ptr<RunningQueryPlanNode>> drained;
+    std::vector<std::shared_ptr<RunningQueryPlanNode>> drainedNodes;
     {
         auto locked = this->successors->wlock();
-        drained = std::move(*locked);
+        drainedNodes.reserve(locked->size());
+        for (auto& entry : *locked)
+        {
+            drainedNodes.push_back(std::move(entry.node));
+        }
         locked->clear();
     }
-    if (onSourceStopped(std::move(drained)))
+    if (onSourceStopped(std::move(drainedNodes)))
     {
         return true;
     }

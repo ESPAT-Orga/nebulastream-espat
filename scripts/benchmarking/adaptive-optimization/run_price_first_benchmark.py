@@ -252,6 +252,7 @@ def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str, sqr
             # blowing the pool at setup.
             "--worker.default_query_execution.operator_buffer_size=4194304",
             "--worker.number_of_buffers_in_global_buffer_manager=1024",
+            "--worker.query_engine.number_of_worker_threads=12",
         ],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,

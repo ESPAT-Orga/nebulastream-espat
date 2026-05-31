@@ -16,6 +16,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <semaphore>
 #include <string>
 #include <vector>
 #include <Identifiers/Identifiers.hpp>
@@ -73,18 +74,27 @@ public:
     /// Calls the underlying `tryStop`
     [[nodiscard]] SourceReturnType::TryStopResult tryStop() const;
 
-    /// Shared-mutable container type used by the emit closure. Held by shared_ptr so the closure
-    /// keeps it alive as long as the source is emitting; mutated under folly::Synchronized so the
-    /// splice path can append after creation without racing with the emit fast path.
-    using SuccessorContainer = folly::Synchronized<std::vector<std::shared_ptr<RunningQueryPlanNode>>>;
+    /// One entry per successor pipeline: the head RunningQueryPlanNode and a *per-successor*
+    /// inflight-tasks semaphore. Earlier versions of this code used a single shared semaphore for
+    /// all successors, which caused the data query to slow down 3× when the workload-domain build
+    /// branch was spliced in — every buffer consumed N slots from a 64-slot pool, and the slower
+    /// branch tied up slots that the data path needed. With per-successor semaphores each branch
+    /// is independently rate-limited and the data path no longer waits on the build branch.
+    struct SuccessorEntry
+    {
+        std::shared_ptr<RunningQueryPlanNode> node;
+        std::shared_ptr<std::counting_semaphore<>> availableSlots;
+    };
+    using SuccessorContainer = folly::Synchronized<std::vector<SuccessorEntry>>;
 
 private:
     RunningSource(
-        std::vector<std::shared_ptr<RunningQueryPlanNode>> successors,
+        std::vector<SuccessorEntry> successors,
         std::unique_ptr<SourceHandle> source,
         std::function<bool(std::vector<std::shared_ptr<RunningQueryPlanNode>>&&)> onSourceStopped,
         std::function<void(Exception)> onSourceFailure,
-        std::string logicalSourceName);
+        std::string logicalSourceName,
+        size_t inflightBufferLimit);
 
     mutable std::mutex mutex; /// Protects against race between create() (starting the source) and tryStop() (stopping the source)
     /// shared_ptr so the emit closure (created in create() below) reads from the SAME container
@@ -94,6 +104,9 @@ private:
     std::function<bool(std::vector<std::shared_ptr<RunningQueryPlanNode>>&&)> onSourceStopped;
     std::function<void(Exception)> onSourceFailure;
     std::string logicalSourceName;
+    /// Slot count for each successor's per-successor semaphore; pinned at create time so later
+    /// splice-time appendSuccessors() calls allocate semaphores with the same budget.
+    size_t inflightBufferLimit{0};
 };
 
 }

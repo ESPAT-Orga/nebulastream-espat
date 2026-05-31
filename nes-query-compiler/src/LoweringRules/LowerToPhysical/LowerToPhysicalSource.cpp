@@ -20,6 +20,7 @@
 #include <LoweringRules/AbstractLoweringRule.hpp>
 #include <Operators/LogicalOperator.hpp>
 #include <Operators/Sources/SourceDescriptorLogicalOperator.hpp>
+#include <Traits/DeferSourceStartTrait.hpp>
 #include <Traits/MemoryLayoutTypeTrait.hpp>
 #include <Traits/OutputOriginIdsTrait.hpp>
 #include <Traits/SpliceToRunningSourceTrait.hpp>
@@ -45,6 +46,7 @@ LoweringRuleResultSubgraph LowerToPhysicalSource::apply(
     /// trait, if set, was stamped by the workload-domain build-branch generator; LogicalSource-
     /// ExpansionRule propagates it to every expanded SourceDescriptor operator.
     physicalOperator.spliceToRunningSource = hasTrait<SpliceToRunningSourceTrait>(source.getTraitSet());
+    physicalOperator.deferStart = hasTrait<DeferSourceStartTrait>(source.getTraitSet());
     physicalOperator.logicalSourceName = source->getSourceDescriptor().getLogicalSource().getLogicalSourceName();
 
     const auto inputSchemas = logicalOperator.getInputSchemas();

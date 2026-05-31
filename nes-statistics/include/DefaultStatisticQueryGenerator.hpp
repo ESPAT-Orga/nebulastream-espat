@@ -14,8 +14,10 @@
 
 #pragma once
 
+#include <optional>
 #include <string>
 #include <CollectionDomain.hpp>
+#include <Functions/LogicalFunction.hpp>
 #include <Operators/LogicalOperator.hpp>
 #include <Plans/LogicalPlan.hpp>
 #include <RequestStatisticStatement.hpp>
@@ -48,14 +50,15 @@ public:
         const std::string& coordinatorAddress,
         const LogicalOperator& spliceLeaf) const override;
 
-    /// Heartbeat probe for the workload-domain build branch. Builds a tiny standalone query:
-    ///   Generator(constant {statisticId, 0, 0, 0}, 1 tuple / intervalMs) → GrpcSink → coordinator
-    /// The probe lets the coordinator's StatisticRegistry fire condition triggers at a fixed
-    /// wall-clock cadence, decoupled from the data query's window-close rate. The probe records
-    /// don't carry meaningful start/end timestamps — they're heartbeat pings; the swap callback
-    /// in the adaptive setup uses only the statisticId.
+    /// Probe for the workload-domain build branch. See base-class docs for predicate modes.
+    /// When predicate is null: legacy ticker — Generator(STATISTICID = probeStatisticId, …) → GrpcSink.
+    /// When predicate is set: selectivity-gated — Generator(STATISTICID = buildStatisticId, …) →
+    ///   EquiWidthHistogramProbe(buildStatisticId) → Selection(predicate) →
+    ///   Projection(STATISTICID := probeStatisticId, pass-through timestamps) → GrpcSink.
     [[nodiscard]] LogicalPlan generateProbeQuery(
-        Statistic::StatisticId statisticId,
+        Statistic::StatisticId buildStatisticId,
+        Statistic::StatisticId probeStatisticId,
+        std::optional<LogicalFunction> predicate,
         const std::string& coordinatorAddress,
         uint64_t intervalMs,
         const std::string& sinkWorkerHost) const override;

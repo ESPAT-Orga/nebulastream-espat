@@ -57,6 +57,10 @@ struct CompiledQueryPlan
         /// it. logicalSourceName is taken from descriptor.getLogicalSource() at lowering time and
         /// pinned here so the runtime path doesn't depend on the descriptor still being live.
         bool spliceToRunningSource = false;
+        /// If true, the runtime creates the RunningSource and registers it but does NOT start
+        /// its emit thread. An explicit RunningSourceRegistry::startDeferred(name) call (issued
+        /// by orchestration code after all splices have wired in) starts emission.
+        bool deferStart = false;
         std::string logicalSourceName;
     };
 

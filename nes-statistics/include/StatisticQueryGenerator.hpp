@@ -15,8 +15,10 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <CollectionDomain.hpp>
+#include <Functions/LogicalFunction.hpp>
 #include <Operators/LogicalOperator.hpp>
 #include <Plans/LogicalPlan.hpp>
 #include <Statistic.hpp>
@@ -64,14 +66,29 @@ public:
         throw NotImplemented("This StatisticQueryGenerator does not support WorkloadDomain build-branch generation");
     }
 
-    /// Heartbeat probe used alongside the workload-domain build branch. Default throws.
+    /// Probe used alongside the workload-domain build branch.
+    /// Two modes (selected by the `predicate` argument):
+    ///  - predicate == nullopt: a pure heartbeat. Generator → GrpcSink reports `buildStatisticId`
+    ///    every interval. The coordinator-side trigger callback handles all decision logic.
+    ///  - predicate != nullopt: a *selectivity-gated* probe. The pipeline reads the histogram via
+    ///    EquiWidthHistogramProbe(buildStatisticId), filters bin rows by `predicate`, and rewrites
+    ///    STATISTICID to `probeStatisticId` before reporting. The coordinator routes the report
+    ///    via probeStatisticId, so two probes built off the same buildStatisticId fire two distinct
+    ///    callbacks.
+    /// `probeStatisticId` is the report routing key (must differ between probes when stacking
+    /// multiple). When `predicate` is null and the caller wants the legacy single-callback flow,
+    /// they pass `probeStatisticId == buildStatisticId`.
     [[nodiscard]] virtual LogicalPlan generateProbeQuery(
-        Statistic::StatisticId statisticId,
+        Statistic::StatisticId buildStatisticId,
+        Statistic::StatisticId probeStatisticId,
+        std::optional<LogicalFunction> predicate,
         const std::string& coordinatorAddress,
         uint64_t intervalMs,
         const std::string& sinkWorkerHost) const
     {
-        (void)statisticId;
+        (void)buildStatisticId;
+        (void)probeStatisticId;
+        (void)predicate;
         (void)coordinatorAddress;
         (void)intervalMs;
         (void)sinkWorkerHost;

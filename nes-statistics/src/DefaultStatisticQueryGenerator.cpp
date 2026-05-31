@@ -28,14 +28,18 @@
 #include <DataTypes/DataType.hpp>
 #include <DataTypes/DataTypeProvider.hpp>
 #include <DataTypes/Schema.hpp>
+#include <Functions/ConstantValueLogicalFunction.hpp>
 #include <Functions/FieldAccessLogicalFunction.hpp>
+#include <Functions/LogicalFunction.hpp>
 #include <Identifiers/Identifiers.hpp>
 #include <Identifiers/SketchDimensions.hpp>
+#include <Operators/ProjectionLogicalOperator.hpp>
 #include <Operators/Sources/SourceNameLogicalOperator.hpp>
 #include <Operators/Statistic/LogicalStatisticFields.hpp>
 #include <Traits/SpliceToRunningSourceTrait.hpp>
 #include <Traits/TraitSet.hpp>
 #include <Operators/Windows/Aggregations/Histogram/EquiWidthHistogramLogicalFunction.hpp>
+#include <Operators/Windows/Aggregations/Histogram/EquiWidthHistogramProbeLogicalOperator.hpp>
 #include <Operators/Windows/Aggregations/Sample/ReservoirSampleLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/Sketch/CountMinSketchLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/WindowAggregationLogicalFunction.hpp>
@@ -120,7 +124,8 @@ LogicalPlan stackBuildChainOnTop(
     LogicalPlan basePlan,
     const std::string& fieldNameUpper,
     const RequestStatisticBuildStatement& request,
-    const Statistic::StatisticId statisticId)
+    const Statistic::StatisticId statisticId,
+    const bool applyConditionSelection)
 {
     auto timeChar = request.eventTimeFieldName.has_value()
         ? Windowing::TimeCharacteristic::createEventTime(FieldAccessLogicalFunction{*request.eventTimeFieldName})
@@ -145,7 +150,13 @@ LogicalPlan stackBuildChainOnTop(
     auto plan = std::move(basePlan);
     plan = LogicalPlanBuilder::addStatisticBuild(std::move(plan), windowType, {agg}, {}, logicalStatisticFields);
     plan = LogicalPlanBuilder::addStatisticStoreWriter(plan, logicalStatisticFields, statisticId, toStatisticType(request.metric));
-    if (request.conditionTrigger.has_value() && request.conditionTrigger->condition.has_value())
+    /// Apply the trigger's condition only in the DataDomain build chain (where the build branch
+    /// flows to a gRPC sink, so the Selection filters which window-close results get reported).
+    /// In the WorkloadDomain path the same `condition` is reinterpreted as a *probe-pipeline*
+    /// predicate over histogram bin fields (BINSTART/BINEND/BINCOUNTER) — those aren't present
+    /// on the build chain's StatisticStoreWriter output, so applying the Selection here would
+    /// fail to bind. The caller passes applyConditionSelection=false for the workload-domain path.
+    if (applyConditionSelection and request.conditionTrigger.has_value() and request.conditionTrigger->condition.has_value())
     {
         plan = LogicalPlanBuilder::addSelection(*request.conditionTrigger->condition, plan);
     }
@@ -227,7 +238,7 @@ LogicalPlan generateForDataDomain(
     const auto sourceNameUpper = toUpper(domain.logicalSourceName);
     const auto fieldNameUpper = toUpper(domain.fieldName);
     auto basePlan = LogicalPlanBuilder::createLogicalPlan(domain.logicalSourceName);
-    auto plan = stackBuildChainOnTop(std::move(basePlan), fieldNameUpper, request, statisticId);
+    auto plan = stackBuildChainOnTop(std::move(basePlan), fieldNameUpper, request, statisticId, /*applyConditionSelection=*/true);
     return appendGrpcSinkToStatisticChain(std::move(plan), sourceNameUpper, coordinatorAddress, request.options);
 }
 
@@ -303,15 +314,19 @@ LogicalPlan DefaultStatisticQueryGenerator::generateWorkloadBranch(
     }
 
     LogicalPlan basePlan{INVALID_QUERY_ID, {taggedSource}};
-    auto plan = stackBuildChainOnTop(std::move(basePlan), fieldNameUpper, request, statisticId);
-    /// Build branch terminates at VoidSink — the heartbeat probe is responsible for reporting to
+    /// applyConditionSelection=false: the trigger's `condition` is a probe-pipeline predicate
+    /// (binds against histogram bin fields), not a build-chain output filter.
+    auto plan = stackBuildChainOnTop(std::move(basePlan), fieldNameUpper, request, statisticId, /*applyConditionSelection=*/false);
+    /// Build branch terminates at VoidSink — the gated probe is responsible for reporting to
     /// the coordinator. Avoids per-window-close gRPC traffic on the data-query source thread.
     (void)coordinatorAddress;
     return appendVoidSinkToStatisticChain(std::move(plan), sourceNameUpper, request.options);
 }
 
 LogicalPlan DefaultStatisticQueryGenerator::generateProbeQuery(
-    const Statistic::StatisticId statisticId,
+    const Statistic::StatisticId buildStatisticId,
+    const Statistic::StatisticId probeStatisticId,
+    std::optional<LogicalFunction> predicate,
     const std::string& coordinatorAddress,
     const uint64_t intervalMs,
     const std::string& sinkWorkerHost) const
@@ -319,24 +334,51 @@ LogicalPlan DefaultStatisticQueryGenerator::generateProbeQuery(
     PRECONDITION(not coordinatorAddress.empty(), "Required to have a coordinator gRPC address!");
     PRECONDITION(intervalMs > 0, "intervalMs must be > 0");
 
-    /// Schema mirrors the StatisticStoreWriter output / GrpcSink statistic-report schema.
-    /// All four columns are UINT64 and unqualified — GrpcSink uses substring matching on field names
-    /// so the absence of a SOURCE$ qualifier is fine here.
-    Schema probeSchema;
-    probeSchema.addField({"STATISTICID", DataTypeProvider::provideDataType(DataType::Type::UINT64, DataType::NULLABLE::NOT_NULLABLE)});
-    probeSchema.addField({"STATISTICSTART", DataTypeProvider::provideDataType(DataType::Type::UINT64, DataType::NULLABLE::NOT_NULLABLE)});
-    probeSchema.addField({"STATISTICEND", DataTypeProvider::provideDataType(DataType::Type::UINT64, DataType::NULLABLE::NOT_NULLABLE)});
-    probeSchema.addField(
-        {"STATISTICNUMBEROFSEENTUPLES", DataTypeProvider::provideDataType(DataType::Type::UINT64, DataType::NULLABLE::NOT_NULLABLE)});
+    /// In the gated mode the Generator drives the EquiWidthHistogramProbe, whose physical reader
+    /// looks up the histogram via the input record's STATISTICID. So we set STATISTICID =
+    /// buildStatisticId here. In the heartbeat mode (no predicate) there is no histogram lookup —
+    /// the Generator value flows straight to GrpcSink, so we use probeStatisticId so the report
+    /// already carries the routing key.
+    const auto generatorStatId = predicate.has_value() ? buildStatisticId.getRawValue() : probeStatisticId.getRawValue();
 
-    /// Emit the constant tuple (statisticId, 0, 0, 0) at 1 tuple per `intervalMs`. SequenceField
+    /// Schema for the Generator source's emitted heartbeat records. In the gated mode we need a
+    /// distinct first-field qualifier so the system-generated qualifier extracted by
+    /// Schema::getQualifierNameForSystemGeneratedFieldsWithSeparator (which splits the first
+    /// field name at "$") doesn't collide with a literal "STATISTICID" prefix — that previously
+    /// caused the EquiWidthProbe's input-resolved field "STATISTICID" to be rewritten to
+    /// "STATISTICID$STATISTICID", which the runtime then failed to find in records. With a
+    /// "PROBE$" qualifier here, every downstream field cleanly inherits "PROBE$" until the
+    /// final Projection strips the qualifier off again before the GrpcSink sees the row.
+    /// In the heartbeat (non-gated) mode the records flow directly to the GrpcSink, whose
+    /// substring matching on field names treats "ZZZ$STATISTICID" identically to "STATISTICID".
+    Schema probeSchema;
+    probeSchema.addField(
+        {"ZZZ$STATISTICID", DataTypeProvider::provideDataType(DataType::Type::UINT64, DataType::NULLABLE::NOT_NULLABLE)});
+    probeSchema.addField(
+        {"ZZZ$STATISTICSTART", DataTypeProvider::provideDataType(DataType::Type::UINT64, DataType::NULLABLE::NOT_NULLABLE)});
+    probeSchema.addField(
+        {"ZZZ$STATISTICEND", DataTypeProvider::provideDataType(DataType::Type::UINT64, DataType::NULLABLE::NOT_NULLABLE)});
+    probeSchema.addField(
+        {"ZZZ$STATISTICNUMBEROFSEENTUPLES", DataTypeProvider::provideDataType(DataType::Type::UINT64, DataType::NULLABLE::NOT_NULLABLE)});
+
+    /// Emit the constant tuple (generatorStatId, 0, 0, 0) at 1 tuple per `intervalMs`. SequenceField
     /// with start==end and step==0 emits the start value forever (sequencePosition never advances
     /// past sequenceEnd; see SequenceField::generate in GeneratorFields.cpp). We set start=N and
     /// end=N+1 so the first emission has pos<end (=>OK), step=0 keeps pos at N, and the post-
     /// emission stop check fails (N < N+1) so the source never stops.
-    const auto rawId = statisticId.getRawValue();
+    /// STATISTICSTART = 0, STATISTICEND = LATEST_WINDOW_END_SENTINEL (UINT64_MAX - 1) so the
+    /// downstream StatisticStoreReader's "latest closed window" fallback kicks in (see
+    /// resolveStatistic in StatisticStoreReader.cpp). Each probe tick reads whatever the build
+    /// branch most recently wrote — no need to coordinate window timestamps between concurrently
+    /// running build and probe pipelines. SequenceField with start = N, end = N+1, step = 0
+    /// emits N forever (sequencePosition stays at start; stop-check only fires when pos >= end).
+    constexpr uint64_t latestWindowSentinel = std::numeric_limits<uint64_t>::max() - 1;
     const auto generatorSchema = std::format(
-        "SEQUENCE UINT64 {} {} 0, SEQUENCE UINT64 0 1 0, SEQUENCE UINT64 0 1 0, SEQUENCE UINT64 0 1 0", rawId, rawId + 1);
+        "SEQUENCE UINT64 {} {} 0, SEQUENCE UINT64 0 1 0, SEQUENCE UINT64 {} {} 0, SEQUENCE UINT64 0 1 0",
+        generatorStatId,
+        generatorStatId + 1,
+        latestWindowSentinel,
+        latestWindowSentinel + 1);
     /// emit_rate is parsed as double by FixedGeneratorRate, so fractional rates (sub-1 tuple/sec)
     /// are supported. We want one probe tuple every `intervalMs`, i.e. `1000/intervalMs` tup/sec.
     /// Integer arithmetic here previously clamped the rate to 1 tuple/sec for any intervalMs > 1000,
@@ -352,18 +394,74 @@ LogicalPlan DefaultStatisticQueryGenerator::generateProbeQuery(
             {"generator_rate_config", emitRateConfig},
             {"flush_interval_ms", std::to_string(intervalMs)},
             {"max_runtime_ms", "100000000"},
-            {"seed", std::to_string(rawId)},
+            {"seed", std::to_string(probeStatisticId.getRawValue())},
             {"generator_schema", generatorSchema},
             {"host", sinkWorkerHost},
         },
         {{"type", "CSV"}});
+
+    /// Schema reported to the GrpcSink. Heartbeat path: matches the Generator's PROBE$-qualified
+    /// fields directly. Gated path: matches the Projection's explicitly-unqualified output
+    /// (so the GrpcSink's substring-match on STATISTICID etc. works on a clean schema).
+    Schema sinkSchema;
+    if (predicate.has_value())
+    {
+        sinkSchema.addField({"STATISTICID", DataTypeProvider::provideDataType(DataType::Type::UINT64, DataType::NULLABLE::NOT_NULLABLE)});
+        sinkSchema.addField({"STATISTICSTART", DataTypeProvider::provideDataType(DataType::Type::UINT64, DataType::NULLABLE::NOT_NULLABLE)});
+        sinkSchema.addField({"STATISTICEND", DataTypeProvider::provideDataType(DataType::Type::UINT64, DataType::NULLABLE::NOT_NULLABLE)});
+        sinkSchema.addField(
+            {"STATISTICNUMBEROFSEENTUPLES", DataTypeProvider::provideDataType(DataType::Type::UINT64, DataType::NULLABLE::NOT_NULLABLE)});
+    }
+    else
+    {
+        sinkSchema = probeSchema;
+    }
+
+    if (predicate.has_value())
+    {
+        /// Selectivity-gated probe path:
+        ///   Generator → EquiWidthHistogramProbe(reads buildStatisticId's histogram)
+        ///             → Selection(predicate over bin fields)
+        ///             → Projection({STATISTICID := probeStatisticId, pass timestamps + seen-tuples})
+        /// The probe operator emits one record per bin; Selection filters bin rows, and the
+        /// Projection collapses every surviving row to a 4-field tuple carrying the regime-routing
+        /// statisticId. Multiple bins surviving the predicate just fire the same callback more
+        /// than once — the swap logic is expected to be idempotent.
+        plan = promoteOperatorToRoot(
+            plan,
+            EquiWidthHistogramProbeLogicalOperator{
+                buildStatisticId,
+                DataTypeProvider::provideDataType(DataType::Type::UINT64, DataType::NULLABLE::NOT_NULLABLE),
+                DataTypeProvider::provideDataType(DataType::Type::FLOAT64, DataType::NULLABLE::NOT_NULLABLE)});
+
+        plan = LogicalPlanBuilder::addSelection(*predicate, plan);
+
+        /// Overwrite STATISTICID with the probeStatisticId (the routing key the coordinator
+        /// matches against) while preserving the timestamps + seen-tuples. Explicit
+        /// FieldIdentifiers on the pass-throughs keep the output field names unqualified so the
+        /// downstream GrpcSink's declared schema matches. Without the explicit identifiers, the
+        /// FieldAccess's inferred name would inherit the system qualifier the EquiWidthProbe
+        /// stamped on its outputs (e.g. "STATISTICID$STATISTICSTART"), and the GrpcSink schema
+        /// inference would reject the output.
+        std::vector<ProjectionLogicalOperator::Projection> projections;
+        projections.emplace_back(
+            FieldIdentifier{"STATISTICID"},
+            LogicalFunction{ConstantValueLogicalFunction{
+                DataTypeProvider::provideDataType(DataType::Type::UINT64, DataType::NULLABLE::NOT_NULLABLE),
+                std::to_string(probeStatisticId.getRawValue())}});
+        projections.emplace_back(FieldIdentifier{"STATISTICSTART"}, LogicalFunction{FieldAccessLogicalFunction{"STATISTICSTART"}});
+        projections.emplace_back(FieldIdentifier{"STATISTICEND"}, LogicalFunction{FieldAccessLogicalFunction{"STATISTICEND"}});
+        projections.emplace_back(
+            FieldIdentifier{"STATISTICNUMBEROFSEENTUPLES"}, LogicalFunction{FieldAccessLogicalFunction{"STATISTICNUMBEROFSEENTUPLES"}});
+        plan = LogicalPlanBuilder::addProjection(std::move(projections), /*asterisk=*/false, plan);
+    }
 
     const auto colonPos = coordinatorAddress.find(':');
     const auto sinkHost = coordinatorAddress.substr(0, colonPos);
     const auto sinkPort = coordinatorAddress.substr(colonPos + 1);
     plan = LogicalPlanBuilder::addInlineSink(
         "Grpc",
-        probeSchema,
+        sinkSchema,
         {{"grpc_host", sinkHost}, {"grpc_port", sinkPort}, {"host", sinkWorkerHost}, {"output_format", "NATIVE"}},
         {},
         plan);

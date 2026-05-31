@@ -42,6 +42,10 @@ struct ExecutableQueryPlan
         std::unique_ptr<SourceHandle> source;
         std::vector<std::weak_ptr<ExecutablePipeline>> successors;
         bool spliceToRunningSource = false;
+        /// If true, the source is created and registered in RunningSourceRegistry but NOT
+        /// started until an explicit startDeferred(name) call. Lets splice'd pipelines wire in
+        /// before any buffers are emitted.
+        bool deferStart = false;
         std::string logicalSourceName;
     };
 

@@ -375,13 +375,38 @@ int main(int argc, char** argv)
         auto parseConditionExpression = [](const std::string& conditionStr) -> std::optional<NES::LogicalFunction>
         {
             /// Wrap the raw SQL expression in a synthetic SELECT so the existing parser can handle it.
-            /// The dummy source name is irrelevant — expression parsing does not need schema lookup.
-            const auto sql = fmt::format("SELECT * FROM _nes_stat_dummy_ WHERE {}", conditionStr);
-            auto plan = NES::AntlrSQLQueryParser::createLogicalQueryPlanFromSQLString(sql);
-            auto selections = NES::getOperatorByType<NES::SelectionLogicalOperator>(plan);
-            if (selections.empty())
+            /// The dummy source and sink names are irrelevant — the parser only needs the syntactic
+            /// shape of a complete query; we then walk the AST and lift just the Selection's
+            /// predicate. The INTO clause is required (`Query does not contain sink` otherwise).
+            /// Catch all exceptions: a malformed expression must not crash the REPL silently. Print
+            /// a clear diagnostic to stderr and return nullopt so the caller falls back to the
+            /// no-predicate path (legacy heartbeat).
+            const auto sql
+                = fmt::format("SELECT * FROM _nes_stat_dummy_ WHERE {} INTO _nes_stat_dummy_sink_", conditionStr);
+            try
+            {
+                auto plan = NES::AntlrSQLQueryParser::createLogicalQueryPlanFromSQLString(sql);
+                auto selections = NES::getOperatorByType<NES::SelectionLogicalOperator>(plan);
+                if (selections.empty())
+                {
+                    std::cerr << "[--companion-condition] No SelectionLogicalOperator found in parsed expression: '"
+                              << conditionStr << "' — ignoring.\n";
+                    return std::nullopt;
+                }
+                return selections.front()->getPredicate();
+            }
+            catch (const std::exception& e)
+            {
+                std::cerr << "[--companion-condition] Failed to parse expression: '" << conditionStr << "': " << e.what()
+                          << " — ignoring.\n";
                 return std::nullopt;
-            return selections.front()->getPredicate();
+            }
+            catch (...)
+            {
+                std::cerr << "[--companion-condition] Unknown exception parsing expression: '" << conditionStr
+                          << "' — ignoring.\n";
+                return std::nullopt;
+            }
         };
 
         /// A second binder instance sharing the same source catalog. Used inside the companion callback,

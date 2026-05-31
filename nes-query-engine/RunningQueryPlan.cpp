@@ -128,6 +128,7 @@ struct InstantiatedSourceEntry
     std::unique_ptr<SourceHandle> source;
     std::vector<std::shared_ptr<RunningQueryPlanNode>> successorNodes;
     bool spliceToRunningSource = false;
+    bool deferStart = false;
     std::string logicalSourceName;
 };
 
@@ -179,6 +180,7 @@ static std::pair<std::vector<InstantiatedSourceEntry>, std::vector<std::weak_ptr
             .source = std::move(entry.source),
             .successorNodes = std::move(successorNodes),
             .spliceToRunningSource = entry.spliceToRunningSource,
+            .deferStart = entry.deferStart,
             .logicalSourceName = entry.logicalSourceName});
     }
 
@@ -261,6 +263,11 @@ std::pair<std::unique_ptr<RunningQueryPlan>, CallbackRef> RunningQueryPlan::star
                             return;
                         }
                         running->appendSuccessors(std::move(sourceEntry.successorNodes));
+                        /// If the running source was created with deferStart=true (the typical
+                        /// case for the workload-domain data query), the splice is the signal
+                        /// that all expected successors are wired in. Start emission now so the
+                        /// build branch sees sequence 0 first. Idempotent if already started.
+                        running->startEmitting();
                         continue;
                     }
                     auto sourceId = sourceEntry.source->getSourceId();
@@ -283,7 +290,8 @@ std::pair<std::unique_ptr<RunningQueryPlan>, CallbackRef> RunningQueryPlan::star
                             [listener](const Exception& exception) { listener->onFailure(exception); },
                             controller,
                             emitter,
-                            sourceEntry.logicalSourceName));
+                            sourceEntry.logicalSourceName,
+                            sourceEntry.deferStart));
                 }
                 /// release lock
             }

@@ -80,6 +80,7 @@ void LowerToCompiledQueryPlanPhase::processSource(const std::shared_ptr<Pipeline
         .descriptor = sourceOperator.getDescriptor(),
         .successors = std::move(executableSuccessorPipelines),
         .spliceToRunningSource = sourceOperator.spliceToRunningSource,
+        .deferStart = sourceOperator.deferStart,
         .logicalSourceName = sourceOperator.logicalSourceName});
 }
 

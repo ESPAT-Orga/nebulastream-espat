@@ -327,12 +327,23 @@ def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str, sqr
             "--companion-domain", "workload",
             "--companion-source", "bid",
             "--companion-field", "price",
-            "--companion-metric", "Cardinality",
-            # Same as adaptive script — keeps swap cadence comparable across both runs.
-            "--companion-window-size-ms", "300000000",
+            # MinVal maps to Equi_Width_Histogram, the only metric the histogram-probe operator
+            # can read. Cardinality (Count_Min_Sketch) wouldn't work with the gated probe path.
+            "--companion-metric", "MinVal",
+            # 60 M event-time ms — at the steady-state ingest rate of ~200 M tup/s the histogram
+            # closes ~3× per wall-clock second, low enough to keep the statistic store bounded
+            # while frequent enough that gated-probe trigger fires become observable within a
+            # ~30 s bench. Smaller windows have OOM'd the worker (event time advances at the
+            # tuple-emit rate).
+            "--companion-window-size-ms", "60000000",
             "--companion-event-time-field", "BID$TIMESTAMP",
             "--companion-host", WORKER_GRPC,
             "--companion-switch-to-sql", make_reversed_query_sql(sqrts),
+            # Selectivity-gated probe: fires when any histogram bin has > 0 tuples.
+            # Currently inactive because the build branch's StatisticStoreWriter never fires (see
+            # findings — pre-existing issue in build chain that legacy heartbeat probe never
+            # surfaced). When that's fixed, this condition will exercise the gated probe path.
+            "--companion-condition", "BINCOUNTER > UINT64(0)",
         ],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,

@@ -134,6 +134,7 @@ ExecutableQueryPlan::instantiate(CompiledQueryPlan& compiledQueryPlan, const Sou
                 .source = sourceProvider.lower(compiledSource.originId, compiledSource.pipelineId, mergedListener, compiledSource.descriptor),
                 .successors = std::move(compiledSource.successors),
                 .spliceToRunningSource = false,
+                .deferStart = compiledSource.deferStart,
                 .logicalSourceName = compiledSource.logicalSourceName});
         }
     }

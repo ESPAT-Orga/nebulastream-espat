@@ -90,6 +90,18 @@ public:
     /// Returns false if the key is not found in the registry.
     bool addConditionTrigger(const StatisticRegistry::Key& key, ConditionTrigger trigger);
 
+    /// Type of the callback invoked when a probe-specific statisticId is reported by gRPC.
+    /// Distinct from the registry's per-key triggers: routed directly by the probe report's
+    /// statisticId, so each gated probe pipeline (with its own regime id and Selection predicate)
+    /// can deliver to a dedicated callback without interfering with other probes' routes.
+    using ProbeCallback = std::function<void(Statistic::StatisticId, Windowing::TimeMeasure, Windowing::TimeMeasure)>;
+
+    /// Register a callback under a probe-specific statisticId. Multiple registrations under the
+    /// same id append to the list; all callbacks fire when a report arrives. Used by
+    /// collectWorkloadStatistic: each selectivity-gated probe gets a unique regime id and a
+    /// callback that knows which workload variant the regime implies.
+    void addProbeCallback(Statistic::StatisticId probeStatisticId, ProbeCallback callback);
+
     /// Removes the entry for this key. Returns true if an entry was removed.
     bool deregisterStatistic(const StatisticRegistry::Key& key);
 
@@ -135,6 +147,12 @@ private:
     };
 
     folly::Synchronized<std::unordered_map<Statistic::StatisticId, PendingProbe>> pendingProbes;
+
+    /// Direct-route callbacks for probe-specific statisticIds. Looked up by onStatisticReport
+    /// before the registry scan; if a regime id matches, fires the registered callbacks and
+    /// returns (the registry scan would not match anyway because regime ids are separate from
+    /// build-branch ids).
+    folly::Synchronized<std::unordered_map<Statistic::StatisticId, std::vector<ProbeCallback>>> probeCallbacks;
 };
 
 }

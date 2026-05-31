@@ -29,6 +29,7 @@
 #include <Operators/UnionLogicalOperator.hpp>
 #include <Plans/LogicalPlan.hpp>
 #include <Rules/Semantic/SourceInferenceRule.hpp>
+#include <Traits/DeferSourceStartTrait.hpp>
 #include <Traits/SpliceToRunningSourceTrait.hpp>
 #include <Traits/TraitSet.hpp>
 #include <Util/PlanRenderer.hpp>
@@ -96,19 +97,27 @@ LogicalPlan LogicalSourceExpansionRule::apply(LogicalPlan queryPlan) const
             throw UnknownSourceName("No physical sources present for logical source \"{}\"", sourceOp->getLogicalSourceName());
         }
 
-        /// Preserve SpliceToRunningSourceTrait across expansion: if the source-name op was tagged
-        /// (workload-domain build branch), every expanded SourceDescriptor must carry the same
-        /// marker so the runtime splice hook can recognize it at instantiation time.
+        /// Preserve SpliceToRunningSourceTrait / DeferSourceStartTrait across expansion: if the
+        /// source-name op was tagged, every expanded SourceDescriptor must carry the same marker
+        /// so the runtime hooks can recognize it at instantiation time.
         const bool spliceMarker = hasTrait<SpliceToRunningSourceTrait>(sourceOp.getTraitSet());
+        const bool deferStartMarker = hasTrait<DeferSourceStartTrait>(sourceOp.getTraitSet());
         auto expandedSourceOperators = entries
             | std::views::transform(
-                [spliceMarker](const auto& entry)
+                [spliceMarker, deferStartMarker](const auto& entry)
                 {
                     LogicalOperator op{SourceDescriptorLogicalOperator{entry}};
+                    auto ts = op.getTraitSet();
                     if (spliceMarker)
                     {
-                        auto ts = op.getTraitSet();
                         [[maybe_unused]] const auto inserted = tryInsert(ts, SpliceToRunningSourceTrait{});
+                    }
+                    if (deferStartMarker)
+                    {
+                        [[maybe_unused]] const auto inserted = tryInsert(ts, DeferSourceStartTrait{});
+                    }
+                    if (spliceMarker or deferStartMarker)
+                    {
                         op = op.withTraitSet(ts);
                     }
                     return op;

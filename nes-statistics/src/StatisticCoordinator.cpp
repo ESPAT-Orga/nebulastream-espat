@@ -27,6 +27,8 @@
 #include <Identifiers/Identifiers.hpp>
 #include <Operators/Sources/SourceNameLogicalOperator.hpp>
 #include <Operators/Statistic/LogicalStatisticFields.hpp>
+#include <Traits/DeferSourceStartTrait.hpp>
+#include <Traits/TraitSet.hpp>
 #include <Util/PlanRenderer.hpp>
 #include <Plans/LogicalPlan.hpp>
 #include <Plans/LogicalPlanBuilder.hpp>
@@ -164,22 +166,107 @@ std::expected<CollectStatisticResult, Exception> StatisticCoordinator::collectWo
 
     const StatisticRegistry::Key key{
         .metric = statement.metric, .collectionDomain = statement.domain, .windowSize = Windowing::TimeMeasure{statement.windowSizeMs}};
+
+    const auto hostIt = statement.options.find("host");
+    const auto& sinkWorkerHost = hostIt != statement.options.end() ? hostIt->second : std::string{"localhost:8080"};
+
+    /// Deploy one gated probe pipeline (Generator → EquiWidthHistogramProbe → Selection(predicate)
+    /// → Projection(STATISTICID := regimeId) → GrpcSink) and register the trigger's callback under
+    /// the regimeId so that pipeline's reports route to that callback.
+    /// Returns the freshly allocated regimeId on success.
+    auto deployGatedProbe =
+        [&](const Statistic::StatisticId buildStatisticId, const ConditionTrigger& trigger) -> std::optional<Statistic::StatisticId>
+    {
+        if (not trigger.condition.has_value())
+        {
+            return std::nullopt;
+        }
+        const auto regimeId = Statistic::StatisticId{nextStatisticId.fetch_add(1)};
+        std::cerr << "[GATED_PROBE] deploying buildId=" << buildStatisticId.getRawValue()
+                  << " regimeId=" << regimeId.getRawValue() << "\n";
+        std::cerr.flush();
+        try
+        {
+            auto probePlan = queryGenerator->generateProbeQuery(
+                buildStatisticId, regimeId, *trigger.condition, coordinatorAddress, probeIntervalMs, sinkWorkerHost);
+            if (auto submittedProbe = submitPlan(std::move(probePlan)); not submittedProbe.has_value())
+            {
+                std::cerr << "[GATED_PROBE] submitPlan FAILED for regimeId=" << regimeId.getRawValue() << ": "
+                          << submittedProbe.error().what() << "\n";
+                std::cerr.flush();
+                return std::nullopt;
+            }
+            std::cerr << "[GATED_PROBE] deployed regimeId=" << regimeId.getRawValue() << "\n";
+            std::cerr.flush();
+        }
+        catch (const std::exception& e)
+        {
+            std::cerr << "[GATED_PROBE] construction THREW for regimeId=" << regimeId.getRawValue() << ": "
+                      << e.what() << "\n";
+            std::cerr.flush();
+            return std::nullopt;
+        }
+        if (trigger.callback)
+        {
+            addProbeCallback(regimeId, trigger.callback);
+            std::cerr << "[GATED_PROBE] registered callback for regimeId=" << regimeId.getRawValue() << "\n";
+            std::cerr.flush();
+        }
+        return regimeId;
+    };
+
     if (const auto existing = registry.find(key))
     {
         if (statement.conditionTrigger.has_value())
         {
-            registry.addTrigger(key, statement.conditionTrigger.value());
+            /// A second request for the same statistic key. The build branch is already running
+            /// under existing->statisticId. We deploy an ADDITIONAL gated probe (with this new
+            /// trigger's predicate + a fresh regimeId) so this trigger's callback fires
+            /// independently of any earlier triggers' probes.
+            if (statement.conditionTrigger->condition.has_value())
+            {
+                deployGatedProbe(existing->statisticId, *statement.conditionTrigger);
+            }
+            else
+            {
+                /// No predicate → fall back to old behavior: append to the registry trigger list,
+                /// which fires on the heartbeat probe's ticks.
+                registry.addTrigger(key, statement.conditionTrigger.value());
+            }
         }
         return CollectStatisticResult{.queryId = existing->queryId, .statisticId = existing->statisticId, .alreadyExisted = true};
     }
 
     const auto statisticId = Statistic::StatisticId{nextStatisticId.fetch_add(1)};
-    /// Deploy the data plan as-is. The statistic build branch is submitted as a *separate* query
-    /// below; its source carries SpliceToRunningSourceTrait so at runtime instantiation the build
-    /// branch splices into the data query's already-running source pipeline instead of spawning
-    /// its own source thread. This keeps both plans single-root and avoids the cross-cutting
-    /// multi-root work in the optimizer/compiler/serializer.
-    auto submittedData = submitPlan(dataQueryPlan);
+
+    /// Stamp DeferSourceStartTrait on the data plan's source so the runtime creates the
+    /// RunningSource but doesn't begin emission until the build branch's splice signals start.
+    /// Without this gate, the source emits sequences 0..N before the build branch wires in, and
+    /// the build branch's MultiOriginWatermarkProcessor gets stuck waiting for those missing
+    /// early sequences — windows never close, histogram never populates.
+    auto dataPlanWithDeferTrait = dataQueryPlan;
+    {
+        const auto dataSources = getOperatorByType<SourceNameLogicalOperator>(dataPlanWithDeferTrait);
+        if (not dataSources.empty())
+        {
+            auto taggedSource = LogicalOperator{dataSources.front()};
+            auto ts = taggedSource.getTraitSet();
+            [[maybe_unused]] const auto inserted = tryInsert(ts, DeferSourceStartTrait{});
+            taggedSource = taggedSource.withTraitSet(ts);
+            auto replaced = replaceOperator(dataPlanWithDeferTrait, dataSources.front().getId(), taggedSource);
+            if (replaced.has_value())
+            {
+                dataPlanWithDeferTrait = std::move(*replaced);
+            }
+        }
+    }
+
+    /// Deploy the (tagged) data plan. The statistic build branch is submitted as a *separate*
+    /// query below; its source carries SpliceToRunningSourceTrait so at runtime instantiation
+    /// the build branch splices into the data query's already-registered (but not yet emitting)
+    /// running source pipeline. The splice itself triggers startEmitting() so emission starts at
+    /// sequence 0 with the build branch already attached.
+    auto submittedData = submitPlan(std::move(dataPlanWithDeferTrait));
     if (not submittedData.has_value())
     {
         return std::unexpected(submittedData.error());
@@ -206,34 +293,44 @@ std::expected<CollectStatisticResult, Exception> StatisticCoordinator::collectWo
         NES_WARNING("Workload-domain build branch construction threw (statisticId={}): {}", statisticId.getRawValue(), e.what());
     }
 
-    /// Deploy the heartbeat probe separately. It ticks at probeIntervalMs and pings the
-    /// coordinator with the registered statisticId; the registry entry then fires whichever
-    /// condition triggers are registered for this statistic. If the probe fails to deploy we
-    /// still register the statistic so subsequent re-splices on swap reuse the same id — the
-    /// trigger just won't fire until a probe is up.
-    const auto hostIt = statement.options.find("host");
-    const auto& sinkWorkerHost = hostIt != statement.options.end() ? hostIt->second : std::string{"localhost:8080"};
-    try
+    /// Probe deployment:
+    ///  - With a predicate: deploy a gated pipeline that only reports when the histogram's bins
+    ///    match `condition`. The trigger's callback is registered under the fresh regimeId, not
+    ///    the build branch's statisticId. The registry's `triggers` list is left empty so the
+    ///    fallback heartbeat path doesn't double-fire the callback.
+    ///  - Without a predicate: legacy heartbeat — probe pings every interval and the registry's
+    ///    `triggers` list fires the callback unconditionally.
+    std::vector<ConditionTrigger> triggers;
+    const bool hasGatedTrigger
+        = statement.conditionTrigger.has_value() and statement.conditionTrigger->condition.has_value();
+
+    if (hasGatedTrigger)
     {
-        auto probePlan = queryGenerator->generateProbeQuery(statisticId, coordinatorAddress, probeIntervalMs, sinkWorkerHost);
-        auto submittedProbe = submitPlan(std::move(probePlan));
-        if (not submittedProbe.has_value())
+        deployGatedProbe(statisticId, *statement.conditionTrigger);
+    }
+    else
+    {
+        try
+        {
+            auto probePlan = queryGenerator->generateProbeQuery(
+                statisticId, statisticId, std::nullopt, coordinatorAddress, probeIntervalMs, sinkWorkerHost);
+            if (auto submittedProbe = submitPlan(std::move(probePlan)); not submittedProbe.has_value())
+            {
+                NES_WARNING(
+                    "Workload-domain probe deploy failed (statisticId={}): {}",
+                    statisticId.getRawValue(),
+                    submittedProbe.error().what());
+            }
+        }
+        catch (const std::exception& e)
         {
             NES_WARNING(
-                "Workload-domain probe deploy failed (statisticId={}): {}",
-                statisticId.getRawValue(),
-                submittedProbe.error().what());
+                "Workload-domain probe construction threw (statisticId={}): {}", statisticId.getRawValue(), e.what());
         }
-    }
-    catch (const std::exception& e)
-    {
-        NES_WARNING("Workload-domain probe construction threw (statisticId={}): {}", statisticId.getRawValue(), e.what());
-    }
-
-    std::vector<ConditionTrigger> triggers;
-    if (statement.conditionTrigger.has_value())
-    {
-        triggers.emplace_back(*statement.conditionTrigger);
+        if (statement.conditionTrigger.has_value())
+        {
+            triggers.emplace_back(*statement.conditionTrigger);
+        }
     }
     registry.registerStatistic(key, mergedQueryId, statisticId, std::move(triggers));
     return CollectStatisticResult{.queryId = mergedQueryId, .statisticId = statisticId, .alreadyExisted = false};
@@ -435,6 +532,28 @@ void StatisticCoordinator::onStatisticReport(
         }
     }
 
+    /// Selectivity-gated probe path: regime-specific statisticIds are routed directly via the
+    /// probeCallbacks map. The registry scan below wouldn't match anyway (regime ids are not
+    /// stored as entry.statisticId) so we return after firing.
+    {
+        std::vector<ProbeCallback> snapshot;
+        {
+            auto callbacks = probeCallbacks.rlock();
+            if (auto it = callbacks->find(statisticId); it != callbacks->end())
+            {
+                snapshot = it->second;
+            }
+        }
+        if (not snapshot.empty())
+        {
+            for (const auto& cb : snapshot)
+            {
+                cb(statisticId, startTs, endTs);
+            }
+            return;
+        }
+    }
+
     /// Not a probe response — check for condition triggers in the registry.
     /// We iterate over all entries to find one matching this statisticId.
     /// This is acceptable for now since the registry is typically small.
@@ -449,6 +568,12 @@ void StatisticCoordinator::onStatisticReport(
                 }
             }
         });
+}
+
+void StatisticCoordinator::addProbeCallback(Statistic::StatisticId probeStatisticId, ProbeCallback callback)
+{
+    auto callbacks = probeCallbacks.wlock();
+    (*callbacks)[probeStatisticId].push_back(std::move(callback));
 }
 
 }

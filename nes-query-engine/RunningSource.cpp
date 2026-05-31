@@ -149,7 +149,8 @@ std::shared_ptr<RunningSource> RunningSource::create(
     std::function<void(Exception)> onSourceFailure,
     QueryLifetimeController& controller,
     WorkEmitter& emitter,
-    std::string logicalSourceName)
+    std::string logicalSourceName,
+    bool deferStart)
 {
     const auto maxInflightBuffers = source->getRuntimeConfiguration().inflightBufferLimit;
     std::vector<SuccessorEntry> initialEntries;
@@ -172,11 +173,52 @@ std::shared_ptr<RunningSource> RunningSource::create(
         /// the source begins emitting. Deregistration is in ~RunningSource.
         RunningSourceRegistry::instance().registerSource(logicalSourceName, std::weak_ptr<RunningSource>(runningSource));
     }
+    /// Build the start closure once. In the immediate-start path we invoke it now; in the
+    /// deferred-start path we stash it on the RunningSource and an external trigger fires it.
+    auto startFn
+        = [&controller, &emitter, queryId, weakSource = std::weak_ptr<RunningSource>(runningSource)]()
     {
-        const std::scoped_lock lock(runningSource->mutex);
-        runningSource->source->start(emitFunction(queryId, runningSource, runningSource->successors, controller, emitter));
+        if (auto self = weakSource.lock())
+        {
+            const std::scoped_lock lock(self->mutex);
+            self->source->start(emitFunction(queryId, self, self->successors, controller, emitter));
+        }
+    };
+    if (deferStart)
+    {
+        std::cout << fmt::format(
+            "[SOURCE_DEFER] queued deferred start for logical source '{}'\n", logicalSourceName.empty() ? "<anon>" : logicalSourceName);
+        std::cout.flush();
+        runningSource->deferredStart = std::move(startFn);
+    }
+    else
+    {
+        runningSource->started.store(true);
+        startFn();
     }
     return runningSource;
+}
+
+void RunningSource::startEmitting()
+{
+    if (started.exchange(true))
+    {
+        /// already started — idempotent
+        return;
+    }
+    std::function<void()> toFire;
+    {
+        const std::scoped_lock lock(mutex);
+        toFire = std::move(deferredStart);
+        deferredStart = {};
+    }
+    if (toFire)
+    {
+        std::cout << fmt::format(
+            "[SOURCE_DEFER] firing deferred start for logical source '{}'\n", logicalSourceName.empty() ? "<anon>" : logicalSourceName);
+        std::cout.flush();
+        toFire();
+    }
 }
 
 void RunningSource::appendSuccessors(std::vector<std::shared_ptr<RunningQueryPlanNode>> additionalSuccessors)

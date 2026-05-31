@@ -13,6 +13,7 @@
 */
 
 #pragma once
+#include <atomic>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -46,6 +47,10 @@ public:
     /// If logicalSourceName is non-empty, the constructed RunningSource registers itself in the
     /// process-wide RunningSourceRegistry under that name and deregisters on destruction. This is
     /// what later splice-mode queries look up to graft their successors onto this source.
+    /// If deferStart is true, the source is constructed and registered but its underlying emit
+    /// thread is NOT started; a subsequent startEmitting() call (typically via
+    /// RunningSourceRegistry::startDeferred(name)) starts it. Used so splice pipelines can wire
+    /// in before sequence 0 is emitted.
     static std::shared_ptr<RunningSource> create(
         QueryId queryId,
         std::unique_ptr<SourceHandle> source,
@@ -54,11 +59,16 @@ public:
         std::function<void(Exception)> onSourceFailure,
         QueryLifetimeController& controller,
         WorkEmitter& emitter,
-        std::string logicalSourceName = {});
+        std::string logicalSourceName = {},
+        bool deferStart = false);
 
     /// Append additional head pipelines to this source's emit fan-out. Used by the splice path so
     /// a later query's build branch can run off the same source thread as the data query.
     void appendSuccessors(std::vector<std::shared_ptr<RunningQueryPlanNode>> additionalSuccessors);
+
+    /// Starts the underlying source's emit thread. No-op if already started (idempotent).
+    /// Intended for the deferStart=true case: call after all expected splices have completed.
+    void startEmitting();
 
     RunningSource(const RunningSource& other) = delete;
     RunningSource& operator=(const RunningSource& other) = delete;
@@ -95,6 +105,12 @@ private:
         std::function<void(Exception)> onSourceFailure,
         std::string logicalSourceName,
         size_t inflightBufferLimit);
+
+    /// One-shot startup closure populated when deferStart=true. startEmitting() moves it out
+    /// under the mutex; second/later calls find it empty and become no-ops. atomic_bool guards
+    /// fast-path "already-started" reads without acquiring the mutex.
+    std::atomic_bool started{false};
+    std::function<void()> deferredStart;
 
     mutable std::mutex mutex; /// Protects against race between create() (starting the source) and tryStop() (stopping the source)
     /// shared_ptr so the emit closure (created in create() below) reads from the SAME container

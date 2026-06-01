@@ -98,26 +98,44 @@ def _expensive_filter_clause(sqrts: int) -> str:
     return f"{terms} > FLOAT64(0.0)"
 
 
-def make_setup_sql(data_path_a: str, data_path_b: str, sqrts: int, constant_workload: bool) -> str:
+def make_data_select_sql(variant: str, sqrts: int) -> str:
+    """SELECT block for the data query in the requested filter order.
+
+    variant="bid_first":  bidValue first, then price (the original adaptive default).
+    variant="price_first": price first, then bidValue (the swap target).
+
+    The expensive SQRT clause, when present, is sandwiched between the two filters in both
+    variants so per-tuple cost is comparable. The variant determines only which filter is
+    more selective on the upstream side and therefore "wins" on that regime's distribution.
+    """
     expensive = _expensive_filter_clause(sqrts)
+    if variant == "price_first":
+        first_filter = "price < FLOAT64(888.49)"
+        second_filter = "bidValue < FLOAT64(10.45)"
+    else:
+        first_filter = "bidValue < FLOAT64(10.45)"
+        second_filter = "price < FLOAT64(888.49)"
     if expensive:
-        select_block = f"""\
+        return f"""\
 SELECT timestamp, auctionId, bidValue, price
 FROM (
   SELECT timestamp, auctionId, bidValue, price
-  FROM (SELECT timestamp, auctionId, bidValue, price FROM bid WHERE bidValue < FLOAT64(10.45))
+  FROM (SELECT timestamp, auctionId, bidValue, price FROM bid WHERE {first_filter})
   WHERE {expensive}
 )
-WHERE price < FLOAT64(888.49)
+WHERE {second_filter}
 INTO someSink
 SET (FALSE as `QUERY`.FUSE);"""
-    else:
-        select_block = """\
+    return f"""\
 SELECT timestamp, auctionId, bidValue, price
-FROM (SELECT timestamp, auctionId, bidValue, price FROM bid WHERE bidValue < FLOAT64(10.45))
-WHERE price < FLOAT64(888.49)
+FROM (SELECT timestamp, auctionId, bidValue, price FROM bid WHERE {first_filter})
+WHERE {second_filter}
 INTO someSink
 SET (FALSE as `QUERY`.FUSE);"""
+
+
+def make_setup_sql(data_path_a: str, data_path_b: str, sqrts: int, constant_workload: bool, variant: str = "bid_first") -> str:
+    select_block = make_data_select_sql(variant, sqrts)
     # With --constant-workload, only regime A is loaded and looped indefinitely. With both,
     # the source alternates between A and B every REPLAYS_PER_FILE full passes to simulate a
     # workload-distribution shift on a deterministic schedule.
@@ -157,27 +175,10 @@ SET(
 
 
 def make_reversed_query_sql(sqrts: int) -> str:
-    """Filter-reversed alternate; same SQRT injection point as the data query."""
-    expensive = _expensive_filter_clause(sqrts)
-    if expensive:
-        return (
-            "SELECT timestamp, auctionId, bidValue, price "
-            "FROM ("
-            "SELECT timestamp, auctionId, bidValue, price "
-            "FROM (SELECT timestamp, auctionId, bidValue, price FROM bid WHERE price < FLOAT64(888.49)) "
-            f"WHERE {expensive}"
-            ") "
-            "WHERE bidValue < FLOAT64(10.45) "
-            "INTO someSink "
-            "SET (FALSE as `QUERY`.FUSE);"
-        )
-    return (
-        "SELECT timestamp, auctionId, bidValue, price "
-        "FROM (SELECT timestamp, auctionId, bidValue, price FROM bid WHERE price < FLOAT64(888.49)) "
-        "WHERE bidValue < FLOAT64(10.45) "
-        "INTO someSink "
-        "SET (FALSE as `QUERY`.FUSE);"
-    )
+    """Filter-reversed alternate (price first); used by adaptive mode as --companion-switch-to-sql.
+    Delegates to make_data_select_sql so the bid-first / price-first / adaptive paths stay in
+    sync as the query shape evolves."""
+    return make_data_select_sql("price_first", sqrts)
 
 # Matches: Throughput for queryId QueryId(local=<UUID>, distributed=<horse-name>) in window <ts>-<ts> is <val> <prefix>Tup/s
 _THROUGHPUT_RE = re.compile(
@@ -305,7 +306,15 @@ def write_throughput_csv(measurements, output_path):
     printSuccess(f"Throughput data ({len(measurements)} samples) written to {os.path.abspath(output_path)}")
 
 
-def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str, sqrts: int = 0, constant_workload: bool = False):
+def run_benchmark(
+    duration: int,
+    skip_build: bool,
+    clean: bool,
+    output: str,
+    sqrts: int = 0,
+    constant_workload: bool = False,
+    fixed_variant: str = "",
+):
     check_repository_root()
 
     if clean:
@@ -332,10 +341,22 @@ def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str, sqr
         data_path_b = ""
     else:
         data_path_b = ensure_dataset_b(path=DEFAULT_OUTPUT_B)
-    setup_sql = make_setup_sql(data_path_a, data_path_b, sqrts, constant_workload)
-    printInfo(
-        f"Using {sqrts} SQRT operators between filters; "
-        f"workload={'CONSTANT (regime A only)' if constant_workload else 'ALTERNATING (A/B)'}.")
+    # When --fixed-variant is set we want a baseline: the chosen filter order runs without ANY
+    # adaptive machinery (no build branch splice, no probe queries, no swap callback). This is
+    # the comparison point for "what would performance be without the adaptive system?" — the
+    # answer to whether adaptation actually pays for its own overhead.
+    variant_for_query = fixed_variant if fixed_variant else "bid_first"
+    setup_sql = make_setup_sql(data_path_a, data_path_b, sqrts, constant_workload, variant_for_query)
+    if fixed_variant:
+        printInfo(
+            f"Using {sqrts} SQRT operators between filters; "
+            f"workload={'CONSTANT (regime A only)' if constant_workload else 'ALTERNATING (A/B)'}; "
+            f"fixed-variant={fixed_variant} (companion-statistic DISABLED for baseline).")
+    else:
+        printInfo(
+            f"Using {sqrts} SQRT operators between filters; "
+            f"workload={'CONSTANT (regime A only)' if constant_workload else 'ALTERNATING (A/B)'}; "
+            f"variant=ADAPTIVE (companion-statistic enabled).")
 
     # --- Start worker ---
     printInfo(f"Starting nes-single-node-worker (grpc={WORKER_GRPC}, data={WORKER_DATA})...")
@@ -365,19 +386,18 @@ def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str, sqr
         sys.exit(1)
     printSuccess("Worker is up.")
 
-    # --- Start REPL ---
-    printInfo("Starting nes-repl (distributed mode)...")
-    repl_proc = subprocess.Popen(
-        [
-            repl_binary,
-            "-f", "JSON",
+    # --- Build REPL command ---
+    # Base command (always present, no companion): the fixed-variant baseline path.
+    repl_cmd = [repl_binary, "-f", "JSON"]
+    # Adaptive mode: add the full --companion-* configuration so the REPL spawns the build
+    # branch + two gated probes + swap callback. With --fixed-variant set we skip all of this
+    # so the bench measures pure data-query throughput for that filter order — a clean
+    # baseline to compare adaptive against.
+    if not fixed_variant:
+        repl_cmd += [
             "--companion-statistic",
-            # Splice the build branch into the data query (one source thread feeds both subtrees)
-            # and run a low-rate heartbeat probe to keep the swap callback firing. Without this
-            # flag the REPL falls back to the legacy DataDomain path, which deploys the companion
-            # as an independent query reading from the same logical source — that path
-            # re-instantiates MemorySource per query, doubling CSV parse + RAM and creating
-            # CPU/bandwidth contention with the data query (visible as a ~5-50× throughput drop).
+            # Splice the build branch into the data query (one source thread feeds both
+            # subtrees) and run gated probes whose swap callbacks flip the workload-switch.
             "--companion-domain", "workload",
             "--companion-source", "bid",
             "--companion-field", "price",
@@ -400,15 +420,18 @@ def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str, sqr
             "--companion-histogram-min", "0",
             "--companion-histogram-max", "2000",
             # Two gated probes covering the two regimes by NON-OVERLAPPING price-bin ranges.
-            # The bin width is small (~4 per bucket at memory_budget=4096), so any populated
-            # bin in [200, 800] is overwhelmingly from regime A; any populated bin in
-            # [1000, 1600] from regime B. Threshold UINT64(50000) requires meaningful density,
-            # not just one stray tuple from the boundary window where A and B mix.
+            # Probe A (target=1, bid-first): BINSTART < 900 → fires for regime A's price~500.
+            # Probe B (target=0, price-first): BINSTART >= 900 → fires for regime B's price~1277.
             "--companion-condition", "BINSTART < UINT64(900) AND BINCOUNTER > UINT64(0)",
             "--companion-target-value", "1",
             "--companion-condition-2", "BINSTART >= UINT64(900) AND BINCOUNTER > UINT64(0)",
             "--companion-target-value-2", "0",
-        ],
+        ]
+
+    # --- Start REPL ---
+    printInfo("Starting nes-repl (distributed mode)...")
+    repl_proc = subprocess.Popen(
+        repl_cmd,
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -509,6 +532,19 @@ if __name__ == "__main__":
         "and the swap callback should fire at most once (the initial reconfiguration). Useful for "
         "verifying the adaptive mechanism settles instead of toggling continuously.",
     )
+    parser.add_argument(
+        "--fixed-variant",
+        choices=["bid_first", "price_first"],
+        default="",
+        help="If set, skip the entire companion-statistic deployment (no build branch splice, no "
+        "gated probes, no swap callback) and run ONLY the chosen filter ordering. Use this to "
+        "produce a baseline curve showing what raw throughput looks like without adaptation — "
+        "the comparison point that justifies the overhead of the adaptive machinery. "
+        "Combine with --constant-workload to also restrict to a single data regime; otherwise "
+        "the alternating workload exposes the dip when the fixed order mismatches the regime. "
+        "Mirrors run_bid_value_first_benchmark.py / run_price_first_benchmark.py but keeps "
+        "everything in one script so parameter drift between baselines and adaptive can't happen.",
+    )
     args = parser.parse_args()
 
     run_benchmark(
@@ -518,4 +554,5 @@ if __name__ == "__main__":
         output=args.output,
         constant_workload=args.constant_workload,
         sqrts=args.sqrts,
+        fixed_variant=args.fixed_variant,
     )

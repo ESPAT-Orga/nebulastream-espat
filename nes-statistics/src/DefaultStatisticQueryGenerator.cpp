@@ -427,12 +427,17 @@ LogicalPlan DefaultStatisticQueryGenerator::generateProbeQuery(
         /// Projection collapses every surviving row to a 4-field tuple carrying the regime-routing
         /// statisticId. Multiple bins surviving the predicate just fire the same callback more
         /// than once — the swap logic is expected to be idempotent.
+        /// counterType=UINT64 (per-bin counters are integers), startEndType=UINT64 to match the
+        /// EquiWidthHistogram build's actual bin-start storage layout — even though the underlying
+        /// field is FLOAT64, the histogram quantizes to integer-step bins. Mismatched startEnd
+        /// type causes the IEEE-float bytes to be reinterpreted as integers in BINSTART/BINEND,
+        /// making comparisons like "BINSTART >= 900" silently never match.
         plan = promoteOperatorToRoot(
             plan,
             EquiWidthHistogramProbeLogicalOperator{
                 buildStatisticId,
                 DataTypeProvider::provideDataType(DataType::Type::UINT64, DataType::NULLABLE::NOT_NULLABLE),
-                DataTypeProvider::provideDataType(DataType::Type::FLOAT64, DataType::NULLABLE::NOT_NULLABLE)});
+                DataTypeProvider::provideDataType(DataType::Type::UINT64, DataType::NULLABLE::NOT_NULLABLE)});
 
         plan = LogicalPlanBuilder::addSelection(*predicate, plan);
 

@@ -202,7 +202,37 @@ int main(int argc, char** argv)
         program.add_argument("--companion-event-time-field")
             .help("Event-time field name; if omitted, uses ingestion time");
         program.add_argument("--companion-condition")
-            .help("SQL filter expression applied to the statistic result (e.g. 'value > 100')");
+            .help(
+                "SQL filter expression applied to the statistic result (e.g. 'value > 100'). With "
+                "--companion-domain workload + --companion-metric MinVal, this is interpreted as a predicate "
+                "over EquiWidthHistogram bin fields (BINSTART, BINEND, BINCOUNTER) and gates the probe: only "
+                "bins matching the predicate flow to the swap callback. The callback then drives the workload "
+                "switch to --companion-target-value.");
+        program.add_argument("--companion-target-value")
+            .default_value(std::string{"1"})
+            .help(
+                "Target value for the workload-switch gate when --companion-condition's predicate matches. "
+                "The callback is idempotent: if the gate is already at this value, the firing is a quiet no-op. "
+                "Default: 1.");
+        program.add_argument("--companion-condition-2")
+            .help(
+                "Second gated-probe predicate. Deploys an additional probe pipeline reading the same build "
+                "branch's histogram, with this Selection predicate. When it fires, the callback sets the gate "
+                "to --companion-target-value-2. Lets a constant-workload run flip ONCE to the optimal regime "
+                "and an A↔B alternating workload flip back and forth as the histogram shifts.");
+        program.add_argument("--companion-target-value-2")
+            .default_value(std::string{"0"})
+            .help("Target value for the workload-switch gate when --companion-condition-2's predicate matches. Default: 0.");
+        program.add_argument("--companion-histogram-min")
+            .default_value(std::string{"0"})
+            .help(
+                "Minimum value for the EquiWidthHistogram bucket range (only used with --companion-metric MinVal). "
+                "Values below this fall outside the histogram. Default: 0.");
+        program.add_argument("--companion-histogram-max")
+            .default_value(std::string{"1000"})
+            .help(
+                "Maximum value for the EquiWidthHistogram bucket range (only used with --companion-metric MinVal). "
+                "Values above this fall outside the histogram. Default: 1000.");
         program.add_argument("--companion-host")
             .default_value(std::string{"localhost:8080"})
             .help("Worker host for the companion statistic sink (default: localhost:8080)");
@@ -416,7 +446,11 @@ int main(int argc, char** argv)
             sourceCatalog,
             [](auto&& pH1) { return NES::AntlrSQLQueryParser::bindLogicalQueryPlan(std::forward<decltype(pH1)>(pH1)); });
 
-        std::optional<NES::RequestStatisticBuildStatement> companionStatisticRequest = std::nullopt;
+        /// Each entry is one (predicate, callback) pair to register with collectWorkloadStatistic.
+        /// The first call deploys the data query + build branch + first gated probe; subsequent
+        /// calls hit the "registry already has this key" branch in collectWorkloadStatistic which
+        /// deploys ONLY an additional gated probe + callback.
+        std::vector<NES::RequestStatisticBuildStatement> companionStatisticRequests;
         std::optional<std::function<void(NES::DistributedQueryId, const std::string&, NES::Statistic::StatisticId)>>
             onCompanionAssociatedWithQuery = std::nullopt;
         if (program.get<bool>("--companion-statistic"))
@@ -435,6 +469,11 @@ int main(int argc, char** argv)
             std::optional<NES::LogicalFunction> condition;
             if (program.is_used("--companion-condition"))
                 condition = parseConditionExpression(program.get<std::string>("--companion-condition"));
+            std::optional<NES::LogicalFunction> condition2;
+            if (program.is_used("--companion-condition-2"))
+                condition2 = parseConditionExpression(program.get<std::string>("--companion-condition-2"));
+            const auto targetSwitchValue1 = std::stoll(program.get<std::string>("--companion-target-value"));
+            const auto targetSwitchValue2 = std::stoll(program.get<std::string>("--companion-target-value-2"));
 
             std::string switchToSql;
             if (program.is_used("--companion-switch-to-sql"))
@@ -488,14 +527,21 @@ int main(int argc, char** argv)
             const auto companionHost = program.get<std::string>("--companion-host");
             const auto swapCoordinatorAddr = coordinatorAddr;
             auto swapGenerator = std::make_shared<NES::DefaultStatisticQueryGenerator>();
-            companionStatisticRequest = NES::RequestStatisticBuildStatement{
+            /// Factory: builds one RequestStatisticBuildStatement bound to a specific predicate
+            /// + target switch value. The callback closure captures `targetSwitchValue` so each
+            /// generated request drives the workload-switch gate to its own regime when it fires.
+            /// All other captures are shared across the requests (build chain spec, swapState,
+            /// re-deploy plumbing, gRPC stub config).
+            auto makeRequest = [&](std::optional<NES::LogicalFunction> cond, int64_t targetSwitchValue)
+            {
+                return NES::RequestStatisticBuildStatement{
                 .domain = collectionDomain,
                 .metric = metric,
                 .windowSizeMs = windowSizeMs,
                 .windowAdvanceMs = windowAdvanceMs,
                 .eventTimeFieldName = eventTimeFieldName,
                 .conditionTrigger = NES::ConditionTrigger{
-                    .condition = condition,
+                    .condition = cond,
                     .callback =
                         [swapState,
                          queryStatementHandler,
@@ -506,14 +552,15 @@ int main(int argc, char** argv)
                          windowSizeMs,
                          windowAdvanceMs,
                          eventTimeFieldName,
-                         condition,
+                         cond,
                          companionField,
                          companionHost,
                          swapCoordinatorAddr,
                          swapGenerator,
                          workloadSwitchMode,
                          switchName,
-                         workerServerUri](
+                         workerServerUri,
+                         targetSwitchValue](
                             NES::Statistic::StatisticId statId,
                             NES::Windowing::TimeMeasure startTs,
                             NES::Windowing::TimeMeasure endTs)
@@ -522,26 +569,39 @@ int main(int argc, char** argv)
                                   << endTs.getTime() << "]\n";
                         std::flush(std::cout);
 
-                        /// Workload-switch path: flip the named gate via gRPC. No query stop/redeploy —
-                        /// the source thread keeps running, and the merged plan's two chains see the
-                        /// new gate value on their next buffer.
+                        /// Workload-switch path: set the named gate to the regime favored by THIS
+                        /// trigger via gRPC. No query stop/redeploy — the source thread keeps
+                        /// running, and the merged plan's two chains see the new gate value on
+                        /// their next buffer.
+                        ///
+                        /// Idempotency: each gated probe represents a single workload regime; its
+                        /// firing condition holds only while that regime is favored. The intended
+                        /// target switch value for this trigger is `targetSwitchValue` (set to 1
+                        /// — the alternate filter chain — by default). If the gate is already at
+                        /// the target, skip the gRPC call. Without this guard the previous code
+                        /// blindly toggled 0↔1 on every fire, producing one redeploy per matching
+                        /// histogram bin per probe tick instead of one redeploy per regime change.
                         if (workloadSwitchMode)
                         {
-                            int64_t newValue = 0;
                             {
                                 std::lock_guard lock(swapState->mutex);
-                                swapState->currentSwitchValue = (swapState->currentSwitchValue == 0) ? 1 : 0;
-                                newValue = swapState->currentSwitchValue;
+                                if (swapState->currentSwitchValue == targetSwitchValue)
+                                {
+                                    /// Already at the target regime — quiet no-op so the log
+                                    /// reflects only actual reconfigurations.
+                                    return;
+                                }
+                                swapState->currentSwitchValue = targetSwitchValue;
                             }
                             /// Direct stub bypasses WorkerConfig/QueryManager — the swap callback only needs
-                            /// the worker's gRPC address. Fresh stub per fire is fine; flips happen every
-                            /// probe interval (10s by default).
+                            /// the worker's gRPC address. Fresh stub per fire is fine; flips happen at most
+                            /// once per regime change.
                             auto stub = WorkerRPCService::NewStub(
                                 grpc::CreateChannel(workerServerUri, grpc::InsecureChannelCredentials()));
                             grpc::ClientContext ctx;
                             SetSwitchRequest req;
                             req.set_name(switchName);
-                            req.set_value(newValue);
+                            req.set_value(targetSwitchValue);
                             google::protobuf::Empty resp;
                             auto status = stub->SetSwitch(&ctx, req, &resp);
                             if (not status.ok())
@@ -550,7 +610,7 @@ int main(int argc, char** argv)
                                 std::flush(std::cout);
                                 return;
                             }
-                            std::cout << "[AdaptiveOpt] Flipped workload-switch '" << switchName << "' to " << newValue
+                            std::cout << "[AdaptiveOpt] Flipped workload-switch '" << switchName << "' to " << targetSwitchValue
                                       << " (no redeploy).\n";
                             std::flush(std::cout);
                             return;
@@ -637,7 +697,7 @@ int main(int argc, char** argv)
                                             .windowSizeMs = windowSizeMs,
                                             .windowAdvanceMs = windowAdvanceMs,
                                             .eventTimeFieldName = eventTimeFieldName,
-                                            .conditionTrigger = NES::ConditionTrigger{.condition = condition, .callback = {}},
+                                            .conditionTrigger = NES::ConditionTrigger{.condition = cond, .callback = {}},
                                             .options = {{"host", companionHost}}};
                                         const NES::LogicalOperator spliceLeaf{sources.front()};
                                         auto branch = swapGenerator->generateWorkloadBranch(
@@ -689,7 +749,23 @@ int main(int argc, char** argv)
                    /// Repl::Impl::executeQuery. Empty paired_sql means: no alternate, use the normal
                    /// collectWorkloadStatistic flow.
                    {"paired_sql", switchToSql},
-                   {"switch_name", program.get<std::string>("--companion-switch-name")}}};
+                   {"switch_name", program.get<std::string>("--companion-switch-name")},
+                   /// min/max are EquiWidthHistogram bucket-range bounds; read by
+                   /// DefaultStatisticQueryGenerator::createAggregationFunction.
+                   {"min", program.get<std::string>("--companion-histogram-min")},
+                   {"max", program.get<std::string>("--companion-histogram-max")}}};
+            };
+
+            /// Build the primary statement. When the first --companion-condition predicate fires,
+            /// the gate moves to --companion-target-value (default 1).
+            companionStatisticRequests.push_back(makeRequest(condition, targetSwitchValue1));
+            /// Optional secondary statement: a second gated probe with its own predicate +
+            /// target value. collectWorkloadStatistic's second call hits the "registry already has
+            /// this key" branch and just deploys an additional gated probe pipeline + callback.
+            if (condition2.has_value())
+            {
+                companionStatisticRequests.push_back(makeRequest(condition2, targetSwitchValue2));
+            }
             onCompanionAssociatedWithQuery
                 = [swapState](NES::DistributedQueryId id, const std::string& sql, NES::Statistic::StatisticId statId)
             {
@@ -714,7 +790,7 @@ int main(int argc, char** argv)
             defaultOutputFormat,
             interactiveMode,
             SignalHandler::terminationToken(),
-            std::move(companionStatisticRequest),
+            std::move(companionStatisticRequests),
             std::move(onCompanionAssociatedWithQuery)};
         replClient.run();
 

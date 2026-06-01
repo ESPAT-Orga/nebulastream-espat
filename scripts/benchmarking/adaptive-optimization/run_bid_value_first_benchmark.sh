@@ -22,6 +22,8 @@ if [ ! -d myenv ]; then
 fi
 source myenv/bin/activate
 
-myenv/bin/python3 -m scripts.benchmarking.adaptive-optimization.run_bid_value_first_benchmark "$@"
+# `python -m` rejects hyphens in module paths (`adaptive-optimization` isn't a valid identifier),
+# so run the script by file path. The script appends the repo root to sys.path itself.
+myenv/bin/python3 scripts/benchmarking/adaptive-optimization/run_bid_value_first_benchmark.py "$@"
 
 deactivate

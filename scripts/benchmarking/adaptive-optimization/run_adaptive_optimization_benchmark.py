@@ -53,9 +53,11 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from generate_bid_data import DEFAULT_OUTPUT_A, DEFAULT_OUTPUT_B, ensure_dataset_a, ensure_dataset_b
 
 # How many full passes through the current dataset before MemorySource flips to the other one.
-# At ~400 MTup/s and 30M-row datasets one pass is ~75 ms, so 130 ≈ 10 s of one regime —
-# enough for the adaptive optimizer to notice a histogram shift and trigger a swap.
-REPLAYS_PER_FILE = 130
+# At ~400 MTup/s and 30M-row datasets one pass is ~75 ms, so 30 ≈ 2.25 s of one regime —
+# short enough that a 60 s bench observes ~13 regime switches, long enough that each regime's
+# histogram covers multiple closed windows (windowSize=60M event-time ≈ 0.3 s wall clock per
+# window, so ~7 closed windows per regime).
+REPLAYS_PER_FILE = 30
 
 #### Build Configuration
 build_dir = os.path.join(".", "build_dir")
@@ -96,7 +98,7 @@ def _expensive_filter_clause(sqrts: int) -> str:
     return f"{terms} > FLOAT64(0.0)"
 
 
-def make_setup_sql(data_path_a: str, data_path_b: str, sqrts: int) -> str:
+def make_setup_sql(data_path_a: str, data_path_b: str, sqrts: int, constant_workload: bool) -> str:
     expensive = _expensive_filter_clause(sqrts)
     if expensive:
         select_block = f"""\
@@ -116,19 +118,32 @@ FROM (SELECT timestamp, auctionId, bidValue, price FROM bid WHERE bidValue < FLO
 WHERE price < FLOAT64(888.49)
 INTO someSink
 SET (FALSE as `QUERY`.FUSE);"""
-    return f"""\
-CREATE WORKER "{WORKER_GRPC}" SET ('{WORKER_DATA}' AS DATA);
-CREATE LOGICAL SOURCE bid(timestamp UINT64 NOT NULL, auctionId INT32 NOT NULL, bidValue FLOAT64 NOT NULL, price FLOAT64 NOT NULL);
-CREATE PHYSICAL SOURCE FOR bid
-TYPE Memory
-SET(
+    # With --constant-workload, only regime A is loaded and looped indefinitely. With both,
+    # the source alternates between A and B every REPLAYS_PER_FILE full passes to simulate a
+    # workload-distribution shift on a deterministic schedule.
+    if constant_workload:
+        source_set_clause = f"""\
+    'NATIVE' as PARSER.`TYPE`,
+    '{data_path_a}' AS `SOURCE`.FILE_PATH,
+    'timestamp' AS `SOURCE`.MONOTONIC_TIMESTAMP_FIELD,
+    'true' AS `SOURCE`.LOOP,
+    '{WORKER_GRPC}' AS `SOURCE`.HOST"""
+    else:
+        source_set_clause = f"""\
     'NATIVE' as PARSER.`TYPE`,
     '{data_path_a}' AS `SOURCE`.FILE_PATH,
     '{data_path_b}' AS `SOURCE`.FILE_PATH_2,
     '{REPLAYS_PER_FILE}' AS `SOURCE`.REPLAYS_PER_FILE,
     'timestamp' AS `SOURCE`.MONOTONIC_TIMESTAMP_FIELD,
     'true' AS `SOURCE`.LOOP,
-    '{WORKER_GRPC}' AS `SOURCE`.HOST
+    '{WORKER_GRPC}' AS `SOURCE`.HOST"""
+    return f"""\
+CREATE WORKER "{WORKER_GRPC}" SET ('{WORKER_DATA}' AS DATA);
+CREATE LOGICAL SOURCE bid(timestamp UINT64 NOT NULL, auctionId INT32 NOT NULL, bidValue FLOAT64 NOT NULL, price FLOAT64 NOT NULL);
+CREATE PHYSICAL SOURCE FOR bid
+TYPE Memory
+SET(
+{source_set_clause}
 );
 CREATE SINK someSink(BID.TIMESTAMP UINT64 NOT NULL, BID.AUCTIONID INT32 NOT NULL, BID.BIDVALUE FLOAT64 NOT NULL, BID.PRICE FLOAT64 NOT NULL)
 TYPE File
@@ -290,7 +305,7 @@ def write_throughput_csv(measurements, output_path):
     printSuccess(f"Throughput data ({len(measurements)} samples) written to {os.path.abspath(output_path)}")
 
 
-def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str, sqrts: int = 0):
+def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str, sqrts: int = 0, constant_workload: bool = False):
     check_repository_root()
 
     if clean:
@@ -310,9 +325,17 @@ def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str, sqr
             sys.exit(1)
 
     data_path_a = ensure_dataset_a(path=DEFAULT_OUTPUT_A)
-    data_path_b = ensure_dataset_b(path=DEFAULT_OUTPUT_B)
-    setup_sql = make_setup_sql(data_path_a, data_path_b, sqrts)
-    printInfo(f"Using {sqrts} SQRT operators between filters.")
+    if constant_workload:
+        # Single regime — regime B isn't loaded. The probe predicate is expected to fire only
+        # in the very first window (initial convergence to the optimal ordering); after that
+        # the histogram is stable and the swap callback should be a no-op.
+        data_path_b = ""
+    else:
+        data_path_b = ensure_dataset_b(path=DEFAULT_OUTPUT_B)
+    setup_sql = make_setup_sql(data_path_a, data_path_b, sqrts, constant_workload)
+    printInfo(
+        f"Using {sqrts} SQRT operators between filters; "
+        f"workload={'CONSTANT (regime A only)' if constant_workload else 'ALTERNATING (A/B)'}.")
 
     # --- Start worker ---
     printInfo(f"Starting nes-single-node-worker (grpc={WORKER_GRPC}, data={WORKER_DATA})...")
@@ -358,15 +381,33 @@ def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str, sqr
             "--companion-domain", "workload",
             "--companion-source", "bid",
             "--companion-field", "price",
-            "--companion-metric", "Cardinality",
-            # With MONOTONIC_TIMESTAMP_FIELD on, BID$TIMESTAMP advances 1 per tuple. The build
-            # branch's window-close cadence determines how often new entries land in the statistic
-            # store; the heartbeat probe (configured via --companion-probe-interval-ms) decouples
-            # the trigger-callback rate from window-close rate.
-            "--companion-window-size-ms", "300000000",
+            # MinVal maps to Equi_Width_Histogram, which is the only metric the gated probe
+            # supports (StatisticStoreReader returns histogram bins as rows for the Selection
+            # predicate to filter on). Cardinality goes to a CountMinSketch — different probe
+            # operator, no in-pipeline bin filtering.
+            "--companion-metric", "MinVal",
+            # 60M event-time ms — at the steady-state ingest rate of ~200M tup/s the histogram
+            # closes ~3× per wall-clock second, low enough to keep the statistic store bounded
+            # while frequent enough that gated-probe trigger fires arrive within ~1s. Smaller
+            # windows have OOM'd the worker (event time advances at the tuple-emit rate).
+            "--companion-window-size-ms", "60000000",
             "--companion-event-time-field", "BID$TIMESTAMP",
             "--companion-host", WORKER_GRPC,
             "--companion-switch-to-sql", make_reversed_query_sql(sqrts),
+            # Histogram bucket range widened to [0, 2000] so both regimes' price distributions
+            # fit (regime A: price~N(500,167); regime B: price~N(1277,167); regime B would be
+            # clipped at the default max=1000).
+            "--companion-histogram-min", "0",
+            "--companion-histogram-max", "2000",
+            # Two gated probes covering the two regimes by NON-OVERLAPPING price-bin ranges.
+            # The bin width is small (~4 per bucket at memory_budget=4096), so any populated
+            # bin in [200, 800] is overwhelmingly from regime A; any populated bin in
+            # [1000, 1600] from regime B. Threshold UINT64(50000) requires meaningful density,
+            # not just one stray tuple from the boundary window where A and B mix.
+            "--companion-condition", "BINSTART < UINT64(900) AND BINCOUNTER > UINT64(0)",
+            "--companion-target-value", "1",
+            "--companion-condition-2", "BINSTART >= UINT64(900) AND BINCOUNTER > UINT64(0)",
+            "--companion-target-value-2", "0",
         ],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
@@ -460,6 +501,14 @@ if __name__ == "__main__":
         "is an always-true WHERE adding per-tuple CPU cost in the middle pipeline — useful for "
         "exposing throughput differences between filter orderings.",
     )
+    parser.add_argument(
+        "--constant-workload",
+        action="store_true",
+        help="Run with only regime A loaded (no FILE_PATH_2, no REPLAYS_PER_FILE alternation). "
+        "Expected behavior: histogram converges to a single distribution within the first window "
+        "and the swap callback should fire at most once (the initial reconfiguration). Useful for "
+        "verifying the adaptive mechanism settles instead of toggling continuously.",
+    )
     args = parser.parse_args()
 
     run_benchmark(
@@ -467,5 +516,6 @@ if __name__ == "__main__":
         skip_build=args.skip_build,
         clean=args.clean,
         output=args.output,
+        constant_workload=args.constant_workload,
         sqrts=args.sqrts,
     )

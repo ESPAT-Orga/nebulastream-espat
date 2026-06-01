@@ -59,7 +59,7 @@ struct Repl::Impl
     StatisticRequestHandler statisticRequestHandler;
     StatementBinder binder;
     std::stop_token stopToken;
-    std::optional<RequestStatisticBuildStatement> companionStatisticRequest;
+    std::vector<RequestStatisticBuildStatement> companionStatisticRequests;
     std::optional<std::function<void(DistributedQueryId, const std::string&, Statistic::StatisticId)>> onCompanionAssociatedWithQuery;
 
     std::unique_ptr<replxx::Replxx> rx;
@@ -88,7 +88,7 @@ struct Repl::Impl
         const StatementOutputFormat defaultOutputFormat,
         const bool interactiveMode,
         std::stop_token stopToken,
-        std::optional<RequestStatisticBuildStatement> companionStatisticRequest,
+        std::vector<RequestStatisticBuildStatement> companionStatisticRequests,
         std::optional<std::function<void(DistributedQueryId, const std::string&, Statistic::StatisticId)>> onCompanionAssociatedWithQuery)
         : sourceStatementHandler(std::move(sourceStatementHandler))
         , sinkStatementHandler(std::move(sinkStatementHandler))
@@ -97,7 +97,7 @@ struct Repl::Impl
         , statisticRequestHandler(std::move(statisticRequestHandler))
         , binder(std::move(binder))
         , stopToken(std::move(stopToken))
-        , companionStatisticRequest(std::move(companionStatisticRequest))
+        , companionStatisticRequests(std::move(companionStatisticRequests))
         , onCompanionAssociatedWithQuery(std::move(onCompanionAssociatedWithQuery))
         , interactiveMode(interactiveMode)
         , errorBehaviour(errorBehaviour)
@@ -429,8 +429,8 @@ struct Repl::Impl
                         /// thread runs; the engine fans buffers out to both subtrees via the multi-
                         /// successor pipeline emit path (QueryEngine.cpp:512). The companion is not
                         /// deployed as a separate query.
-                        if (companionStatisticRequest.has_value()
-                            && std::holds_alternative<WorkloadDomain>(companionStatisticRequest->domain))
+                        if (not companionStatisticRequests.empty()
+                            && std::holds_alternative<WorkloadDomain>(companionStatisticRequests.front().domain))
                         {
                             try
                             {
@@ -442,8 +442,8 @@ struct Repl::Impl
                                 /// Otherwise fall back to the legacy probe-only flow.
                                 std::optional<QueryStatement> alternateStmt;
                                 std::string switchName = "filter_order";
-                                if (const auto pairedIt = companionStatisticRequest->options.find("paired_sql");
-                                    pairedIt != companionStatisticRequest->options.end() && not pairedIt->second.empty())
+                                if (const auto pairedIt = companionStatisticRequests.front().options.find("paired_sql");
+                                    pairedIt != companionStatisticRequests.front().options.end() && not pairedIt->second.empty())
                                 {
                                     auto pairedBind = binder.parseAndBindSingle(pairedIt->second);
                                     if (not pairedBind.has_value())
@@ -457,8 +457,8 @@ struct Repl::Impl
                                             "Workload-switch paired SQL must be a SELECT statement", ErrorCode::UnknownException));
                                     }
                                     alternateStmt = *pairedQuery;
-                                    if (const auto switchIt = companionStatisticRequest->options.find("switch_name");
-                                        switchIt != companionStatisticRequest->options.end())
+                                    if (const auto switchIt = companionStatisticRequests.front().options.find("switch_name");
+                                        switchIt != companionStatisticRequests.front().options.end())
                                     {
                                         switchName = switchIt->second;
                                     }
@@ -499,29 +499,44 @@ struct Repl::Impl
                                 /// (stashed there by ReplStarter from --companion-probe-interval-ms).
                                 /// Falls back to 10000ms if absent or unparseable.
                                 uint64_t probeIntervalMs = 10000;
-                                if (const auto it = companionStatisticRequest->options.find("probe_interval_ms");
-                                    it != companionStatisticRequest->options.end())
+                                if (const auto it = companionStatisticRequests.front().options.find("probe_interval_ms");
+                                    it != companionStatisticRequests.front().options.end())
                                 {
                                     try { probeIntervalMs = std::stoull(it->second); }
                                     catch (...) { /* keep default */ }
                                 }
-                                auto statResult = statisticRequestHandler.collectWorkloadStatistic(
-                                    *companionStatisticRequest, stmt.plan, submitMerged, probeIntervalMs);
-                                if (not statResult.has_value())
+                                /// First request deploys the data query + build branch + first
+                                /// gated probe. Subsequent requests hit the "already in registry"
+                                /// branch in collectWorkloadStatistic and just add another gated
+                                /// probe with its own predicate + callback (each with its own
+                                /// target switch value, configured by --companion-condition-N /
+                                /// --companion-target-value-N in ReplStarter).
+                                std::optional<CollectStatisticResult> firstResult;
+                                for (size_t i = 0; i < companionStatisticRequests.size(); ++i)
                                 {
-                                    std::cout << "[Statistic] Failed to deploy workload companion: " << statResult.error().what()
-                                              << "\n";
+                                    auto statResult = statisticRequestHandler.collectWorkloadStatistic(
+                                        companionStatisticRequests[i], stmt.plan, submitMerged, probeIntervalMs);
+                                    if (not statResult.has_value())
+                                    {
+                                        std::cout << "[Statistic] Failed to deploy workload companion #" << i << ": "
+                                                  << statResult.error().what() << "\n";
+                                        std::flush(std::cout);
+                                        return std::unexpected<Exception>(std::move(statResult.error()));
+                                    }
+                                    std::cout << "[Statistic] Workload companion deployed: id="
+                                              << statResult->statisticId.getRawValue()
+                                              << (statResult->alreadyExisted ? " (reused existing)" : " (new)")
+                                              << " [request #" << i << "]\n";
                                     std::flush(std::cout);
-                                    return std::unexpected<Exception>(std::move(statResult.error()));
+                                    if (not firstResult.has_value())
+                                    {
+                                        firstResult = *statResult;
+                                    }
                                 }
-                                std::cout << "[Statistic] Workload companion deployed: id="
-                                          << statResult->statisticId.getRawValue()
-                                          << (statResult->alreadyExisted ? " (reused existing)" : " (new)") << "\n";
-                                std::flush(std::cout);
-                                QueryStatementResult merged{.id = statResult->queryId.getDistributedQueryId()};
+                                QueryStatementResult merged{.id = firstResult->queryId.getDistributedQueryId()};
                                 if (onCompanionAssociatedWithQuery.has_value())
                                 {
-                                    (*onCompanionAssociatedWithQuery)(merged.id, query, statResult->statisticId);
+                                    (*onCompanionAssociatedWithQuery)(merged.id, query, firstResult->statisticId);
                                 }
                                 return std::expected<QueryStatementResult, Exception>{merged};
                             }
@@ -537,13 +552,16 @@ struct Repl::Impl
                     /// Default path: deploy the data query as-is, then optionally deploy a DataDomain
                     /// companion as a separate statistic-collection query.
                     auto result = queryStatementHandler->apply(stmt);
-                    if (result.has_value() && companionStatisticRequest.has_value())
+                    if (result.has_value() && not companionStatisticRequests.empty())
                     {
                         if constexpr (std::is_same_v<std::remove_cvref_t<decltype(stmt)>, QueryStatement>)
                         {
                             try
                             {
-                                auto statResult = statisticRequestHandler.collectNewStatistic(*companionStatisticRequest);
+                                /// DataDomain companion path uses only the first request (a single
+                                /// independent statistic query — multiple gated probes are a
+                                /// WorkloadDomain-only concept).
+                                auto statResult = statisticRequestHandler.collectNewStatistic(companionStatisticRequests.front());
                                 if (statResult.has_value())
                                 {
                                     std::cout << "[Statistic] Companion deployed: id=" << statResult->statisticId.getRawValue()
@@ -722,7 +740,7 @@ Repl::Repl(
     StatementOutputFormat defaultOutputFormat,
     bool interactiveMode,
     std::stop_token stopToken,
-    std::optional<RequestStatisticBuildStatement> companionStatisticRequest,
+    std::vector<RequestStatisticBuildStatement> companionStatisticRequests,
     std::optional<std::function<void(DistributedQueryId, const std::string&, Statistic::StatisticId)>> onCompanionAssociatedWithQuery)
     : impl(std::make_unique<Impl>(
           std::move(sourceStatementHandler),
@@ -735,7 +753,7 @@ Repl::Repl(
           defaultOutputFormat,
           interactiveMode,
           std::move(stopToken),
-          std::move(companionStatisticRequest),
+          std::move(companionStatisticRequests),
           std::move(onCompanionAssociatedWithQuery)))
 {
 }

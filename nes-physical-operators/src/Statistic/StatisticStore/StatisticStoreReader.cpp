@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <iostream>
 #include <limits>
 #include <optional>
 #include <string_view>
@@ -64,7 +65,26 @@ resolveStatistic(AbstractStatisticStore& store, const Statistic::StatisticId sta
 {
     if (startTs.getRawValue() == 0 and endTs.getRawValue() == LATEST_WINDOW_END_SENTINEL)
     {
-        return pickLatest(store.getStatistics(statisticId, Windowing::TimeMeasure{0}, Windowing::TimeMeasure{LATEST_WINDOW_END_SENTINEL}));
+        const auto all = store.getStatistics(statisticId, Windowing::TimeMeasure{0}, Windowing::TimeMeasure{LATEST_WINDOW_END_SENTINEL});
+        const auto picked = pickLatest(all);
+        /// Diagnostic: trace which window was actually returned. If endTs jumps around between
+        /// adjacent ticks the store is retaining multiple historical windows AND `pickLatest` is
+        /// returning different ones across lookups — both probes would then race over different
+        /// historical regimes. Print every call so we can correlate with the swap-callback log.
+        {
+            static thread_local uint64_t lastEnd = 0;
+            const uint64_t pickedEnd = picked.has_value() ? picked->getEndTs().getTime() : 0;
+            const bool wentBackwards = pickedEnd < lastEnd;
+            std::cout << "[STAT_PICK] statId=" << statisticId.getRawValue()
+                      << " storeSize=" << all.size()
+                      << " pickedEnd=" << pickedEnd
+                      << " seenTuples=" << (picked.has_value() ? picked->getNumberOfSeenTuples() : 0)
+                      << (wentBackwards ? " <- WENT BACKWARDS" : "")
+                      << "\n";
+            std::cout.flush();
+            lastEnd = pickedEnd;
+        }
+        return picked;
     }
     return store.getSingleStatistic(
         statisticId, Windowing::TimeMeasure(startTs.getRawValue()), Windowing::TimeMeasure(endTs.getRawValue()));

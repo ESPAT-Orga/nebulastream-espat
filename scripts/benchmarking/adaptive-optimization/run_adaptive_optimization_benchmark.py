@@ -413,6 +413,13 @@ def run_benchmark(
             "--companion-window-size-ms", "60000000",
             "--companion-event-time-field", "BID$TIMESTAMP",
             "--companion-host", WORKER_GRPC,
+            # Probe-tick cadence matched to the window-close cadence (~0.3 s at our ingest rate
+            # of ~200M tup/s with 60M event-time windows). Default is 10 s, which would leave the
+            # swap callback up to 10 s behind a regime change — that's exactly the "stairs effect"
+            # in the throughput curve when REPLAYS_PER_FILE-driven regime cycles are faster than
+            # the sampling rate. 300 ms gives ~3 probe ticks per regime cycle and adaptation lag
+            # stays bounded to one window-close cycle.
+            "--companion-probe-interval-ms", "300",
             "--companion-switch-to-sql", make_reversed_query_sql(sqrts),
             # Histogram bucket range widened to [0, 2000] so both regimes' price distributions
             # fit (regime A: price~N(500,167); regime B: price~N(1277,167); regime B would be
@@ -420,12 +427,20 @@ def run_benchmark(
             "--companion-histogram-min", "0",
             "--companion-histogram-max", "2000",
             # Two gated probes covering the two regimes by NON-OVERLAPPING price-bin ranges.
-            # Probe A (target=1, bid-first): BINSTART < 900 → fires for regime A's price~500.
-            # Probe B (target=0, price-first): BINSTART >= 900 → fires for regime B's price~1277.
-            "--companion-condition", "BINSTART < UINT64(900) AND BINCOUNTER > UINT64(0)",
-            "--companion-target-value", "1",
-            "--companion-condition-2", "BINSTART >= UINT64(900) AND BINCOUNTER > UINT64(0)",
-            "--companion-target-value-2", "0",
+            # Probe A (fires on regime A: price~N(500, 167)): BINSTART < 900 → set switch=0
+            #   (bid-first variant). Regime A's bidValue~N(50, 17) makes `bidValue < 10.45`
+            #   the more selective filter (~0.9% pass) so we want it first.
+            # Probe B (fires on regime B: price~N(1277, 167)): BINSTART >= 900 → set switch=1
+            #   (price-first variant). Regime B's bidValue~N(-30, 17) makes `bidValue < 10.45`
+            #   match ~99%, while `price < 888.49` is the selective one (~1%), so price-first wins.
+            # Density threshold UINT64(500000): regime A's right-tail mass at BINSTART=900 is
+            # ~160K tuples (~0.27% of 60M); regime B's left-tail there is ~2.16M (~3.6%). 500K
+            # filters out the leaky tails so each probe matches only when its regime is
+            # genuinely dominant.
+            "--companion-condition", "BINSTART < UINT64(900) AND BINCOUNTER > UINT64(500000)",
+            "--companion-target-value", "0",
+            "--companion-condition-2", "BINSTART >= UINT64(900) AND BINCOUNTER > UINT64(500000)",
+            "--companion-target-value-2", "1",
         ]
 
     # --- Start REPL ---

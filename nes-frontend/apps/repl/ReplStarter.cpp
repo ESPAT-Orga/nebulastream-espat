@@ -185,6 +185,13 @@ int main(int argc, char** argv)
         program.add_argument("--companion-field")
             .default_value(std::string{"price"})
             .help("Field name for the companion statistic (default: price)");
+        program.add_argument("--companion-field-2")
+            .help(
+                "Field name for the SECOND companion statistic (when paired with --companion-condition-2). "
+                "If omitted, the secondary statistic reuses --companion-field. Use a different field here to "
+                "deploy a second build branch monitoring a separate column — the data source defers emission "
+                "until both build branches have spliced in, and the source still serves a single thread to "
+                "all of them.");
         program.add_argument("--companion-metric")
             .default_value(std::string(magic_enum::enum_name(NES::Metric::Cardinality)))
             .choices(
@@ -532,10 +539,26 @@ int main(int argc, char** argv)
             /// generated request drives the workload-switch gate to its own regime when it fires.
             /// All other captures are shared across the requests (build chain spec, swapState,
             /// re-deploy plumbing, gRPC stub config).
-            auto makeRequest = [&](std::optional<NES::LogicalFunction> cond, int64_t targetSwitchValue)
+            auto makeRequest = [&](std::optional<NES::LogicalFunction> cond, int64_t targetSwitchValue, std::optional<std::string> fieldOverride = std::nullopt)
             {
+                /// If fieldOverride is set, construct a fresh WorkloadDomain with that field
+                /// name — different fieldName → different registry key → distinct build branch.
+                NES::CollectionDomain perRequestDomain = collectionDomain;
+                if (fieldOverride.has_value() and companionDomain == "workload")
+                {
+                    perRequestDomain = NES::WorkloadDomain{
+                        .queryId = NES::QueryId::invalid(),
+                        .operatorId = NES::INVALID_OPERATOR_ID,
+                        .fieldName = *fieldOverride};
+                }
+                else if (fieldOverride.has_value())
+                {
+                    perRequestDomain = NES::DataDomain{
+                        .logicalSourceName = program.get<std::string>("--companion-source"),
+                        .fieldName = *fieldOverride};
+                }
                 return NES::RequestStatisticBuildStatement{
-                .domain = collectionDomain,
+                .domain = perRequestDomain,
                 .metric = metric,
                 .windowSizeMs = windowSizeMs,
                 .windowAdvanceMs = windowAdvanceMs,
@@ -760,11 +783,25 @@ int main(int argc, char** argv)
             /// the gate moves to --companion-target-value (default 1).
             companionStatisticRequests.push_back(makeRequest(condition, targetSwitchValue1));
             /// Optional secondary statement: a second gated probe with its own predicate +
-            /// target value. collectWorkloadStatistic's second call hits the "registry already has
-            /// this key" branch and just deploys an additional gated probe pipeline + callback.
+            /// target value. With Phase 2 (multi-splice), the data source defers emission
+            /// until ALL build branches splice in — count carried via the "expected_splice_count"
+            /// option set just below.
             if (condition2.has_value())
             {
-                companionStatisticRequests.push_back(makeRequest(condition2, targetSwitchValue2));
+                std::optional<std::string> field2;
+                if (program.is_used("--companion-field-2"))
+                {
+                    field2 = program.get<std::string>("--companion-field-2");
+                }
+                companionStatisticRequests.push_back(makeRequest(condition2, targetSwitchValue2, field2));
+            }
+            /// Set expected_splice_count on EVERY request so collectWorkloadStatistic (called
+            /// once per request) reads the same total when stamping the data plan's source.
+            /// Only the FIRST call uses this to set up the deferred-start budget; later calls
+            /// hit the "registry already exists" path and don't re-stamp.
+            for (auto& req : companionStatisticRequests)
+            {
+                req.options["expected_splice_count"] = std::to_string(companionStatisticRequests.size());
             }
             onCompanionAssociatedWithQuery
                 = [swapState](NES::DistributedQueryId id, const std::string& sql, NES::Statistic::StatisticId statId)

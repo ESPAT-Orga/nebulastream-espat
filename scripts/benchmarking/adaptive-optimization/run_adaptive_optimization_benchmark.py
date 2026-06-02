@@ -437,9 +437,27 @@ def run_benchmark(
             # ~160K tuples (~0.27% of 60M); regime B's left-tail there is ~2.16M (~3.6%). 500K
             # filters out the leaky tails so each probe matches only when its regime is
             # genuinely dominant.
+            # Phase 2: two build branches monitoring TWO different fields, each with its own
+            # predicate-and-target. Each request gets its own statisticId; both build branches
+            # splice into BID via SpliceToRunningSourceTrait, and the source defers emission until
+            # both have wired in (expected_splice_count=2). The probe inside each build branch
+            # routes survivors to its own callback (no shared probe, no Generator polling).
+            #
+            # Probe A monitors PRICE (set via --companion-field "price" above): in regime A
+            # (price ~ N(500, 167)) most mass is in [0, 900), so BINSTART < 900 → fires → target
+            # switch=0 (bid-first variant; bidValue<10.45 is very selective in regime A).
             "--companion-condition", "BINSTART < UINT64(900) AND BINCOUNTER > UINT64(500000)",
             "--companion-target-value", "0",
-            "--companion-condition-2", "BINSTART >= UINT64(900) AND BINCOUNTER > UINT64(500000)",
+            # Probe B monitors BIDVALUE: in regime B (bidValue ~ N(-30, 17)) most mass is below
+            # the filter threshold 10.45, so BINSTART < 11 → fires → target switch=1.
+            # Threshold 1500000: regime A's bidValue left-tail mass in [0, 11) is ~564K
+            # (P(bidValue<11 | N(50, 17)) ≈ 0.94% × 60M); regime B's positive-tail mass there
+            # is ~1.87M (P(0<bidValue<11 | N(-30, 17)) ≈ 3.12% × 60M). 1.5M cleanly separates.
+            # NOTE: histogram-min=0/max=2000 (set globally for the bench) clips regime B's
+            # negative bidValues — only its right shoulder survives, which is enough to
+            # produce the distinguishable density spike Probe B's predicate keys on.
+            "--companion-field-2", "bidValue",
+            "--companion-condition-2", "BINSTART < UINT64(11) AND BINCOUNTER > UINT64(1500000)",
             "--companion-target-value-2", "1",
         ]
 

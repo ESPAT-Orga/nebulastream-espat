@@ -60,7 +60,8 @@ public:
         QueryLifetimeController& controller,
         WorkEmitter& emitter,
         std::string logicalSourceName = {},
-        bool deferStart = false);
+        bool deferStart = false,
+        uint32_t expectedSpliceCount = 1);
 
     /// Append additional head pipelines to this source's emit fan-out. Used by the splice path so
     /// a later query's build branch can run off the same source thread as the data query.
@@ -111,6 +112,10 @@ private:
     /// fast-path "already-started" reads without acquiring the mutex.
     std::atomic_bool started{false};
     std::function<void()> deferredStart;
+    /// Number of splices remaining before the deferred start fires. Counts down inside
+    /// appendSuccessors(); reaching 0 triggers startEmitting(). 0 from creation means "no
+    /// deferral, start immediately" (handled in create()).
+    std::atomic<uint32_t> pendingSplices{0};
 
     mutable std::mutex mutex; /// Protects against race between create() (starting the source) and tryStop() (stopping the source)
     /// shared_ptr so the emit closure (created in create() below) reads from the SAME container

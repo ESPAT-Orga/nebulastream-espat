@@ -150,7 +150,8 @@ std::shared_ptr<RunningSource> RunningSource::create(
     QueryLifetimeController& controller,
     WorkEmitter& emitter,
     std::string logicalSourceName,
-    bool deferStart)
+    bool deferStart,
+    uint32_t expectedSpliceCount)
 {
     const auto maxInflightBuffers = source->getRuntimeConfiguration().inflightBufferLimit;
     std::vector<SuccessorEntry> initialEntries;
@@ -186,8 +187,11 @@ std::shared_ptr<RunningSource> RunningSource::create(
     };
     if (deferStart)
     {
+        runningSource->pendingSplices.store(std::max<uint32_t>(expectedSpliceCount, 1));
         std::cout << fmt::format(
-            "[SOURCE_DEFER] queued deferred start for logical source '{}'\n", logicalSourceName.empty() ? "<anon>" : logicalSourceName);
+            "[SOURCE_DEFER] queued deferred start for logical source '{}' (expectedSpliceCount={})\n",
+            logicalSourceName.empty() ? "<anon>" : logicalSourceName,
+            runningSource->pendingSplices.load());
         std::cout.flush();
         runningSource->deferredStart = std::move(startFn);
     }
@@ -227,15 +231,33 @@ void RunningSource::appendSuccessors(std::vector<std::shared_ptr<RunningQueryPla
     {
         return;
     }
-    auto locked = successors->wlock();
-    std::cout << fmt::format(
-        "[SOURCE_SPLICE] appending {} successor pipelines to running source for logical source '{}'\n",
-        additionalSuccessors.size(),
-        logicalSourceName);
-    std::cout.flush();
-    for (auto& node : additionalSuccessors)
     {
-        locked->push_back(makeEntry(std::move(node), inflightBufferLimit));
+        auto locked = successors->wlock();
+        std::cout << fmt::format(
+            "[SOURCE_SPLICE] appending {} successor pipelines to running source for logical source '{}'\n",
+            additionalSuccessors.size(),
+            logicalSourceName);
+        std::cout.flush();
+        for (auto& node : additionalSuccessors)
+        {
+            locked->push_back(makeEntry(std::move(node), inflightBufferLimit));
+        }
+    }
+    /// Count this splice against the pending budget set by the deferStart path. If the budget
+    /// hits 0, fire the deferred start. Non-deferred sources have pendingSplices == 0 from
+    /// creation, so this is a no-op.
+    uint32_t previous = pendingSplices.load();
+    while (previous > 0 && !pendingSplices.compare_exchange_weak(previous, previous - 1))
+    {
+        /// retry
+    }
+    if (previous > 0 && pendingSplices.load() == 0)
+    {
+        std::cout << fmt::format(
+            "[SOURCE_SPLICE] last expected splice consumed for logical source '{}'; firing deferred start.\n",
+            logicalSourceName);
+        std::cout.flush();
+        startEmitting();
     }
 }
 

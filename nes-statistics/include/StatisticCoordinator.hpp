@@ -153,6 +153,14 @@ private:
     /// returns (the registry scan would not match anyway because regime ids are separate from
     /// build-branch ids).
     folly::Synchronized<std::unordered_map<Statistic::StatisticId, std::vector<ProbeCallback>>> probeCallbacks;
+
+    /// Cache of data-query deployments keyed by logical source name (we use logical source name
+    /// as a proxy for "same data query"). Lets a second collectWorkloadStatistic call for a
+    /// DIFFERENT field of the same source reuse the data query deployed by the first call,
+    /// instead of submitting a duplicate. Without this, multi-field workload monitoring deploys
+    /// N redundant data queries (one per registry-key-distinct call), which would actually run
+    /// the user's SELECT N times.
+    folly::Synchronized<std::unordered_map<std::string, QueryId>> deployedDataQueriesBySource;
 };
 
 }

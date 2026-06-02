@@ -99,12 +99,13 @@ LogicalPlan LogicalSourceExpansionRule::apply(LogicalPlan queryPlan) const
 
         /// Preserve SpliceToRunningSourceTrait / DeferSourceStartTrait across expansion: if the
         /// source-name op was tagged, every expanded SourceDescriptor must carry the same marker
-        /// so the runtime hooks can recognize it at instantiation time.
+        /// (and the DeferSourceStartTrait's expectedSpliceCount payload) so the runtime hooks
+        /// can recognize it at instantiation time.
         const bool spliceMarker = hasTrait<SpliceToRunningSourceTrait>(sourceOp.getTraitSet());
-        const bool deferStartMarker = hasTrait<DeferSourceStartTrait>(sourceOp.getTraitSet());
+        const auto deferStartTrait = sourceOp.getTraitSet().tryGet<DeferSourceStartTrait>();
         auto expandedSourceOperators = entries
             | std::views::transform(
-                [spliceMarker, deferStartMarker](const auto& entry)
+                [spliceMarker, &deferStartTrait](const auto& entry)
                 {
                     LogicalOperator op{SourceDescriptorLogicalOperator{entry}};
                     auto ts = op.getTraitSet();
@@ -112,11 +113,11 @@ LogicalPlan LogicalSourceExpansionRule::apply(LogicalPlan queryPlan) const
                     {
                         [[maybe_unused]] const auto inserted = tryInsert(ts, SpliceToRunningSourceTrait{});
                     }
-                    if (deferStartMarker)
+                    if (deferStartTrait.has_value())
                     {
-                        [[maybe_unused]] const auto inserted = tryInsert(ts, DeferSourceStartTrait{});
+                        [[maybe_unused]] const auto inserted = tryInsert(ts, deferStartTrait.value().get());
                     }
-                    if (spliceMarker or deferStartMarker)
+                    if (spliceMarker or deferStartTrait.has_value())
                     {
                         op = op.withTraitSet(ts);
                     }

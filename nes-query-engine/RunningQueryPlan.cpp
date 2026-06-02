@@ -129,6 +129,7 @@ struct InstantiatedSourceEntry
     std::vector<std::shared_ptr<RunningQueryPlanNode>> successorNodes;
     bool spliceToRunningSource = false;
     bool deferStart = false;
+    uint32_t deferStartExpectedSpliceCount = 1;
     std::string logicalSourceName;
 };
 
@@ -181,6 +182,7 @@ static std::pair<std::vector<InstantiatedSourceEntry>, std::vector<std::weak_ptr
             .successorNodes = std::move(successorNodes),
             .spliceToRunningSource = entry.spliceToRunningSource,
             .deferStart = entry.deferStart,
+            .deferStartExpectedSpliceCount = entry.deferStartExpectedSpliceCount,
             .logicalSourceName = entry.logicalSourceName});
     }
 
@@ -262,12 +264,11 @@ std::pair<std::unique_ptr<RunningQueryPlan>, CallbackRef> RunningQueryPlan::star
                                 sourceEntry.logicalSourceName));
                             return;
                         }
+                        /// appendSuccessors now handles the deferred-start countdown internally:
+                        /// each call decrements pendingSplices, and only the last one (when
+                        /// budget reaches 0) fires startEmitting(). This supports N expected
+                        /// build branches splicing in before the source begins emitting.
                         running->appendSuccessors(std::move(sourceEntry.successorNodes));
-                        /// If the running source was created with deferStart=true (the typical
-                        /// case for the workload-domain data query), the splice is the signal
-                        /// that all expected successors are wired in. Start emission now so the
-                        /// build branch sees sequence 0 first. Idempotent if already started.
-                        running->startEmitting();
                         continue;
                     }
                     auto sourceId = sourceEntry.source->getSourceId();
@@ -291,7 +292,8 @@ std::pair<std::unique_ptr<RunningQueryPlan>, CallbackRef> RunningQueryPlan::star
                             controller,
                             emitter,
                             sourceEntry.logicalSourceName,
-                            sourceEntry.deferStart));
+                            sourceEntry.deferStart,
+                            sourceEntry.deferStartExpectedSpliceCount));
                 }
                 /// release lock
             }

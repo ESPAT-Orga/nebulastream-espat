@@ -135,6 +135,7 @@ ExecutableQueryPlan::instantiate(CompiledQueryPlan& compiledQueryPlan, const Sou
                 .successors = std::move(compiledSource.successors),
                 .spliceToRunningSource = false,
                 .deferStart = compiledSource.deferStart,
+                .deferStartExpectedSpliceCount = compiledSource.deferStartExpectedSpliceCount,
                 .logicalSourceName = compiledSource.logicalSourceName});
         }
     }

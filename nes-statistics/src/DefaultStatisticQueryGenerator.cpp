@@ -317,10 +317,65 @@ LogicalPlan DefaultStatisticQueryGenerator::generateWorkloadBranch(
     /// applyConditionSelection=false: the trigger's `condition` is a probe-pipeline predicate
     /// (binds against histogram bin fields), not a build-chain output filter.
     auto plan = stackBuildChainOnTop(std::move(basePlan), fieldNameUpper, request, statisticId, /*applyConditionSelection=*/false);
-    /// Build branch terminates at VoidSink — the gated probe is responsible for reporting to
-    /// the coordinator. Avoids per-window-close gRPC traffic on the data-query source thread.
-    (void)coordinatorAddress;
-    return appendVoidSinkToStatisticChain(std::move(plan), sourceNameUpper, request.options);
+
+    const auto predicate
+        = request.conditionTrigger.has_value() ? request.conditionTrigger->condition : std::optional<LogicalFunction>{};
+
+    if (not predicate.has_value())
+    {
+        /// No predicate: terminate at VoidSink so the build chain quietly populates the store
+        /// without shipping window-close records anywhere. (Heartbeat-style probe is no longer
+        /// deployed separately; users wiring a callback without a predicate get no triggers.)
+        (void)coordinatorAddress;
+        return appendVoidSinkToStatisticChain(std::move(plan), sourceNameUpper, request.options);
+    }
+
+    /// Probe-in-build path: instead of VoidSink we chain
+    ///   StatisticStoreWriter → EquiWidthHistogramProbe → Selection(predicate) → GrpcSink
+    /// The writer emits one record per window-close carrying that window's (statId, startTs,
+    /// endTs, seenTuples). The probe reads those values from its input record (not from any
+    /// sentinel constant) and fetches that exact window's bins from the store. So:
+    ///  - No Generator-driven polling: triggers fire per window-close, at the build's natural
+    ///    cadence (~3 Hz here).
+    ///  - No latest-window guessing: the probe's lookup key matches the just-written window
+    ///    exactly. No stale data, no ambiguity.
+    ///  - Selection filters which bin rows make it to the GrpcSink (the bin-level predicate).
+    ///  - The GrpcSink reports each surviving bin row to the coordinator; the report's
+    ///    STATISTICID is the build's statisticId, which is also the routing key for the
+    ///    coordinator-side probe callback registered by collectWorkloadStatistic.
+    plan = promoteOperatorToRoot(
+        plan,
+        EquiWidthHistogramProbeLogicalOperator{
+            statisticId,
+            DataTypeProvider::provideDataType(DataType::Type::UINT64, DataType::NULLABLE::NOT_NULLABLE),
+            DataTypeProvider::provideDataType(DataType::Type::UINT64, DataType::NULLABLE::NOT_NULLABLE)});
+    plan = LogicalPlanBuilder::addSelection(*predicate, plan);
+
+    /// GrpcSink schema mirrors the StatisticStoreWriter's output schema (the four
+    /// LogicalStatisticFields), qualified with the source name. The probe operator adds bin
+    /// fields (BINSTART/BINCOUNTER/BINEND) to its output schema; we drop them via a Projection
+    /// so the sink only carries the four reporting fields the coordinator's gRPC service
+    /// expects. STATISTICID stays = build's statisticId, so coordinator-side
+    /// `probeCallbacks[statisticId]` routes correctly.
+    const auto& systemQualifier = sourceNameUpper + "$";
+    LogicalStatisticFields outputStatisticFields;
+    outputStatisticFields.addQualifierName(systemQualifier);
+    std::vector<ProjectionLogicalOperator::Projection> projections;
+    projections.emplace_back(
+        FieldIdentifier{outputStatisticFields.statisticIdField.name},
+        LogicalFunction{FieldAccessLogicalFunction{"STATISTICID"}});
+    projections.emplace_back(
+        FieldIdentifier{outputStatisticFields.statisticStartTsField.name},
+        LogicalFunction{FieldAccessLogicalFunction{"STATISTICSTART"}});
+    projections.emplace_back(
+        FieldIdentifier{outputStatisticFields.statisticEndTsField.name},
+        LogicalFunction{FieldAccessLogicalFunction{"STATISTICEND"}});
+    projections.emplace_back(
+        FieldIdentifier{outputStatisticFields.statisticNumberOfSeenTuplesField.name},
+        LogicalFunction{FieldAccessLogicalFunction{"STATISTICNUMBEROFSEENTUPLES"}});
+    plan = LogicalPlanBuilder::addProjection(std::move(projections), /*asterisk=*/false, plan);
+
+    return appendGrpcSinkToStatisticChain(std::move(plan), sourceNameUpper, coordinatorAddress, request.options);
 }
 
 LogicalPlan DefaultStatisticQueryGenerator::generateProbeQuery(

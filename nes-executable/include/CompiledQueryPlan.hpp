@@ -58,9 +58,10 @@ struct CompiledQueryPlan
         /// pinned here so the runtime path doesn't depend on the descriptor still being live.
         bool spliceToRunningSource = false;
         /// If true, the runtime creates the RunningSource and registers it but does NOT start
-        /// its emit thread. An explicit RunningSourceRegistry::startDeferred(name) call (issued
-        /// by orchestration code after all splices have wired in) starts emission.
+        /// its emit thread until `deferStartExpectedSpliceCount` successful appendSuccessors()
+        /// calls have happened (or until an explicit RunningSourceRegistry::startDeferred(name)).
         bool deferStart = false;
+        uint32_t deferStartExpectedSpliceCount = 1;
         std::string logicalSourceName;
     };
 

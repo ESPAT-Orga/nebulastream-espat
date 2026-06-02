@@ -46,7 +46,11 @@ LoweringRuleResultSubgraph LowerToPhysicalSource::apply(
     /// trait, if set, was stamped by the workload-domain build-branch generator; LogicalSource-
     /// ExpansionRule propagates it to every expanded SourceDescriptor operator.
     physicalOperator.spliceToRunningSource = hasTrait<SpliceToRunningSourceTrait>(source.getTraitSet());
-    physicalOperator.deferStart = hasTrait<DeferSourceStartTrait>(source.getTraitSet());
+    if (const auto deferTrait = source.getTraitSet().tryGet<DeferSourceStartTrait>(); deferTrait.has_value())
+    {
+        physicalOperator.deferStart = true;
+        physicalOperator.deferStartExpectedSpliceCount = deferTrait.value()->expectedSpliceCount;
+    }
     physicalOperator.logicalSourceName = source->getSourceDescriptor().getLogicalSource().getLogicalSourceName();
 
     const auto inputSchemas = logicalOperator.getInputSchemas();

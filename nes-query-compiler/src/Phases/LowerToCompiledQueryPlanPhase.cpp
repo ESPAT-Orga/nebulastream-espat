@@ -93,6 +93,7 @@ void LowerToCompiledQueryPlanPhase::processSource(const std::shared_ptr<Pipeline
         .successors = std::move(executableSuccessorPipelines),
         .spliceToRunningSource = sourceOperator.spliceToRunningSource,
         .deferStart = sourceOperator.deferStart,
+        .deferStartExpectedSpliceCount = sourceOperator.deferStartExpectedSpliceCount,
         .logicalSourceName = sourceOperator.logicalSourceName});
 }
 

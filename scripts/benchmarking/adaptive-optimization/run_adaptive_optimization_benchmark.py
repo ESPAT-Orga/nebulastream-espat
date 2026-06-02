@@ -398,8 +398,6 @@ def run_benchmark(
             "--companion-statistic",
             # Splice the build branch into the data query (one source thread feeds both
             # subtrees) and run gated probes whose swap callbacks flip the workload-switch.
-            "--companion-domain", "workload",
-            "--companion-source", "bid",
             "--companion-field", "price",
             # MinVal maps to Equi_Width_Histogram, which is the only metric the gated probe
             # supports (StatisticStoreReader returns histogram bins as rows for the Selection
@@ -413,13 +411,6 @@ def run_benchmark(
             "--companion-window-size-ms", "60000000",
             "--companion-event-time-field", "BID$TIMESTAMP",
             "--companion-host", WORKER_GRPC,
-            # Probe-tick cadence matched to the window-close cadence (~0.3 s at our ingest rate
-            # of ~200M tup/s with 60M event-time windows). Default is 10 s, which would leave the
-            # swap callback up to 10 s behind a regime change — that's exactly the "stairs effect"
-            # in the throughput curve when REPLAYS_PER_FILE-driven regime cycles are faster than
-            # the sampling rate. 300 ms gives ~3 probe ticks per regime cycle and adaptation lag
-            # stays bounded to one window-close cycle.
-            "--companion-probe-interval-ms", "300",
             "--companion-switch-to-sql", make_reversed_query_sql(sqrts),
             # Histogram bucket range widened to [0, 2000] so both regimes' price distributions
             # fit (regime A: price~N(500,167); regime B: price~N(1277,167); regime B would be

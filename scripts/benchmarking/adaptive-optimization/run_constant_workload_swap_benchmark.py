@@ -321,11 +321,9 @@ def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str, sqr
             repl_binary,
             "-f", "JSON",
             "--companion-statistic",
-            # workload domain triggers the REPL's plan merger: both filter chains run side by side
+            # Splice the build branch into the data query so both filter chains run side by side
             # under one shared source, gated by a SwitchRegistry atomic that the swap callback
             # flips via gRPC SetSwitch (no stop/redeploy, source thread keeps running).
-            "--companion-domain", "workload",
-            "--companion-source", "bid",
             "--companion-field", "price",
             # MinVal maps to Equi_Width_Histogram, the only metric the histogram-probe operator
             # can read. Cardinality (Count_Min_Sketch) wouldn't work with the gated probe path.
@@ -340,9 +338,6 @@ def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str, sqr
             "--companion-host", WORKER_GRPC,
             "--companion-switch-to-sql", make_reversed_query_sql(sqrts),
             # Selectivity-gated probe: fires when any histogram bin has > 0 tuples.
-            # Currently inactive because the build branch's StatisticStoreWriter never fires (see
-            # findings — pre-existing issue in build chain that legacy heartbeat probe never
-            # surfaced). When that's fixed, this condition will exercise the gated probe path.
             "--companion-condition", "BINCOUNTER > UINT64(0)",
         ],
         stdin=subprocess.PIPE,

@@ -262,15 +262,13 @@ public:
     /// Used internally to co-deploy companion statistic queries alongside data queries.
     [[nodiscard]] std::expected<CollectStatisticResult, Exception> collectNewStatistic(const RequestStatisticBuildStatement& statement);
 
-    /// Workload-domain variant: splices the build branch into the data query's plan, submits the
-    /// merged plan via `submitPlan`, and deploys a heartbeat probe (also via `submitPlan`) so the
-    /// coordinator's registry keeps firing condition triggers at the configured cadence.
-    /// See StatisticCoordinator::collectWorkloadStatistic.
+    /// Workload-domain variant: splices the build branch into the data query's plan and submits
+    /// the merged plan via `submitPlan`. The probe runs inline with the build chain and fires its
+    /// condition trigger on every window-close. See StatisticCoordinator::collectWorkloadStatistic.
     [[nodiscard]] std::expected<CollectStatisticResult, Exception> collectWorkloadStatistic(
         const RequestStatisticBuildStatement& statement,
         const LogicalPlan& dataQueryPlan,
-        const std::function<std::expected<QueryId, Exception>(LogicalPlan)>& submitPlan,
-        uint64_t probeIntervalMs = 10000);
+        const std::function<std::expected<QueryId, Exception>(LogicalPlan)>& submitPlan);
 
     /// Starts the gRPC server on the owned coordinator. Must be called after construction.
     /// Returns "host:port" of the listening server.

@@ -17,7 +17,6 @@
 #include <chrono>
 #include <cstdint>
 #include <future>
-#include <iostream>
 #include <memory>
 #include <optional>
 #include <string>
@@ -139,8 +138,7 @@ std::expected<CollectStatisticResult, Exception> StatisticCoordinator::collectNe
 std::expected<CollectStatisticResult, Exception> StatisticCoordinator::collectWorkloadStatistic(
     const RequestStatisticBuildStatement& statement,
     const LogicalPlan& dataQueryPlan,
-    const std::function<std::expected<QueryId, Exception>(LogicalPlan)>& submitPlan,
-    const uint64_t probeIntervalMs)
+    const std::function<std::expected<QueryId, Exception>(LogicalPlan)>& submitPlan)
 {
     const auto* domain = std::get_if<WorkloadDomain>(&statement.domain);
     if (domain == nullptr)
@@ -171,7 +169,6 @@ std::expected<CollectStatisticResult, Exception> StatisticCoordinator::collectWo
     const auto hostIt = statement.options.find("host");
     const auto& sinkWorkerHost = hostIt != statement.options.end() ? hostIt->second : std::string{"localhost:8080"};
     (void)sinkWorkerHost; /// kept for forward-compat with future per-request host overrides
-    (void)probeIntervalMs; /// no longer used: the probe runs inline with the build chain and fires on every window-close
 
     if (const auto existing = registry.find(key))
     {

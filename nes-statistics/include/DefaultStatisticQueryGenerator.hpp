@@ -14,10 +14,8 @@
 
 #pragma once
 
-#include <optional>
 #include <string>
 #include <CollectionDomain.hpp>
-#include <Functions/LogicalFunction.hpp>
 #include <Operators/LogicalOperator.hpp>
 #include <Plans/LogicalPlan.hpp>
 #include <RequestStatisticStatement.hpp>
@@ -49,19 +47,6 @@ public:
         Statistic::StatisticId statisticId,
         const std::string& coordinatorAddress,
         const LogicalOperator& spliceLeaf) const override;
-
-    /// Probe for the workload-domain build branch. See base-class docs for predicate modes.
-    /// When predicate is null: legacy ticker — Generator(STATISTICID = probeStatisticId, …) → GrpcSink.
-    /// When predicate is set: selectivity-gated — Generator(STATISTICID = buildStatisticId, …) →
-    ///   EquiWidthHistogramProbe(buildStatisticId) → Selection(predicate) →
-    ///   Projection(STATISTICID := probeStatisticId, pass-through timestamps) → GrpcSink.
-    [[nodiscard]] LogicalPlan generateProbeQuery(
-        Statistic::StatisticId buildStatisticId,
-        Statistic::StatisticId probeStatisticId,
-        std::optional<LogicalFunction> predicate,
-        const std::string& coordinatorAddress,
-        uint64_t intervalMs,
-        const std::string& sinkWorkerHost) const override;
 };
 
 }

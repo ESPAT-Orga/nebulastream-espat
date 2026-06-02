@@ -410,10 +410,6 @@ bool MemorySource::setup(const std::shared_ptr<AbstractBufferProvider>& bufferPr
                 "monotonic_timestamp_field '{}' did not match (suffix, case-insensitive) any field in the schema",
                 monotonicTimestampField);
         }
-        std::cout << std::format(
-            "MemorySource: monotonic timestamp rewrite enabled on field offset {} ('{}')\n",
-            monotonicTimestampOffsetBytes,
-            monotonicTimestampField);
     }
 
     /// Cache for fillTupleBuffer.

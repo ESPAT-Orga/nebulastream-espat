@@ -15,11 +15,9 @@
 #include <Phases/PipeliningPhase.hpp>
 
 #include <cstdint>
-#include <cstdio>
 #include <functional>
 #include <memory>
 #include <optional>
-#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -457,15 +455,6 @@ std::shared_ptr<PipelinedQueryPlan> apply(const PhysicalPlan& physicalPlan)
     }
 
     NES_DEBUG("Constructed pipeline plan with {} root pipelines.\n{}", pipelinedPlan->getPipelines().size(), *pipelinedPlan);
-    {
-        std::ostringstream oss;
-        oss << *pipelinedPlan;
-        fprintf(stderr, "[PipeliningPhase] fuseOperators=%s, %zu root pipeline(s):\n%s\n",
-            fuseOperators ? "true" : "false",
-            pipelinedPlan->getPipelines().size(),
-            oss.str().c_str());
-        fflush(stderr);
-    }
     return pipelinedPlan;
 }
 }

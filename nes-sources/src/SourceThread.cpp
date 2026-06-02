@@ -19,9 +19,7 @@
 #include <exception>
 #include <functional>
 #include <future>
-#include <iostream>
 #include <memory>
-#include <sstream>
 #include <stop_token>
 #include <string>
 #include <utility>
@@ -225,16 +223,6 @@ bool SourceThread::start(SourceReturnType::EmitFunction&& emitFunction)
     }
 
     NES_DEBUG("Starting source with originId: {}", originId);
-    {
-        std::ostringstream descr;
-        descr << *sourceImplementation;
-        std::cout << fmt::format(
-            "[SOURCE_INSTANTIATE] spawning DataSrc thread originId={} pipelineId={} impl={}\n",
-            originId,
-            pipelineId,
-            descr.str());
-        std::cout.flush();
-    }
     std::promise<SourceImplementationTermination> terminationPromise;
     this->terminationFuture = terminationPromise.get_future();
 

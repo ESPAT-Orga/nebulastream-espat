@@ -18,7 +18,6 @@
 #include <chrono>
 #include <cstdint>
 #include <functional>
-#include <iostream>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -31,7 +30,6 @@
 #include <Identifiers/Identifiers.hpp>
 #include <Sources/SourceReturnType.hpp>
 #include <Util/Overloaded.hpp>
-#include <fmt/format.h>
 #include <EngineLogger.hpp>
 #include <ErrorHandling.hpp>
 #include <Interfaces.hpp>
@@ -188,11 +186,6 @@ std::shared_ptr<RunningSource> RunningSource::create(
     if (deferStart)
     {
         runningSource->pendingSplices.store(std::max<uint32_t>(expectedSpliceCount, 1));
-        std::cout << fmt::format(
-            "[SOURCE_DEFER] queued deferred start for logical source '{}' (expectedSpliceCount={})\n",
-            logicalSourceName.empty() ? "<anon>" : logicalSourceName,
-            runningSource->pendingSplices.load());
-        std::cout.flush();
         runningSource->deferredStart = std::move(startFn);
     }
     else
@@ -218,9 +211,6 @@ void RunningSource::startEmitting()
     }
     if (toFire)
     {
-        std::cout << fmt::format(
-            "[SOURCE_DEFER] firing deferred start for logical source '{}'\n", logicalSourceName.empty() ? "<anon>" : logicalSourceName);
-        std::cout.flush();
         toFire();
     }
 }
@@ -233,11 +223,6 @@ void RunningSource::appendSuccessors(std::vector<std::shared_ptr<RunningQueryPla
     }
     {
         auto locked = successors->wlock();
-        std::cout << fmt::format(
-            "[SOURCE_SPLICE] appending {} successor pipelines to running source for logical source '{}'\n",
-            additionalSuccessors.size(),
-            logicalSourceName);
-        std::cout.flush();
         for (auto& node : additionalSuccessors)
         {
             locked->push_back(makeEntry(std::move(node), inflightBufferLimit));
@@ -253,10 +238,6 @@ void RunningSource::appendSuccessors(std::vector<std::shared_ptr<RunningQueryPla
     }
     if (previous > 0 && pendingSplices.load() == 0)
     {
-        std::cout << fmt::format(
-            "[SOURCE_SPLICE] last expected splice consumed for logical source '{}'; firing deferred start.\n",
-            logicalSourceName);
-        std::cout.flush();
         startEmitting();
     }
 }

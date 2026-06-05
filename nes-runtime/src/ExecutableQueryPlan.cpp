@@ -124,7 +124,7 @@ std::unique_ptr<ExecutableQueryPlan> ExecutableQueryPlan::instantiate(
     for (size_t i = 0; i < compiledQueryPlan.sinks.size(); ++i)
     {
         auto& [sinkPipelineId, sinkDescriptor, predecessors] = compiledQueryPlan.sinks[i];
-        auto sink = ExecutablePipeline::create(sinkPipelineId, lower(std::move(sinkControllers[i]), sinkDescriptor, sinkDescriptor, compiledQueryPlan.queryId, compiledQueryPlan.priority, sendingStrategy), {});
+        auto sink = ExecutablePipeline::create(sinkPipelineId, lower(std::move(sinkControllers[i]), sinkDescriptor, compiledQueryPlan.queryId, compiledQueryPlan.priority, sendingStrategy), {});
         compiledQueryPlan.pipelines.push_back(sink);
         for (const auto& predecessor : predecessors)
         {

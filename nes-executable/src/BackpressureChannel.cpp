@@ -283,15 +283,6 @@ void BackpressureListener::wait(const std::stop_token& stopToken) const
 
         INVARIANT(!destroyed, "Backpressure Controller was destroyed before the BackpressureListener");
     }
-}
-
-void BackpressureListener::merge(BackpressureListener other)
-{
-    for (auto& channel : other.channels)
-    {
-        channels.push_back(std::move(channel));
-    }
-}
 
     /// Block-time accounting (lock released): emit how long the source thread spent blocked.
     /// Captures the upstream side of backpressure that the sojourn metric is blind to — under
@@ -302,6 +293,14 @@ void BackpressureListener::merge(BackpressureListener other)
     {
         const auto blockedNs = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(blockEnd - blockStart).count());
         statisticListener->onEvent(NES::BackpressureBlockedEvent{statQueryId, statPriority, blockedNs});
+    }
+}
+
+void BackpressureListener::merge(BackpressureListener other)
+{
+    for (auto& channel : other.channels)
+    {
+        channels.push_back(std::move(channel));
     }
 }
 

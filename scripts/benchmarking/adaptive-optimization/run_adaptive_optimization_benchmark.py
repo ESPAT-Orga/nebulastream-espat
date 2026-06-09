@@ -33,6 +33,8 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.parse
+import urllib.request
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 from scripts.benchmarking.utils import (
@@ -77,6 +79,18 @@ repl_binary = os.path.join(build_dir, "nes-frontend", "apps", "nes-repl")
 #### Worker / REPL Addresses
 WORKER_GRPC = "localhost:8080"
 WORKER_DATA = "localhost:9090"
+
+#### Prometheus-baseline addresses
+# The PrometheusSink's exposer binds this address on the worker; the external Prometheus scrapes
+# it and (later) the coordinator polls Prometheus. For the single-node bench the worker is local,
+# so we scrape it directly at localhost for validation.
+PROM_SINK_BIND = "0.0.0.0:9464"
+PROM_SCRAPE_URL = "http://localhost:9464/metrics"
+PROM_SINK_TARGET = "localhost:9464"
+# Prometheus server's own web/API listen address. NOT 9090 — that collides with the worker's
+# data_address. The coordinator poll loop (and our validation) query this for PromQL results.
+PROM_WEB_BIND = "0.0.0.0:9595"
+PROM_QUERY_BASE = "http://localhost:9595"
 
 #### Query to deploy (nexmark bid-like schema, Memory source with LOOP)
 #
@@ -134,7 +148,14 @@ INTO someSink
 SET (FALSE as `QUERY`.FUSE);"""
 
 
-def make_setup_sql(data_path_a: str, data_path_b: str, sqrts: int, constant_workload: bool, variant: str = "bid_first") -> str:
+def make_setup_sql(
+    data_path_a: str,
+    data_path_b: str,
+    sqrts: int,
+    constant_workload: bool,
+    variant: str = "bid_first",
+    replays_per_file: int = REPLAYS_PER_FILE,
+) -> str:
     select_block = make_data_select_sql(variant, sqrts)
     # With --constant-workload, only regime A is loaded and looped indefinitely. With both,
     # the source alternates between A and B every REPLAYS_PER_FILE full passes to simulate a
@@ -151,7 +172,7 @@ def make_setup_sql(data_path_a: str, data_path_b: str, sqrts: int, constant_work
     'NATIVE' as PARSER.`TYPE`,
     '{data_path_a}' AS `SOURCE`.FILE_PATH,
     '{data_path_b}' AS `SOURCE`.FILE_PATH_2,
-    '{REPLAYS_PER_FILE}' AS `SOURCE`.REPLAYS_PER_FILE,
+    '{replays_per_file}' AS `SOURCE`.REPLAYS_PER_FILE,
     'timestamp' AS `SOURCE`.MONOTONIC_TIMESTAMP_FIELD,
     'true' AS `SOURCE`.LOOP,
     '{WORKER_GRPC}' AS `SOURCE`.HOST"""
@@ -213,6 +234,150 @@ def wait_for_port(host, port, timeout=10.0, interval=0.2):
         except OSError:
             time.sleep(interval)
     return False
+
+
+def scrape_and_validate_prometheus_sink(metrics_url, retries=15, interval=2.0):
+    """Scrape the PrometheusSink's /metrics endpoint and confirm it built a populated histogram.
+
+    Returns (ok, metrics_text, total_observations). `total_observations` is the max over all
+    histogram families of the +Inf bucket count (= total values Observe()'d). We retry because the
+    spliced build branch needs a moment after deploy to start emitting into the sink.
+    """
+    last_text = ""
+    for attempt in range(retries):
+        try:
+            with urllib.request.urlopen(metrics_url, timeout=5) as resp:
+                last_text = resp.read().decode("utf-8", errors="replace")
+        except Exception as e:  # connection refused until the exposer binds at sink start()
+            printInfo(f"  scrape {attempt + 1}/{retries}: {metrics_url} not ready ({e})")
+            time.sleep(interval)
+            continue
+        totals = [int(m) for m in re.findall(r'le="\+Inf"\}\s+(\d+)', last_text)]
+        if totals and max(totals) > 0:
+            return True, last_text, max(totals)
+        printInfo(f"  scrape {attempt + 1}/{retries}: exposer up, no observations yet (totals={totals})")
+        time.sleep(interval)
+    return False, last_text, 0
+
+
+def resolve_prometheus_binary():
+    """Resolve (download + cache on first use) the prometheus binary via scripts/install-prometheus.sh.
+
+    Returns the absolute path, or None on failure. The script echoes the path on stdout.
+    """
+    try:
+        result = subprocess.run(
+            ["bash", os.path.join("scripts", "install-prometheus.sh")],
+            capture_output=True, text=True, timeout=600,
+        )
+    except Exception as e:
+        printError(f"Failed to run install-prometheus.sh: {e}")
+        return None
+    if result.returncode != 0:
+        printError(f"install-prometheus.sh failed: {result.stderr.strip() or result.stdout.strip()}")
+        return None
+    path = (result.stdout.strip().splitlines() or [""])[-1].strip()
+    if not path or not os.path.isfile(path):
+        printError(f"install-prometheus.sh did not return a valid binary path (got: {path!r})")
+        return None
+    return path
+
+
+def write_prometheus_scrape_config(path, target, scrape_interval="1s"):
+    """Write a minimal Prometheus config scraping the PrometheusSink exposer at `target`."""
+    cfg = (
+        "global:\n"
+        f"  scrape_interval: {scrape_interval}\n"
+        f"  evaluation_interval: {scrape_interval}\n"
+        "\n"
+        "scrape_configs:\n"
+        "  - job_name: nes-prometheus-sink\n"
+        "    static_configs:\n"
+        f'      - targets: ["{target}"]\n'
+    )
+    with open(path, "w") as f:
+        f.write(cfg)
+    return path
+
+
+def prometheus_scalar(promql, base=PROM_QUERY_BASE, timeout=5):
+    """Run an instant PromQL query and return the first result's value as float, or None."""
+    url = f"{base}/api/v1/query?query=" + urllib.parse.quote(promql)
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as resp:
+            data = json.load(resp)
+    except Exception as e:
+        printInfo(f"  PromQL query failed ({promql}): {e}")
+        return None
+    if data.get("status") != "success":
+        printInfo(f"  PromQL non-success for ({promql}): {data.get('status')}")
+        return None
+    result = data.get("data", {}).get("result", [])
+    if not result:
+        return None
+    value = result[0].get("value", [None, None])[1]
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def launch_and_validate_prometheus(worker_lines_label="PROM"):
+    """Launch Prometheus scraping the sink, wait for scrapes, and run a PromQL histogram_quantile
+    to confirm the metrics pipeline works end-to-end. Returns the Prometheus process (to tear down)
+    or None if it could not be started.
+    """
+    prom_bin = resolve_prometheus_binary()
+    if not prom_bin:
+        printError("Could not resolve the prometheus binary; skipping Prometheus-server validation.")
+        return None
+
+    here = os.path.dirname(os.path.abspath(__file__))
+    cfg_path = write_prometheus_scrape_config(os.path.join(here, "prometheus_baseline.yml"), PROM_SINK_TARGET)
+    tsdb_dir = os.path.join("/tmp", "nes_prom_tsdb")
+    create_folder_and_remove_if_exists(tsdb_dir)  # fresh TSDB so PromQL rates aren't polluted by prior runs
+
+    printInfo(f"Launching Prometheus ({prom_bin}) scraping {PROM_SINK_TARGET}, web={PROM_WEB_BIND} ...")
+    prom_proc = subprocess.Popen(
+        [
+            prom_bin,
+            f"--config.file={cfg_path}",
+            f"--storage.tsdb.path={tsdb_dir}",
+            f"--web.listen-address={PROM_WEB_BIND}",
+            "--storage.tsdb.retention.time=1h",
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    threading.Thread(target=stream_output, args=(prom_proc, worker_lines_label, []), daemon=True).start()
+
+    web_port = int(PROM_WEB_BIND.split(":")[1])
+    if not wait_for_port("localhost", web_port, timeout=20):
+        printError("Prometheus web/API port did not open within 20s.")
+        return prom_proc
+
+    # rate() needs >= 2 samples in its window; with a 1s scrape, ~12s gives a comfortable margin.
+    printInfo("Waiting ~12s for Prometheus to scrape the sink several times ...")
+    time.sleep(12)
+
+    count = prometheus_scalar("PRICE_count")
+    obs_rate = prometheus_scalar("rate(PRICE_count[4s])")
+    median = prometheus_scalar("histogram_quantile(0.5, rate(PRICE_bucket[4s]))")
+    printInfo(f"PromQL PRICE_count                                 = {count}")
+    printInfo(f"PromQL rate(PRICE_count[4s])                       = {obs_rate} obs/s")
+    printInfo(f"PromQL histogram_quantile(0.5, rate(PRICE_bucket[4s])) = {median}")
+    if median is not None and 300.0 < median < 800.0:
+        printSuccess(
+            f"Prometheus + PromQL validated: median price ≈ {median:.1f} "
+            f"(regime A is price~N(500,167), so ~500 is expected). The coordinator poll loop can "
+            f"query this same expression to detect the regime.")
+    elif count and count > 0:
+        printError(
+            f"Prometheus is scraping (PRICE_count={count}) but histogram_quantile returned {median} "
+            f"(outside the expected ~500 band) — check bucket range / metric name.")
+    else:
+        printError("Prometheus returned no data for the sink metrics — scrape target or metric name is wrong.")
+    return prom_proc
 
 
 def terminate_process(proc, name, timeout=5):
@@ -314,8 +479,14 @@ def run_benchmark(
     sqrts: int = 0,
     constant_workload: bool = False,
     fixed_variant: str = "",
+    baseline_prometheus: bool = False,
+    baseline_switch_threshold: float = 888.49,
+    baseline_poll_interval_ms: int = 1000,
+    replays_per_file: int = REPLAYS_PER_FILE,
 ):
     check_repository_root()
+
+    prom_proc = None  # Prometheus server process (baseline mode only); torn down at the end.
 
     if clean:
         create_folder_and_remove_if_exists(build_dir)
@@ -346,7 +517,7 @@ def run_benchmark(
     # the comparison point for "what would performance be without the adaptive system?" — the
     # answer to whether adaptation actually pays for its own overhead.
     variant_for_query = fixed_variant if fixed_variant else "bid_first"
-    setup_sql = make_setup_sql(data_path_a, data_path_b, sqrts, constant_workload, variant_for_query)
+    setup_sql = make_setup_sql(data_path_a, data_path_b, sqrts, constant_workload, variant_for_query, replays_per_file)
     if fixed_variant:
         printInfo(
             f"Using {sqrts} SQRT operators between filters; "
@@ -393,7 +564,35 @@ def run_benchmark(
     # branch + two gated probes + swap callback. With --fixed-variant set we skip all of this
     # so the bench measures pure data-query throughput for that filter order — a clean
     # baseline to compare adaptive against.
-    if not fixed_variant:
+    if baseline_prometheus:
+        # Prometheus SOTA baseline: splice a single build branch that routes `price` into a
+        # PrometheusSink (which builds the histogram and exposes it for scraping) instead of the
+        # in-engine StatisticBuild→Probe→GrpcSink chain. One field → one sink → one exposer port
+        # (a second --companion-field would need a second port). No gated --companion-condition
+        # (the predicate is unused in baseline mode). We DO pass --companion-switch-to-sql so the
+        # data query deploys via deployWithSwitchableAlternate (the same path the native benchmark
+        # uses, which registers the data source before the build branch splices in) AND so the
+        # switchable filter pair is in place for the step-3 poll loop to flip. The gated SetSwitch
+        # callback stays installed but is inert in baseline mode (the sink emits no gRPC reports).
+        repl_cmd += [
+            "--companion-statistic",
+            "--companion-field", "price",
+            "--companion-metric", "MinVal",
+            "--companion-window-size-ms", "60000000",
+            "--companion-event-time-field", "BID$TIMESTAMP",
+            "--companion-host", WORKER_GRPC,
+            "--companion-switch-to-sql", make_reversed_query_sql(sqrts),
+            "--companion-histogram-min", "0",
+            "--companion-histogram-max", "2000",
+            "--baseline-prometheus",
+            "--prometheus-server-url", PROM_SINK_BIND,
+            # Coordinator poll loop: query the Prometheus server we launch below, threshold the
+            # median price to pick the filter order, and flip the gate via the shared switch client.
+            "--baseline-prometheus-query-url", f"localhost:{PROM_WEB_BIND.split(':')[1]}",
+            "--baseline-switch-threshold", str(baseline_switch_threshold),
+            "--baseline-poll-interval-ms", str(baseline_poll_interval_ms),
+        ]
+    elif not fixed_variant:
         repl_cmd += [
             "--companion-statistic",
             # Splice the build branch into the data query (one source thread feeds both
@@ -489,6 +688,27 @@ def run_benchmark(
         sys.exit(1)
     printSuccess(f"Data query deployed with id: {data_query_id}")
 
+    # --- Prometheus-baseline validation: confirm the spliced PrometheusSink built + exposed a histogram ---
+    if baseline_prometheus:
+        printInfo(f"Validating PrometheusSink exposer at {PROM_SCRAPE_URL} ...")
+        ok, metrics_text, total = scrape_and_validate_prometheus_sink(PROM_SCRAPE_URL)
+        sample = "\n".join(
+            line for line in metrics_text.splitlines()
+            if ("_bucket{" in line or line.endswith("_count") or "_count " in line or "_sum " in line)
+        )[:1500]
+        if ok:
+            printSuccess(
+                f"PrometheusSink is exposing a populated histogram ({total} observations). Sample:\n{sample}")
+        else:
+            printError(f"PrometheusSink validation FAILED — no observations scraped from {PROM_SCRAPE_URL}.")
+            printError("Metrics text (first 800 chars):\n" + (metrics_text[:800] or "<empty>"))
+
+        # Stand up a real Prometheus server scraping the sink and confirm PromQL works end-to-end.
+        # This is the data path the coordinator poll loop will query (histogram_quantile over the
+        # scraped buckets) to detect the workload regime.
+        if ok:
+            prom_proc = launch_and_validate_prometheus()
+
     printSuccess(f"Query deployed. Running for {duration} seconds...")
 
     # --- Run for the configured duration ---
@@ -499,6 +719,8 @@ def run_benchmark(
 
     # --- Tear down ---
     printInfo("Tearing down...")
+    if prom_proc is not None:
+        terminate_process(prom_proc, "prometheus")
     terminate_process(repl_proc, "nes-repl")
     terminate_process(worker_proc, "nes-single-node-worker")
 
@@ -569,6 +791,36 @@ if __name__ == "__main__":
         "Mirrors run_bid_value_first_benchmark.py / run_price_first_benchmark.py but keeps "
         "everything in one script so parameter drift between baselines and adaptive can't happen.",
     )
+    parser.add_argument(
+        "--baseline-prometheus",
+        action="store_true",
+        help="Run the Prometheus SOTA baseline instead of the native adaptive path: the spliced "
+        "build branch routes the monitored field into a PrometheusSink (histogram built in the "
+        "sink, exposed for scraping), a real Prometheus server scrapes it, and the coordinator "
+        "poll loop queries Prometheus (PromQL) to drive the filter-order switch.",
+    )
+    parser.add_argument(
+        "--baseline-switch-threshold",
+        type=float,
+        default=888.49,
+        help="Poll-loop decision threshold on the PromQL median price: >= picks price-first (switch=1), "
+        "below picks bid-first (switch=0). Default 888.49 (between regime A ~500 and regime B ~1277).",
+    )
+    parser.add_argument(
+        "--baseline-poll-interval-ms",
+        type=int,
+        default=1000,
+        help="How often (ms) the coordinator poll loop queries Prometheus (default: 1000).",
+    )
+    parser.add_argument(
+        "--replays-per-file",
+        type=int,
+        default=REPLAYS_PER_FILE,
+        help=f"Full passes through one dataset before the alternating workload flips regimes "
+        f"(default: {REPLAYS_PER_FILE}). Wall-clock regime duration = replays * 30M / throughput, so "
+        f"size this per variant: the Prometheus baseline runs ~50-70x slower (sink backpressure), so it "
+        f"needs a much SMALLER value than native for the same regime duration.",
+    )
     args = parser.parse_args()
 
     run_benchmark(
@@ -579,4 +831,8 @@ if __name__ == "__main__":
         constant_workload=args.constant_workload,
         sqrts=args.sqrts,
         fixed_variant=args.fixed_variant,
+        baseline_prometheus=args.baseline_prometheus,
+        baseline_switch_threshold=args.baseline_switch_threshold,
+        baseline_poll_interval_ms=args.baseline_poll_interval_ms,
+        replays_per_file=args.replays_per_file,
     )

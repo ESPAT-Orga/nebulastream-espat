@@ -68,6 +68,7 @@
 #include <ErrorHandling.hpp>
 #include <QueryOptimizer.hpp>
 #include <QueryOptimizerConfiguration.hpp>
+#include <PrometheusQuery.hpp>
 #include <Repl.hpp>
 #include <StatisticCoordinator.hpp>
 #include <Thread.hpp>
@@ -88,6 +89,53 @@ extern void enable_memcom();
 
 namespace
 {
+/// Shared worker-facing action for BOTH adaptive-redeployment paths: the native gated probe
+/// callback and the Prometheus-baseline poll loop. Encapsulates the gRPC SetSwitch call plus the
+/// gate-state guard so a switch is issued only on an actual regime change, never once-per-tick.
+/// Lives in the coordinator process (= this REPL/frontend process); both paths flip the worker's
+/// filter-order gate through this one object so the comparison differs only in how the regime is
+/// detected, not in how the switch is applied.
+class WorkloadSwitchClient
+{
+public:
+    explicit WorkloadSwitchClient(std::string workerServerUri) : workerServerUri(std::move(workerServerUri)) { }
+
+    /// Set the named gate to `targetValue` on the worker. No-op (returns false) if the gate is
+    /// already at that value — an unknown gate is treated as its initial value 0 (the data sink is
+    /// gated expected=0). On gRPC failure the cached state is NOT advanced, so the next call retries.
+    /// Returns true iff a SetSwitch was actually applied. The whole call is serialized under `mutex`,
+    /// which also makes concurrent native-callback fires safe (switches are rare, so contention is nil).
+    bool setSwitch(const std::string& switchName, int64_t targetValue)
+    {
+        const std::lock_guard lock(mutex);
+        const auto it = currentValues.find(switchName);
+        const int64_t current = it != currentValues.end() ? it->second : 0;
+        if (current == targetValue)
+        {
+            return false;
+        }
+        auto stub = WorkerRPCService::NewStub(grpc::CreateChannel(workerServerUri, grpc::InsecureChannelCredentials()));
+        grpc::ClientContext ctx;
+        SetSwitchRequest req;
+        req.set_name(switchName);
+        req.set_value(targetValue);
+        google::protobuf::Empty resp;
+        if (const auto status = stub->SetSwitch(&ctx, req, &resp); not status.ok())
+        {
+            NES_WARNING("SetSwitch({}={}) failed: {}", switchName, targetValue, status.error_message());
+            return false;
+        }
+        currentValues[switchName] = targetValue;
+        NES_INFO("WorkloadSwitch: set gate '{}' -> {}", switchName, targetValue);
+        return true;
+    }
+
+private:
+    std::string workerServerUri;
+    std::mutex mutex;
+    std::unordered_map<std::string, int64_t> currentValues;
+};
+
 enum class OnExitBehavior : uint8_t
 {
     WAIT_FOR_QUERY_TERMINATION,
@@ -247,6 +295,34 @@ int main(int argc, char** argv)
                 "Name of the workload-switch gate (SwitchRegistry slot) used to flip between two filter-chain "
                 "pipelines without redeploying. The data sink is gated with expected=0, the paired sink "
                 "(--companion-switch-to-sql) with expected=1. Default: filter_order");
+        program.add_argument("--baseline-prometheus")
+            .flag()
+            .help(
+                "Run the Prometheus SOTA baseline instead of the native in-engine statistic path. The companion "
+                "build branch routes the monitored field into a PrometheusSink (which builds the histogram and "
+                "exposes it for scraping) instead of the StatisticBuild→StoreWriter→Probe→GrpcSink chain. Switching "
+                "is driven by the coordinator polling Prometheus rather than by gRPC probe reports.");
+        program.add_argument("--prometheus-server-url")
+            .default_value(std::string{"0.0.0.0:9464"})
+            .help("host:port the Prometheus-baseline sink's exposer binds its /metrics endpoint to (scraped by the "
+                  "external Prometheus instance). Only used with --baseline-prometheus. Default: 0.0.0.0:9464");
+        program.add_argument("--baseline-prometheus-query-url")
+            .default_value(std::string{"localhost:9595"})
+            .help("host:port of the Prometheus server's query API that the coordinator poll loop GETs "
+                  "(/api/v1/query). Only used with --baseline-prometheus. Default: localhost:9595");
+        program.add_argument("--baseline-promql")
+            .default_value(std::string{""})
+            .help("PromQL instant-query expression returning a scalar that the poll loop thresholds to pick the "
+                  "filter order. Empty (default) auto-builds histogram_quantile(0.5, rate(<FIELD>_bucket[30s])) from "
+                  "--companion-field.");
+        program.add_argument("--baseline-switch-threshold")
+            .default_value(std::string{"888.49"})
+            .help("Poll-loop decision threshold on the PromQL value: >= threshold selects the price-first order "
+                  "(switch=1), below selects bid-first (switch=0). Default 888.49 (between regime A's ~500 and "
+                  "regime B's ~1277 median price).");
+        program.add_argument("--baseline-poll-interval-ms")
+            .default_value(std::string{"1000"})
+            .help("How often (ms) the coordinator poll loop queries Prometheus. Default: 1000");
 
 #ifdef EMBED_ENGINE
         /// single node worker config
@@ -441,6 +517,10 @@ int main(int argc, char** argv)
         /// calls hit the "registry already has this key" branch in collectWorkloadStatistic which
         /// deploys ONLY an additional gated probe + callback.
         std::vector<NES::RequestStatisticBuildStatement> companionStatisticRequests;
+        /// Prometheus-baseline poll loop thread. Declared in this outer scope so it outlives the
+        /// companion-setup block where it is started and remains joinable across replClient.run();
+        /// it is stop-requested after run() returns. std::jthread joins on destruction.
+        std::jthread baselinePollThread;
         std::optional<std::function<void(NES::DistributedQueryId, const std::string&, NES::Statistic::StatisticId)>>
             onCompanionAssociatedWithQuery = std::nullopt;
         if (program.get<bool>("--companion-statistic"))
@@ -495,6 +575,20 @@ int main(int argc, char** argv)
             const auto workerServerUri = program.get<std::string>("-s");
             const bool workloadSwitchMode = not switchToSql.empty();
 
+            /// Prometheus-baseline mode: route each companion build branch into a PrometheusSink
+            /// (see DefaultStatisticQueryGenerator::generateWorkloadBranchPrometheus). Carried to
+            /// collectWorkloadStatistic via the per-request "prometheus_server_url" option; an empty
+            /// value selects the native in-engine path. The gated SetSwitch callback below stays
+            /// installed but is inert in this mode (the PrometheusSink emits no gRPC reports, so it
+            /// never fires) — switching is driven by the coordinator's Prometheus poll loop.
+            const bool baselinePrometheus = program.get<bool>("--baseline-prometheus");
+            const auto prometheusServerUrl = program.get<std::string>("--prometheus-server-url");
+
+            /// Shared filter-order switch action for both paths: the native gated callback (below)
+            /// and the Prometheus poll loop. Owns the gate-state guard so a SetSwitch is issued only
+            /// on a real regime change.
+            auto switchClient = std::make_shared<WorkloadSwitchClient>(workerServerUri);
+
             /// WorkloadDomain.queryId / operatorId are placeholders here — collectWorkloadStatistic
             /// resolves the actual splice target from the data query's LogicalPlan at deploy time.
             const NES::CollectionDomain collectionDomain = NES::WorkloadDomain{
@@ -510,6 +604,69 @@ int main(int argc, char** argv)
             const auto companionHost = program.get<std::string>("--companion-host");
             const auto swapCoordinatorAddr = coordinatorAddr;
             auto swapGenerator = std::make_shared<NES::DefaultStatisticQueryGenerator>();
+
+            /// Prometheus-baseline: spawn the coordinator-side poll loop. It periodically queries the
+            /// Prometheus server (PromQL histogram_quantile over the sink's scraped buckets) to detect
+            /// the workload regime and flips the filter-order gate through the SAME `switchClient` the
+            /// native callback uses — so both adaptive paths share the act and differ only in detection
+            /// (in-engine gated probe vs. Prometheus poll). It is safe to start before the query
+            /// deploys: queryPrometheusScalar returns nullopt until Prometheus has data, so early ticks
+            /// are harmless no-ops. Requires workloadSwitchMode (a switchable alternate to flip).
+            if (baselinePrometheus && workloadSwitchMode)
+            {
+                const auto pollQueryUrl = program.get<std::string>("--baseline-prometheus-query-url");
+                const auto pollIntervalMs = static_cast<int>(std::stoull(program.get<std::string>("--baseline-poll-interval-ms")));
+                const double switchThreshold = std::stod(program.get<std::string>("--baseline-switch-threshold"));
+                std::string promql = program.get<std::string>("--baseline-promql");
+                if (promql.empty())
+                {
+                    /// Default: median of the monitored field over the last 30s, from the sink's
+                    /// histogram buckets. Metric name = uppercased field (the PrometheusSink names the
+                    /// metric after the projected field), e.g. price -> PRICE_bucket.
+                    std::string fieldUpper = companionField;
+                    for (auto& ch : fieldUpper)
+                    {
+                        if (ch >= 'a' && ch <= 'z')
+                        {
+                            ch = static_cast<char>(ch - 'a' + 'A');
+                        }
+                    }
+                    promql = "histogram_quantile(0.5, rate(" + fieldUpper + "_bucket[4s]))";
+                }
+                NES_INFO(
+                    "Prometheus-baseline poll loop: query={} every {}ms, PromQL='{}', threshold={} "
+                    "(>=threshold -> gate '{}'=1 price-first, else 0 bid-first)",
+                    pollQueryUrl,
+                    pollIntervalMs,
+                    promql,
+                    switchThreshold,
+                    switchName);
+                baselinePollThread = std::jthread(
+                    [switchClient, switchName, pollQueryUrl, promql, switchThreshold, pollIntervalMs](std::stop_token stopToken)
+                    {
+                        while (not stopToken.stop_requested())
+                        {
+                            /// Interruptible sleep in small slices so shutdown is prompt.
+                            for (int slept = 0; slept < pollIntervalMs && not stopToken.stop_requested(); slept += 50)
+                            {
+                                std::this_thread::sleep_for(std::chrono::milliseconds{50});
+                            }
+                            if (stopToken.stop_requested())
+                            {
+                                break;
+                            }
+                            const auto value = NES::repl_baseline::queryPrometheusScalar(pollQueryUrl, promql);
+                            if (not value.has_value())
+                            {
+                                continue; /// Prometheus unreachable or no samples in the rate() window yet.
+                            }
+                            /// Regime decision: median >= threshold ⇒ regime B (price-first, gate 1);
+                            /// below ⇒ regime A (bid-first, gate 0). setSwitch's guard makes this a
+                            /// no-op unless the regime actually changed.
+                            switchClient->setSwitch(switchName, *value >= switchThreshold ? 1 : 0);
+                        }
+                    });
+            }
             /// Factory: builds one RequestStatisticBuildStatement bound to a specific predicate
             /// + target switch value. The callback closure captures `targetSwitchValue` so each
             /// generated request drives the workload-switch gate to its own regime when it fires.
@@ -551,7 +708,7 @@ int main(int argc, char** argv)
                          swapGenerator,
                          workloadSwitchMode,
                          switchName,
-                         workerServerUri,
+                         switchClient,
                          targetSwitchValue](
                             NES::Statistic::StatisticId statId,
                             NES::Windowing::TimeMeasure startTs,
@@ -571,31 +728,12 @@ int main(int argc, char** argv)
                         /// histogram bin per probe tick instead of one redeploy per regime change.
                         if (workloadSwitchMode)
                         {
-                            {
-                                std::lock_guard lock(swapState->mutex);
-                                if (swapState->currentSwitchValue == targetSwitchValue)
-                                {
-                                    /// Already at the target regime — quiet no-op so the log
-                                    /// reflects only actual reconfigurations.
-                                    return;
-                                }
-                                swapState->currentSwitchValue = targetSwitchValue;
-                            }
-                            /// Direct stub bypasses WorkerConfig/QueryManager — the swap callback only needs
-                            /// the worker's gRPC address. Fresh stub per fire is fine; flips happen at most
-                            /// once per regime change.
-                            auto stub = WorkerRPCService::NewStub(
-                                grpc::CreateChannel(workerServerUri, grpc::InsecureChannelCredentials()));
-                            grpc::ClientContext ctx;
-                            SetSwitchRequest req;
-                            req.set_name(switchName);
-                            req.set_value(targetSwitchValue);
-                            google::protobuf::Empty resp;
-                            auto status = stub->SetSwitch(&ctx, req, &resp);
-                            if (not status.ok())
-                            {
-                                return;
-                            }
+                            /// Flip the named filter-order gate through the shared switch client
+                            /// (gRPC SetSwitch + the once-per-regime-change guard). This is the exact
+                            /// same action the Prometheus-baseline poll loop performs, so the two
+                            /// adaptive paths differ only in HOW the regime is detected (in-engine
+                            /// gated probe vs. Prometheus poll), not in how the switch is applied.
+                            switchClient->setSwitch(switchName, targetSwitchValue);
                             return;
                         }
 
@@ -689,9 +827,13 @@ int main(int argc, char** argv)
                    {"paired_sql", switchToSql},
                    {"switch_name", program.get<std::string>("--companion-switch-name")},
                    /// min/max are EquiWidthHistogram bucket-range bounds; read by
-                   /// DefaultStatisticQueryGenerator::createAggregationFunction.
+                   /// DefaultStatisticQueryGenerator::createAggregationFunction. In Prometheus-baseline
+                   /// mode they also seed the PrometheusSink's equi-width histogram_min/max_value.
                    {"min", program.get<std::string>("--companion-histogram-min")},
-                   {"max", program.get<std::string>("--companion-histogram-max")}}};
+                   {"max", program.get<std::string>("--companion-histogram-max")},
+                   /// Non-empty only with --baseline-prometheus: selects the PrometheusSink build
+                   /// branch in collectWorkloadStatistic and binds the sink's exposer to this address.
+                   {"prometheus_server_url", baselinePrometheus ? prometheusServerUrl : std::string{}}}};
             };
 
             /// Build the primary statement. When the first --companion-condition predicate fires,
@@ -745,6 +887,11 @@ int main(int argc, char** argv)
             std::move(companionStatisticRequests),
             std::move(onCompanionAssociatedWithQuery)};
         replClient.run();
+
+        /// Stop the Prometheus-baseline poll loop (no-op if it was never started). std::jthread also
+        /// requests stop + joins on destruction, but doing it here ends the loop promptly once the
+        /// REPL exits, before the rest of teardown.
+        baselinePollThread.request_stop();
 
         bool hasError = false;
         /// NOLINTNEXTLINE(bugprone-unchecked-optional-access) validated by argparse .choices()

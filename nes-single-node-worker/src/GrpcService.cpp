@@ -16,6 +16,7 @@
 
 #include <chrono>
 #include <exception>
+#include <iostream>
 #include <string>
 #include <utility>
 #include <Identifiers/Identifiers.hpp>
@@ -223,6 +224,9 @@ grpc::Status GRPCServer::SetSwitch(grpc::ServerContext* context, const SetSwitch
     CPPTRACE_TRY
     {
         SwitchRegistry::instance().set(request->name(), request->value());
+        /// Surface filter-order switches on stdout (like the worker's throughput line) so benchmarks
+        /// can observe redeployments uniformly for both the native and Prometheus-baseline paths.
+        std::cout << "SetSwitch: " << request->name() << " = " << request->value() << "\n" << std::flush;
         return grpc::Status::OK;
     }
     CPPTRACE_CATCH(const Exception& e)

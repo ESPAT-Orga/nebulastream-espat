@@ -410,5 +410,74 @@ LogicalPlan DefaultStatisticQueryGenerator::generateWorkloadBranch(
     return appendWorkloadGrpcSink(std::move(plan), sourceNameUpper, coordinatorAddress, request.options);
 }
 
+LogicalPlan DefaultStatisticQueryGenerator::generateWorkloadBranchPrometheus(
+    const WorkloadDomain& domain, const RequestStatisticBuildStatement& request, const LogicalOperator& spliceLeaf) const
+{
+    /// Same splice contract as generateWorkloadBranch: the leaf must be the data query's
+    /// SourceNameLogicalOperator so the build branch shares one source thread with the data query
+    /// (SpliceToRunningSourceTrait → the worker fans the running source out to both pipelines
+    /// instead of spawning a second source thread).
+    const auto sourceNameOp = spliceLeaf.tryGetAs<SourceNameLogicalOperator>();
+    if (not sourceNameOp.has_value())
+    {
+        throw InvalidConfigParameter(
+            "generateWorkloadBranchPrometheus expects the splice leaf to be a SourceNameLogicalOperator (got operator id {}); "
+            "the WorkloadDomain MVP only supports splicing at the data query's source operator.",
+            spliceLeaf.getId());
+    }
+    const auto fieldNameUpper = toUpper(domain.fieldName);
+
+    /// server_url is the host:port this sink's Prometheus exposer binds its /metrics endpoint to;
+    /// the external Prometheus instance scrapes it. It must be unique per sink, so we require it
+    /// explicitly rather than defaulting (a silent default would collide across fields/sources).
+    const auto serverUrlIt = request.options.find("prometheus_server_url");
+    if (serverUrlIt == request.options.end() or serverUrlIt->second.empty())
+    {
+        throw InvalidConfigParameter(
+            "generateWorkloadBranchPrometheus requires a 'prometheus_server_url' option "
+            "(the host:port the sink's Prometheus exposer binds to).");
+    }
+    const auto& serverUrl = serverUrlIt->second;
+
+    /// Tag the shared source so the worker splices it into the already-running data-query source.
+    auto taggedSource = spliceLeaf;
+    {
+        auto ts = taggedSource.getTraitSet();
+        [[maybe_unused]] const auto inserted = tryInsert(ts, SpliceToRunningSourceTrait{});
+        taggedSource = taggedSource.withTraitSet(ts);
+    }
+
+    /// Baseline branch: Source → Projection(field) → PrometheusSink. No in-engine
+    /// StatisticBuild/StoreWriter/Probe — the PrometheusSink builds the histogram itself (one
+    /// Observe() per tuple), the external Prometheus scrapes the cumulative bucket counters, and
+    /// windowing happens at query time via PromQL rate(). We project down to the single monitored
+    /// field so the sink builds exactly one histogram, matching the native path's single-field
+    /// EquiWidthHistogram for an apples-to-apples per-tuple cost.
+    LogicalPlan plan{INVALID_QUERY_ID, {taggedSource}};
+    std::vector<ProjectionLogicalOperator::Projection> projections;
+    projections.emplace_back(FieldIdentifier{fieldNameUpper}, LogicalFunction{FieldAccessLogicalFunction{fieldNameUpper}});
+    plan = LogicalPlanBuilder::addProjection(std::move(projections), /*asterisk=*/false, plan);
+
+    /// Pass an EMPTY schema: SinkLogicalOperator::withInferredSchema fills an inline sink's empty
+    /// schema from its input (the projection's single-field output), so we don't need the field's
+    /// concrete type here — it isn't resolved on the splice leaf until the optimizer's
+    /// type-inference phase runs on submit.
+    const auto getOpt = [&](const std::string& key, const std::string& dflt)
+    {
+        const auto it = request.options.find(key);
+        return it != request.options.end() ? it->second : dflt;
+    };
+    /// min/max default to the PrometheusSink's own equi-width bounds; "min"/"max" are the same
+    /// option keys the native EquiWidthHistogram reads (createAggregationFunction), so a single
+    /// --companion-histogram-min/max pair configures both paths identically.
+    std::unordered_map<std::string, std::string> sinkConfig{
+        {"server_url", serverUrl},
+        {"histogram_num_buckets", getOpt("histogram_num_buckets", "100")},
+        {"histogram_min_value", getOpt("min", "0")},
+        {"histogram_max_value", getOpt("max", "1000000")},
+        {"output_format", "NATIVE"},
+        {"host", getOpt("host", "localhost:8080")}};
+    return LogicalPlanBuilder::addInlineSink("Prometheus", Schema{}, std::move(sinkConfig), {}, plan);
+}
 
 }

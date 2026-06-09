@@ -24,7 +24,6 @@
 #include <iterator>
 #include <ranges>
 #include <thread>
-#include <unordered_map>
 #include <utility>
 
 namespace NES
@@ -48,99 +47,111 @@ SubStoresStatisticStore::SubStoresStatisticStore(const uint64_t numberOfExpected
     allSubStores.reserve(numberOfExpectedConcurrentAccess);
     for (uint64_t i = 0; i < numberOfExpectedConcurrentAccess; ++i)
     {
-        allSubStores.emplace_back(folly::Synchronized<std::unordered_map<Statistic::StatisticId, std::vector<Statistic>>>{});
+        allSubStores.emplace_back(folly::Synchronized<IdWindowMap>{});
     }
 }
 
 bool SubStoresStatisticStore::insertStatistic(const Statistic::StatisticId& statisticId, Statistic statistic)
 {
+    const auto startTs = statistic.getStartTs();
     const auto pos = getPos(numberOfExpectedConcurrentAccess);
-    const auto lockedStatisticStore = allSubStores[pos].wlock();
-    (*lockedStatisticStore)[statisticId].emplace_back(std::move(statistic));
+    const auto locked = allSubStores[pos].wlock();
+    (*locked)[statisticId][startTs].emplace_back(std::move(statistic));
     return true;
 }
 
 bool SubStoresStatisticStore::deleteStatistics(
     const Statistic::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs)
 {
-    bool foundAnyStatistic = false;
-    for (auto& statisticStore : allSubStores)
+    bool foundAny = false;
+    for (auto& subStore : allSubStores)
     {
-        const auto lockedStatisticStore = statisticStore.wlock();
-        const auto bucketIt = lockedStatisticStore->find(statisticId);
-        if (bucketIt == lockedStatisticStore->end())
-        {
+        const auto locked = subStore.wlock();
+        const auto idIt = locked->find(statisticId);
+        if (idIt == locked->end())
             continue;
-        }
-        auto& bucket = bucketIt->second;
-        const auto removed = std::ranges::remove_if(
-            bucket,
-            [startTs, endTs](const Statistic& statistic) { return statistic.getStartTs() >= startTs and statistic.getEndTs() <= endTs; });
-        if (removed.begin() != bucket.end())
+        auto& windowMap = idIt->second;
+
+        const auto hi = windowMap.upper_bound(endTs);
+        for (auto it = windowMap.lower_bound(startTs); it != hi;)
         {
-            bucket.erase(removed.begin(), removed.end());
-            foundAnyStatistic = true;
+            auto& vec = it->second;
+            const auto removed = std::ranges::remove_if(vec, [&endTs](const Statistic& s) { return s.getEndTs() <= endTs; });
+            if (removed.begin() != vec.end())
+            {
+                vec.erase(removed.begin(), vec.end());
+                foundAny = true;
+            }
+            if (vec.empty())
+                it = windowMap.erase(it);
+            else
+                ++it;
         }
     }
-    return foundAnyStatistic;
+    return foundAny;
 }
 
 std::vector<Statistic> SubStoresStatisticStore::getStatistics(
     const Statistic::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs)
 {
-    std::vector<Statistic> foundStatistics;
-    for (const auto& statisticStore : allSubStores)
+    std::vector<Statistic> result;
+    for (const auto& subStore : allSubStores)
     {
-        const auto lockedStatisticStore = statisticStore.rlock();
-        const auto bucketIt = lockedStatisticStore->find(statisticId);
-        if (bucketIt == lockedStatisticStore->end())
-        {
+        const auto locked = subStore.rlock();
+        const auto idIt = locked->find(statisticId);
+        if (idIt == locked->end())
             continue;
+        const auto& windowMap = idIt->second;
+
+        const auto lo = windowMap.lower_bound(startTs);
+        const auto hi = windowMap.upper_bound(endTs);
+        for (auto it = lo; it != hi; ++it)
+        {
+            std::ranges::copy_if(
+                it->second, std::back_inserter(result), [&endTs](const Statistic& s) { return s.getEndTs() <= endTs; });
         }
-        std::ranges::copy_if(
-            bucketIt->second,
-            std::back_inserter(foundStatistics),
-            [startTs, endTs](const Statistic& statistic) { return statistic.getStartTs() >= startTs and statistic.getEndTs() <= endTs; });
     }
-    return foundStatistics;
+    return result;
 }
 
 std::optional<Statistic> SubStoresStatisticStore::getSingleStatistic(
     const Statistic::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs)
 {
-    for (const auto& statisticStore : allSubStores)
+    for (const auto& subStore : allSubStores)
     {
-        const auto lockedStatisticStore = statisticStore.rlock();
-        const auto bucketIt = lockedStatisticStore->find(statisticId);
-        if (bucketIt == lockedStatisticStore->end())
-        {
+        const auto locked = subStore.rlock();
+        const auto idIt = locked->find(statisticId);
+        if (idIt == locked->end())
             continue;
-        }
-        const auto foundStatistic = std::ranges::find_if(
-            bucketIt->second,
-            [startTs, endTs](const Statistic& statistic) { return statistic.getStartTs() == startTs and statistic.getEndTs() == endTs; });
-        if (foundStatistic != bucketIt->second.end())
-        {
-            return *foundStatistic;
-        }
+        const auto& windowMap = idIt->second;
+        const auto wsIt = windowMap.find(startTs);
+        if (wsIt == windowMap.end())
+            continue;
+        const auto& vec = wsIt->second;
+        const auto found = std::ranges::find_if(
+            vec, [&](const Statistic& s) { return s.getStartTs() == startTs && s.getEndTs() == endTs; });
+        if (found != vec.end())
+            return *found;
     }
     return {};
 }
 
 std::vector<AbstractStatisticStore::IdStatisticPair> SubStoresStatisticStore::getAllStatistics()
 {
-    std::vector<AbstractStatisticStore::IdStatisticPair> retStatistics;
-    for (const auto& statisticStore : allSubStores)
+    std::vector<IdStatisticPair> result;
+    for (const auto& subStore : allSubStores)
     {
-        const auto lockedStatisticStore = statisticStore.rlock();
-        for (const auto& [statisticId, bucket] : *lockedStatisticStore)
+        const auto locked = subStore.rlock();
+        for (const auto& [id, windowMap] : *locked)
         {
-            for (const auto& statistic : bucket)
+            for (const auto& [ts, vec] : windowMap)
             {
-                retStatistics.emplace_back(statisticId, statistic);
+                for (const auto& stat : vec)
+                    result.emplace_back(id, stat);
             }
         }
     }
-    return retStatistics;
+    return result;
 }
+
 }

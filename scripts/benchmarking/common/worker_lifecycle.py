@@ -26,6 +26,7 @@ import csv
 import json
 import os
 import re
+import shutil
 import subprocess
 import time
 
@@ -83,15 +84,22 @@ def start_single_node_worker(file_path_stdout, numberOfWorkerThreads, executionM
                      f"--worker.statistic_store_type={statisticStoreType} "
                      f"--worker.throughput_listener_interval_in_ms={throughputListenerInterval}")
 
-    cmd = f"systemd-run --user --scope --quiet {single_node_executable} {worker_config}"
+    _in_docker = os.path.exists("/.dockerenv")
+    _use_systemd = shutil.which("systemd-run") is not None and not _in_docker
+    if _use_systemd:
+        cmd = f"systemd-run --user --scope --quiet {single_node_executable} {worker_config}"
+        cmd_list = cmd.split(" ")
+    else:
+        cmd_list = [single_node_executable] + worker_config.split()
+        cmd = " ".join(cmd_list)
     if cli_log_file is not None:
         cli_log_file.write(f"=== Start worker: {cmd} ===\n")
         cli_log_file.flush()
-    process = subprocess.Popen(cmd.split(" "), stdout=file_path_stdout, stderr=subprocess.STDOUT)
+    process = subprocess.Popen(cmd_list, stdout=file_path_stdout, stderr=subprocess.STDOUT)
     pid = process.pid
 
     # Verify the worker is still alive after startup
-    time.sleep(3)
+    time.sleep(5)
     if process.poll() is not None:
         raise RuntimeError(f"Worker process exited immediately with code {process.returncode}")
 

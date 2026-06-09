@@ -15,6 +15,7 @@
 
 #include <cstdint>
 #include <string_view>
+#include <vector>
 
 #include <Nautilus/Interface/NESStrongTypeRef.hpp>
 #include <Runtime/Execution/OperatorHandler.hpp>
@@ -29,40 +30,46 @@
 namespace NES
 {
 
-const static int8_t* getStatisticDataProxy(
+/// Thread-local cache populated by loadStatisticsProxy. Holds the statistics matching a single execute() call.
+/// Safe to use as TLS because each worker thread executes operator pipelines without re-entrant calls to execute().
+thread_local static std::vector<Statistic> tProbeStatistics;
+
+/// Fetches all statistics matching (statisticId, [startTs, endTs]) via a range query and stores them in tProbeStatistics.
+/// Returns the count; zero means no statistics are available for this probe tuple.
+///
+/// Replacing the former getSingleStatistic call that performed an exact (startTs, endTs) match:
+/// when a probe window spans multiple build windows (build_windows_per_probe_window > 1), no single
+/// stored statistic carries the full probe time range, so the exact-match always missed and the
+/// reader emitted zero output tuples. That left LatencyListener measuring only task-scheduling noise
+/// with 16 worker threads, producing enormous variance at windows=100 vs windows=1.
+static uint64_t loadStatisticsProxy(
     OperatorHandler* ptrOpHandler, const Statistic::StatisticId statisticId, const Timestamp startTs, const Timestamp endTs)
 {
     PRECONDITION(ptrOpHandler != nullptr, "opHandler should not be null!");
-
     const auto* opHandler = dynamic_cast<StatisticStoreOperatorHandler*>(ptrOpHandler);
-    const auto statisticStore = opHandler->getStatisticStore();
-
-    const auto statistic = statisticStore->getSingleStatistic(
+    tProbeStatistics = opHandler->getStatisticStore()->getStatistics(
         statisticId, Windowing::TimeMeasure(startTs.getRawValue()), Windowing::TimeMeasure(endTs.getRawValue()));
-
-    if (statistic.has_value())
-    {
-        return statistic.value().getStatisticData();
-    }
-    return nullptr;
+    return tProbeStatistics.size();
 }
 
-uint64_t getNumberOfSeenTuplesOfStatistic(
-    OperatorHandler* ptrOpHandler, const Statistic::StatisticId statisticId, const Timestamp startTs, const Timestamp endTs)
+/// Returns the raw statistic data pointer for the i-th entry in tProbeStatistics (populated by loadStatisticsProxy).
+static const int8_t* getStatisticDataByIndexProxy(OperatorHandler* /*handler*/, const uint64_t index)
 {
-    PRECONDITION(ptrOpHandler != nullptr, "opHandler should not be null!");
-
-    const auto* opHandler = dynamic_cast<StatisticStoreOperatorHandler*>(ptrOpHandler);
-    const auto statisticStore = opHandler->getStatisticStore();
-
-    const auto statistic = statisticStore->getSingleStatistic(
-        statisticId, Windowing::TimeMeasure(startTs.getRawValue()), Windowing::TimeMeasure(endTs.getRawValue()));
-
-    if (statistic.has_value())
+    if (index >= tProbeStatistics.size())
     {
-        return statistic.value().getNumberOfSeenTuples();
+        return nullptr;
     }
-    return 0;
+    return tProbeStatistics[index].getStatisticData();
+}
+
+/// Returns the numberOfSeenTuples for the i-th entry in tProbeStatistics.
+static uint64_t getSeenTuplesByIndexProxy(OperatorHandler* /*handler*/, const uint64_t index)
+{
+    if (index >= tProbeStatistics.size())
+    {
+        return 0;
+    }
+    return tProbeStatistics[index].getNumberOfSeenTuples();
 }
 
 StatisticStoreReader::StatisticStoreReader(
@@ -83,29 +90,33 @@ StatisticStoreReader::StatisticStoreReader(
 
 void StatisticStoreReader::execute(ExecutionContext& executionCtx, Record& record) const
 {
-    /// Read statistics and call the child with the generated tuples
     auto operatorHandlerMemRef = executionCtx.getGlobalOperatorHandler(operatorHandlerId);
     const nautilus::val<Statistic::StatisticId> statisticId{
         record.read(statisticIdFieldName).getRawValueAs<nautilus::val<Statistic::StatisticId::Underlying>>()};
     const nautilus::val<Timestamp> startTs{record.read(statisticStartTsFieldName).getRawValueAs<nautilus::val<Timestamp::Underlying>>()};
     const nautilus::val<Timestamp> endTs{record.read(statisticEndTsFieldName).getRawValueAs<nautilus::val<Timestamp::Underlying>>()};
-    const auto numberOfSeenTuples = invoke(getNumberOfSeenTuplesOfStatistic, operatorHandlerMemRef, statisticId, startTs, endTs);
-    const auto statisticMemArea = invoke(getStatisticDataProxy, operatorHandlerMemRef, statisticId, startTs, endTs);
-    if (statisticMemArea != nullptr)
-    {
-        for (auto statisticIterator = statisticProvider.begin(statisticMemArea);
-             statisticIterator != statisticProvider.end(statisticMemArea);
-             ++statisticIterator)
-        {
-            /// Getting a record containing the data from the current statistic, e.g., for a histogram the upper, lower bound and counter
-            Record statisticRecord = *statisticIterator;
 
-            /// Adding additional data so that downstream operators know when and for what the statistic was created
-            statisticRecord.write(statisticStartTsFieldName, startTs.convertToValue());
-            statisticRecord.write(statisticEndTsFieldName, endTs.convertToValue());
-            statisticRecord.write(statisticIdFieldName, statisticId.convertToValue());
-            statisticRecord.write(statisticNumberOfSeenTuplesFieldName, numberOfSeenTuples);
-            executeChild(executionCtx, statisticRecord);
+    /// Load all build-window statistics covering [startTs, endTs] into the TLS cache and get their count.
+    /// For windows=1, this returns exactly one statistic (same as before).
+    /// For windows=N, this returns N individual per-window statistics; we emit each one's cells separately.
+    const auto statisticCount = invoke(loadStatisticsProxy, operatorHandlerMemRef, statisticId, startTs, endTs);
+    for (nautilus::val<uint64_t> i = 0; i < statisticCount; ++i)
+    {
+        const auto numberOfSeenTuples = invoke(getSeenTuplesByIndexProxy, operatorHandlerMemRef, i);
+        const auto statisticMemArea = invoke(getStatisticDataByIndexProxy, operatorHandlerMemRef, i);
+        if (statisticMemArea != nullptr)
+        {
+            for (auto statisticIterator = statisticProvider.begin(statisticMemArea);
+                 statisticIterator != statisticProvider.end(statisticMemArea);
+                 ++statisticIterator)
+            {
+                Record statisticRecord = *statisticIterator;
+                statisticRecord.write(statisticStartTsFieldName, startTs.convertToValue());
+                statisticRecord.write(statisticEndTsFieldName, endTs.convertToValue());
+                statisticRecord.write(statisticIdFieldName, statisticId.convertToValue());
+                statisticRecord.write(statisticNumberOfSeenTuplesFieldName, numberOfSeenTuples);
+                executeChild(executionCtx, statisticRecord);
+            }
         }
     }
 }

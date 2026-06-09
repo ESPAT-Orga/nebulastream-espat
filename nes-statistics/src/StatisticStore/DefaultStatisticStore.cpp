@@ -16,79 +16,106 @@
 #include <WindowTypes/Measures/TimeMeasure.hpp>
 #include <Statistic.hpp>
 
+#include <ranges>
+#include <utility>
+
 namespace NES
 {
 
 bool DefaultStatisticStore::insertStatistic(const Statistic::StatisticId& statisticId, Statistic statistic)
 {
-    const auto statisticsLocked = statistics.wlock();
-    (*statisticsLocked)[statisticId].emplace_back(std::move(statistic));
+    const auto startTs = statistic.getStartTs();
+    const auto locked = statistics.wlock();
+    (*locked)[statisticId][startTs].emplace_back(std::move(statistic));
     return true;
 }
 
 bool DefaultStatisticStore::deleteStatistics(
     const Statistic::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs)
 {
-    const auto statisticsLocked = statistics.wlock();
-    auto& statisticsVec = (*statisticsLocked)[statisticId];
+    const auto locked = statistics.wlock();
+    const auto idIt = locked->find(statisticId);
+    if (idIt == locked->end())
+    {
+        return false;
+    }
+    auto& windowMap = idIt->second;
 
-    const auto range = std::ranges::remove_if(
-        statisticsVec,
-        [startTs, endTs](const Statistic& statistic) { return startTs <= statistic.getStartTs() && statistic.getEndTs() <= endTs; });
-    const bool foundAnyStatistic = range.begin() != statisticsVec.end();
-    statisticsVec.erase(range.begin(), statisticsVec.end());
-    return foundAnyStatistic;
+    bool foundAny = false;
+    const auto hi = windowMap.upper_bound(endTs);
+    for (auto it = windowMap.lower_bound(startTs); it != hi;)
+    {
+        auto& vec = it->second;
+        const auto removed = std::ranges::remove_if(vec, [&endTs](const Statistic& s) { return s.getEndTs() <= endTs; });
+        if (removed.begin() != vec.end())
+        {
+            vec.erase(removed.begin(), vec.end());
+            foundAny = true;
+        }
+        if (vec.empty())
+            it = windowMap.erase(it);
+        else
+            ++it;
+    }
+    return foundAny;
 }
 
 std::vector<Statistic> DefaultStatisticStore::getStatistics(
     const Statistic::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs)
 {
-    const auto statisticsLocked = statistics.rlock();
-    const auto idIt = statisticsLocked->find(statisticId);
-    if (idIt == statisticsLocked->end())
+    const auto locked = statistics.rlock();
+    const auto idIt = locked->find(statisticId);
+    if (idIt == locked->end())
     {
         return {};
     }
+    const auto& windowMap = idIt->second;
 
-    std::vector<Statistic> returnStatisticsVector;
-    const auto& statisticsVec = idIt->second;
-    std::ranges::copy_if(
-        statisticsVec,
-        std::back_inserter(returnStatisticsVector),
-        [startTs, endTs](const Statistic& statistic) { return startTs <= statistic.getStartTs() && statistic.getEndTs() <= endTs; });
-    return returnStatisticsVector;
+    std::vector<Statistic> result;
+    const auto lo = windowMap.lower_bound(startTs);
+    const auto hi = windowMap.upper_bound(endTs);
+    for (auto it = lo; it != hi; ++it)
+    {
+        std::ranges::copy_if(
+            it->second, std::back_inserter(result), [&endTs](const Statistic& s) { return s.getEndTs() <= endTs; });
+    }
+    return result;
 }
 
 std::optional<Statistic> DefaultStatisticStore::getSingleStatistic(
     const Statistic::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs)
 {
-    const auto statisticsLocked = statistics.rlock();
-    const auto idIt = statisticsLocked->find(statisticId);
-    if (idIt == statisticsLocked->end())
+    const auto locked = statistics.rlock();
+    const auto idIt = locked->find(statisticId);
+    if (idIt == locked->end())
     {
         return std::nullopt;
     }
-    const auto& statisticsVec = idIt->second;
-
-    const auto it = std::ranges::find_if(
-        statisticsVec,
-        [startTs, endTs](const Statistic& statistic) { return startTs == statistic.getStartTs() && statistic.getEndTs() == endTs; });
-    return it != statisticsVec.end() ? std::make_optional(*it) : std::optional<Statistic>{};
+    const auto& windowMap = idIt->second;
+    const auto wsIt = windowMap.find(startTs);
+    if (wsIt == windowMap.end())
+    {
+        return std::nullopt;
+    }
+    const auto& vec = wsIt->second;
+    const auto found = std::ranges::find_if(
+        vec, [&](const Statistic& s) { return s.getStartTs() == startTs && s.getEndTs() == endTs; });
+    return found != vec.end() ? std::make_optional(*found) : std::nullopt;
 }
 
 std::vector<DefaultStatisticStore::IdStatisticPair> DefaultStatisticStore::getAllStatistics()
 {
-    std::vector<IdStatisticPair> returnStatisticsVector;
-    const auto statisticsLocked = statistics.rlock();
-
-    for (const auto& [statisticId, statisticVec] : *statisticsLocked)
+    std::vector<IdStatisticPair> result;
+    const auto locked = statistics.rlock();
+    for (const auto& [id, windowMap] : *locked)
     {
-        for (const auto& statistic : statisticVec)
+        for (const auto& [ts, vec] : windowMap)
         {
-            returnStatisticsVector.emplace_back(statisticId, statistic);
+            for (const auto& stat : vec)
+                result.emplace_back(id, stat);
         }
     }
-    return returnStatisticsVector;
+    return result;
 }
 
 }

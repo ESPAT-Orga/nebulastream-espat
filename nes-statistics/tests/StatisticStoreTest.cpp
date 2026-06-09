@@ -283,6 +283,101 @@ TEST_P(StatisticStoreTest, multipleItem)
     }
 }
 
+/// Regression test for the probe-latency variance observed at build_windows_per_probe_window=100.
+///
+/// The build query stores one statistic per tumbling window, e.g. [0, W), [W, 2W), ...
+/// The probe benchmark generates probe tuples with startTs=0, endTs=N*W (spanning N build windows).
+/// StatisticStoreReader::execute() calls getSingleStatistic(id, startTs, endTs) — an exact-match
+/// lookup. Because no single statistic covers [0, N*W), ALL probes miss when N>1:
+///   - zero output tuples are emitted
+///   - the LatencyListener measures only task-scheduling noise with 16 worker threads
+///   - that noise has enormous variance (OS jitter dominates when there is no real work)
+///
+/// This test pins the miss behaviour so it is visible without the ClusterMonitoring dataset.
+/// The correct fix is to change the reader to call getStatistics (range query) and merge.
+class ProbeWindowMissTest : public Testing::BaseUnitTest, public testing::WithParamInterface<StatisticStoreType>
+{
+public:
+    static void SetUpTestCase() { Logger::setupLogging("ProbeWindowMissTest.log", LogLevel::LOG_DEBUG); }
+};
+
+TEST_P(ProbeWindowMissTest, singleWindowProbeHitsExactEntry)
+{
+    constexpr uint64_t windowSize = 1000;
+    constexpr Statistic::StatisticId id{42};
+    const Windowing::TimeMeasure startTs{0};
+    const Windowing::TimeMeasure endTs{windowSize};
+
+    auto store = [&]() -> std::variant<DefaultStatisticStore, WindowStatisticStore, SubStoresStatisticStore>
+    {
+        switch (GetParam())
+        {
+            case StatisticStoreType::DEFAULT:
+                return DefaultStatisticStore{};
+            case StatisticStoreType::WINDOW:
+                return WindowStatisticStore{16};
+            case StatisticStoreType::SUB_STORES:
+                return SubStoresStatisticStore{16};
+        }
+        std::unreachable();
+    }();
+
+    const auto stat = createDummyStatistic(id, startTs, endTs);
+    std::visit([&](auto& s) { s.insertStatistic(id, stat); }, store);
+
+    const auto result = std::visit([&](auto& s) { return s.getSingleStatistic(id, startTs, endTs); }, store);
+    EXPECT_TRUE(result.has_value()) << "windows=1: getSingleStatistic should hit";
+}
+
+TEST_P(ProbeWindowMissTest, rangeSpanningProbeAlwaysMissesViaSingleStatistic)
+{
+    /// Insert 100 per-window statistics — exactly what a build query produces.
+    constexpr uint64_t windowSize = 1000;
+    constexpr uint64_t numWindows = 100;
+    constexpr Statistic::StatisticId id{42};
+
+    auto store = [&]() -> std::variant<DefaultStatisticStore, WindowStatisticStore, SubStoresStatisticStore>
+    {
+        switch (GetParam())
+        {
+            case StatisticStoreType::DEFAULT:
+                return DefaultStatisticStore{};
+            case StatisticStoreType::WINDOW:
+                return WindowStatisticStore{16};
+            case StatisticStoreType::SUB_STORES:
+                return SubStoresStatisticStore{16};
+        }
+        std::unreachable();
+    }();
+
+    for (uint64_t i = 0; i < numWindows; ++i)
+    {
+        const Windowing::TimeMeasure s{i * windowSize};
+        const Windowing::TimeMeasure e{(i + 1) * windowSize};
+        std::visit([&](auto& store) { store.insertStatistic(id, createDummyStatistic(id, s, e)); }, store);
+    }
+
+    const Windowing::TimeMeasure probeStart{0};
+    const Windowing::TimeMeasure probeEnd{numWindows * windowSize};
+
+    /// getSingleStatistic: exact (startTs, endTs) match — still misses (no single statistic spans all 100 windows).
+    /// This is the root cause of the original variance: StatisticStoreReader used this API.
+    const auto miss = std::visit([&](auto& s) { return s.getSingleStatistic(id, probeStart, probeEnd); }, store);
+    EXPECT_FALSE(miss.has_value()) << "getSingleStatistic must miss for a range-spanning probe window";
+
+    /// getStatistics: range query — returns all 100 individual build-window statistics.
+    /// StatisticStoreReader now uses this API so windows=100 probes produce real output instead of nothing.
+    const auto hits = std::visit([&](auto& s) { return s.getStatistics(id, probeStart, probeEnd); }, store);
+    EXPECT_EQ(hits.size(), numWindows)
+        << "getStatistics should find all " << numWindows << " individual build-window statistics";
+}
+
+INSTANTIATE_TEST_CASE_P(
+    allStoreTypes,
+    ProbeWindowMissTest,
+    ::testing::ValuesIn(magic_enum::enum_values<StatisticStoreType>()),
+    [](const testing::TestParamInfo<StatisticStoreType>& info) { return std::string(magic_enum::enum_name(info.param)); });
+
 INSTANTIATE_TEST_CASE_P(
     testStatisticStore,
     StatisticStoreTest,

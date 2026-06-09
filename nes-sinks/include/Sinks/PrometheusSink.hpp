@@ -67,6 +67,9 @@ private:
     prometheus::Exposer exposer;
     std::shared_ptr<prometheus::Registry> registry;
     std::vector<Metric> metrics;
+    /// Equi-width bucket boundaries (numBuckets finite edges), computed once in start() and reused
+    /// per buffer in execute() to bucket values for the batched ObserveMultiple flush.
+    prometheus::Histogram::BucketBoundaries boundaries;
     Schema schema;
     uint64_t histogramNumBuckets;
     double histogramMinValue;

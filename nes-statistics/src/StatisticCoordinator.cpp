@@ -250,9 +250,19 @@ std::expected<CollectStatisticResult, Exception> StatisticCoordinator::collectWo
     /// so on the worker side ExecutableQueryPlan::instantiate will redirect it to the data
     /// query's running source instead of spawning a new source thread. Failure here is logged
     /// but does not undo the data-query deploy — the build branch is an observability concern.
+    /// Prometheus-baseline mode: when the request carries a (non-empty) prometheus_server_url, the
+    /// build branch routes the monitored field into a PrometheusSink instead of the in-engine
+    /// StatisticBuild/StoreWriter/Probe→GrpcSink chain. No probe reports come back over gRPC in
+    /// this mode (the external Prometheus scrapes the sink and the coordinator polls Prometheus),
+    /// so no probe callback is registered below.
+    const auto prometheusUrlIt = statement.options.find("prometheus_server_url");
+    const bool prometheusBaseline = prometheusUrlIt != statement.options.end() and not prometheusUrlIt->second.empty();
+
     try
     {
-        auto buildBranch = queryGenerator->generateWorkloadBranch(*domain, statement, statisticId, coordinatorAddress, spliceLeaf);
+        auto buildBranch = prometheusBaseline
+            ? queryGenerator->generateWorkloadBranchPrometheus(*domain, statement, spliceLeaf)
+            : queryGenerator->generateWorkloadBranch(*domain, statement, statisticId, coordinatorAddress, spliceLeaf);
         if (auto submittedBranch = submitPlan(std::move(buildBranch)); not submittedBranch.has_value())
         {
             NES_WARNING(
@@ -269,8 +279,9 @@ std::expected<CollectStatisticResult, Exception> StatisticCoordinator::collectWo
     /// Register the trigger's callback under the build statisticId. The build branch's in-line
     /// probe (Probe → Selection → Projection → GrpcSink) reports to the coordinator on each
     /// window-close that survives the Selection predicate, and the report carries this
-    /// statisticId so probeCallbacks[statisticId] is the right routing key.
-    if (statement.conditionTrigger.has_value() and statement.conditionTrigger->callback)
+    /// statisticId so probeCallbacks[statisticId] is the right routing key. Skipped in
+    /// Prometheus-baseline mode, where no gRPC reports are produced.
+    if (not prometheusBaseline and statement.conditionTrigger.has_value() and statement.conditionTrigger->callback)
     {
         addProbeCallback(statisticId, statement.conditionTrigger->callback);
     }

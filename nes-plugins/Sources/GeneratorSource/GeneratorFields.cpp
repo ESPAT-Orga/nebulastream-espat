@@ -20,6 +20,7 @@
 #include <fstream>
 #include <iomanip>
 #include <ios>
+#include <optional>
 #include <ostream>
 #include <random>
 #include <ranges>
@@ -263,6 +264,51 @@ std::ostream& SequenceField::generate(std::ostream& os, std::mt19937& /*re*/)
 
 namespace
 {
+/// Parses a single value as T and wraps it in a FieldType, or returns nullopt if it does not fit T.
+template <typename T>
+std::optional<FieldType> parseAs(std::string_view value)
+{
+    if (const auto parsed = from_chars<T>(value))
+    {
+        return FieldType{*parsed};
+    }
+    return std::nullopt;
+}
+
+/// Parses a `value` as the C++ type `type`, returning nullopt on parse failure or unsupported type.
+std::optional<FieldType> tryParseBound(const DataType::Type type, std::string_view value)
+{
+    switch (type)
+    {
+        case DataType::Type::UINT8:
+            return parseAs<uint8_t>(value);
+        case DataType::Type::UINT16:
+            return parseAs<uint16_t>(value);
+        case DataType::Type::UINT32:
+            return parseAs<uint32_t>(value);
+        case DataType::Type::UINT64:
+            return parseAs<uint64_t>(value);
+        case DataType::Type::INT8:
+            return parseAs<int8_t>(value);
+        case DataType::Type::INT16:
+            return parseAs<int16_t>(value);
+        case DataType::Type::INT32:
+            return parseAs<int32_t>(value);
+        case DataType::Type::INT64:
+            return parseAs<int64_t>(value);
+        case DataType::Type::FLOAT32:
+            return parseAs<float>(value);
+        case DataType::Type::FLOAT64:
+            return parseAs<double>(value);
+        case DataType::Type::BOOLEAN:
+        case DataType::Type::CHAR:
+        case DataType::Type::VARSIZED:
+        case DataType::Type::UNDEFINED:
+            return std::nullopt;
+    }
+    return std::nullopt;
+}
+
 template <typename T, typename U = double>
 NormalDistributionField::DistributionVariant createDistribution(const std::string_view mean, const std::string_view stdDev)
 {
@@ -280,6 +326,34 @@ NormalDistributionField::DistributionVariant createDistribution(const std::strin
         return std::binomial_distribution<T>(*parsedMean, *parsedStdDev);
     }
 };
+
+template <typename T>
+void generateUniformValue(
+    std::ostream& os, std::mt19937& randEng, const GeneratorFields::FieldType& minField, const GeneratorFields::FieldType& maxField)
+{
+    const auto lo = std::get<T>(minField);
+    const auto hi = std::get<T>(maxField);
+    if constexpr (std::is_floating_point_v<T>)
+    {
+        std::uniform_real_distribution<T> dist(lo, hi);
+        os << dist(randEng);
+    }
+    else if constexpr (std::is_same_v<T, uint8_t>)
+    {
+        std::uniform_int_distribution<uint16_t> dist(lo, hi);
+        os << static_cast<int32_t>(static_cast<T>(dist(randEng)));
+    }
+    else if constexpr (std::is_same_v<T, int8_t>)
+    {
+        std::uniform_int_distribution<int16_t> dist(lo, hi);
+        os << static_cast<int32_t>(static_cast<T>(dist(randEng)));
+    }
+    else
+    {
+        std::uniform_int_distribution<T> dist(lo, hi);
+        os << dist(randEng);
+    }
+}
 }
 
 NormalDistributionField::NormalDistributionField(const std::string_view rawSchemaLine)
@@ -565,6 +639,131 @@ std::ostream& RandomStrField::generate(std::ostream& os, std::mt19937& randEng)
     for (size_t i = 0; i < randomLength; i++)
     {
         os << randomAlphabetChar();
+    }
+    return os;
+}
+
+AlternatingField::AlternatingField(std::string_view rawSchemaLine)
+{
+    const auto parameters = splitWithStringDelimiter<std::string_view>(rawSchemaLine, " ");
+    const auto type = parameters[1];
+    const auto dataType = DataTypeProvider::tryProvideDataType(std::string{type});
+    INVARIANT(dataType.has_value(), "Invalid AlternatingField type of {}!", type);
+    outputType = dataType.value();
+
+    const auto parsedCount = from_chars<std::size_t>(parameters[2]);
+    INVARIANT(parsedCount.has_value(), "Invalid AlternatingField count_per_phase: {}", parameters[2]);
+    countPerPhase = *parsedCount;
+
+    for (std::size_t i = 3; i < NUM_PARAMETERS_ALTERNATING_FIELD; i += 2)
+    {
+        auto lo = tryParseBound(outputType.type, parameters[i]);
+        auto hi = tryParseBound(outputType.type, parameters[i + 1]);
+        INVARIANT(lo && hi, "AlternatingField: cannot parse bounds {} {} as type {}", parameters[i], parameters[i + 1], type);
+        phases.emplace_back(*lo, *hi);
+    }
+}
+
+void AlternatingField::validate(std::string_view rawSchemaLine)
+{
+    const auto parameters = splitWithStringDelimiter<std::string_view>(rawSchemaLine, " ");
+    if (parameters.size() < static_cast<std::size_t>(NUM_PARAMETERS_ALTERNATING_FIELD))
+    {
+        throw InvalidConfigParameter(
+            "AlternatingField requires at least {} parameters, got {}: {}",
+            NUM_PARAMETERS_ALTERNATING_FIELD,
+            parameters.size(),
+            rawSchemaLine);
+    }
+
+    const auto dataType = DataTypeProvider::tryProvideDataType(std::string{parameters[1]});
+    if (!dataType.has_value())
+    {
+        throw InvalidConfigParameter("Invalid AlternatingField type {}: {}", parameters[1], rawSchemaLine);
+    }
+    switch (dataType.value().type)
+    {
+        case DataType::Type::BOOLEAN:
+        case DataType::Type::CHAR:
+        case DataType::Type::VARSIZED:
+        case DataType::Type::UNDEFINED:
+            throw InvalidConfigParameter("AlternatingField does not support type {}: {}", parameters[1], rawSchemaLine);
+        default:
+            break;
+    }
+
+    const auto parsedCount = from_chars<std::size_t>(parameters[2]);
+    if (!parsedCount || *parsedCount < 1)
+    {
+        throw InvalidConfigParameter("AlternatingField count_per_phase must be >= 1: {}", rawSchemaLine);
+    }
+
+    for (std::size_t i = 3; i < NUM_PARAMETERS_ALTERNATING_FIELD; i += 2)
+    {
+        const auto minVal = tryParseBound(dataType.value().type, parameters[i]);
+        const auto maxVal = tryParseBound(dataType.value().type, parameters[i + 1]);
+        if (!minVal)
+        {
+            throw InvalidConfigParameter(
+                "AlternatingField: cannot parse min bound {} as type {}: {}", parameters[i], parameters[1], rawSchemaLine);
+        }
+        if (!maxVal)
+        {
+            throw InvalidConfigParameter(
+                "AlternatingField: cannot parse max bound {} as type {}: {}", parameters[i + 1], parameters[1], rawSchemaLine);
+        }
+        if (*minVal > *maxVal)
+        {
+            throw InvalidConfigParameter(
+                "AlternatingField: min {} > max {} in phase {}: {}", parameters[i], parameters[i + 1], (i - 3) / 2, rawSchemaLine);
+        }
+    }
+}
+
+std::ostream& AlternatingField::generate(std::ostream& os, std::mt19937& randEng)
+{
+    const auto& [minField, maxField] = phases[currentPhase];
+    switch (outputType.type)
+    {
+        case DataType::Type::UINT8:
+            generateUniformValue<uint8_t>(os, randEng, minField, maxField);
+            break;
+        case DataType::Type::UINT16:
+            generateUniformValue<uint16_t>(os, randEng, minField, maxField);
+            break;
+        case DataType::Type::UINT32:
+            generateUniformValue<uint32_t>(os, randEng, minField, maxField);
+            break;
+        case DataType::Type::UINT64:
+            generateUniformValue<uint64_t>(os, randEng, minField, maxField);
+            break;
+        case DataType::Type::INT8:
+            generateUniformValue<int8_t>(os, randEng, minField, maxField);
+            break;
+        case DataType::Type::INT16:
+            generateUniformValue<int16_t>(os, randEng, minField, maxField);
+            break;
+        case DataType::Type::INT32:
+            generateUniformValue<int32_t>(os, randEng, minField, maxField);
+            break;
+        case DataType::Type::INT64:
+            generateUniformValue<int64_t>(os, randEng, minField, maxField);
+            break;
+        case DataType::Type::FLOAT32:
+            generateUniformValue<float>(os, randEng, minField, maxField);
+            break;
+        case DataType::Type::FLOAT64:
+            generateUniformValue<double>(os, randEng, minField, maxField);
+            break;
+        default:
+            INVARIANT(false, "Unsupported outputType in AlternatingField::generate");
+    }
+
+    ++currentCount;
+    if (currentCount >= countPerPhase)
+    {
+        currentCount = 0;
+        currentPhase = (currentPhase + 1) % phases.size();
     }
     return os;
 }

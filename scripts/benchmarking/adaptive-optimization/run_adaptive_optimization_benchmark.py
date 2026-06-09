@@ -33,6 +33,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.request
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 from scripts.benchmarking.utils import (
@@ -77,6 +78,13 @@ repl_binary = os.path.join(build_dir, "nes-frontend", "apps", "nes-repl")
 #### Worker / REPL Addresses
 WORKER_GRPC = "localhost:8080"
 WORKER_DATA = "localhost:9090"
+
+#### Prometheus-baseline addresses
+# The PrometheusSink's exposer binds this address on the worker; the external Prometheus scrapes
+# it and (later) the coordinator polls Prometheus. For the single-node bench the worker is local,
+# so we scrape it directly at localhost for validation.
+PROM_SINK_BIND = "0.0.0.0:9464"
+PROM_SCRAPE_URL = "http://localhost:9464/metrics"
 
 #### Query to deploy (nexmark bid-like schema, Memory source with LOOP)
 #
@@ -215,6 +223,30 @@ def wait_for_port(host, port, timeout=10.0, interval=0.2):
     return False
 
 
+def scrape_and_validate_prometheus_sink(metrics_url, retries=15, interval=2.0):
+    """Scrape the PrometheusSink's /metrics endpoint and confirm it built a populated histogram.
+
+    Returns (ok, metrics_text, total_observations). `total_observations` is the max over all
+    histogram families of the +Inf bucket count (= total values Observe()'d). We retry because the
+    spliced build branch needs a moment after deploy to start emitting into the sink.
+    """
+    last_text = ""
+    for attempt in range(retries):
+        try:
+            with urllib.request.urlopen(metrics_url, timeout=5) as resp:
+                last_text = resp.read().decode("utf-8", errors="replace")
+        except Exception as e:  # connection refused until the exposer binds at sink start()
+            printInfo(f"  scrape {attempt + 1}/{retries}: {metrics_url} not ready ({e})")
+            time.sleep(interval)
+            continue
+        totals = [int(m) for m in re.findall(r'le="\+Inf"\}\s+(\d+)', last_text)]
+        if totals and max(totals) > 0:
+            return True, last_text, max(totals)
+        printInfo(f"  scrape {attempt + 1}/{retries}: exposer up, no observations yet (totals={totals})")
+        time.sleep(interval)
+    return False, last_text, 0
+
+
 def terminate_process(proc, name, timeout=5):
     """Gracefully terminate a process, escalating to SIGKILL if needed."""
     if proc.poll() is not None:
@@ -314,6 +346,7 @@ def run_benchmark(
     sqrts: int = 0,
     constant_workload: bool = False,
     fixed_variant: str = "",
+    baseline_prometheus: bool = False,
 ):
     check_repository_root()
 
@@ -393,7 +426,30 @@ def run_benchmark(
     # branch + two gated probes + swap callback. With --fixed-variant set we skip all of this
     # so the bench measures pure data-query throughput for that filter order — a clean
     # baseline to compare adaptive against.
-    if not fixed_variant:
+    if baseline_prometheus:
+        # Prometheus SOTA baseline: splice a single build branch that routes `price` into a
+        # PrometheusSink (which builds the histogram and exposes it for scraping) instead of the
+        # in-engine StatisticBuild→Probe→GrpcSink chain. One field → one sink → one exposer port
+        # (a second --companion-field would need a second port). No gated --companion-condition
+        # (the predicate is unused in baseline mode). We DO pass --companion-switch-to-sql so the
+        # data query deploys via deployWithSwitchableAlternate (the same path the native benchmark
+        # uses, which registers the data source before the build branch splices in) AND so the
+        # switchable filter pair is in place for the step-3 poll loop to flip. The gated SetSwitch
+        # callback stays installed but is inert in baseline mode (the sink emits no gRPC reports).
+        repl_cmd += [
+            "--companion-statistic",
+            "--companion-field", "price",
+            "--companion-metric", "MinVal",
+            "--companion-window-size-ms", "60000000",
+            "--companion-event-time-field", "BID$TIMESTAMP",
+            "--companion-host", WORKER_GRPC,
+            "--companion-switch-to-sql", make_reversed_query_sql(sqrts),
+            "--companion-histogram-min", "0",
+            "--companion-histogram-max", "2000",
+            "--baseline-prometheus",
+            "--prometheus-server-url", PROM_SINK_BIND,
+        ]
+    elif not fixed_variant:
         repl_cmd += [
             "--companion-statistic",
             # Splice the build branch into the data query (one source thread feeds both
@@ -489,6 +545,21 @@ def run_benchmark(
         sys.exit(1)
     printSuccess(f"Data query deployed with id: {data_query_id}")
 
+    # --- Prometheus-baseline validation: confirm the spliced PrometheusSink built + exposed a histogram ---
+    if baseline_prometheus:
+        printInfo(f"Validating PrometheusSink exposer at {PROM_SCRAPE_URL} ...")
+        ok, metrics_text, total = scrape_and_validate_prometheus_sink(PROM_SCRAPE_URL)
+        sample = "\n".join(
+            line for line in metrics_text.splitlines()
+            if ("_bucket{" in line or line.endswith("_count") or "_count " in line or "_sum " in line)
+        )[:1500]
+        if ok:
+            printSuccess(
+                f"PrometheusSink is exposing a populated histogram ({total} observations). Sample:\n{sample}")
+        else:
+            printError(f"PrometheusSink validation FAILED — no observations scraped from {PROM_SCRAPE_URL}.")
+            printError("Metrics text (first 800 chars):\n" + (metrics_text[:800] or "<empty>"))
+
     printSuccess(f"Query deployed. Running for {duration} seconds...")
 
     # --- Run for the configured duration ---
@@ -569,6 +640,14 @@ if __name__ == "__main__":
         "Mirrors run_bid_value_first_benchmark.py / run_price_first_benchmark.py but keeps "
         "everything in one script so parameter drift between baselines and adaptive can't happen.",
     )
+    parser.add_argument(
+        "--baseline-prometheus",
+        action="store_true",
+        help="Run the Prometheus SOTA baseline instead of the native adaptive path: the spliced "
+        "build branch routes the monitored field into a PrometheusSink (histogram built in the "
+        "sink, exposed for scraping) and the run validates that /metrics is populated. The "
+        "coordinator poll loop that drives the actual filter swap is added in a later step.",
+    )
     args = parser.parse_args()
 
     run_benchmark(
@@ -579,4 +658,5 @@ if __name__ == "__main__":
         constant_workload=args.constant_workload,
         sqrts=args.sqrts,
         fixed_variant=args.fixed_variant,
+        baseline_prometheus=args.baseline_prometheus,
     )

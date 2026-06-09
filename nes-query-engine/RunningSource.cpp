@@ -166,13 +166,7 @@ std::shared_ptr<RunningSource> RunningSource::create(
         logicalSourceName,
         maxInflightBuffers));
     ENGINE_LOG_DEBUG("Starting Running Source");
-    if (not logicalSourceName.empty())
-    {
-        /// Register before starting the source thread so the splice path can find us as soon as
-        /// the source begins emitting. Deregistration is in ~RunningSource.
-        RunningSourceRegistry::instance().registerSource(logicalSourceName, std::weak_ptr<RunningSource>(runningSource));
-    }
-    /// Build the start closure once. In the immediate-start path we invoke it now; in the
+    /// Build the start closure once. In the immediate-start path we invoke it below; in the
     /// deferred-start path we stash it on the RunningSource and an external trigger fires it.
     auto startFn
         = [&controller, &emitter, queryId, weakSource = std::weak_ptr<RunningSource>(runningSource)]()
@@ -183,14 +177,29 @@ std::shared_ptr<RunningSource> RunningSource::create(
             self->source->start(emitFunction(queryId, self, self->successors, controller, emitter));
         }
     };
+    /// Initialize the deferred-start splice budget BEFORE registering. registerSource drains any
+    /// splices that raced ahead of us and grafts them on via appendSuccessors, which counts each
+    /// against this budget; the final one fires startEmitting(). If the budget were still 0 at
+    /// drain time, those splices would not count and the source would never start.
     if (deferStart)
     {
         runningSource->pendingSplices.store(std::max<uint32_t>(expectedSpliceCount, 1));
-        runningSource->deferredStart = std::move(startFn);
+        runningSource->deferredStart = startFn;
     }
     else
     {
         runningSource->started.store(true);
+    }
+    /// Register (and drain raced splices) after the budget is set, before starting the thread, so
+    /// the splice path can find us. Deregistration is in ~RunningSource.
+    if (not logicalSourceName.empty())
+    {
+        RunningSourceRegistry::instance().registerSource(logicalSourceName, std::weak_ptr<RunningSource>(runningSource));
+    }
+    /// Immediate (non-deferred) sources start now — after registration + drain so any raced splice
+    /// is already attached to the successors list before the first buffer is emitted.
+    if (not deferStart)
+    {
         startFn();
     }
     return runningSource;

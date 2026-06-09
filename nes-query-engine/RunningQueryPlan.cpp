@@ -252,23 +252,18 @@ std::pair<std::unique_ptr<RunningQueryPlan>, CallbackRef> RunningQueryPlan::star
                 {
                     if (sourceEntry.spliceToRunningSource)
                     {
-                        /// Splice path: don't spawn a new source thread. Look up the already-
-                        /// running source for the same logical name and graft our successor
-                        /// pipelines onto it. Strict: fail the query if no live source is found.
-                        auto running = RunningSourceRegistry::instance().tryLookup(sourceEntry.logicalSourceName);
-                        if (not running)
-                        {
-                            listener->onFailure(InvalidConfigParameter(
-                                "Splice failed: no running source registered for logical source '{}'. "
-                                "Deploy the data query before its statistic-build branch.",
-                                sourceEntry.logicalSourceName));
-                            return;
-                        }
-                        /// appendSuccessors now handles the deferred-start countdown internally:
-                        /// each call decrements pendingSplices, and only the last one (when
-                        /// budget reaches 0) fires startEmitting(). This supports N expected
-                        /// build branches splicing in before the source begins emitting.
-                        running->appendSuccessors(std::move(sourceEntry.successorNodes));
+                        /// Splice path: don't spawn a new source thread. Graft our successor
+                        /// pipelines onto the already-running source for the same logical name.
+                        /// If that source hasn't registered yet — the build branch is deployed as a
+                        /// separate query and a lightweight branch can win the async deploy race
+                        /// against the data query — spliceOrDefer stashes our successors and
+                        /// registerSource grafts them on when the source appears, instead of failing.
+                        /// appendSuccessors (run inside spliceOrDefer when the source is already live,
+                        /// or later at drain time) handles the deferred-start countdown: each splice
+                        /// decrements pendingSplices and the final one fires startEmitting(), so N
+                        /// build branches can splice in before the source begins emitting.
+                        RunningSourceRegistry::instance().spliceOrDefer(
+                            sourceEntry.logicalSourceName, std::move(sourceEntry.successorNodes));
                         continue;
                     }
                     auto sourceId = sourceEntry.source->getSourceId();

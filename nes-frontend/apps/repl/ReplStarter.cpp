@@ -247,6 +247,17 @@ int main(int argc, char** argv)
                 "Name of the workload-switch gate (SwitchRegistry slot) used to flip between two filter-chain "
                 "pipelines without redeploying. The data sink is gated with expected=0, the paired sink "
                 "(--companion-switch-to-sql) with expected=1. Default: filter_order");
+        program.add_argument("--baseline-prometheus")
+            .flag()
+            .help(
+                "Run the Prometheus SOTA baseline instead of the native in-engine statistic path. The companion "
+                "build branch routes the monitored field into a PrometheusSink (which builds the histogram and "
+                "exposes it for scraping) instead of the StatisticBuild→StoreWriter→Probe→GrpcSink chain. Switching "
+                "is driven by the coordinator polling Prometheus rather than by gRPC probe reports.");
+        program.add_argument("--prometheus-server-url")
+            .default_value(std::string{"0.0.0.0:9464"})
+            .help("host:port the Prometheus-baseline sink's exposer binds its /metrics endpoint to (scraped by the "
+                  "external Prometheus instance). Only used with --baseline-prometheus. Default: 0.0.0.0:9464");
 
 #ifdef EMBED_ENGINE
         /// single node worker config
@@ -495,6 +506,15 @@ int main(int argc, char** argv)
             const auto workerServerUri = program.get<std::string>("-s");
             const bool workloadSwitchMode = not switchToSql.empty();
 
+            /// Prometheus-baseline mode: route each companion build branch into a PrometheusSink
+            /// (see DefaultStatisticQueryGenerator::generateWorkloadBranchPrometheus). Carried to
+            /// collectWorkloadStatistic via the per-request "prometheus_server_url" option; an empty
+            /// value selects the native in-engine path. The gated SetSwitch callback below stays
+            /// installed but is inert in this mode (the PrometheusSink emits no gRPC reports, so it
+            /// never fires) — switching is driven by the coordinator's Prometheus poll loop.
+            const bool baselinePrometheus = program.get<bool>("--baseline-prometheus");
+            const auto prometheusServerUrl = program.get<std::string>("--prometheus-server-url");
+
             /// WorkloadDomain.queryId / operatorId are placeholders here — collectWorkloadStatistic
             /// resolves the actual splice target from the data query's LogicalPlan at deploy time.
             const NES::CollectionDomain collectionDomain = NES::WorkloadDomain{
@@ -689,9 +709,13 @@ int main(int argc, char** argv)
                    {"paired_sql", switchToSql},
                    {"switch_name", program.get<std::string>("--companion-switch-name")},
                    /// min/max are EquiWidthHistogram bucket-range bounds; read by
-                   /// DefaultStatisticQueryGenerator::createAggregationFunction.
+                   /// DefaultStatisticQueryGenerator::createAggregationFunction. In Prometheus-baseline
+                   /// mode they also seed the PrometheusSink's equi-width histogram_min/max_value.
                    {"min", program.get<std::string>("--companion-histogram-min")},
-                   {"max", program.get<std::string>("--companion-histogram-max")}}};
+                   {"max", program.get<std::string>("--companion-histogram-max")},
+                   /// Non-empty only with --baseline-prometheus: selects the PrometheusSink build
+                   /// branch in collectWorkloadStatistic and binds the sink's exposer to this address.
+                   {"prometheus_server_url", baselinePrometheus ? prometheusServerUrl : std::string{}}}};
             };
 
             /// Build the primary statement. When the first --companion-condition predicate fires,

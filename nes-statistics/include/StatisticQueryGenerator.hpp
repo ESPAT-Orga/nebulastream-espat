@@ -63,6 +63,20 @@ public:
         throw NotImplemented("This StatisticQueryGenerator does not support WorkloadDomain build-branch generation");
     }
 
+    /// Prometheus-baseline counterpart of generateWorkloadBranch. Produces a build branch
+    /// (Source → Projection(field) → PrometheusSink) spliced onto the same `spliceLeaf`, but
+    /// instead of the in-engine StatisticBuild/StoreWriter/Probe chain it routes the monitored
+    /// field straight into a PrometheusSink that builds the histogram itself and exposes it for an
+    /// external Prometheus to scrape. No statisticId / coordinatorAddress: this branch reports
+    /// nothing back over gRPC — the coordinator polls Prometheus instead. Default impl throws.
+    [[nodiscard]] virtual LogicalPlan generateWorkloadBranchPrometheus(
+        const WorkloadDomain& domain, const RequestStatisticBuildStatement& request, const LogicalOperator& spliceLeaf) const
+    {
+        (void)domain;
+        (void)request;
+        (void)spliceLeaf;
+        throw NotImplemented("This StatisticQueryGenerator does not support Prometheus-baseline build-branch generation");
+    }
 };
 
 }

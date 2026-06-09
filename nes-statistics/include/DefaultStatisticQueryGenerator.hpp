@@ -47,6 +47,15 @@ public:
         Statistic::StatisticId statisticId,
         const std::string& coordinatorAddress,
         const LogicalOperator& spliceLeaf) const override;
+
+    /// Prometheus-baseline build branch: Source → Projection(field) → PrometheusSink. See the base
+    /// interface declaration for the contract. The sink is given an empty schema; type inference
+    /// fills it from the projection's single-field output (the field type isn't resolved on the
+    /// splice leaf until the optimizer runs).
+    [[nodiscard]] LogicalPlan generateWorkloadBranchPrometheus(
+        const WorkloadDomain& domain,
+        const RequestStatisticBuildStatement& request,
+        const LogicalOperator& spliceLeaf) const override;
 };
 
 }

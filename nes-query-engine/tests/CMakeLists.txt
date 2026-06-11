@@ -21,6 +21,7 @@ add_query_engine_test(delayed-task-submitter-test DelayedTaskSubmitterTest.cpp)
 add_query_engine_test(query-engine-test QueryEngineTest.cpp)
 add_query_engine_test(query-engine-task-queue-test TaskQueueTest.cpp)
 add_query_engine_test(running-query-plan-test QueryPlanTest.cpp)
+add_query_engine_test(splice-test SpliceTest.cpp)
 add_query_engine_test(query-engine-configuration-test QueryEngineConfigurationTest.cpp)
 add_query_engine_test(callback-test CallbackTest.cpp)
 

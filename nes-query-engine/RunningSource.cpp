@@ -134,8 +134,7 @@ namespace
 RunningSource::SuccessorEntry makeEntry(std::shared_ptr<RunningQueryPlanNode> node, size_t inflightBufferLimit)
 {
     const auto slotCount = std::min(inflightBufferLimit, static_cast<size_t>(std::numeric_limits<int32_t>::max()));
-    return RunningSource::SuccessorEntry{
-        .node = std::move(node), .availableSlots = std::make_shared<std::counting_semaphore<>>(slotCount)};
+    return RunningSource::SuccessorEntry{.node = std::move(node), .availableSlots = std::make_shared<std::counting_semaphore<>>(slotCount)};
 }
 }
 
@@ -166,16 +165,9 @@ std::shared_ptr<RunningSource> RunningSource::create(
         logicalSourceName,
         maxInflightBuffers));
     ENGINE_LOG_DEBUG("Starting Running Source");
-    if (not logicalSourceName.empty())
-    {
-        /// Register before starting the source thread so the splice path can find us as soon as
-        /// the source begins emitting. Deregistration is in ~RunningSource.
-        RunningSourceRegistry::instance().registerSource(logicalSourceName, std::weak_ptr<RunningSource>(runningSource));
-    }
     /// Build the start closure once. In the immediate-start path we invoke it now; in the
     /// deferred-start path we stash it on the RunningSource and an external trigger fires it.
-    auto startFn
-        = [&controller, &emitter, queryId, weakSource = std::weak_ptr<RunningSource>(runningSource)]()
+    auto startFn = [&controller, &emitter, queryId, weakSource = std::weak_ptr<RunningSource>(runningSource)]()
     {
         if (auto self = weakSource.lock())
         {
@@ -185,8 +177,23 @@ std::shared_ptr<RunningSource> RunningSource::create(
     };
     if (deferStart)
     {
+        /// Install the splice budget and the deferred-start closure BEFORE registering. The
+        /// registration below grafts any splices that were queued before this source existed,
+        /// and each graft counts the budget down (appendSuccessors -> startEmitting). Registering
+        /// first would let a drained splice decrement a still-zero budget, so the source would
+        /// never start. startFn only ever runs via that countdown, so there is no window where the
+        /// source starts before deferredStart is installed.
         runningSource->pendingSplices.store(std::max<uint32_t>(expectedSpliceCount, 1));
         runningSource->deferredStart = std::move(startFn);
+        if (not logicalSourceName.empty())
+        {
+            /// Only splice targets (deferStart) publish themselves so the splice path can find them
+            /// by name; registerSourceAndDrain also grafts splices that arrived before we got here.
+            /// Deregistration is in ~RunningSource. Plain sources skip this so two concurrent
+            /// unrelated queries reusing a logical source name never collide.
+            RunningSourceRegistry::instance().registerSourceAndDrain(logicalSourceName, runningSource);
+            runningSource->registeredInRegistry = true;
+        }
     }
     else
     {
@@ -244,7 +251,7 @@ void RunningSource::appendSuccessors(std::vector<std::shared_ptr<RunningQueryPla
 
 RunningSource::~RunningSource()
 {
-    if (not logicalSourceName.empty())
+    if (registeredInRegistry)
     {
         RunningSourceRegistry::instance().deregisterSource(logicalSourceName);
     }

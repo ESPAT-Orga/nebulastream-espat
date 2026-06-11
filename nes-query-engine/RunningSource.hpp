@@ -44,9 +44,11 @@ public:
     /// Creates and starts the underlying source implementation. As long as the RunningSource is kept alive the source will run,
     /// once the last reference to the RunningSource is destroyed the source is stopped.
     /// The onSourceStopped callback is invoked after the source has been successfully stopped.
-    /// If logicalSourceName is non-empty, the constructed RunningSource registers itself in the
-    /// process-wide RunningSourceRegistry under that name and deregisters on destruction. This is
-    /// what later splice-mode queries look up to graft their successors onto this source.
+    /// If deferStart is true (a splice target), the constructed RunningSource registers itself in
+    /// the process-wide RunningSourceRegistry under logicalSourceName and deregisters on
+    /// destruction. This is what later splice-mode queries look up to graft their successors onto
+    /// this source. Plain sources (deferStart == false) do NOT register, so concurrent unrelated
+    /// queries may freely share a logical source name without colliding in the registry.
     /// If deferStart is true, the source is constructed and registered but its underlying emit
     /// thread is NOT started; a subsequent startEmitting() call (typically via
     /// RunningSourceRegistry::startDeferred(name)) starts it. Used so splice pipelines can wire
@@ -96,6 +98,7 @@ public:
         std::shared_ptr<RunningQueryPlanNode> node;
         std::shared_ptr<std::counting_semaphore<>> availableSlots;
     };
+
     using SuccessorContainer = folly::Synchronized<std::vector<SuccessorEntry>>;
 
 private:
@@ -125,6 +128,10 @@ private:
     std::function<bool(std::vector<std::shared_ptr<RunningQueryPlanNode>>&&)> onSourceStopped;
     std::function<void(Exception)> onSourceFailure;
     std::string logicalSourceName;
+    /// Whether this source published itself in the process-wide RunningSourceRegistry. Only splice
+    /// targets (deferStart == true) register, so the destructor deregisters symmetrically and a
+    /// plain source never touches another query's registry slot that happens to share its name.
+    bool registeredInRegistry{false};
     /// Slot count for each successor's per-successor semaphore; pinned at create time so later
     /// splice-time appendSuccessors() calls allocate semaphores with the same budget.
     size_t inflightBufferLimit{0};

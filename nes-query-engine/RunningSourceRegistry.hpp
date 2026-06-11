@@ -23,28 +23,41 @@
 namespace NES
 {
 class RunningSource;
+struct RunningQueryPlanNode;
 
 /// Worker-wide registry mapping logical source name -> live RunningSource. Populated by the
 /// RunningQueryPlan setup callback after a non-splice source is created, cleared via
 /// RunningSource's destructor. Used by the SpliceToRunningSourceTrait code path: when a query
-/// arrives with that trait on its source, it looks up the running source for the same logical
-/// name and appends its head-pipeline nodes there instead of spawning a fresh source thread.
-/// Strict: lookup fails if there is no matching live source, and matches MUST be unique. The
-/// matching semantics on logical source name only — multiple physical sources expanding from
-/// the same logical name are still served by a single registry entry per name.
+/// arrives with that trait on its source, it grafts its head-pipeline nodes onto the running
+/// source for the same logical name instead of spawning a fresh source thread.
+///
+/// Splice and registration race: a build branch can finish pipeline setup and try to splice
+/// BEFORE the data query has registered its source (the data query compiles slower — it carries
+/// the heavy filter chain). To make deployment order irrelevant, a splice that finds no live
+/// source is QUEUED in `pendingSplices` and grafted automatically when the source later registers.
+/// The entries map and the pending-splice queue live under a single lock so the "is the source
+/// registered?" check and the enqueue are atomic with respect to registration + drain.
 class RunningSourceRegistry
 {
 public:
     static RunningSourceRegistry& instance();
 
-    /// Register a live source under its logical name. Throws if a different RunningSource is
-    /// already registered for that name — concurrent registrations of the SAME RunningSource
-    /// are idempotent. Returns immediately; the splice path only sees registrations that have
-    /// completed.
-    void registerSource(const std::string& logicalSourceName, std::weak_ptr<RunningSource> source);
+    /// Splice now, or queue until the target registers. If a live source is registered under
+    /// `logicalSourceName`, append `successorNodes` to it immediately and return true. Otherwise
+    /// move them into the pending-splice queue (grafted later by registerSourceAndDrain) and
+    /// return false. Never throws, never fails — deployment order does not matter.
+    bool spliceOrEnqueue(const std::string& logicalSourceName, std::vector<std::shared_ptr<RunningQueryPlanNode>>&& successorNodes);
+
+    /// Register a live source under its logical name and graft any splice batches that were queued
+    /// before it registered. Throws if a DIFFERENT RunningSource is already registered for that
+    /// name — concurrent registrations of the SAME RunningSource are idempotent. `source` must be
+    /// the strong ref from RunningSource::create with its pendingSplices budget already installed,
+    /// so each drained appendSuccessors counts the budget down correctly.
+    void registerSourceAndDrain(const std::string& logicalSourceName, const std::shared_ptr<RunningSource>& source);
 
     /// Remove an entry. Called from RunningSource's destructor. Looking up by logicalSourceName
     /// rather than by RunningSource* avoids stale entries from earlier queries on the same name.
+    /// Also reaps any still-queued splice batches for that name when the legitimate owner expires.
     void deregisterSource(const std::string& logicalSourceName);
 
     /// Strict lookup: returns the live shared_ptr or nullptr if not found / expired.
@@ -64,7 +77,16 @@ private:
     RunningSourceRegistry() = default;
     ~RunningSourceRegistry() = default;
 
-    folly::Synchronized<std::unordered_map<std::string, std::weak_ptr<RunningSource>>> entries;
+    struct State
+    {
+        std::unordered_map<std::string, std::weak_ptr<RunningSource>> entries;
+        /// Splice batches that arrived before their target source registered, keyed by logical
+        /// source name. Each batch is one spliceOrEnqueue call's successor nodes. Drained (and the
+        /// key erased) by registerSourceAndDrain; reaped by deregisterSource.
+        std::unordered_map<std::string, std::vector<std::vector<std::shared_ptr<RunningQueryPlanNode>>>> pendingSplices;
+    };
+
+    folly::Synchronized<State> state;
 };
 
 }

@@ -26,8 +26,8 @@
 
 namespace NES
 {
-TraitRegistryReturnType
-TraitGeneratedRegistrar::RegisterSpliceToRunningSourceTrait(TraitRegistryArguments arguments) /// NOLINT(performance-unnecessary-value-param)
+TraitRegistryReturnType TraitGeneratedRegistrar::RegisterSpliceToRunningSourceTrait(
+    TraitRegistryArguments arguments) /// NOLINT(performance-unnecessary-value-param)
 {
     return unreflect<SpliceToRunningSourceTrait>(arguments.reflected);
 }

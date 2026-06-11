@@ -101,24 +101,39 @@ PROM_SINK_TARGET = "localhost:9464"
 PROM_WEB_BIND = "0.0.0.0:9595"
 PROM_QUERY_BASE = "http://localhost:9595"
 
-#### Query to deploy (nexmark bid-like schema, Memory source with LOOP)
+#### Query to deploy (nexmark bid-like schema, LoopingMemory source with LOOP)
 #
-# Two filters are applied with the following selectivities (fields are independent):
-#   bidValue < 10.45  →  selectivity 0.01
-#     bidValue ~ N(mean=50, stddev=17); 1st percentile = 50 + 17 * Φ⁻¹(0.01) ≈ 10.45
-#   price    < 888.49 →  selectivity 0.99
-#     price    ~ N(mean=500, stddev=167); 99th percentile = 500 + 167 * Φ⁻¹(0.99) ≈ 888.49
-#   Combined selectivity (AND): 0.01 * 0.99 ≈ 0.0099
+# Two filters are applied; fields are independent. Selectivity is set by construction in
+# generate_bid_data.py (each field is two tight clusters straddling its threshold, with an
+# EXACT fraction in the low/pass cluster) — not via a distribution tail — so the realized
+# pass rates hit the targets precisely with a sharp boundary:
+#   bidValue < 10.45  →  selectivity 0.01 (selective)
+#   price    < 888.49 →  selectivity 0.99 (non-selective)
+#   Combined selectivity (AND): 0.01 * 0.99 = 0.0099
 #
 def _expensive_filter_clause(sqrts: int) -> str:
-    """Per-tuple SQRT chain summed > 0 (always passes). Empty for sqrts <= 0."""
+    """Per-tuple SQRT chain summed > 0 (always passes). Empty for sqrts <= 0.
+
+    The terms are summed as a BALANCED tree (parenthesized pairwise) rather than a flat
+    left-associative chain, so the parsed expression has depth ~log2(sqrts) instead of
+    ~sqrts. A deep chain makes parsing and every subsequent recursive AST traversal during
+    query submission blow up; the balanced form is shallow while keeping the exact same
+    per-tuple cost (same SQRT/+ op count). The JIT must still compile `sqrts` operations,
+    so submission time grows with the count regardless — keep `sqrts` moderate.
+    """
+    printInfo(f"Sqrts: {sqrts}")
     if sqrts <= 0:
         return ""
-    terms = " + ".join(
+    terms = [
         f"SQRT({'bidValue' if i % 2 == 0 else 'price'} + FLOAT64({1000 + i // 2}))"
         for i in range(sqrts)
-    )
-    return f"{terms} > FLOAT64(0.0)"
+    ]
+    while len(terms) > 1:
+        terms = [
+            f"({terms[i]} + {terms[i + 1]})" if i + 1 < len(terms) else terms[i]
+            for i in range(0, len(terms), 2)
+        ]
+    return f"{terms[0]} > FLOAT64(0.0)"
 
 
 def make_data_select_sql(variant: str, sqrts: int) -> str:
@@ -562,6 +577,7 @@ def run_benchmark(
             worker_binary,
             "--grpc=0.0.0.0:8080",
             "--data_address=0.0.0.0:9090",
+            "--worker.throughput_listener_interval_in_ms=100",
             "--worker.default_query_execution.operator_buffer_size=4194304",
             "--worker.number_of_buffers_in_global_buffer_manager=1024",
             "--worker.query_engine.number_of_worker_threads=4",
@@ -704,7 +720,7 @@ def run_benchmark(
 
     # --- Record the distributed query ID assigned to the data query ---
     printInfo("Waiting for data query deployment confirmation...")
-    # Memory source parses the whole CSV at setup() before reporting deployed.
+    # LoopingMemory source parses the whole CSV at setup() before reporting deployed.
     # A 2.4 GB file takes ~1–2 min on this box, so give the REPL plenty of slack.
     data_query_id = find_data_query_id(repl_lines, timeout=300.0)
     if data_query_id is None:

@@ -13,10 +13,10 @@
 # limitations under the License.
 
 """
-Single-node-worker lifecycle helpers shared by run_statistic_build.py and
-run_statistic_probe.py.
+Single-node-worker lifecycle helpers shared by the statistic benchmark runners
+(amortization, accuracy, probe).
 
-Wraps the standalone-worker flow used by both benchmarks: starting the worker
+Wraps the standalone-worker flow used by these benchmarks: starting the worker
 under systemd-run, submitting queries via nes-cli, polling the worker stdout
 log for throughput/latency lines, stopping queries, and tearing the worker
 down.
@@ -177,13 +177,32 @@ def stop_queries(query_ids, query_file, cli_log_file):
     return processes
 
 
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+# A nes-cli --debug log line looks like ``[HH:MM:SS.micros] [D] [..] ...`` once ANSI
+# colour codes are stripped. The JSON payload's own bracket lines (``[``, ``]``,
+# ``    {``) never start with a ``[HH:MM:`` timestamp, so this cleanly separates them.
+_DEBUG_LOG_RE = re.compile(r"^\s*\[\d{2}:\d{2}:\d{2}")
+
+
+def _extract_json(stdout):
+    """Return the JSON payload from nes-cli stdout, dropping ``--debug`` log noise.
+
+    With ``--debug`` enabled nes-cli interleaves ANSI-coloured ``[D]`` log lines on
+    stdout before the JSON result; a raw ``json.loads`` of the whole stream throws.
+    Strip ANSI codes, drop timestamped log lines, and parse what remains.
+    """
+    cleaned = _ANSI_RE.sub("", stdout)
+    json_text = "\n".join(ln for ln in cleaned.splitlines() if not _DEBUG_LOG_RE.match(ln)).strip()
+    return json.loads(json_text) if json_text else None
+
+
 def get_query_status(query_id, query_file):
     """Query the status of a single query via nes-cli. Returns the status string or None."""
     cmd = nebuli_executable + ["-t", query_file, "status", query_id]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
         if result.returncode == 0 and result.stdout.strip():
-            statuses = json.loads(result.stdout)
+            statuses = _extract_json(result.stdout)
             if statuses and len(statuses) > 0:
                 return statuses[0].get("query_status")
     except (subprocess.TimeoutExpired, json.JSONDecodeError, Exception):

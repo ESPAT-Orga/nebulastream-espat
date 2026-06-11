@@ -53,7 +53,8 @@ cmake_flags = ("-G Ninja "
                "-DNES_BUILD_NATIVE:BOOL=ON "
                "-DNES_LOG_LEVEL:STRING=LEVEL_NONE "
                "-DNES_BUILD_NATIVE:BOOL=ON")
-NUM_RUNS_PER_EXPERIMENT = 3
+#NUM_RUNS_PER_EXPERIMENT = 3
+NUM_RUNS_PER_EXPERIMENT = 10
 
 QUERY_CONFIGS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "query-configs")
 
@@ -92,15 +93,10 @@ allBuildWindowSizesSec = [1, 5, 10]
 # buckets / sample-size are derived inside the C++ logical functions'
 # calculateConfigs() during lowering.
 memoryBudgetConfig = [1 * 1024, 5 * 1024, 10 * 1024]
-# memoryBudgetConfig =  [1 * 1024, 10 * 1024]
 
 # Legacy histogram bounds; the runner now derives min/max from the data instead.
 histogramMinValue = 0
 histogramMaxValue = 100 * 1000
-
-# Latency listener flag for build-throughput experiments. Disabled because we
-# only care about throughput here.
-enableLatencyForBuild = [False]
 
 
 ## Accuracy ####################################################################
@@ -176,6 +172,63 @@ STATISTIC_TYPES_WITHOUT_SYNOPSIS_PARAMS = {"Passthrough", "Sum"}
 DATASET_PATHS = {
     "Nexmark": "nes-systests/testdata/large/nexmark/bid_6GB.csv",
     "ClusterMonitoring": "nes-systests/testdata/large/cluster_monitoring/google-cluster-data-original_1G.csv",
+    "Manufacturing": "nes-systests/testdata/large/manufacturing/manufacturing_1G.csv",
+}
+
+
+## Synopsis amortization #######################################################
+#
+# The amortization experiment runs ONE build query maintaining N synopses (one scan, one duration, one
+# throughput) to measure how the per-tuple cost of N specialised synopses (CountMin / EquiWidthHistogram,
+# one per field) grows relative to a single full-record Reservoir sample.
+#
+# There is no hardcoded schema here. synopsis_query_builder.py loads a per-dataset YAML skeleton
+# (query-configs/SynopsisAmortization_<Dataset>.yaml.template) that carries the logical source schema, the
+# Memory/Native source, and the event-time field (in its placeholder WINDOW clause). The builder parses that,
+# derives the numeric fields, and writes a concrete query YAML on the fly. To add a dataset: drop a skeleton
+# in query-configs/ and a path in DATASET_PATHS.
+
+# Datasets benchmarked by the amortization runner (each needs a skeleton template + a DATASET_PATHS entry).
+# They span the field-count axis the experiment varies over: Nexmark F=3 (narrow), ClusterMonitoring F=10
+# (wide, mixed types), Manufacturing F=13 (widest, uniform INT16). Nexmark is 6 GB but cheap in trial count.
+SYNOPSIS_AMORT_DATASETS = ["Nexmark", "ClusterMonitoring", "Manufacturing"]
+
+# Statistic types the amortization runner sweeps. CountMin / EquiWidthHistogram
+# scale N = 1..F (one synopsis per field); Reservoir / Sum / Passthrough are
+# pinned to N = 1 (one full-record sample / one baseline aggregation / the raw
+# copy ceiling).
+SYNOPSIS_AMORT_SCALING_TYPES = ["CountMin", "EquiWidthHistogram"]
+SYNOPSIS_AMORT_SINGLE_TYPES = ["Reservoir", "Sum", "Passthrough"]
+
+# Number-of-synopses ladder for the scaling types. Clamped to each dataset's
+# field count F and always augmented with F itself, then deduped + sorted.
+SYNOPSIS_AMORT_N_LADDER = [1, 2, 4, 8]
+
+# Tumbling window size(s), in seconds. The amortization experiment isolates per-tuple synopsis cost, so it
+# defaults to a single size; pass --window-sizes to sweep several (e.g. 1 5 10) and compare across windowing.
+SYNOPSIS_AMORT_WINDOW_SIZES = [1, 5, 10]
+
+# Memory budgets (bytes) for the scaling/sample synopses. Sum/Passthrough ignore this.
+SYNOPSIS_AMORT_MEMORY_BUDGETS = [1 * 1024, 10 * 1024, 100 * 1024]
+
+# Worker thread counts.
+SYNOPSIS_AMORT_WORKER_THREADS = ["1", "16"]
+
+# Fixed EquiWidthHistogram bounds. Mirrors the effective behaviour of the
+# existing single-synopsis build templates (which hardcode 0..100000 regardless
+# of column); throughput — not accuracy — is what we measure, so wide static
+# bounds avoid an expensive per-field scan of multi-GB inputs.
+SYNOPSIS_AMORT_HISTOGRAM_MIN = 0
+SYNOPSIS_AMORT_HISTOGRAM_MAX = 100 * 1000
+
+# Base statistic IDs per synopsis kind; the i-th synopsis in a query uses base+i,
+# so all ids within one build query stay distinct (the engine requires this).
+SYNOPSIS_AMORT_BASE_IDS = {
+    "CountMin": 1000,
+    "EquiWidthHistogram": 2000,
+    "Reservoir": 3000,
+    "Sum": 4000,
+    "Passthrough": 5000,
 }
 
 
@@ -187,11 +240,6 @@ IDENTITY_FIELDNAMES = [
     'dataset', 'statistic_type', 'memory_budget', 'build_window_size_sec',
     'executionMode', 'numberOfWorkerThreads', 'buffersInGlobalBufferManager', 'joinStrategy',
     'bufferSizeInBytes', 'pageSize', 'enableLatency', 'statisticStoreType', 'run_idx',
-]
-
-BUILD_FIELDNAMES = IDENTITY_FIELDNAMES + [
-    'query_name', 'tuplesPerSecond_listener', 'build_duration_s',
-    'issue',
 ]
 
 ACCURACY_FIELDNAMES = IDENTITY_FIELDNAMES + [
@@ -208,5 +256,13 @@ PROBE_FIELDNAMES = IDENTITY_FIELDNAMES + [
     'num_probe_tuples', 'num_probe_repetitions',
     'probe_throughput_listener', 'probe_duration_s', 'probe_latency_listener',
     'build_throughput_listener', 'build_duration_s', 'build_latency_listener',
+    'issue',
+]
+
+# Amortization results — the build-throughput experiment (one query, N synopses).
+# Filtering num_synopses == 1 reproduces the single-synopsis build view; CountMin /
+# EquiWidthHistogram rows with num_synopses > 1 carry the scaling data.
+SYNOPSIS_AMORT_FIELDNAMES = IDENTITY_FIELDNAMES + [
+    'num_synopses', 'query_name', 'tuplesPerSecond_listener', 'build_duration_s',
     'issue',
 ]

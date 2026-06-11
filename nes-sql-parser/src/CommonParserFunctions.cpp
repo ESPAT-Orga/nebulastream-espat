@@ -31,6 +31,7 @@
 #include <DataTypes/DataType.hpp>
 #include <DataTypes/DataTypeProvider.hpp>
 #include <DataTypes/Schema.hpp>
+#include <Plans/LogicalPlan.hpp>
 #include <Util/Overloaded.hpp>
 #include <Util/Strings.hpp>
 #include <ErrorHandling.hpp>
@@ -338,6 +339,24 @@ DataType bindDataType(AntlrSQLParser::TypeDefinitionContext* typeDefAST, const D
         throw UnknownDataType("{}", typeDefAST->getText());
     }
     return *dataType;
+}
+
+void applyQueryOptionsToPlan(LogicalPlan& plan, const ConfigMap& boundOptions)
+{
+    const auto queryOptionsIter = boundOptions.find("QUERY");
+    if (queryOptionsIter == boundOptions.end())
+    {
+        return;
+    }
+    if (const auto fuseIter = queryOptionsIter->second.find("FUSE"); fuseIter != queryOptionsIter->second.end())
+    {
+        const auto* literal = std::get_if<Literal>(&fuseIter->second);
+        if ((literal == nullptr) || !std::holds_alternative<bool>(*literal))
+        {
+            throw InvalidQuerySyntax("QUERY.FUSE must be a boolean");
+        }
+        plan.setOperatorFusing(std::get<bool>(*literal));
+    }
 }
 
 [[nodiscard]] std::string literalToString(const Literal& literal)

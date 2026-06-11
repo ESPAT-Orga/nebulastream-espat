@@ -609,8 +609,7 @@ public:
             std::unordered_map<std::string, std::string> options;
             if (workloadChar->optionsClause() != nullptr)
             {
-                auto configOptions
-                    = bindConfigOptionsWithDuplicates(workloadChar->optionsClause()->options->namedConfigExpression());
+                auto configOptions = bindConfigOptionsWithDuplicates(workloadChar->optionsClause()->options->namedConfigExpression());
                 for (const auto& [path, value] : configOptions)
                 {
                     if (std::holds_alternative<Literal>(value) && !path.empty())
@@ -710,15 +709,10 @@ public:
                                 throw InvalidQuerySyntax("Query priority must be 'HIGH' or 'LOW', got '{}'", value);
                             }
                         }
-                        if (auto fuseIter = optionsIter->second.find("FUSE"); fuseIter != optionsIter->second.end())
-                        {
-                            auto* literal = std::get_if<Literal>(&fuseIter->second);
-                            if ((literal == nullptr) || !std::holds_alternative<bool>(*literal))
-                            {
-                                throw InvalidQuerySyntax("QUERY.FUSE must be a boolean");
-                            }
-                            plan.setOperatorFusing(std::get<bool>(*literal));
-                        }
+                        /// Plan-level options (QUERY.FUSE) are validated and applied centrally so the
+                        /// systest query path (createLogicalQueryPlanFromSQLString) shares the exact
+                        /// same behaviour. ID/PRIORITY above are submission-level and stay here.
+                        applyQueryOptionsToPlan(plan, options);
                     }
                 }
                 if (queryPriority.has_value())

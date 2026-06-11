@@ -27,6 +27,8 @@
 
 namespace NES
 {
+class LogicalPlan;
+
 using Literal = std::variant<std::string, int64_t, uint64_t, double, bool>;
 using ConfigMap = std::unordered_map<std::string, std::unordered_map<std::string, std::variant<Literal, Schema>>>;
 using ConfigMultiMap = std::vector<std::pair<std::vector<std::string>, std::variant<Literal, Schema>>>;
@@ -56,5 +58,11 @@ Schema bindSchema(AntlrSQLParser::SchemaDefinitionContext* schemaDefAST);
 DataType bindDataType(AntlrSQLParser::TypeDefinitionContext* typeDefAST, DataType::NULLABLE isNullable);
 
 std::string literalToString(const Literal& literal);
+
+/// Validates and applies plan-level QUERY options parsed from a SET clause (currently only
+/// QUERY.FUSE) to the plan. Throws InvalidQuerySyntax if QUERY.FUSE is present but not a boolean.
+/// Submission-level options (QUERY.ID, QUERY.PRIORITY) are intentionally NOT handled here, as they
+/// are not part of a bare LogicalPlan.
+void applyQueryOptionsToPlan(LogicalPlan& plan, const ConfigMap& boundOptions);
 
 }

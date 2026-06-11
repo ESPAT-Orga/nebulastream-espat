@@ -12,17 +12,23 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Comparison runner: deploys the adaptive setup, then each fixed-variant baseline
-# (bid_first, price_first) one after another and collects all three throughput CSVs
-# into a single results directory. The baselines disable the entire statistic-
-# collection apparatus so what they measure is "the cost of running the wrong
-# filter order without the adaptive system intervening" — the comparison point
-# that justifies the overhead of the adaptive machinery.
+# Comparison runner: deploys the native adaptive setup, the Prometheus SOTA baseline,
+# and each fixed-variant baseline (bid_first, price_first) one after another, and
+# collects all four throughput CSVs into a single results directory.
+#   - adaptive   : native in-engine statistics drive the filter-order switch.
+#   - prometheus : the SOTA baseline — a PrometheusSink builds the histogram, a real
+#                  Prometheus scrapes it, and the coordinator poll loop drives the switch.
+#   - bid_first / price_first : fixed orders with NO adaptation — they measure "the cost
+#                  of running the wrong filter order without any system intervening".
+# With --sqrts > 0 and the ALTERNATING workload, the throughput-over-time curves make the
+# reaction-time difference visible directly: the slump after each regime flip is brief for
+# `adaptive`, wider for `prometheus` (its scrape+rate+poll reaction), and never recovers for
+# the fixed variants.
 #
-# All user-passed flags after the script name are forwarded to every individual
-# run (so e.g. `--duration 60 --sqrts 10 --constant-workload` applies uniformly).
-# DO NOT pass `--fixed-variant` or `--output` here — the wrapper sets those
-# itself per run.
+# All user-passed flags after the script name are forwarded to every individual run
+# (so e.g. `--duration 60 --sqrts 150 --replays-per-file 120` applies uniformly).
+# DO NOT pass `--fixed-variant`, `--baseline-prometheus`, or `--output` here — the wrapper
+# sets those itself per run.
 #
 # Pass `--results-dir <path>` to override the output directory. The directory
 # is REMOVED and recreated on every invocation so old CSVs can't leak between
@@ -46,7 +52,7 @@ while [[ $# -gt 0 ]]; do
             RESULTS_DIR="${1#*=}"
             shift
             ;;
-        --fixed-variant|--output)
+        --fixed-variant|--baseline-prometheus|--output)
             echo "Error: $1 is set per-run by this wrapper; do not pass it on the command line." >&2
             exit 1
             ;;
@@ -80,6 +86,7 @@ PYSCRIPT="scripts/benchmarking/adaptive-optimization/run_adaptive_optimization_b
 # so failures can be diagnosed without re-running.
 for variant_spec in \
     "adaptive::adaptive.csv" \
+    "prometheus:--baseline-prometheus:prometheus.csv" \
     "bid_first:--fixed-variant bid_first:bid_first.csv" \
     "price_first:--fixed-variant price_first:price_first.csv"; do
     IFS=':' read -r label variant_flag csv_name <<<"$variant_spec"
@@ -95,5 +102,5 @@ done
 
 deactivate
 
-echo "[wrapper] All three runs complete. Results in: $RESULTS_DIR"
+echo "[wrapper] All four runs complete. Results in: $RESULTS_DIR"
 ls -la "$RESULTS_DIR"

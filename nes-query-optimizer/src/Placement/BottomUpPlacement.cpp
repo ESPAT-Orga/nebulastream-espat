@@ -32,6 +32,10 @@
 #include <Operators/LogicalOperator.hpp>
 #include <Operators/Sinks/SinkLogicalOperator.hpp>
 #include <Operators/Sources/SourceDescriptorLogicalOperator.hpp>
+#include <Operators/Statistic/StatisticStoreWriterLogicalOperator.hpp>
+#include <Operators/Windows/Aggregations/Histogram/EquiWidthHistogramProbeLogicalOperator.hpp>
+#include <Operators/Windows/Aggregations/Sample/ReservoirProbeLogicalOperator.hpp>
+#include <Operators/Windows/Aggregations/Sketch/CountMinSketchProbeLogicalOperator.hpp>
 #include <Plans/LogicalPlan.hpp>
 #include <Traits/PlacementTrait.hpp>
 #include <Util/Logger/Logger.hpp>
@@ -42,6 +46,7 @@
 #include <util/HighsInt.h>
 #include <ErrorHandling.hpp>
 #include <NetworkTopology.hpp>
+#include <Statistic.hpp>
 #include <WorkerConfig.hpp>
 #include <scope_guard.hpp>
 
@@ -347,6 +352,57 @@ void addConnectivityConstraints(PlacementModel& model, const LogicalPlan& logica
     }
 }
 
+/// Constraint: a statistic probe must run on the same node as the StatisticStoreWriter whose statistic
+/// it reads. The StatisticStore is node-local (one per NodeEngine), so a probe placed on a different
+/// node than its writer reads an empty store and emits nothing. We pair probe and writer by
+/// statisticId and pin them to the same node via `x[probe, n] - x[writer, n] == 0` for every node.
+void addStatisticColocationConstraints(PlacementModel& model, const LogicalPlan& logicalPlan, const NetworkTopology& topology)
+{
+    std::unordered_map<Statistic::StatisticId, OperatorId> writerByStatId;
+    for (const LogicalOperator& op : BFSRange(logicalPlan.getRootOperators().front()))
+    {
+        if (auto writer = op.tryGetAs<StatisticStoreWriterLogicalOperator>())
+        {
+            writerByStatId.insert_or_assign(writer->get().getStatisticId(), op.getId());
+        }
+    }
+
+    for (const LogicalOperator& op : BFSRange(logicalPlan.getRootOperators().front()))
+    {
+        std::optional<Statistic::StatisticId> statisticId;
+        if (auto probe = op.tryGetAs<CountMinSketchProbeLogicalOperator>())
+        {
+            statisticId = probe->get().statisticId;
+        }
+        else if (auto probe = op.tryGetAs<ReservoirProbeLogicalOperator>())
+        {
+            statisticId = probe->get().statisticId;
+        }
+        else if (auto probe = op.tryGetAs<EquiWidthHistogramProbeLogicalOperator>())
+        {
+            statisticId = probe->get().statisticId;
+        }
+        if (not statisticId.has_value())
+        {
+            continue;
+        }
+        const auto writerIt = writerByStatId.find(*statisticId);
+        if (writerIt == writerByStatId.end())
+        {
+            /// No writer for this statistic in the same plan (e.g. a build deployed as a separate
+            /// query via the coordinator). Nothing to co-locate against here.
+            continue;
+        }
+        for (const NetworkTopology::NodeId& nodeId : topology | std::views::keys)
+        {
+            std::array index{
+                model.operatorPlacementMatrix.at({op.getId(), nodeId}), model.operatorPlacementMatrix.at({writerIt->second, nodeId})};
+            std::array values{1.0, -1.0};
+            checkError(Highs_addRow(model.highs, 0.0, 0.0, index.size(), index.data(), values.data()), model.highs);
+        }
+    }
+}
+
 /// Objective: minimize the sum of distances for all operator placements to their descendant sources
 void addDistanceObjective(PlacementModel& model, const LogicalPlan& logicalPlan, const NetworkTopology& topology)
 {
@@ -419,6 +475,7 @@ std::optional<std::unordered_map<OperatorId, NetworkTopology::NodeId>> solvePlac
     addSourcePlacementConstraints(model, logicalPlan);
     addSinkPlacementConstraint(model, logicalPlan);
     addConnectivityConstraints(model, logicalPlan, topology);
+    addStatisticColocationConstraints(model, logicalPlan, topology);
     addDistanceObjective(model, logicalPlan, topology);
     return extractPlacement(model);
 }

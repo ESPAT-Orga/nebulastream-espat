@@ -275,8 +275,7 @@ namespace
 /// Sinks are skipped — their stage type is sink-specific (FileSink, GrpcSink, ...) and not paired
 /// for switching. The ordering is deterministic given a deterministic compiler: each chain visits
 /// pipelines in the same relative order, so two structurally-identical plans line up element-wise.
-std::vector<std::shared_ptr<ExecutablePipeline>>
-collectIntermediatePipelines(const std::vector<CompiledQueryPlan::Source>& sources)
+std::vector<std::shared_ptr<ExecutablePipeline>> collectIntermediatePipelines(const std::vector<CompiledQueryPlan::Source>& sources)
 {
     std::vector<std::shared_ptr<ExecutablePipeline>> result;
     std::unordered_set<PipelineId::Underlying> seen;

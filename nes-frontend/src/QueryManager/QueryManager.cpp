@@ -193,10 +193,7 @@ std::expected<DistributedQueryId, Exception> QueryManager::registerQueryDeferred
 }
 
 std::expected<void, std::vector<Exception>> QueryManager::attachAlternatePipeline(
-    DistributedQueryId queryId,
-    const DistributedLogicalPlan& alternatePlan,
-    const std::string& switchName,
-    int64_t alternateExpectedValue)
+    DistributedQueryId queryId, const DistributedLogicalPlan& alternatePlan, const std::string& switchName, int64_t alternateExpectedValue)
 {
     auto queryResult = getQuery(queryId);
     if (!queryResult.has_value())
@@ -216,14 +213,13 @@ std::expected<void, std::vector<Exception>> QueryManager::attachAlternatePipelin
             INVARIANT(backends.contains(host), "Local query references node ({}) that is not part of the cluster", host);
             if (const auto it = alternatePlan.begin(); it == alternatePlan.end() || alternatePlan[host].empty())
             {
-                exceptions.emplace_back(NotImplemented(
-                    "attachAlternatePipeline: alternate plan has no local plan for host {}", host));
+                exceptions.emplace_back(NotImplemented("attachAlternatePipeline: alternate plan has no local plan for host {}", host));
                 continue;
             }
             auto alternateLocalPlan = alternatePlan[host].front();
             alternateLocalPlan.setQueryId(QueryId::createDistributed(queryId));
-            const auto result = backends.at(host).attachAlternatePipeline(
-                localQueryId, alternateLocalPlan, switchName, alternateExpectedValue);
+            const auto result
+                = backends.at(host).attachAlternatePipeline(localQueryId, alternateLocalPlan, switchName, alternateExpectedValue);
             if (not result)
             {
                 exceptions.push_back(result.error());

@@ -56,8 +56,7 @@ std::optional<Statistic> pickLatest(const std::vector<Statistic>& statistics)
     {
         return std::nullopt;
     }
-    return *std::ranges::max_element(
-        statistics, {}, [](const Statistic& s) { return s.getEndTs().getTime(); });
+    return *std::ranges::max_element(statistics, {}, [](const Statistic& s) { return s.getEndTs().getTime(); });
 }
 
 std::optional<Statistic>
@@ -72,8 +71,8 @@ resolveStatistic(AbstractStatisticStore& store, const Statistic::StatisticId sta
 }
 }
 
-const static int8_t*
-getStatisticDataProxy(OperatorHandler* ptrOpHandler, const Statistic::StatisticId statisticId, const Timestamp startTs, const Timestamp endTs)
+const static int8_t* getStatisticDataProxy(
+    OperatorHandler* ptrOpHandler, const Statistic::StatisticId statisticId, const Timestamp startTs, const Timestamp endTs)
 {
     PRECONDITION(ptrOpHandler != nullptr, "opHandler should not be null!");
 

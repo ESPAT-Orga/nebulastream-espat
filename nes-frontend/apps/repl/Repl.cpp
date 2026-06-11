@@ -32,9 +32,7 @@
 #include <vector>
 #include <unistd.h>
 
-#include <CollectionDomain.hpp>
 #include <Plans/LogicalPlan.hpp>
-#include <RequestStatisticStatement.hpp>
 #include <SQLQueryParser/AntlrSQLQueryParser.hpp>
 #include <SQLQueryParser/StatementBinder.hpp>
 #include <Statements/JsonOutputFormatter.hpp> /// NOLINT(misc-include-cleaner)
@@ -44,7 +42,9 @@
 #include <Util/Logger/Logger.hpp>
 #include <nlohmann/json.hpp>
 #include <nlohmann/json_fwd.hpp>
+#include <CollectionDomain.hpp>
 #include <ErrorHandling.hpp>
+#include <RequestStatisticStatement.hpp>
 #include <replxx.hxx>
 
 namespace NES
@@ -479,8 +479,8 @@ struct Repl::Impl
                                     {
                                         QueryStatement dataStmt = stmt;
                                         dataStmt.plan = std::move(mergedPlan);
-                                        auto deployResult = queryStatementHandler->deployWithSwitchableAlternate(
-                                            dataStmt, *alternateStmt, switchName);
+                                        auto deployResult
+                                            = queryStatementHandler->deployWithSwitchableAlternate(dataStmt, *alternateStmt, switchName);
                                         if (not deployResult.has_value())
                                         {
                                             return std::unexpected(deployResult.error());

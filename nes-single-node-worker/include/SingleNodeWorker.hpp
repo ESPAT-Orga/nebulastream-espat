@@ -90,10 +90,7 @@ public:
     ///                   when the named switch equals `alternateExpectedValue`.
     /// @param alternateExpectedValue value at which the switch routes buffers to the alternate.
     std::expected<void, Exception> attachAlternatePipeline(
-        QueryId queryId,
-        LogicalPlan alternatePlan,
-        std::string switchName,
-        int64_t alternateExpectedValue = 1) noexcept;
+        QueryId queryId, LogicalPlan alternatePlan, std::string switchName, int64_t alternateExpectedValue = 1) noexcept;
 
     /// Starts the Query asynchronously and moves it into the RunningState. Query execution error are only reported during runtime
     /// of the query.

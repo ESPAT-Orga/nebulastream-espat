@@ -35,6 +35,7 @@
 #include <Plans/LogicalPlan.hpp>
 #include <Util/Logger/Logger.hpp>
 #include <fmt/format.h>
+#include <CommonParserFunctions.hpp>
 #include <ErrorHandling.hpp>
 
 namespace NES::AntlrSQLQueryParser
@@ -97,10 +98,17 @@ LogicalPlan createLogicalQueryPlanFromSQLString(std::string_view queryString)
         antlr4::CommonTokenStream tokens(&lexer);
         AntlrSQLParser parser(&tokens);
         [[maybe_unused]] auto listener = installErrorListenerAndHandler(queryString, lexer, parser);
-        AntlrSQLParser::QueryContext* tree = parser.query();
+        /// Parse queryWithOptions (not just query) so a trailing SET (...) clause is consumed and
+        /// applied rather than silently dropped. Only the query subtree feeds the plan creator; the
+        /// options clause is interpreted separately by applyQueryOptionsToPlan.
+        AntlrSQLParser::QueryWithOptionsContext* tree = parser.queryWithOptions();
         Parsers::AntlrSQLQueryPlanCreator queryPlanCreator;
-        antlr4::tree::ParseTreeWalker::DEFAULT.walk(&queryPlanCreator, tree);
+        antlr4::tree::ParseTreeWalker::DEFAULT.walk(&queryPlanCreator, tree->query());
         auto queryPlan = queryPlanCreator.getQueryPlan();
+        if (tree->optionsClause() != nullptr)
+        {
+            applyQueryOptionsToPlan(queryPlan, bindConfigOptions(tree->optionsClause()->options->namedConfigExpression()));
+        }
         queryPlan.setOriginalSql(std::string(queryString));
         NES_DEBUG("Created the following query from antlr AST: \n{}", queryPlan);
         return queryPlan;

@@ -240,8 +240,8 @@ grpc::Status GRPCServer::SetSwitch(grpc::ServerContext* context, const SetSwitch
     return {grpc::INTERNAL, "unknown exception"};
 }
 
-grpc::Status GRPCServer::RegisterQueryDeferred(
-    grpc::ServerContext* context, const RegisterQueryRequest* request, RegisterQueryReply* response)
+grpc::Status
+GRPCServer::RegisterQueryDeferred(grpc::ServerContext* context, const RegisterQueryRequest* request, RegisterQueryReply* response)
 {
     auto plan = QueryPlanSerializationUtil::deserializeQueryPlan(request->queryplan());
     CPPTRACE_TRY
@@ -261,8 +261,8 @@ grpc::Status GRPCServer::RegisterQueryDeferred(
     return {grpc::INTERNAL, "unknown exception"};
 }
 
-grpc::Status GRPCServer::AttachAlternatePipeline(
-    grpc::ServerContext* context, const AttachAlternatePipelineRequest* request, google::protobuf::Empty*)
+grpc::Status
+GRPCServer::AttachAlternatePipeline(grpc::ServerContext* context, const AttachAlternatePipelineRequest* request, google::protobuf::Empty*)
 {
     const auto queryId = QueryPlanSerializationUtil::deserializeQueryId(request->query_id());
     auto alternatePlan = QueryPlanSerializationUtil::deserializeQueryPlan(request->alternate_plan());

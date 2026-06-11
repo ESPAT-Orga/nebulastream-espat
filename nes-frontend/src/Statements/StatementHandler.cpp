@@ -293,8 +293,8 @@ std::expected<QueryStatementResult, Exception> QueryStatementHandler::deployWith
         {
             return std::unexpected{registeredId.error()};
         }
-        if (const auto attachResult = queryManager->attachAlternatePipeline(
-                *registeredId, alternateDistributed, switchName, alternateExpectedValue);
+        if (const auto attachResult
+            = queryManager->attachAlternatePipeline(*registeredId, alternateDistributed, switchName, alternateExpectedValue);
             not attachResult)
         {
             return std::unexpected{QueryRegistrationFailed(

@@ -54,8 +54,8 @@ public:
         bool interactiveMode,
         std::stop_token stopToken,
         std::vector<RequestStatisticBuildStatement> companionStatisticRequests = {},
-        std::optional<std::function<void(DistributedQueryId, const std::string&, Statistic::StatisticId)>>
-            onCompanionAssociatedWithQuery = std::nullopt);
+        std::optional<std::function<void(DistributedQueryId, const std::string&, Statistic::StatisticId)>> onCompanionAssociatedWithQuery
+        = std::nullopt);
     void run();
     ~Repl();
 };

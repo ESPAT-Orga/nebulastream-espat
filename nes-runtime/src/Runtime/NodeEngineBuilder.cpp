@@ -14,8 +14,8 @@
 
 #include <Runtime/NodeEngineBuilder.hpp>
 
-#include <cstdio>
 #include <chrono>
+#include <cstdio>
 #include <map>
 #include <memory>
 #include <utility>
@@ -61,7 +61,8 @@ std::unique_ptr<NodeEngine> NodeEngineBuilder::build(const Host& host)
     const auto numBuffers = workerConfiguration.numberOfBuffersInGlobalBufferManager.getValue();
     const auto maxInflightBuffers = workerConfiguration.defaultMaxInflightBuffers.getValue();
     const auto numWorkerThreads = workerConfiguration.queryEngine.numberOfWorkerThreads.getValue();
-    fprintf(stderr,
+    fprintf(
+        stderr,
         "[NodeEngineBuilder] BufferManager: operator_buffer_size=%lu, number_of_buffers_in_global_buffer_manager=%lu, "
         "default_max_inflight_buffers=%lu, number_of_worker_threads=%lu\n",
         static_cast<unsigned long>(bufferSize),

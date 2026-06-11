@@ -54,8 +54,8 @@ public:
     }
 
     /// Optional: attach an alternate plan to a pending-registered query (see registerQueryDeferred).
-    virtual std::expected<void, Exception>
-    attachAlternatePipeline(QueryId /*queryId*/, LogicalPlan /*alternatePlan*/, const std::string& /*switchName*/, int64_t /*alternateExpectedValue*/)
+    virtual std::expected<void, Exception> attachAlternatePipeline(
+        QueryId /*queryId*/, LogicalPlan /*alternatePlan*/, const std::string& /*switchName*/, int64_t /*alternateExpectedValue*/)
     {
         return std::unexpected{NotImplemented("attachAlternatePipeline is not implemented for this backend")};
     }

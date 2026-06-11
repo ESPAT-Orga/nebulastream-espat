@@ -462,9 +462,26 @@ struct QueryPlanBuilder
 
     using QueryComponentDescriptor = std::variant<SourceDescriptor, SinkDescriptor, PipelineDescriptor>;
 
+    /// Per-source overrides for the SpliceToRunningSource / deferred-start paths. The default
+    /// (addSource() with no config) builds a normal TestSource with its own thread, as before.
+    struct SourceConfig
+    {
+        /// No real source thread: graft this source's successors onto the running source
+        /// registered under `logicalSourceName` (the entry's `source` is left null).
+        bool spliceToRunningSource = false;
+        /// Register the source but defer its emit thread until `deferStartExpectedSpliceCount`
+        /// build branches have spliced in (used by the splice target / data query).
+        bool deferStart = false;
+        uint32_t deferStartExpectedSpliceCount = 1;
+        std::string logicalSourceName;
+    };
+
     identifier_t addPipeline(const std::vector<identifier_t>& predecssors);
 
     identifier_t addSource();
+
+    /// Add a source with a SpliceToRunningSource / deferred-start configuration.
+    identifier_t addSource(SourceConfig config);
 
     identifier_t addSink(const std::vector<identifier_t>& predecessors);
 
@@ -492,6 +509,7 @@ private:
     std::unordered_map<identifier_t, std::vector<identifier_t>> forwardRelations;
     std::unordered_map<identifier_t, std::vector<identifier_t>> backwardRelations;
     std::unordered_map<identifier_t, QueryComponentDescriptor> objects;
+    std::unordered_map<identifier_t, SourceConfig> sourceConfigs;
 };
 
 struct TestingHarness

@@ -283,7 +283,14 @@ void buildPipelineRecursively(
             for (auto& child : opWrapper->getChildren())
             {
                 buildPipelineRecursively(
-                    child, opWrapper, currentPipeline, pipelineMap, PipelinePolicy::ForceNew, configuredBufferSize, mergePoints, fuseOperators);
+                    child,
+                    opWrapper,
+                    currentPipeline,
+                    pipelineMap,
+                    PipelinePolicy::ForceNew,
+                    configuredBufferSize,
+                    mergePoints,
+                    fuseOperators);
             }
         }
 

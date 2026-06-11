@@ -174,6 +174,13 @@ QueryPlanBuilder::identifier_t QueryPlanBuilder::addSource()
     return identifier;
 }
 
+QueryPlanBuilder::identifier_t QueryPlanBuilder::addSource(SourceConfig config)
+{
+    auto identifier = addSource();
+    sourceConfigs[identifier] = std::move(config);
+    return identifier;
+}
+
 QueryPlanBuilder::identifier_t QueryPlanBuilder::addSink(const std::vector<identifier_t>& predecessors)
 {
     auto identifier = nextIdentifier++;
@@ -265,14 +272,34 @@ QueryPlanBuilder::TestPlanCtrl QueryPlanBuilder::build(QueryId queryId, std::sha
     {
         std::vector<std::weak_ptr<ExecutablePipeline>> successors;
         std::ranges::transform(forwardRelations.at(source.first), std::back_inserter(successors), getOrCreatePipeline);
+        SourceConfig config;
+        if (auto it = sourceConfigs.find(source.first); it != sourceConfigs.end())
+        {
+            config = it->second;
+        }
+        if (config.spliceToRunningSource)
+        {
+            /// Splice source: no real source thread / no TestSourceControl. The engine grafts these
+            /// successors onto the running source registered under `logicalSourceName`.
+            sources.emplace_back(ExecutableQueryPlan::SourceWithSuccessor{
+                .source = nullptr,
+                .successors = std::move(successors),
+                .spliceToRunningSource = true,
+                .deferStart = false,
+                .deferStartExpectedSpliceCount = 1,
+                .logicalSourceName = config.logicalSourceName});
+            continue;
+        }
         auto [s, ctrl] = getTestSource(
-            mergedListener,
-            std::get<SourceDescriptor>(source.second).sourceId,
-            std::get<SourceDescriptor>(source.second).pipelineId,
-            bm);
+            mergedListener, std::get<SourceDescriptor>(source.second).sourceId, std::get<SourceDescriptor>(source.second).pipelineId, bm);
         sourceIds.emplace(source.first, s->getSourceId());
         sources.emplace_back(ExecutableQueryPlan::SourceWithSuccessor{
-            .source = std::move(s), .successors = std::move(successors), .spliceToRunningSource = false, .logicalSourceName = {}});
+            .source = std::move(s),
+            .successors = std::move(successors),
+            .spliceToRunningSource = false,
+            .deferStart = config.deferStart,
+            .deferStartExpectedSpliceCount = config.deferStartExpectedSpliceCount,
+            .logicalSourceName = config.logicalSourceName});
         sourceCtrls[source.first] = ctrl;
     }
 

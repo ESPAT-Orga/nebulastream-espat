@@ -1,0 +1,40 @@
+# Skeleton for the synopsis-amortization runner (Nexmark, bid_6GB.csv).
+# synopsis_query_builder.py loads this with PyYAML and treats only two things as authoritative:
+#   - the logical source schema below (column order + types), and
+#   - the event-time field, read from the WINDOW TUMBLING(...) clause of the placeholder `query`.
+# It then derives the numeric fields, and overwrites `query`, the sink `schema`, and the source `file_path`
+# before submitting. The placeholder query / empty sink schema here are never run as-is.
+query: SELECT COUNT(*) FROM build_source WINDOW TUMBLING(timestamp, size 10 sec) INTO void_sink
+sinks:
+  - name: void_sink
+    host: localhost:8080
+    schema: []
+    type: Void
+    config: {}
+    parser_config: {}
+logical:
+  - name: build_source
+    schema:
+      - name: timestamp
+        type: UINT64
+        nullable: false
+      - name: auctionId
+        type: INT32
+        nullable: false
+      - name: bidder
+        type: INT32
+        nullable: false
+      - name: price
+        type: FLOAT64
+        nullable: false
+physical:
+  - logical: build_source
+    host: localhost:8080
+    type: Memory
+    parser_config:
+      type: Native
+    source_config:
+      file_path: PLACEHOLDER
+workers:
+  - host: localhost:8080
+    data_address: localhost:9090

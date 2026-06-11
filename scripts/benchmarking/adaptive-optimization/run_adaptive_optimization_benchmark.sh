@@ -68,13 +68,10 @@ rm -rf "$RESULTS_DIR"
 mkdir -p "$RESULTS_DIR"
 echo "[wrapper] Results dir: $RESULTS_DIR (clean)"
 
-# Create a Python virtual environment and install numpy (used by generate_bid_data.py).
-# The venv is kept across runs so numpy isn't reinstalled every invocation.
-if [ ! -d myenv ]; then
-    python3 -m venv myenv
-    myenv/bin/pip install --quiet numpy
-fi
+# Create a Python virtual environment and install the required python libraries
+python3 -m venv myenv
 source myenv/bin/activate
+pip3 install argparse requests pandas pyyaml numpy
 
 # `python -m` rejects hyphens in module paths (`adaptive-optimization` isn't a valid identifier),
 # so run the script by file path. The script appends the repo root to sys.path itself, which is
@@ -84,11 +81,15 @@ PYSCRIPT="scripts/benchmarking/adaptive-optimization/run_adaptive_optimization_b
 
 # Each run also redirects its console output to a log file alongside the CSV
 # so failures can be diagnosed without re-running.
-for variant_spec in \
-    "adaptive::adaptive.csv" \
-    "prometheus:--baseline-prometheus:prometheus.csv" \
-    "bid_first:--fixed-variant bid_first:bid_first.csv" \
-    "price_first:--fixed-variant price_first:price_first.csv"; do
+# Each element is on its own line (no `\` continuation) so any variant can be
+# commented out independently without breaking the list.
+variant_specs=(
+    "adaptive::adaptive.csv"
+    "prometheus:--baseline-prometheus:prometheus.csv"
+    "bid_first:--fixed-variant bid_first:bid_first.csv"
+    "price_first:--fixed-variant price_first:price_first.csv"
+)
+for variant_spec in "${variant_specs[@]}"; do
     IFS=':' read -r label variant_flag csv_name <<<"$variant_spec"
     echo "[wrapper] --- Running variant: $label ---"
     csv_path="$RESULTS_DIR/$csv_name"
@@ -96,11 +97,13 @@ for variant_spec in \
     # `$variant_flag` deliberately unquoted so an empty value contributes no arg
     # and "--fixed-variant bid_first" expands to two args.
     # shellcheck disable=SC2086
-    "$PYBIN" "$PYSCRIPT" $variant_flag --output "$csv_path" "${FORWARDED_ARGS[@]}" 2>&1 | tee "$log_path"
+    "$PYBIN" "$PYSCRIPT" --sqrts 200 --duration 120 $variant_flag --output "$csv_path" "${FORWARDED_ARGS[@]}" 2>&1 | tee "$log_path"
     echo "[wrapper] --- Done: $label (csv=$csv_path, log=$log_path) ---"
 done
 
+# Deactivate the virtual environment
 deactivate
+rm -rf myenv
 
 echo "[wrapper] All four runs complete. Results in: $RESULTS_DIR"
 ls -la "$RESULTS_DIR"

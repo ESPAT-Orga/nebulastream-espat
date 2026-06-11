@@ -1,26 +1,17 @@
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#    https://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
-query: SELECT SUM(cpu) AS sum_cpu FROM build_source WINDOW TUMBLING(creationTS, size {window_size} sec) INTO void_sink;
+# Skeleton for the synopsis-amortization runner (ClusterMonitoring, google-cluster-data-original_1G.csv).
+# synopsis_query_builder.py loads this with PyYAML and treats only two things as authoritative:
+#   - the logical source schema below (column order + types), and
+#   - the event-time field, read from the WINDOW TUMBLING(...) clause of the placeholder `query`.
+# It then derives the numeric fields, and overwrites `query`, the sink `schema`, and the source `file_path`
+# before submitting. The placeholder query / empty sink schema here are never run as-is.
+query: SELECT COUNT(*) FROM build_source WINDOW TUMBLING(creationTS, size 10 sec) INTO void_sink
 sinks:
   - name: void_sink
     host: localhost:8080
-    schema:
-      - name: build_source$sum_cpu
-        type: FLOAT64
-        nullable: false
+    schema: []
     type: Void
-    config: {{ }}
-    parser_config: {{ }}
+    config: {}
+    parser_config: {}
 logical:
   - name: build_source
     schema:
@@ -67,7 +58,7 @@ physical:
     parser_config:
       type: Native
     source_config:
-      file_path: {build_dataset_path}
+      file_path: PLACEHOLDER
 workers:
   - host: localhost:8080
     data_address: localhost:9090

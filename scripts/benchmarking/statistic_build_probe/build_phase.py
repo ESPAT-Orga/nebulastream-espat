@@ -12,14 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Build-phase helpers shared by run_statistic_build.py and run_statistic_accuracy.py.
+"""Build-phase helpers used by run_statistic_accuracy.py.
 
-Both scripts iterate over the same parameter grid and need to populate the
-worker's StatisticStore by submitting an existing ``*Build_*.yaml.template``.
-The throughput-measurement script keeps only the throughput; the accuracy
-script ignores it and continues with follow-up queries against the populated
-synopsis.  Putting the rendering + submit/wait/parse here keeps the two
-scripts in sync without one importing from the other.
+The accuracy runner needs to populate the worker's StatisticStore by submitting
+an existing ``*Build_*.yaml.template`` before running follow-up queries against
+the populated synopsis.  Keeping the rendering + submit/wait/parse here lets the
+accuracy runner reuse it; the synopsis-amortization runner builds its own
+multi-synopsis YAML (see synopsis_query_builder.py) and does not use this.
 """
 
 import os

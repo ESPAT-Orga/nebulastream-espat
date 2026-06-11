@@ -19,22 +19,23 @@ the Memory source.
 Schema (matches the logical `bid` source in the benchmark scripts):
     timestamp UINT64  -- monotonic sequence starting at 0
     auctionId INT32   -- monotonic sequence starting at 0
-    bidValue  FLOAT64 -- Normal(mean, stddev) per --bid-mean / --bid-stddev
-    price     FLOAT64 -- Normal(mean, stddev) per --price-mean / --price-stddev
+    bidValue  FLOAT64 -- low/high cluster straddling BID_THRESHOLD
+    price     FLOAT64 -- low/high cluster straddling PRICE_THRESHOLD
 
 The CSV is comma-separated, newline-terminated, no header, no quoting.
 
-Two predefined "regimes" are used by the adaptive benchmark to simulate a workload-distribution
-shift between bid-first and price-first being the optimal filter ordering:
+Selectivity is controlled EXACTLY, not via a distribution tail. Each field is drawn from one
+of two tight clusters (a "pass" cluster below the filter threshold and a "fail" cluster above
+it). A regime says what fraction of rows land in each field's pass cluster, and exactly that
+fraction is assigned per chunk — so the realized selectivity hits the target precisely. The
+clusters are narrow (CLUSTER_STDDEV) so the boundary is sharp: no values sit near the
+threshold and jitter never crosses it. The two fields are assigned independently, so the
+combined (AND) selectivity is the product of the two pass fractions.
 
-    A (default): bidValue ~ N(50, 17), price ~ N(500, 167)
-        bidValue < 10.45  → ~1% pass  (selective)
-        price    < 888.49 → ~99% pass (non-selective)
+    A (default): bidValue 1% pass (selective),  price 99% pass (non-selective)
         => bid-first is the cheap order.
 
-    B (flipped): bidValue ~ N(-30, 17), price ~ N(1277, 167)
-        bidValue < 10.45  → ~99% pass (non-selective)
-        price    < 888.49 → ~1% pass  (selective)
+    B (flipped): bidValue 99% pass (non-selective), price 1% pass (selective)
         => price-first is the cheap order.
 
 ensure_dataset_a() and ensure_dataset_b() are convenience wrappers used by the benchmark scripts.
@@ -42,7 +43,8 @@ ensure_dataset_a() and ensure_dataset_b() are convenience wrappers used by the b
 Usage:
     python -m scripts.benchmarking.adaptive-optimization.generate_bid_data
     python -m scripts.benchmarking.adaptive-optimization.generate_bid_data --regime B
-    python -m scripts.benchmarking.adaptive-optimization.generate_bid_data --bid-mean 0 --bid-stddev 50
+    python -m scripts.benchmarking.adaptive-optimization.generate_bid_data --regime custom \
+        --bid-pass 0.1 --price-pass 0.9 --output data/custom.csv
 """
 
 import argparse
@@ -55,28 +57,60 @@ DEFAULT_COUNT = 30_000_000
 DEFAULT_SEED = 1
 _DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 
-# Regime parameters (mean / stddev for bidValue and price).
-REGIME_A = {"bid_mean": 50.0, "bid_stddev": 17.0, "price_mean": 500.0, "price_stddev": 167.0}
-REGIME_B = {"bid_mean": -30.0, "bid_stddev": 17.0, "price_mean": 1277.0, "price_stddev": 167.0}
+# Filter thresholds — must match the SQL filters in run_adaptive_optimization_benchmark.py
+# (bidValue < 10.45, price < 888.49). The absolute values are arbitrary; only the pass
+# fractions below matter, since selectivity is set by construction.
+BID_THRESHOLD = 10.45
+PRICE_THRESHOLD = 888.49
+
+# Low (pass, below threshold) and high (fail, above threshold) cluster centers, placed well
+# clear of each threshold on both sides so the sharp clusters never straddle it.
+BID_PASS_MEAN, BID_FAIL_MEAN = 0.0, 20.0
+PRICE_PASS_MEAN, PRICE_FAIL_MEAN = 800.0, 980.0
+
+# Cluster spread. Small => sharp boundary. Kept far below the gap from each cluster center to
+# its threshold (~10 for bid, ~88/91 for price) so a value never lands on the wrong side and
+# the per-chunk pass count stays exact.
+CLUSTER_STDDEV = 1.0
+
+# Regime parameters: fraction of rows whose field lands in the pass cluster (i.e. selectivity).
+REGIME_A = {"bid_pass": 0.01, "price_pass": 0.99}
+REGIME_B = {"bid_pass": 0.99, "price_pass": 0.01}
 
 DEFAULT_OUTPUT_A = os.path.join(_DATA_DIR, "bid_A_30M.csv")
 DEFAULT_OUTPUT_B = os.path.join(_DATA_DIR, "bid_B_30M.csv")
+
+
+def _make_field(n, pass_frac, pass_mean, fail_mean, stddev, mask_rng, jitter_rng):
+    """Build `n` values where EXACTLY round(pass_frac * n) land in the (low) pass cluster.
+
+    `mask_rng` picks which rows pass (independent per field); `jitter_rng` adds the narrow
+    spread. The exact count comes from the assignment, not from a distribution tail.
+    """
+    n_pass = int(round(pass_frac * n))
+    centers = np.full(n, fail_mean, dtype=np.float64)
+    if n_pass > 0:
+        pass_idx = mask_rng.choice(n, size=n_pass, replace=False)
+        centers[pass_idx] = pass_mean
+    return centers + jitter_rng.normal(0.0, stddev, size=n)
 
 
 def _generate(
     output_path: str,
     count: int,
     seed: int,
-    bid_mean: float,
-    bid_stddev: float,
-    price_mean: float,
-    price_stddev: float,
+    bid_pass: float,
+    price_pass: float,
     chunk_size: int = 1_000_000,
 ) -> None:
     """Write `count` rows of synthetic bid data to `output_path` as CSV."""
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
 
-    rng = np.random.default_rng(seed)
+    # Independent RNG streams: which bid rows pass, bid jitter, which price rows pass, price
+    # jitter. Independent pass masks => bidValue and price selectivities are uncorrelated.
+    bid_mask_rng, bid_jit_rng, price_mask_rng, price_jit_rng = (
+        np.random.default_rng(s) for s in np.random.SeedSequence(seed).spawn(4)
+    )
 
     tmp_path = output_path + ".tmp"
     written = 0
@@ -85,8 +119,8 @@ def _generate(
             n = min(chunk_size, count - written)
             timestamps = np.arange(written, written + n, dtype=np.uint64)
             auction_ids = np.arange(written, written + n, dtype=np.int32)
-            bid_values = rng.normal(loc=bid_mean, scale=bid_stddev, size=n).astype(np.float64)
-            prices = rng.normal(loc=price_mean, scale=price_stddev, size=n).astype(np.float64)
+            bid_values = _make_field(n, bid_pass, BID_PASS_MEAN, BID_FAIL_MEAN, CLUSTER_STDDEV, bid_mask_rng, bid_jit_rng)
+            prices = _make_field(n, price_pass, PRICE_PASS_MEAN, PRICE_FAIL_MEAN, CLUSTER_STDDEV, price_mask_rng, price_jit_rng)
 
             lines = (
                 np.char.add(
@@ -121,10 +155,8 @@ def ensure_dataset(
     path: str,
     count: int = DEFAULT_COUNT,
     seed: int = DEFAULT_SEED,
-    bid_mean: float = REGIME_A["bid_mean"],
-    bid_stddev: float = REGIME_A["bid_stddev"],
-    price_mean: float = REGIME_A["price_mean"],
-    price_stddev: float = REGIME_A["price_stddev"],
+    bid_pass: float = REGIME_A["bid_pass"],
+    price_pass: float = REGIME_A["price_pass"],
 ) -> str:
     """Generate the dataset if it does not already exist. Returns the absolute path."""
     abs_path = os.path.abspath(path)
@@ -133,10 +165,10 @@ def ensure_dataset(
         return abs_path
     print(
         f"[generate_bid_data] generating {count:,} rows "
-        f"(bid~N({bid_mean},{bid_stddev}), price~N({price_mean},{price_stddev})) -> {abs_path}",
+        f"(bidValue {bid_pass:.0%} pass, price {price_pass:.0%} pass) -> {abs_path}",
         flush=True,
     )
-    _generate(abs_path, count, seed, bid_mean, bid_stddev, price_mean, price_stddev)
+    _generate(abs_path, count, seed, bid_pass, price_pass)
     print(f"[generate_bid_data] done: {abs_path} ({os.path.getsize(abs_path):,} bytes)", flush=True)
     return abs_path
 
@@ -161,12 +193,10 @@ def main() -> int:
         "--regime",
         choices=["A", "B", "both", "custom"],
         default="A",
-        help="Predefined distribution regime to generate. 'custom' uses the --bid-* / --price-* flags.",
+        help="Predefined selectivity regime to generate. 'custom' uses --bid-pass / --price-pass.",
     )
-    parser.add_argument("--bid-mean", type=float, default=None, help="Mean of the bidValue normal distribution (custom only).")
-    parser.add_argument("--bid-stddev", type=float, default=None, help="Stddev of the bidValue normal distribution (custom only).")
-    parser.add_argument("--price-mean", type=float, default=None, help="Mean of the price normal distribution (custom only).")
-    parser.add_argument("--price-stddev", type=float, default=None, help="Stddev of the price normal distribution (custom only).")
+    parser.add_argument("--bid-pass", type=float, default=None, help="Fraction of rows passing the bidValue filter (custom only).")
+    parser.add_argument("--price-pass", type=float, default=None, help="Fraction of rows passing the price filter (custom only).")
     args = parser.parse_args()
 
     def maybe_force(path: str) -> None:
@@ -191,18 +221,16 @@ def main() -> int:
         if args.output is None:
             print("--output is required with --regime custom", file=sys.stderr)
             return 2
-        if None in (args.bid_mean, args.bid_stddev, args.price_mean, args.price_stddev):
-            print("--bid-mean, --bid-stddev, --price-mean, --price-stddev are all required with --regime custom", file=sys.stderr)
+        if None in (args.bid_pass, args.price_pass):
+            print("--bid-pass and --price-pass are both required with --regime custom", file=sys.stderr)
             return 2
         maybe_force(args.output)
         ensure_dataset(
             path=args.output,
             count=args.count,
             seed=args.seed if args.seed is not None else DEFAULT_SEED,
-            bid_mean=args.bid_mean,
-            bid_stddev=args.bid_stddev,
-            price_mean=args.price_mean,
-            price_stddev=args.price_stddev,
+            bid_pass=args.bid_pass,
+            price_pass=args.price_pass,
         )
     return 0
 

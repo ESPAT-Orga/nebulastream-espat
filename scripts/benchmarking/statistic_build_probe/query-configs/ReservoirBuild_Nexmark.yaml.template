@@ -48,9 +48,9 @@ logical:
 physical:
   - logical: build_source
     host: localhost:8080
-    type: File
+    type: Memory
     parser_config:
-      type: CSV
+      type: Native
     source_config:
       file_path: {build_dataset_path}
 workers:

@@ -105,32 +105,31 @@ LogicalPlan LogicalSourceExpansionRule::apply(LogicalPlan queryPlan) const
         const auto deferStartTrait = sourceOp.getTraitSet().tryGet<DeferSourceStartTrait>();
         auto expandedSourceOperators = entries
             | std::views::transform(
-                [spliceMarker, &deferStartTrait](const auto& entry)
-                {
-                    LogicalOperator op{SourceDescriptorLogicalOperator{entry}};
-                    auto ts = op.getTraitSet();
-                    if (spliceMarker)
-                    {
-                        [[maybe_unused]] const auto inserted = tryInsert(ts, SpliceToRunningSourceTrait{});
-                    }
-                    if (deferStartTrait.has_value())
-                    {
-                        [[maybe_unused]] const auto inserted = tryInsert(ts, deferStartTrait.value().get());
-                    }
-                    if (spliceMarker or deferStartTrait.has_value())
-                    {
-                        op = op.withTraitSet(ts);
-                    }
-                    return op;
-                })
+                                           [spliceMarker, &deferStartTrait](const auto& entry)
+                                           {
+                                               LogicalOperator op{SourceDescriptorLogicalOperator{entry}};
+                                               auto ts = op.getTraitSet();
+                                               if (spliceMarker)
+                                               {
+                                                   [[maybe_unused]] const auto inserted = tryInsert(ts, SpliceToRunningSourceTrait{});
+                                               }
+                                               if (deferStartTrait.has_value())
+                                               {
+                                                   [[maybe_unused]] const auto inserted = tryInsert(ts, deferStartTrait.value().get());
+                                               }
+                                               if (spliceMarker or deferStartTrait.has_value())
+                                               {
+                                                   op = op.withTraitSet(ts);
+                                               }
+                                               return op;
+                                           })
             | std::ranges::to<std::vector>();
 
         /// Replace the source-name op (rather than its parent) with the Union(SourceDescriptors)
         /// subtree. This handles both single-parent (the historical assumption) and multi-parent
         /// DAG-shaped plans uniformly: replaceSubtree by id substitutes every occurrence in the
         /// plan, so all parents converge on the same expanded subtree without further bookkeeping.
-        const auto unionWithExpansion
-            = LogicalOperator{UnionLogicalOperator{}.withChildren(std::move(expandedSourceOperators))};
+        const auto unionWithExpansion = LogicalOperator{UnionLogicalOperator{}.withChildren(std::move(expandedSourceOperators))};
         auto replaceResult = replaceSubtree(queryPlan, sourceOp.getId(), unionWithExpansion);
 
         INVARIANT(

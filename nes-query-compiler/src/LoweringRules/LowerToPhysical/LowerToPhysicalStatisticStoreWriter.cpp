@@ -13,6 +13,9 @@
 */
 #include <LoweringRules/LowerToPhysical/LowerToPhysicalStatisticStoreWriter.hpp>
 
+#include <utility>
+#include <vector>
+#include <DataTypes/Schema.hpp>
 #include <Operators/Statistic/StatisticStoreWriterLogicalOperator.hpp>
 #include <Statistic/StatisticStore/StatisticStoreOperatorHandler.hpp>
 #include <Statistic/StatisticStore/StatisticStoreWriter.hpp>
@@ -34,12 +37,16 @@ LowerToPhysicalStatisticStoreWriter::apply(LogicalOperator logicalOperator, cons
     const auto memoryLayoutTypeTrait = logicalOperator.getTraitSet().tryGet<MemoryLayoutTypeTrait>();
     PRECONDITION(memoryLayoutTypeTrait.has_value(), "Expected a memory layout type trait");
     const auto memoryLayoutType = memoryLayoutTypeTrait.value()->memoryLayout;
+    const auto qualifier = inputSchema.getQualifierNameForSystemGeneratedFieldsWithSeparator();
+    const auto& inputLogicalFields = *logicalStatisticStoreWriter->inputLogicalStatisticFields;
+    /// Data field is the id-derived name, matching the StatisticBuild output / physical result field.
     StatisticStoreWriter statisticStoreWriter{
         operatorHandlerId,
         logicalStatisticStoreWriter->getStatisticId(),
         logicalStatisticStoreWriter->getStatisticType(),
-        *logicalStatisticStoreWriter->inputLogicalStatisticFields,
-        logicalStatisticStoreWriter->getOutputStatisticFields(inputSchema.getQualifierNameForSystemGeneratedFieldsWithSeparator())};
+        statisticDataFieldName(logicalStatisticStoreWriter->getStatisticId()),
+        inputLogicalFields,
+        logicalStatisticStoreWriter->getOutputStatisticFields(qualifier)};
 
 
     auto outputSchema = logicalStatisticStoreWriter.getOutputSchema();

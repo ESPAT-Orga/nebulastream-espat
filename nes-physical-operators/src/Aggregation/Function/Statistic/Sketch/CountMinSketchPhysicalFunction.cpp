@@ -25,6 +25,16 @@
 
 namespace NES
 {
+/// Counter-count (rows × cols) cut-off below which combine() unrolls the loop with a static_val<> (faster runtime
+/// code) rather than a runtime val<> loop. Measured to keep combine's compile contribution under ~1s. Above it
+/// the unrolled IR makes compilation explode.
+constexpr uint64_t kMaxStaticUnrollCounters = 640;
+
+/// Row-count cut-off below which lift() unrolls the per-row loop with a static_val<> (faster runtime code) rather
+/// than a runtime val<> loop. Measured to keep query compilation under ~1s. Above it the unrolled IR (a full H3
+/// hash per row) makes compilation explode.
+constexpr uint64_t kMaxStaticUnrollRows = 11;
+
 CountMinSketchPhysicalFunction::CountMinSketchPhysicalFunction(
     DataType inputType,
     DataType resultType,
@@ -54,17 +64,37 @@ void CountMinSketchPhysicalFunction::lift(
     const auto value = inputFunction.execute(record, pipelineMemoryProvider.arena);
     const auto firstCounterRef = static_cast<nautilus::val<int8_t*>>(aggregationState);
     const auto firstSeedsRef = static_cast<nautilus::val<int8_t*>>(aggregationState) + nautilus::val<uint64_t>{totalSizeOfSketchInBytes};
-    /// This should be a val<>, as with a static_val<> the compilation times shoots through the roof
-    for (nautilus::val<uint64_t> row = 0; row < numberOfRows.getRawValue(); ++row)
+
+    /// Unroll the per-row loop only for small row counts (see kMaxStaticUnrollRows). Above the cut-off a
+    /// static_val<> would unroll numberOfRows full H3 hashes and blow the compile time up.
+    if (numberOfRows.getRawValue() >= kMaxStaticUnrollRows)
     {
-        const auto seedsRef = firstSeedsRef + nautilus::val<uint64_t>{row * sizeOfSingleSeed};
-        H3HashFunction h3HashFunction{sizeOfSingleSeed, numberOfBitsInKey, seedsRef};
-        auto hash = h3HashFunction.HashFunction::calculate(value);
-        auto col = hash % numberOfCols.getRawValue();
-        auto counterRef = firstCounterRef + counterType.getSizeInBytesWithoutNull() * (row * numberOfCols.getRawValue() + col);
-        auto counter = VarVal::readNonNullableVarValFromMemory(counterRef, counterType);
-        counter = counter + nautilus::val<uint64_t>{1};
-        counter.writeToMemory(counterRef);
+        for (nautilus::val<uint64_t> row = 0; row < numberOfRows.getRawValue(); ++row)
+        {
+            const auto seedsRef = firstSeedsRef + nautilus::val<uint64_t>{row * sizeOfSingleSeed};
+            H3HashFunction h3HashFunction{sizeOfSingleSeed, numberOfBitsInKey, seedsRef};
+            auto hash = h3HashFunction.HashFunction::calculate(value);
+            auto col = hash % numberOfCols.getRawValue();
+            auto counterRef = firstCounterRef + counterType.getSizeInBytesWithoutNull() * (row * numberOfCols.getRawValue() + col);
+            auto counter = VarVal::readNonNullableVarValFromMemory(counterRef, counterType);
+            counter = counter + nautilus::val<uint64_t>{1};
+            counter.writeToMemory(counterRef);
+        }
+    }
+    else
+    {
+        /// Small enough no. rows, so we can use a static_val to unroll the loop in the query compiled code
+        for (nautilus::static_val<uint64_t> row = 0; row < numberOfRows.getRawValue(); ++row)
+        {
+            const auto seedsRef = firstSeedsRef + nautilus::val<uint64_t>{row * sizeOfSingleSeed};
+            H3HashFunction h3HashFunction{sizeOfSingleSeed, numberOfBitsInKey, seedsRef};
+            auto hash = h3HashFunction.HashFunction::calculate(value);
+            auto col = hash % numberOfCols.getRawValue();
+            auto counterRef = firstCounterRef + counterType.getSizeInBytesWithoutNull() * (row * numberOfCols.getRawValue() + col);
+            auto counter = VarVal::readNonNullableVarValFromMemory(counterRef, counterType);
+            counter = counter + nautilus::val<uint64_t>{1};
+            counter.writeToMemory(counterRef);
+        }
     }
 
     /// Incrementing the number of seen tuples
@@ -84,16 +114,33 @@ void CountMinSketchPhysicalFunction::combine(
     auto counter2RefTemp = aggregationState2;
     auto counter1Ref = static_cast<nautilus::val<int8_t*>>(counter1RefTemp);
     auto counter2Ref = static_cast<nautilus::val<int8_t*>>(counter2RefTemp);
-    /// This should be a val<>, as with a static_val<> the compilation times shoots through the roof
-    for (nautilus::val<uint64_t> counterIdx = 0; counterIdx < numberOfRows.getRawValue() * numberOfCols.getRawValue(); ++counterIdx)
+    const auto numberOfCounters = numberOfRows.getRawValue() * numberOfCols.getRawValue();
+    /// Unroll for small sketches, fall back to a runtime loop for large ones (see kMaxStaticUnrollCounters).
+    if (numberOfCounters < kMaxStaticUnrollCounters)
     {
-        auto counter1 = VarVal::readNonNullableVarValFromMemory(counter1Ref, counterType);
-        auto counter2 = VarVal::readNonNullableVarValFromMemory(counter2Ref, counterType);
-        counter1 = counter1 + counter2;
-        counter1.writeToMemory(counter1Ref);
+        for (nautilus::static_val<uint64_t> counterIdx = 0; counterIdx < numberOfCounters; ++counterIdx)
+        {
+            auto counter1 = VarVal::readNonNullableVarValFromMemory(counter1Ref, counterType);
+            auto counter2 = VarVal::readNonNullableVarValFromMemory(counter2Ref, counterType);
+            counter1 = counter1 + counter2;
+            counter1.writeToMemory(counter1Ref);
 
-        counter1Ref += counterType.getSizeInBytesWithoutNull();
-        counter2Ref += counterType.getSizeInBytesWithoutNull();
+            counter1Ref += counterType.getSizeInBytesWithoutNull();
+            counter2Ref += counterType.getSizeInBytesWithoutNull();
+        }
+    }
+    else
+    {
+        for (nautilus::val<uint64_t> counterIdx = 0; counterIdx < numberOfCounters; ++counterIdx)
+        {
+            auto counter1 = VarVal::readNonNullableVarValFromMemory(counter1Ref, counterType);
+            auto counter2 = VarVal::readNonNullableVarValFromMemory(counter2Ref, counterType);
+            counter1 = counter1 + counter2;
+            counter1.writeToMemory(counter1Ref);
+
+            counter1Ref += counterType.getSizeInBytesWithoutNull();
+            counter2Ref += counterType.getSizeInBytesWithoutNull();
+        }
     }
     const auto numberOfSeenTuplesRef1 = static_cast<nautilus::val<int8_t*>>(aggregationState1)
         + nautilus::val<uint64_t>{totalSizeOfSketchInBytes} + nautilus::val<uint64_t>{totalSizeOfSeeds};

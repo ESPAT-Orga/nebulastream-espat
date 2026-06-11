@@ -15,9 +15,9 @@
 #pragma once
 
 #include <string>
-#include <CollectionDomain.hpp>
 #include <Operators/LogicalOperator.hpp>
 #include <Plans/LogicalPlan.hpp>
+#include <CollectionDomain.hpp>
 #include <RequestStatisticStatement.hpp>
 #include <Statistic.hpp>
 #include <StatisticQueryGenerator.hpp>

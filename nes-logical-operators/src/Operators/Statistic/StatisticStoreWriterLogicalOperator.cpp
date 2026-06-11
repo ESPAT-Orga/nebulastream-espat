@@ -102,22 +102,30 @@ StatisticStoreWriterLogicalOperator StatisticStoreWriterLogicalOperator::withInf
     const auto& copyInputLogicalFields = copy.inputLogicalStatisticFields;
     if (not copy.inputSchema.getFieldByName(copyInputLogicalFields->statisticStartTsField.name).has_value()
         or not copy.inputSchema.getFieldByName(copyInputLogicalFields->statisticEndTsField.name).has_value()
-        or not copy.inputSchema.getFieldByName(copyInputLogicalFields->statisticDataField.name).has_value()
         or not copy.inputSchema.getFieldByName(copyInputLogicalFields->statisticNumberOfSeenTuplesField.name).has_value())
     {
-        std::stringstream expectedFields;
-        expectedFields << copyInputLogicalFields->statisticStartTsField << ", " << copyInputLogicalFields->statisticEndTsField << ", "
-                       << copyInputLogicalFields->statisticDataField << ", " << copyInputLogicalFields->statisticNumberOfSeenTuplesField;
-        throw FieldNotFound("Expected the following fields {} to be in the schema {}.", expectedFields.str(), copy.inputSchema);
+        throw FieldNotFound(
+            "Expected statistic metadata fields ({}, {}, {}) in schema {}.",
+            copyInputLogicalFields->statisticStartTsField.name,
+            copyInputLogicalFields->statisticEndTsField.name,
+            copyInputLogicalFields->statisticNumberOfSeenTuplesField.name,
+            copy.inputSchema);
+    }
+    /// The single VARSIZED data field this writer reads, named from its id (statisticDataFieldName), must exist.
+    const auto dataFieldName = statisticDataFieldName(copy.statisticId);
+    if (not copy.inputSchema.getFieldByName(dataFieldName).has_value())
+    {
+        throw FieldNotFound("Expected statistic data field {} in schema {}.", dataFieldName, copy.inputSchema);
     }
 
-    /// We set the output logical fields to use the values defined in the class itself, as downstream operators assume it.
-    copy.outputSchema = Schema{};
+    /// Pass the full input through (so the next writer in the chain still sees every data field) and add the
+    /// STATISTICID field this writer is responsible for. A downstream projection reduces to the sink schema.
+    copy.outputSchema = copy.inputSchema;
     const auto outputLogicalStatisticFields = getOutputStatisticFields(newQualifierForSystemField);
-    copy.outputSchema.addField(outputLogicalStatisticFields.statisticIdField);
-    copy.outputSchema.addField(outputLogicalStatisticFields.statisticStartTsField);
-    copy.outputSchema.addField(outputLogicalStatisticFields.statisticEndTsField);
-    copy.outputSchema.addField(outputLogicalStatisticFields.statisticNumberOfSeenTuplesField);
+    if (not copy.outputSchema.getFieldByName(outputLogicalStatisticFields.statisticIdField.name).has_value())
+    {
+        copy.outputSchema.addField(outputLogicalStatisticFields.statisticIdField);
+    }
 
     return copy;
 }
@@ -140,17 +148,15 @@ Statistic::StatisticType StatisticStoreWriterLogicalOperator::getStatisticType()
 Reflected Reflector<StatisticStoreWriterLogicalOperator>::operator()(const StatisticStoreWriterLogicalOperator& op) const
 {
     return reflect(detail::ReflectedStatisticStoreWriterLogicalOperator{
-        .statisticId = op.getStatisticId().getRawValue(),
-        .statisticType = op.getStatisticType(),
-        .statisticDataFieldName = op.inputLogicalStatisticFields->statisticDataField.name});
+        .statisticId = op.getStatisticId().getRawValue(), .statisticType = op.getStatisticType()});
 }
 
 StatisticStoreWriterLogicalOperator Unreflector<StatisticStoreWriterLogicalOperator>::operator()(const Reflected& reflected) const
 {
-    auto [statisticId, statisticType, statisticDataFieldName] = unreflect<detail::ReflectedStatisticStoreWriterLogicalOperator>(reflected);
-    auto logicalFields = std::make_shared<LogicalStatisticFields>();
-    logicalFields->statisticDataField.name = std::move(statisticDataFieldName);
-    return StatisticStoreWriterLogicalOperator{std::move(logicalFields), Statistic::StatisticId{statisticId}, statisticType};
+    auto [statisticId, statisticType] = unreflect<detail::ReflectedStatisticStoreWriterLogicalOperator>(reflected);
+    /// The data field name is re-derived from the id, so a fresh (metadata-only) LogicalStatisticFields is enough.
+    return StatisticStoreWriterLogicalOperator{
+        std::make_shared<LogicalStatisticFields>(), Statistic::StatisticId{statisticId}, statisticType};
 }
 
 LogicalOperatorRegistryReturnType

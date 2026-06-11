@@ -51,6 +51,7 @@
 #include <Functions/LogicalFunction.hpp>
 #include <Functions/LogicalFunctionProvider.hpp>
 #include <Identifiers/SketchDimensions.hpp>
+#include <Operators/Statistic/StatisticTargetUtil.hpp>
 #include <Operators/Windows/Aggregations/AvgAggregationLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/CountAggregationLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/Histogram/EquiWidthHistogramLogicalFunction.hpp>
@@ -506,8 +507,6 @@ void AntlrSQLQueryPlanCreator::exitPrimaryQuery(AntlrSQLParser::PrimaryQueryCont
         auto logicalStatisticFields = std::make_shared<LogicalStatisticFields>();
         queryPlan = LogicalPlanBuilder::addStatisticBuild(
             queryPlan, helpers.top().windowType, helpers.top().windowAggs, helpers.top().groupByFields, logicalStatisticFields);
-        const auto windowAggName = helpers.top().windowAggs.front().get()->getName();
-
         if (not helpers.top().statProbe.has_value())
         {
             const auto hash = FieldAccessLogicalFunction{
@@ -525,20 +524,14 @@ void AntlrSQLQueryPlanCreator::exitPrimaryQuery(AntlrSQLParser::PrimaryQueryCont
             helpers.top().addProjection({}, numTuples);
         }
 
-        if (windowAggName == "ReservoirSample")
+        /// Chain one StatisticStoreWriter per synopsis. Each inserts its statistic and forwards the record, so the
+        /// next writer still sees every data field. Each aggregation carries its own (id, type).
+        for (const auto& aggregation : helpers.top().windowAggs)
         {
+            const auto target = tryGetStatisticTarget(*aggregation);
+            INVARIANT(target.has_value(), "Statistic query contains a non-statistic aggregation: {}", aggregation->getName());
             queryPlan = LogicalPlanBuilder::addStatisticStoreWriter(
-                queryPlan, logicalStatisticFields, helpers.top().statisticId.value(), Statistic::StatisticType::Reservoir_Sample);
-        }
-        else if (windowAggName == "EquiWidthHistogram")
-        {
-            queryPlan = LogicalPlanBuilder::addStatisticStoreWriter(
-                queryPlan, logicalStatisticFields, helpers.top().statisticId.value(), Statistic::StatisticType::Equi_Width_Histogram);
-        }
-        if (windowAggName == "CountMinSketch")
-        {
-            queryPlan = LogicalPlanBuilder::addStatisticStoreWriter(
-                queryPlan, logicalStatisticFields, helpers.top().statisticId.value(), Statistic::StatisticType::Count_Min_Sketch);
+                queryPlan, logicalStatisticFields, target->statisticId, target->statisticType);
         }
     }
     else if (helpers.top().isInAggFunction())
@@ -1121,6 +1114,9 @@ void AntlrSQLQueryPlanCreator::exitFunctionCall(AntlrSQLParser::FunctionCallCont
                 const auto minValue = parseConstant(helpers.top().constantBuilder.back(), "minValue");
                 helpers.top().constantBuilder.pop_back();
                 const auto memoryBudget = parseConstant(helpers.top().constantBuilder.back(), "memoryBudget");
+                helpers.top().constantBuilder.pop_back();
+                /// statisticId was read from the front (above) but not yet removed; pop it so chained
+                /// EQUIWIDTHHISTOGRAM functions in one query each see exactly their own 4 constants.
                 helpers.top().constantBuilder.pop_back();
                 const auto asFieldIfNotOverwritten = FieldAccessLogicalFunction{
                     LogicalStatisticFields().statisticDataField.dataType, LogicalStatisticFields().statisticDataField.name};

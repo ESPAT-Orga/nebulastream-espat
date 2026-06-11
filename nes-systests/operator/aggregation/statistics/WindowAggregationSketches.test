@@ -235,3 +235,29 @@ SELECT statisticStart, statisticEnd, rowIndex, columnIndex, counter FROM (
 5000 10000 2 7 0
 5000 10000 2 8 1
 5000 10000 2 9 0
+
+# Multiple CountMin sketches in a SINGLE query (one shared scan, distinct statisticIds over distinct fields).
+# Both synopses (48 over value, 49 over id) are inserted into the statistic store via chained store writers;
+# the record flows through the chain, so the build sink reports one row per window carrying the last writer's
+# id (49). Both see the same tuples, so numberOfSeenTuples per window matches the single-sketch case above.
+SELECT COUNTMINSKETCH(48, value, 288), COUNTMINSKETCH(49, id, 288) FROM stream WINDOW TUMBLING(timestamp, size 5 sec) INTO sinkStreamBuild;
+----
+49 0 5000 11
+49 10000 15000 5
+49 15000 20000 5
+49 20000 25000 2
+49 5000 10000 5
+
+# Large sketch (regression guard for the static_val/val threshold). The 3rd argument is the memory BUDGET in
+# bytes; cols = budget / (rows × sizeof(uint64)) = budget / 24 and rows = 3, so the combine() loop iterates over
+# rows × cols = budget / 8 counters. Budget 102400 => 12800 counters (the synopsis-amortization benchmark's
+# 100 kB budget). Above kMaxStaticUnrollCounters combine() must use a runtime val<>; with a compile-time
+# static_val<> this many counters unrolls into IR that blows query compilation up. numberOfSeenTuples per window
+# is independent of the sketch size, so the expected build output matches the single-sketch case above.
+SELECT COUNTMINSKETCH(55, value, 102400) FROM stream WINDOW TUMBLING(timestamp, size 5 sec) INTO sinkStreamBuild;
+----
+55 0 5000 11
+55 10000 15000 5
+55 15000 20000 5
+55 20000 25000 2
+55 5000 10000 5

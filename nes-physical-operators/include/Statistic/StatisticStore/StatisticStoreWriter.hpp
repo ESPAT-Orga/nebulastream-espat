@@ -14,6 +14,8 @@
 
 #pragma once
 
+#include <string>
+#include <vector>
 #include <Operators/Statistic/LogicalStatisticFields.hpp>
 #include <PhysicalOperator.hpp>
 #include <Statistic.hpp>
@@ -24,10 +26,13 @@ namespace NES
 class StatisticStoreWriter final : public PhysicalOperatorConcept
 {
 public:
+    /// Persists ONE statistic. The data field to read is the id-derived name resolved during lowering. The
+    /// operator forwards its input record (adding only STATISTICID), so chaining N of these persists N synopses.
     explicit StatisticStoreWriter(
         const OperatorHandlerId operatorHandlerId,
         Statistic::StatisticId statisticId,
         const Statistic::StatisticType statisticType,
+        std::string dataFieldName,
         const LogicalStatisticFields& inputLogicalStatisticFields,
         const LogicalStatisticFields& outputLogicalStatisticFields);
 
@@ -42,9 +47,9 @@ private:
     OperatorHandlerId operatorHandlerId;
     Statistic::StatisticId statisticId;
     Statistic::StatisticType statisticType;
+    std::string inputStatisticDataFieldName;
     std::string inputStatisticStartTsFieldName;
     std::string inputStatisticEndTsFieldName;
-    std::string inputStatisticDataFieldName;
     std::string inputStatisticNumberOfSeenTuplesFieldName;
     std::string outputStatisticStartTsFieldName;
     std::string outputStatisticEndTsFieldName;

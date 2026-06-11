@@ -20,6 +20,7 @@ add_source_files(nes-sources
         SourceValidationProvider.cpp
         LogicalSource.cpp
         SourceCatalog.cpp
+        CsvBufferParser.cpp
 )
 
 # Register plugins
@@ -27,6 +28,8 @@ add_plugin(File Source nes-sources FileSource.cpp)
 add_plugin(File SourceValidation nes-sources FileSource.cpp)
 add_plugin(Memory Source nes-sources MemorySource.cpp)
 add_plugin(Memory SourceValidation nes-sources MemorySource.cpp)
+add_plugin(LoopingMemory Source nes-sources LoopingMemorySource.cpp)
+add_plugin(LoopingMemory SourceValidation nes-sources LoopingMemorySource.cpp)
 
 # Systest adaptors
 add_plugin(File InlineData nes-sources FileSource.cpp)

@@ -35,8 +35,6 @@
 #include <Operators/ProjectionLogicalOperator.hpp>
 #include <Operators/Sources/SourceNameLogicalOperator.hpp>
 #include <Operators/Statistic/LogicalStatisticFields.hpp>
-#include <Traits/SpliceToRunningSourceTrait.hpp>
-#include <Traits/TraitSet.hpp>
 #include <Operators/Windows/Aggregations/Histogram/EquiWidthHistogramLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/Histogram/EquiWidthHistogramProbeLogicalOperator.hpp>
 #include <Operators/Windows/Aggregations/Sample/ReservoirSampleLogicalFunction.hpp>
@@ -44,6 +42,8 @@
 #include <Operators/Windows/Aggregations/WindowAggregationLogicalFunction.hpp>
 #include <Plans/LogicalPlan.hpp>
 #include <Plans/LogicalPlanBuilder.hpp>
+#include <Traits/SpliceToRunningSourceTrait.hpp>
+#include <Traits/TraitSet.hpp>
 #include <WindowTypes/Measures/TimeCharacteristic.hpp>
 #include <WindowTypes/Measures/TimeMeasure.hpp>
 #include <WindowTypes/Types/SlidingWindow.hpp>
@@ -245,8 +245,8 @@ LogicalPlan appendWorkloadGrpcSink(
 
 /// Append a void sink terminating the workload-domain build chain when no predicate is attached.
 /// The chain quietly populates the store without firing per-window-close reports.
-LogicalPlan appendWorkloadVoidSink(
-    LogicalPlan plan, const std::string& sourceNameUpper, const std::unordered_map<std::string, std::string>& options)
+LogicalPlan
+appendWorkloadVoidSink(LogicalPlan plan, const std::string& sourceNameUpper, const std::unordered_map<std::string, std::string>& options)
 {
     const auto qualifier = sourceNameUpper + "$";
     LogicalStatisticFields outputStatisticFields;
@@ -343,8 +343,7 @@ LogicalPlan DefaultStatisticQueryGenerator::generateWorkloadBranch(
     /// (binds against histogram bin fields), not a build-chain output filter.
     auto plan = stackWorkloadBuildChainOnTop(std::move(basePlan), fieldNameUpper, request, statisticId);
 
-    const auto predicate
-        = request.conditionTrigger.has_value() ? request.conditionTrigger->condition : std::optional<LogicalFunction>{};
+    const auto predicate = request.conditionTrigger.has_value() ? request.conditionTrigger->condition : std::optional<LogicalFunction>{};
 
     if (not predicate.has_value())
     {
@@ -394,14 +393,11 @@ LogicalPlan DefaultStatisticQueryGenerator::generateWorkloadBranch(
     outputStatisticFields.addQualifierName(systemQualifier);
     std::vector<ProjectionLogicalOperator::Projection> projections;
     projections.emplace_back(
-        FieldIdentifier{outputStatisticFields.statisticIdField.name},
-        LogicalFunction{FieldAccessLogicalFunction{"STATISTICID"}});
+        FieldIdentifier{outputStatisticFields.statisticIdField.name}, LogicalFunction{FieldAccessLogicalFunction{"STATISTICID"}});
     projections.emplace_back(
-        FieldIdentifier{outputStatisticFields.statisticStartTsField.name},
-        LogicalFunction{FieldAccessLogicalFunction{"STATISTICSTART"}});
+        FieldIdentifier{outputStatisticFields.statisticStartTsField.name}, LogicalFunction{FieldAccessLogicalFunction{"STATISTICSTART"}});
     projections.emplace_back(
-        FieldIdentifier{outputStatisticFields.statisticEndTsField.name},
-        LogicalFunction{FieldAccessLogicalFunction{"STATISTICEND"}});
+        FieldIdentifier{outputStatisticFields.statisticEndTsField.name}, LogicalFunction{FieldAccessLogicalFunction{"STATISTICEND"}});
     projections.emplace_back(
         FieldIdentifier{outputStatisticFields.statisticNumberOfSeenTuplesField.name},
         LogicalFunction{FieldAccessLogicalFunction{"STATISTICNUMBEROFSEENTUPLES"}});

@@ -13,13 +13,34 @@
 */
 
 #pragma once
+#include <string>
 #include <Configurations/Descriptor.hpp>
 #include <DataTypes/DataType.hpp>
 #include <DataTypes/DataTypeProvider.hpp>
 #include <DataTypes/Schema.hpp>
+#include <fmt/format.h>
+#include <Statistic.hpp>
 
 namespace NES
 {
+
+/// A statistic to persist: its store id and its type. The per-synopsis VARSIZED data-field name is derived
+/// purely from the id (see statisticDataFieldName), so the StatisticBuild operator and the StatisticStoreWriter
+/// always agree on it -- even after plan (de)serialization, where only the id round-trips.
+struct StatisticTarget
+{
+    Statistic::StatisticId statisticId;
+    Statistic::StatisticType statisticType;
+    bool operator==(const StatisticTarget&) const = default;
+};
+
+/// Per-synopsis VARSIZED data-field name, derived purely from the statisticId so producers and consumers
+/// never drift. Upper case, since the SLT sink field-name parsing requires it.
+inline std::string statisticDataFieldName(const Statistic::StatisticId statisticId)
+{
+    return fmt::format("STATISTICDATA_{}", statisticId.getRawValue());
+}
+
 /// Acts as an abstract class that every statistic build logical function should inherit from.
 /// It stores field names necessary across all statistic functions.
 class LogicalStatisticFields

@@ -15,11 +15,11 @@
 #pragma once
 
 #include <string>
-#include <CollectionDomain.hpp>
 #include <Operators/LogicalOperator.hpp>
 #include <Plans/LogicalPlan.hpp>
-#include <Statistic.hpp>
+#include <CollectionDomain.hpp>
 #include <ErrorHandling.hpp>
+#include <Statistic.hpp>
 
 namespace NES
 {

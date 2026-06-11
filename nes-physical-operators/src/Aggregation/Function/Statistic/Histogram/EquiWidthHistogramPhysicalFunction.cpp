@@ -28,6 +28,11 @@
 
 namespace NES
 {
+/// Bin-count cut-off below which reset()/combine() unroll the loop with a static_val<> (faster runtime code)
+/// rather than a runtime val<> loop. Measured to keep query compilation under ~1s. Above it the unrolled IR
+/// makes compilation explode.
+constexpr uint64_t kMaxStaticUnrollBins = 224;
+
 void EquiWidthHistogramPhysicalFunction::lift(
     const nautilus::val<AggregationState*>& aggregationState, PipelineMemoryProvider& pipelineMemoryProvider, const Record& record)
 {
@@ -64,16 +69,34 @@ void EquiWidthHistogramPhysicalFunction::combine(
     auto counterRef1 = static_cast<nautilus::val<int8_t*>>(aggregationState1) + nautilus::val<uint64_t>{counterOffset};
     auto counterRef2 = static_cast<nautilus::val<int8_t*>>(aggregationState2) + nautilus::val<uint64_t>{counterOffset};
 
-    for (nautilus::static_val<uint64_t> counterIdx = 0; counterIdx < numberOfBins; ++counterIdx)
+    /// Unroll for small bin counts, fall back to a runtime loop for large ones (see kMaxStaticUnrollBins).
+    if (numberOfBins < kMaxStaticUnrollBins)
     {
-        auto counter1 = VarVal::readNonNullableVarValFromMemory(counterRef1, dataTypeCounter);
-        auto counter2 = VarVal::readNonNullableVarValFromMemory(counterRef2, dataTypeCounter);
-        counter1 = counter2 + counter1;
-        counter1.writeToMemory(counterRef1);
+        for (nautilus::static_val<uint64_t> counterIdx = 0; counterIdx < numberOfBins; ++counterIdx)
+        {
+            auto counter1 = VarVal::readNonNullableVarValFromMemory(counterRef1, dataTypeCounter);
+            auto counter2 = VarVal::readNonNullableVarValFromMemory(counterRef2, dataTypeCounter);
+            counter1 = counter2 + counter1;
+            counter1.writeToMemory(counterRef1);
 
-        /// Incrementing left and right counter ref
-        counterRef1 += totalBinSize;
-        counterRef2 += totalBinSize;
+            /// Incrementing left and right counter ref
+            counterRef1 += totalBinSize;
+            counterRef2 += totalBinSize;
+        }
+    }
+    else
+    {
+        for (nautilus::val<uint64_t> counterIdx = 0; counterIdx < numberOfBins; ++counterIdx)
+        {
+            auto counter1 = VarVal::readNonNullableVarValFromMemory(counterRef1, dataTypeCounter);
+            auto counter2 = VarVal::readNonNullableVarValFromMemory(counterRef2, dataTypeCounter);
+            counter1 = counter2 + counter1;
+            counter1.writeToMemory(counterRef1);
+
+            /// Incrementing left and right counter ref
+            counterRef1 += totalBinSize;
+            counterRef2 += totalBinSize;
+        }
     }
 
     /// Combining the number of seen tuples of both histograms
@@ -129,19 +152,40 @@ void EquiWidthHistogramPhysicalFunction::reset(nautilus::val<AggregationState*> 
     auto counter = VarVal::readNonNullableVarValFromMemory(counterRef, dataTypeCounter);
     counter = counter - counter; /// Getting a 0 regardless of the counter data type
 
-    for (nautilus::static_val<uint64_t> counterIdx = 0; counterIdx < numberOfBins; ++counterIdx)
+    /// Unroll for small bin counts, fall back to a runtime loop for large ones (see kMaxStaticUnrollBins).
+    if (numberOfBins < kMaxStaticUnrollBins)
     {
-        /// Writing the current values to the current locations and then incrementing the lower and upper bound
-        lowerBound.writeToMemory(lowerBoundRef);
-        upperBound.writeToMemory(upperBoundRef);
-        counter.writeToMemory(counterRef);
-        lowerBound = lowerBound + nautilus::val<uint64_t>{binWidth};
-        upperBound = upperBound + nautilus::val<uint64_t>{binWidth};
+        for (nautilus::static_val<uint64_t> counterIdx = 0; counterIdx < numberOfBins; ++counterIdx)
+        {
+            /// Writing the current values to the current locations and then incrementing the lower and upper bound
+            lowerBound.writeToMemory(lowerBoundRef);
+            upperBound.writeToMemory(upperBoundRef);
+            counter.writeToMemory(counterRef);
+            lowerBound = lowerBound + nautilus::val<uint64_t>{binWidth};
+            upperBound = upperBound + nautilus::val<uint64_t>{binWidth};
 
-        /// Incrementing the refs
-        lowerBoundRef += nautilus::val<uint64_t>{totalBinSize};
-        upperBoundRef += nautilus::val<uint64_t>{totalBinSize};
-        counterRef += nautilus::val<uint64_t>{totalBinSize};
+            /// Incrementing the refs
+            lowerBoundRef += nautilus::val<uint64_t>{totalBinSize};
+            upperBoundRef += nautilus::val<uint64_t>{totalBinSize};
+            counterRef += nautilus::val<uint64_t>{totalBinSize};
+        }
+    }
+    else
+    {
+        for (nautilus::val<uint64_t> counterIdx = 0; counterIdx < numberOfBins; ++counterIdx)
+        {
+            /// Writing the current values to the current locations and then incrementing the lower and upper bound
+            lowerBound.writeToMemory(lowerBoundRef);
+            upperBound.writeToMemory(upperBoundRef);
+            counter.writeToMemory(counterRef);
+            lowerBound = lowerBound + nautilus::val<uint64_t>{binWidth};
+            upperBound = upperBound + nautilus::val<uint64_t>{binWidth};
+
+            /// Incrementing the refs
+            lowerBoundRef += nautilus::val<uint64_t>{totalBinSize};
+            upperBoundRef += nautilus::val<uint64_t>{totalBinSize};
+            counterRef += nautilus::val<uint64_t>{totalBinSize};
+        }
     }
 
     /// Resetting the seen number of tuples

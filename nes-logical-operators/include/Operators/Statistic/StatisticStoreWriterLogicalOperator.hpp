@@ -14,6 +14,8 @@
 
 #pragma once
 
+#include <utility>
+#include <vector>
 #include <Operators/LogicalOperator.hpp>
 #include <Operators/Statistic/LogicalStatisticFields.hpp>
 #include <Util/Reflection.hpp>
@@ -27,6 +29,10 @@ namespace NES
 class StatisticStoreWriterLogicalOperator final
 {
 public:
+    /// Persists ONE statistic built by a StatisticBuild. Multiple synopses in one query are handled by chaining
+    /// N of these (one per target). The VARSIZED data field this writer reads is derived from the id
+    /// (statisticDataFieldName); the operator passes its input through and only adds the STATISTICID field, so
+    /// downstream writers in the chain still see every data field.
     StatisticStoreWriterLogicalOperator(
         std::shared_ptr<LogicalStatisticFields> inputLogicalStatisticFields,
         Statistic::StatisticId statisticId,
@@ -78,9 +84,10 @@ namespace detail
 {
 struct ReflectedStatisticStoreWriterLogicalOperator
 {
+    /// The data field name is NOT serialized -- it is re-derived from the id (statisticDataFieldName), so it
+    /// cannot drift across (de)serialization.
     Statistic::StatisticId::Underlying statisticId;
     Statistic::StatisticType statisticType;
-    std::string statisticDataFieldName;
 };
 }
 

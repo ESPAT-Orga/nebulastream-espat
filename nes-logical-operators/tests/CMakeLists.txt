@@ -18,3 +18,4 @@ endfunction()
 
 add_nes_logical_operators_test(nes-logical-plan-test "LogicalPlanTest.cpp")
 add_nes_logical_operators_test(nes-projection-logical-operator-test "ProjectionLogicalOperatorTest.cpp")
+add_nes_logical_operators_test(nes-statistic-operators-reflection-test "StatisticOperatorsReflectionTest.cpp")

@@ -87,3 +87,28 @@ SELECT statisticStart, statisticEnd, binStart, binCounter, binEnd FROM (
 20000 25000 10 0 15
 20000 25000 15 0 20
 20000 25000 20 2 25
+
+# Multiple histograms in a SINGLE query (one shared scan, distinct statisticIds over distinct fields).
+# Both synopses (50 over value, 51 over id) are inserted into the statistic store via chained store writers;
+# the record flows through the chain, so the build sink reports one row per window carrying the last writer's id (51).
+SELECT EQUIWIDTHHISTOGRAM(50, value, 128, 0, 25), EQUIWIDTHHISTOGRAM(51, id, 128, 0, 25) FROM stream WINDOW TUMBLING(timestamp, size 5 sec) INTO sinkStreamBuild;
+----
+51 0 5000 11
+51 10000 15000 5
+51 15000 20000 5
+51 20000 25000 2
+51 5000 10000 5
+
+# Large bin count (regression guard for the static_val/val threshold). The 3rd argument is the memory BUDGET
+# in bytes; numberOfBins = (budget - 8) / 24, so budget 102400 => 4266 bins (the synopsis-amortization
+# benchmark's 100 kB budget). Above kMaxStaticUnrollBins the histogram's reset()/combine() loops must iterate
+# with a runtime val<>; with a compile-time static_val<> this many bins unrolls into IR that makes query
+# compilation explode (the original build:timeout / OOM). The per-window seen-tuple counts are independent of
+# the bin count, so the expected build output matches the single-histogram case above.
+SELECT EQUIWIDTHHISTOGRAM(60, value, 102400, 0, 100000) FROM stream WINDOW TUMBLING(timestamp, size 5 sec) INTO sinkStreamBuild;
+----
+60 0 5000 11
+60 10000 15000 5
+60 15000 20000 5
+60 20000 25000 2
+60 5000 10000 5

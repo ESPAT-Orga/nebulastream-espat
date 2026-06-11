@@ -61,14 +61,15 @@ StatisticStoreWriter::StatisticStoreWriter(
     const OperatorHandlerId operatorHandlerId,
     const Statistic::StatisticId statisticId,
     const Statistic::StatisticType statisticType,
+    std::string dataFieldName,
     const LogicalStatisticFields& inputLogicalStatisticFields,
     const LogicalStatisticFields& outputLogicalStatisticFields)
     : operatorHandlerId(operatorHandlerId)
     , statisticId(statisticId)
     , statisticType(statisticType)
+    , inputStatisticDataFieldName(std::move(dataFieldName))
     , inputStatisticStartTsFieldName(inputLogicalStatisticFields.statisticStartTsField.name)
     , inputStatisticEndTsFieldName(inputLogicalStatisticFields.statisticEndTsField.name)
-    , inputStatisticDataFieldName(inputLogicalStatisticFields.statisticDataField.name)
     , inputStatisticNumberOfSeenTuplesFieldName(inputLogicalStatisticFields.statisticNumberOfSeenTuplesField.name)
     , outputStatisticStartTsFieldName(outputLogicalStatisticFields.statisticStartTsField.name)
     , outputStatisticEndTsFieldName(outputLogicalStatisticFields.statisticEndTsField.name)
@@ -79,16 +80,14 @@ StatisticStoreWriter::StatisticStoreWriter(
 
 void StatisticStoreWriter::execute(ExecutionContext& executionCtx, Record& record) const
 {
-    /// Insert statistic into store
     auto operatorHandlerMemRef = executionCtx.getGlobalOperatorHandler(operatorHandlerId);
     const nautilus::val<Statistic::StatisticId> statisticIdVal{statisticId};
     const nautilus::val<Statistic::StatisticType> statisticTypeVal{statisticType};
     const nautilus::val<Timestamp> startTs{
         record.read(inputStatisticStartTsFieldName).getRawValueAs<nautilus::val<Timestamp::Underlying>>()};
     const nautilus::val<Timestamp> endTs{record.read(inputStatisticEndTsFieldName).getRawValueAs<nautilus::val<Timestamp::Underlying>>()};
-    const auto statisticData = record.read(inputStatisticDataFieldName).getRawValueAs<VariableSizedData>().getContent();
-    const auto totalSizeOfStatisticData = record.read(inputStatisticDataFieldName).getRawValueAs<VariableSizedData>().getSize();
     const auto numberOfSeenTuples = record.read(inputStatisticNumberOfSeenTuplesFieldName).getRawValueAs<nautilus::val<uint64_t>>();
+    const auto statisticData = record.read(inputStatisticDataFieldName).getRawValueAs<VariableSizedData>();
     invoke(
         insertStatisticIntoStoreProxy,
         operatorHandlerMemRef,
@@ -97,16 +96,13 @@ void StatisticStoreWriter::execute(ExecutionContext& executionCtx, Record& recor
         startTs,
         endTs,
         numberOfSeenTuples,
-        statisticData,
-        totalSizeOfStatisticData);
+        statisticData.getContent(),
+        statisticData.getSize());
 
-    /// Passing the startts, endTs and statistic hash to the next operator
-    Record newRecord;
-    newRecord.write(outputStatisticStartTsFieldName, startTs.convertToValue());
-    newRecord.write(outputStatisticEndTsFieldName, endTs.convertToValue());
-    newRecord.write(outputStatisticIdFieldName, statisticIdVal.convertToValue());
-    newRecord.write(outputStatisticNumberOfSeenTuplesFieldName, numberOfSeenTuples);
-    executeChild(executionCtx, newRecord);
+    /// Forward the input record (so the next writer in the chain still sees every data field), adding only the
+    /// STATISTICID this writer is responsible for. A downstream projection reduces to the sink schema.
+    record.write(outputStatisticIdFieldName, statisticIdVal.convertToValue());
+    executeChild(executionCtx, record);
 }
 
 std::optional<PhysicalOperator> StatisticStoreWriter::getChild() const

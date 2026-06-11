@@ -37,6 +37,7 @@
 #include <Nautilus/Interface/HashMap/ChainedHashMap/ChainedHashMap.hpp>
 #include <Nautilus/Interface/Record.hpp>
 #include <Operators/LogicalOperator.hpp>
+#include <Operators/Statistic/StatisticTargetUtil.hpp>
 #include <Operators/Windows/Aggregations/Histogram/EquiWidthHistogramLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/Sample/ReservoirSampleLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/Sketch/CountMinSketchLogicalFunction.hpp>
@@ -124,7 +125,12 @@ std::vector<std::shared_ptr<AggregationPhysicalFunction>> getAggregationPhysical
         auto physicalFinalType = DataTypeProvider::provideDataType(descriptor->getFinalAggregateStamp().type);
 
         auto aggregationInputFunction = QueryCompilation::FunctionProvider::lowerFunction(descriptor->getOnField());
-        const auto resultFieldIdentifier = descriptor->getAsField().getFieldName();
+        /// Write each synopsis result to its id-derived field, matching the StatisticBuild output schema and the
+        /// field the StatisticStoreWriter reads (unqualified, single source of truth via statisticDataFieldName).
+        const auto statisticTarget = tryGetStatisticTarget(*descriptor);
+        INVARIANT(
+            statisticTarget.has_value(), "StatisticBuild lowering expects only statistic aggregations but got {}", descriptor->getName());
+        const auto resultFieldIdentifier = statisticDataFieldName(statisticTarget->statisticId);
         auto bufferRef
             = LowerSchemaProvider::lowerSchema(configuration.pageSize.getValue(), logicalOperator.getInputSchemas()[0], memoryLayoutType);
 

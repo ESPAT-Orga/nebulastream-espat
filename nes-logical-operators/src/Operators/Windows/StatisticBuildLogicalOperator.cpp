@@ -20,6 +20,7 @@
 #include <ranges>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 #include <Configurations/Descriptor.hpp>
@@ -29,6 +30,7 @@
 #include <Identifiers/Identifiers.hpp>
 #include <Operators/LogicalOperator.hpp>
 #include <Operators/Statistic/LogicalStatisticFields.hpp>
+#include <Operators/Statistic/StatisticTargetUtil.hpp>
 #include <Operators/Windows/Aggregations/WindowAggregationLogicalFunction.hpp>
 #include <Operators/Windows/WindowedAggregationLogicalOperator.hpp>
 #include <Serialization/WindowTypeReflection.hpp>
@@ -126,7 +128,7 @@ StatisticBuildLogicalOperator StatisticBuildLogicalOperator::withInferredSchema(
 
     copy.windowType->inferStamp(firstSchema);
     copy.inputSchema = firstSchema;
-    copy.outputSchema = Schema();
+    copy.outputSchema = Schema{};
 
     const auto& newQualifierForSystemField = firstSchema.getQualifierNameForSystemGeneratedFieldsWithSeparator();
     copy.logicalStatisticFields->addQualifierName(newQualifierForSystemField);
@@ -142,13 +144,30 @@ StatisticBuildLogicalOperator StatisticBuildLogicalOperator::withInferredSchema(
     {
         throw CannotInferSchema("Unsupported window type {}", getWindowType()->toString());
     }
-    if (copy.aggregationFunctions.size() != 1)
+    /// One VARSIZED output field per synopsis, named purely from its statisticId (statisticDataFieldName) so the
+    /// StatisticStoreWriter derives the identical name -- even after (de)serialization, where only the id
+    /// round-trips. Distinct statisticIds therefore guarantee distinct, collision-free output fields.
+    if (copy.aggregationFunctions.empty())
     {
-        throw CannotInferSchema(
-            "Expect exactly one aggregation for a statistic aggregation but found {}", copy.aggregationFunctions.size());
+        throw CannotInferSchema("A StatisticBuild operator requires at least one statistic aggregation");
     }
-    copy.logicalStatisticFields->statisticDataField.name = copy.aggregationFunctions[0]->getAsField().getFieldName();
-    copy.outputSchema.addField(copy.logicalStatisticFields->statisticDataField);
+    std::unordered_set<Statistic::StatisticId::Underlying> seenStatisticIds;
+    const auto dataFieldType = DataTypeProvider::provideDataType(DataType::Type::VARSIZED, DataType::NULLABLE::NOT_NULLABLE);
+    for (const auto& aggregation : copy.aggregationFunctions)
+    {
+        const auto target = tryGetStatisticTarget(*aggregation);
+        if (not target.has_value())
+        {
+            throw CannotInferSchema("StatisticBuild expects only statistic aggregations but got {}", aggregation->getName());
+        }
+        if (not seenStatisticIds.insert(target->statisticId.getRawValue()).second)
+        {
+            throw CannotInferSchema(
+                "StatisticBuild requires distinct statisticIds across its aggregations but {} appears more than once",
+                target->statisticId.getRawValue());
+        }
+        copy.outputSchema.addField(Schema::Field{statisticDataFieldName(target->statisticId), dataFieldType});
+    }
     copy.outputSchema.addField(copy.logicalStatisticFields->statisticNumberOfSeenTuplesField);
 
     return copy;

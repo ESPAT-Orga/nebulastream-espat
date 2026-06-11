@@ -26,12 +26,12 @@
 #include <Identifiers/Identifiers.hpp>
 #include <Operators/Sources/SourceNameLogicalOperator.hpp>
 #include <Operators/Statistic/LogicalStatisticFields.hpp>
-#include <Traits/DeferSourceStartTrait.hpp>
-#include <Traits/TraitSet.hpp>
-#include <Util/PlanRenderer.hpp>
 #include <Plans/LogicalPlan.hpp>
 #include <Plans/LogicalPlanBuilder.hpp>
+#include <Traits/DeferSourceStartTrait.hpp>
+#include <Traits/TraitSet.hpp>
 #include <Util/Logger/Logger.hpp>
+#include <Util/PlanRenderer.hpp>
 #include <WindowTypes/Measures/TimeMeasure.hpp>
 #include <google/protobuf/empty.pb.h>
 #include <grpcpp/client_context.h>
@@ -157,8 +157,8 @@ std::expected<CollectStatisticResult, Exception> StatisticCoordinator::collectWo
     }
     if (sources.size() != 1)
     {
-        return std::unexpected(NotImplemented(
-            "WorkloadDomain splice MVP requires the data query to have exactly one source (got {})", sources.size()));
+        return std::unexpected(
+            NotImplemented("WorkloadDomain splice MVP requires the data query to have exactly one source (got {})", sources.size()));
     }
     const LogicalOperator spliceLeaf{sources.front()};
     const auto sourceNameUpper = sources.front()->getLogicalSourceName();

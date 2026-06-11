@@ -33,7 +33,7 @@ namespace
 /// @brief Calculates the record size for a sample.
 nautilus::val<uint64_t> getRecordDataSizeForSample(const Record& record, const TupleBufferRef& buffRef)
 {
-    auto recordDataSize = nautilus::val<uint64_t>(buffRef.getTupleSize());
+    auto recordDataSize = nautilus::val<uint64_t>{buffRef.getTupleSize()};
     auto names = buffRef.getAllFieldNames();
     auto types = buffRef.getAllDataTypes();
     for (nautilus::static_val<size_t> i = 0; i < names.size(); ++i)
@@ -52,10 +52,76 @@ uint64_t getRandomNumberProxy(const uint64_t upperBound, const uint64_t seed)
 {
     /// Each thread gets its own RNG, seeded by combining the provided seed
     /// with the thread id to ensure different threads produce different sequences.
-    thread_local std::mt19937 gen(seed ^ std::hash<std::thread::id>{}(std::this_thread::get_id()));
-    std::uniform_int_distribution<> dis(0, upperBound);
+    thread_local std::mt19937_64 gen(seed ^ std::hash<std::thread::id>{}(std::this_thread::get_id()));
+    std::uniform_int_distribution<uint64_t> dis{0, upperBound};
 
     return dis(gen);
+}
+
+/// @brief Computes a statistically correct plan for merging two reservoirs into a single uniform sample.
+///
+/// Reservoir 1 is a uniform sample of size m1 = min(k, n1) drawn from n1 elements, reservoir 2 is a
+/// uniform sample of size m2 = min(k, n2) drawn from n2 elements. The merged reservoir must be a uniform
+/// sample of size targetSize = min(k, n1 + n2) from the union. We achieve this by drawing
+/// d1 = the number of survivors taken from reservoir 1 as a hypergeometric variate (sampling targetSize
+/// items without replacement from a population of n1 + n2 of which n1 belong to stream 1), then taking a
+/// uniform subset of size d1 from reservoir 1 and a uniform subset of size d2 = targetSize - d1 from
+/// reservoir 2. Concatenating the two reservoirs (the previous behaviour) is biased and unbounded in size.
+///
+/// Writes the (m1 - d1) reservoir-1 slot indices to drop into @p dropSlotsOut and the d2 reservoir-2 entry
+/// indices to take into @p r2PicksOut (both ascending), and returns d1. The hypergeometric support
+/// guarantees d1 <= m1 and d2 <= m2, so the index arrays never overflow the available entries.
+uint64_t computeMergePlanProxy(
+    const uint64_t n1,
+    const uint64_t n2,
+    const uint64_t m1,
+    const uint64_t m2,
+    const uint64_t targetSize,
+    const uint64_t seed,
+    int8_t* dropSlotsOut,
+    int8_t* r2PicksOut)
+{
+    thread_local std::mt19937_64 gen(seed ^ std::hash<std::thread::id>{}(std::this_thread::get_id()));
+
+    /// Draw d1 ~ Hypergeometric by sampling targetSize items without replacement from the union.
+    uint64_t d1 = 0;
+    uint64_t remainingSuccess = n1;
+    uint64_t remainingTotal = n1 + n2;
+    for (uint64_t i = 0; i < targetSize; ++i)
+    {
+        std::uniform_int_distribution<uint64_t> dist{0, remainingTotal - 1};
+        if (dist(gen) < remainingSuccess)
+        {
+            ++d1;
+            --remainingSuccess;
+        }
+        --remainingTotal;
+    }
+
+    /// Knuth's Algorithm S: select `need` distinct ascending indices from [0, population) uniformly.
+    /// `gen` has thread-local storage duration, so it is used directly rather than captured.
+    const auto selectInto = [](const uint64_t population, const uint64_t need, int8_t* out)
+    {
+        auto* indices = reinterpret_cast<uint64_t*>(out);
+        uint64_t remaining = population;
+        uint64_t needLeft = need;
+        uint64_t written = 0;
+        for (uint64_t pos = 0; pos < population && needLeft > 0; ++pos)
+        {
+            std::uniform_int_distribution<uint64_t> dist{0, remaining - 1};
+            if (dist(gen) < needLeft)
+            {
+                indices[written] = pos;
+                ++written;
+                --needLeft;
+            }
+            --remaining;
+        }
+    };
+
+    selectInto(m1, m1 - d1, dropSlotsOut);
+    selectInto(m2, targetSize - d1, r2PicksOut);
+    return d1;
 }
 }
 
@@ -86,38 +152,91 @@ void ReservoirSamplePhysicalFunction::lift(
                 = sampleDataSize + getRecordDataSizeForSample(record, *bufferRef) - getRecordDataSizeForSample(oldRecord, *bufferRef);
         }
     }
-    numberOfSeenTuples = numberOfSeenTuples + nautilus::val<uint64_t>(1);
+    numberOfSeenTuples = numberOfSeenTuples + nautilus::val<uint64_t>{1};
 
     VarVal{numberOfSeenTuples}.writeToMemory(numberOfSeenTuplesRef);
     VarVal{sampleDataSize}.writeToMemory(sampleDataSizeRef);
 }
 
 void ReservoirSamplePhysicalFunction::combine(
-    nautilus::val<AggregationState*> aggregationState1, nautilus::val<AggregationState*> aggregationState2, PipelineMemoryProvider&)
+    nautilus::val<AggregationState*> aggregationState1,
+    nautilus::val<AggregationState*> aggregationState2,
+    PipelineMemoryProvider& pipelineMemoryProvider)
 {
-    /// We combine two paged vector by copying all tuples from aggState2 into aggState1
-    /// Additionally, we need to sum the sample data size and the number of seen tuples
-
+    /// Merge two partial reservoirs into a single uniform sample of size min(sampleSize, n1 + n2).
+    /// Simply concatenating the reservoirs is statistically wrong:
+    /// It biases the sample whenever n1 != n2 and grows the result beyond sampleSize. Instead we keep a
+    /// hypergeometric number of survivors from reservoir 1 and fill the rest from reservoir 2.
     const auto pagedVectorPtr1 = static_cast<nautilus::val<int8_t*>>(aggregationState1);
     const auto pagedVectorPtr2 = static_cast<nautilus::val<int8_t*>>(aggregationState2);
+    const PagedVectorRef pagedVectorRef1(pagedVectorPtr1, bufferRef);
+    const PagedVectorRef pagedVectorRef2(pagedVectorPtr2, bufferRef);
 
     const auto numberOfSeenTuplesRef1 = pagedVectorPtr1 + nautilus::val<uint64_t>{sizeof(PagedVector)};
     const auto sampleDataSizeRef1 = numberOfSeenTuplesRef1 + nautilus::val<uint64_t>{sizeof(uint64_t)};
-    auto numberOfSeenTuples1 = readValueFromMemRef<uint64_t>(numberOfSeenTuplesRef1);
-    auto sampleDataSize1 = readValueFromMemRef<uint64_t>(sampleDataSizeRef1);
-
     const auto numberOfSeenTuplesRef2 = pagedVectorPtr2 + nautilus::val<uint64_t>{sizeof(PagedVector)};
-    const auto sampleDataSizeRef2 = numberOfSeenTuplesRef2 + nautilus::val<uint64_t>{sizeof(uint64_t)};
-    auto numberOfSeenTuples2 = readValueFromMemRef<uint64_t>(numberOfSeenTuplesRef2);
-    auto sampleDataSize2 = readValueFromMemRef<uint64_t>(sampleDataSizeRef2);
 
-    const auto numberOfSeenTuples = numberOfSeenTuples1 + numberOfSeenTuples2;
-    const auto sampleDataSize = sampleDataSize1 + sampleDataSize2;
-    VarVal{numberOfSeenTuples}.writeToMemory(numberOfSeenTuplesRef1);
+    const auto numberOfSeenTuples1 = readValueFromMemRef<uint64_t>(numberOfSeenTuplesRef1);
+    const auto numberOfSeenTuples2 = readValueFromMemRef<uint64_t>(numberOfSeenTuplesRef2);
+    auto sampleDataSize = readValueFromMemRef<uint64_t>(sampleDataSizeRef1);
+
+    /// Number of entries physically stored in each reservoir: m1 = min(sampleSize, n1), m2 = min(sampleSize, n2).
+    const auto numberStored1 = pagedVectorRef1.getNumberOfTuples();
+    const auto numberStored2 = pagedVectorRef2.getNumberOfTuples();
+
+    /// Target sample size after the merge: min(sampleSize, n1 + n2). Note that targetSize >= numberStored1
+    /// always holds, so we never have to shrink reservoir 1 below its current size.
+    const auto totalSeen = numberOfSeenTuples1 + numberOfSeenTuples2;
+    auto targetSize = totalSeen;
+    if (targetSize > nautilus::val<uint64_t>{sampleSize})
+    {
+        targetSize = nautilus::val<uint64_t>{sampleSize};
+    }
+
+    /// Scratch memory for the merge plan: up to numberStored1 drop-slot indices followed by up to
+    /// targetSize reservoir-2 pick indices, each a uint64_t.
+    const auto indexSize = nautilus::val<uint64_t>{sizeof(uint64_t)};
+    const auto planMemory = pipelineMemoryProvider.arena.allocateMemory((numberStored1 + targetSize) * indexSize);
+    const auto dropSlotsRef = planMemory;
+    const auto r2PicksRef = planMemory + numberStored1 * indexSize;
+
+    const auto survivorsFrom1 = invoke(
+        computeMergePlanProxy,
+        numberOfSeenTuples1,
+        numberOfSeenTuples2,
+        numberStored1,
+        numberStored2,
+        targetSize,
+        nautilus::val<uint64_t>{seed},
+        dropSlotsRef,
+        r2PicksRef);
+    const auto dropCount = numberStored1 - survivorsFrom1;
+    const auto totalFromReservoir2 = targetSize - survivorsFrom1;
+
+    const auto fieldNames = bufferRef->getAllFieldNames();
+
+    /// Overwrite the dropped reservoir-1 slots with the first reservoir-2 survivors.
+    for (nautilus::val<uint64_t> i = 0; i < dropCount; ++i)
+    {
+        const auto slot = readValueFromMemRef<uint64_t>(dropSlotsRef + i * indexSize);
+        const auto pick = readValueFromMemRef<uint64_t>(r2PicksRef + i * indexSize);
+        const auto newRecord = pagedVectorRef2.readRecord(pick, fieldNames);
+        const auto oldRecord = pagedVectorRef1.replaceRecord(newRecord, slot, pipelineMemoryProvider.bufferProvider);
+        sampleDataSize
+            = sampleDataSize + getRecordDataSizeForSample(newRecord, *bufferRef) - getRecordDataSizeForSample(oldRecord, *bufferRef);
+    }
+
+    /// Append the remaining reservoir-2 survivors.
+    for (nautilus::val<uint64_t> i = dropCount; i < totalFromReservoir2; ++i)
+    {
+        const auto pick = readValueFromMemRef<uint64_t>(r2PicksRef + i * indexSize);
+        const auto newRecord = pagedVectorRef2.readRecord(pick, fieldNames);
+        pagedVectorRef1.writeRecord(newRecord, pipelineMemoryProvider.bufferProvider);
+        sampleDataSize = sampleDataSize + getRecordDataSizeForSample(newRecord, *bufferRef);
+    }
+
+    VarVal{totalSeen}.writeToMemory(numberOfSeenTuplesRef1);
     VarVal{sampleDataSize}.writeToMemory(sampleDataSizeRef1);
-
-    invoke(
-        +[](PagedVector* vector1, const PagedVector* vector2) -> void { vector1->copyFrom(*vector2); }, pagedVectorPtr1, pagedVectorPtr2);
 }
 
 Record

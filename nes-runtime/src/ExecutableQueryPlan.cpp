@@ -95,28 +95,41 @@ std::unique_ptr<ExecutableQueryPlan> ExecutableQueryPlan::instantiate(
     /// One backpressure channel per sink. The merged listener handed to each source aggregates the
     /// signals from every sink, so the source blocks if ANY sink has applied pressure.
     auto [firstController, mergedListener] = createBackpressureChannel();
-    std::vector<BackpressureController> sinkControllers;
-    sinkControllers.reserve(compiledQueryPlan.sinks.size());
-    sinkControllers.push_back(std::move(firstController));
-    for (size_t i = 1; i < compiledQueryPlan.sinks.size(); ++i)
+
+    /// Source-side statistic wiring (BackpressureListener::wait → BackpressureBlockedEvent) lives on
+    /// the merged listener: it is the single object every source's wait() runs on, and merge() moves
+    /// only the channels — not the statistic context — so wiring per-sink listeners would be lost.
+    /// Set it exactly once here, independent of the sink count.
+    if (backpressureStatisticListener)
     {
-        auto [ctrl, lst] = createBackpressureChannel();
-        /// Wire both ends of the freshly-created channel to the (optional) statistic listener so events
-        /// downstream (NetworkSink::recordBufferSent, BackpressureListener::recordBufferIngested,
-        /// applyPressure / releasePressure) carry this query's identity.
+        mergedListener.setStatisticListener(backpressureStatisticListener, compiledQueryPlan.queryId, compiledQueryPlan.priority);
+    }
+
+    /// Wire a sink's controller to the (optional) statistic listener so sink-side events
+    /// (NetworkSink::recordBufferSent, recordBufferSojourn, recordSchedulerGated) carry this query's
+    /// identity, and to the (optional) per-worker AdaptiveSendingScheduler so the WEIGHTED_PRIO
+    /// sending strategy can gate sends through per-channel contingents. Every sink owns its own
+    /// controller, so this runs per channel — including the first.
+    auto wireController = [&](BackpressureController& ctrl)
+    {
         if (backpressureStatisticListener)
         {
             ctrl.setStatisticListener(backpressureStatisticListener, compiledQueryPlan.queryId, compiledQueryPlan.priority);
-            ctrl.setStatisticListener(backpressureStatisticListener, compiledQueryPlan.queryId, compiledQueryPlan.priority);
         }
-
-        /// Wire the controller to the (optional) per-worker AdaptiveSendingScheduler so the
-        /// WEIGHTED_PRIO sending strategy can gate sends through per-channel contingents. The
-        /// scheduler tick will start allocating shares for this channel on its next tick.
         if (adaptiveSendingScheduler)
         {
             ctrl.registerWithScheduler(adaptiveSendingScheduler, compiledQueryPlan.queryId, compiledQueryPlan.priority);
         }
+    };
+
+    std::vector<BackpressureController> sinkControllers;
+    sinkControllers.reserve(compiledQueryPlan.sinks.size());
+    wireController(firstController);
+    sinkControllers.push_back(std::move(firstController));
+    for (size_t i = 1; i < compiledQueryPlan.sinks.size(); ++i)
+    {
+        auto [ctrl, lst] = createBackpressureChannel();
+        wireController(ctrl);
         sinkControllers.push_back(std::move(ctrl));
         mergedListener.merge(std::move(lst));
     }
@@ -124,7 +137,10 @@ std::unique_ptr<ExecutableQueryPlan> ExecutableQueryPlan::instantiate(
     for (size_t i = 0; i < compiledQueryPlan.sinks.size(); ++i)
     {
         auto& [sinkPipelineId, sinkDescriptor, predecessors] = compiledQueryPlan.sinks[i];
-        auto sink = ExecutablePipeline::create(sinkPipelineId, lower(std::move(sinkControllers[i]), sinkDescriptor, compiledQueryPlan.queryId, compiledQueryPlan.priority, sendingStrategy), {});
+        auto sink = ExecutablePipeline::create(
+            sinkPipelineId,
+            lower(std::move(sinkControllers[i]), sinkDescriptor, compiledQueryPlan.queryId, compiledQueryPlan.priority, sendingStrategy),
+            {});
         compiledQueryPlan.pipelines.push_back(sink);
         for (const auto& predecessor : predecessors)
         {
@@ -139,8 +155,7 @@ std::unique_ptr<ExecutableQueryPlan> ExecutableQueryPlan::instantiate(
 
     for (auto& compiledSource : compiledQueryPlan.sources)
     {
-        std::ranges::copy(
-            instantiatedSinksWithSourcePredecessor[compiledSource.operatorId], std::back_inserter(compiledSource.successors));
+        std::ranges::copy(instantiatedSinksWithSourcePredecessor[compiledSource.operatorId], std::back_inserter(compiledSource.successors));
         if (compiledSource.spliceToRunningSource)
         {
             /// Defer the registry lookup to RunningQueryPlan::start where our RunningQueryPlanNodes
@@ -154,7 +169,8 @@ std::unique_ptr<ExecutableQueryPlan> ExecutableQueryPlan::instantiate(
         else
         {
             instantiatedSources.emplace_back(ExecutableQueryPlan::SourceWithSuccessor{
-                .source = sourceProvider.lower(compiledSource.originId, compiledSource.pipelineId, mergedListener, compiledSource.descriptor),
+                .source
+                = sourceProvider.lower(compiledSource.originId, compiledSource.pipelineId, mergedListener, compiledSource.descriptor),
                 .successors = std::move(compiledSource.successors),
                 .spliceToRunningSource = false,
                 .deferStart = compiledSource.deferStart,

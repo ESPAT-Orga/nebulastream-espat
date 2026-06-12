@@ -15,6 +15,7 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -70,6 +71,12 @@ private:
     std::vector<std::string> filePaths;
     bool loop;
     uint64_t replaysPerFile;
+    /// When > 0, the source switches to the next file based on elapsed wall-clock time (this many
+    /// milliseconds spent emitting the current file) instead of after `replaysPerFile` full passes.
+    /// 0 disables wall-clock switching and falls back to the replay-count schedule. Wall-clock mode
+    /// keeps each regime the same duration regardless of its throughput, so the periodic throughput
+    /// slumps stay aligned in wall-clock plots; replay-count mode lets faster regimes cycle sooner.
+    uint64_t millisPerFile;
     /// Suffix-match (case-insensitive) of the schema field name whose UINT64 value should receive
     /// a per-replay offset so the event-time watermark advances across loop iterations. Empty
     /// string disables the rewrite (default).
@@ -92,6 +99,11 @@ private:
     std::vector<std::vector<TupleBuffer>> preFormattedBuffers;
     size_t currentFileIdx{0};
     uint64_t currentReplayCount{0};
+    /// Wall-clock instant the current file's regime started; reset on every file switch. Only used
+    /// when millisPerFile > 0. Started lazily on the first emitted buffer (not in setup()) so the
+    /// CSV parse time — seconds for large files — does not count against the first regime's budget.
+    std::chrono::steady_clock::time_point currentFileStart;
+    bool fileTimerStarted{false};
     std::vector<TupleBuffer>::iterator currentBufferIter;
     std::shared_ptr<AbstractBufferProvider> bufferProvider;
 };
@@ -117,6 +129,15 @@ struct ConfigParametersLoopingMemory
         uint64_t{1},
         [](const std::unordered_map<std::string, std::string>& config) { return DescriptorConfig::tryGet(REPLAYS_PER_FILE, config); }};
 
+    /// When > 0, switch files by wall-clock time (this many milliseconds per file) instead of by
+    /// REPLAYS_PER_FILE full passes. Takes precedence over REPLAYS_PER_FILE when set. Default 0
+    /// keeps the replay-count schedule. Use this to keep every regime the same wall-clock duration
+    /// even when the regimes have different throughput.
+    static inline const DescriptorConfig::ConfigParameter<uint64_t> MILLIS_PER_FILE{
+        "millis_per_file",
+        uint64_t{0},
+        [](const std::unordered_map<std::string, std::string>& config) { return DescriptorConfig::tryGet(MILLIS_PER_FILE, config); }};
+
     /// When non-empty, names a UINT64 schema field whose value is incremented on every replayed
     /// emit by `cycles_completed * tuples_per_file`. This keeps a downstream event-time watermark
     /// advancing across LOOP cycles instead of getting stuck at the maximum value of the file.
@@ -132,7 +153,7 @@ struct ConfigParametersLoopingMemory
 
     static inline std::unordered_map<std::string, DescriptorConfig::ConfigParameterContainer> parameterMap
         = DescriptorConfig::createConfigParameterContainerMap(
-            SourceDescriptor::parameterMap, FILEPATH, FILEPATH_2, REPLAYS_PER_FILE, MONOTONIC_TIMESTAMP_FIELD, LOOP);
+            SourceDescriptor::parameterMap, FILEPATH, FILEPATH_2, REPLAYS_PER_FILE, MILLIS_PER_FILE, MONOTONIC_TIMESTAMP_FIELD, LOOP);
 };
 
 }

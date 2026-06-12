@@ -19,7 +19,7 @@ query swaps independent of any actual workload shift.
 
 Compared to run_adaptive_optimization_benchmark.py the only differences are:
   - the Memory source loads exactly one dataset (regime A); no FILE_PATH_2; no
-    REPLAYS_PER_FILE — every replayed pass produces the same distribution.
+    MILLIS_PER_FILE — every replayed pass produces the same distribution.
   - all other plumbing (MONOTONIC_TIMESTAMP_FIELD, LOOP, companion, REVERSED_QUERY_SQL,
     --companion-switch-to-sql, window size) is identical so the swap cadence matches.
 

@@ -54,12 +54,21 @@ from scripts.benchmarking.utils import (
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from generate_bid_data import DEFAULT_OUTPUT_A, DEFAULT_OUTPUT_B, ensure_dataset_a, ensure_dataset_b
 
-# How many full passes through the current dataset before MemorySource flips to the other one.
-# At ~400 MTup/s and 30M-row datasets one pass is ~75 ms, so 30 ≈ 2.25 s of one regime —
-# short enough that a 60 s bench observes ~13 regime switches, long enough that each regime's
-# histogram covers multiple closed windows (windowSize=60M event-time ≈ 0.3 s wall clock per
-# window, so ~7 closed windows per regime).
-REPLAYS_PER_FILE = 30
+# Number of regime changes (A↔B file switches) we want per run. The per-file wall-clock duration
+# is derived from this and the run duration: N changes split the run into N+1 equal segments, so
+# MILLIS_PER_FILE = duration / (N+1). Keeping this small (4) keeps the time-series plots uncluttered
+# while still exercising several adaptive swaps. Wall-clock based (not replay-count based) so every
+# regime lasts the same duration regardless of throughput — with replay counting a faster regime
+# cycles sooner, so the periodic throughput slumps would drift apart in the plots.
+REGIME_CHANGES_PER_RUN = 4
+
+
+def millis_per_file_for(duration_s: int) -> int:
+    """Per-file wall-clock budget (ms) that yields REGIME_CHANGES_PER_RUN switches over the run.
+
+    N changes carve the run into N+1 equal segments (start in A, switch at duration/(N+1),
+    2*duration/(N+1), …), so each file plays for duration / (N+1)."""
+    return max(1, int(duration_s * 1000 / (REGIME_CHANGES_PER_RUN + 1)))
 
 #### Build Configuration
 build_dir = os.path.join(".", "build_dir")
@@ -154,12 +163,12 @@ def make_setup_sql(
     sqrts: int,
     constant_workload: bool,
     variant: str = "bid_first",
-    replays_per_file: int = REPLAYS_PER_FILE,
+    millis_per_file: int = millis_per_file_for(120),
 ) -> str:
     select_block = make_data_select_sql(variant, sqrts)
     # With --constant-workload, only regime A is loaded and looped indefinitely. With both,
-    # the source alternates between A and B every REPLAYS_PER_FILE full passes to simulate a
-    # workload-distribution shift on a deterministic schedule.
+    # the source alternates between A and B every MILLIS_PER_FILE wall-clock milliseconds to
+    # simulate a workload-distribution shift on a fixed-duration schedule.
     if constant_workload:
         source_set_clause = f"""\
     'NATIVE' as PARSER.`TYPE`,
@@ -172,7 +181,7 @@ def make_setup_sql(
     'NATIVE' as PARSER.`TYPE`,
     '{data_path_a}' AS `SOURCE`.FILE_PATH,
     '{data_path_b}' AS `SOURCE`.FILE_PATH_2,
-    '{replays_per_file}' AS `SOURCE`.REPLAYS_PER_FILE,
+    '{millis_per_file}' AS `SOURCE`.MILLIS_PER_FILE,
     'timestamp' AS `SOURCE`.MONOTONIC_TIMESTAMP_FIELD,
     'true' AS `SOURCE`.LOOP,
     '{WORKER_GRPC}' AS `SOURCE`.HOST"""
@@ -482,7 +491,7 @@ def run_benchmark(
     baseline_prometheus: bool = False,
     baseline_switch_threshold: float = 888.49,
     baseline_poll_interval_ms: int = 1000,
-    replays_per_file: int = REPLAYS_PER_FILE,
+    millis_per_file: int = 0,
 ):
     check_repository_root()
 
@@ -517,7 +526,12 @@ def run_benchmark(
     # the comparison point for "what would performance be without the adaptive system?" — the
     # answer to whether adaptation actually pays for its own overhead.
     variant_for_query = fixed_variant if fixed_variant else "bid_first"
-    setup_sql = make_setup_sql(data_path_a, data_path_b, sqrts, constant_workload, variant_for_query, replays_per_file)
+    # millis_per_file <= 0 means "auto": size each regime so the run sees REGIME_CHANGES_PER_RUN
+    # switches. An explicit --millis-per-file overrides this.
+    if millis_per_file <= 0:
+        millis_per_file = millis_per_file_for(duration)
+    printInfo(f"Regime switch every {millis_per_file} ms (~{REGIME_CHANGES_PER_RUN} changes over {duration}s).")
+    setup_sql = make_setup_sql(data_path_a, data_path_b, sqrts, constant_workload, variant_for_query, millis_per_file)
     if fixed_variant:
         printInfo(
             f"Using {sqrts} SQRT operators between filters; "
@@ -773,7 +787,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--constant-workload",
         action="store_true",
-        help="Run with only regime A loaded (no FILE_PATH_2, no REPLAYS_PER_FILE alternation). "
+        help="Run with only regime A loaded (no FILE_PATH_2, no MILLIS_PER_FILE alternation). "
         "Expected behavior: histogram converges to a single distribution within the first window "
         "and the swap callback should fire at most once (the initial reconfiguration). Useful for "
         "verifying the adaptive mechanism settles instead of toggling continuously.",
@@ -813,13 +827,15 @@ if __name__ == "__main__":
         help="How often (ms) the coordinator poll loop queries Prometheus (default: 1000).",
     )
     parser.add_argument(
-        "--replays-per-file",
+        "--millis-per-file",
         type=int,
-        default=REPLAYS_PER_FILE,
-        help=f"Full passes through one dataset before the alternating workload flips regimes "
-        f"(default: {REPLAYS_PER_FILE}). Wall-clock regime duration = replays * 30M / throughput, so "
-        f"size this per variant: the Prometheus baseline runs ~50-70x slower (sink backpressure), so it "
-        f"needs a much SMALLER value than native for the same regime duration.",
+        default=0,
+        help=f"Wall-clock milliseconds spent on one dataset before the alternating workload flips "
+        f"regimes. Default 0 means auto: size each regime so the run sees ~{REGIME_CHANGES_PER_RUN} "
+        f"regime changes regardless of --duration (= duration / {REGIME_CHANGES_PER_RUN + 1}). "
+        f"Because this is wall-clock based, the regime duration is throughput-independent: the same "
+        f"value gives the same regime length for native and for the ~50-70x slower Prometheus "
+        f"baseline, with no per-variant retuning, and the throughput slumps stay aligned in the plots.",
     )
     args = parser.parse_args()
 
@@ -834,5 +850,5 @@ if __name__ == "__main__":
         baseline_prometheus=args.baseline_prometheus,
         baseline_switch_threshold=args.baseline_switch_threshold,
         baseline_poll_interval_ms=args.baseline_poll_interval_ms,
-        replays_per_file=args.replays_per_file,
+        millis_per_file=args.millis_per_file,
     )

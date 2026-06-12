@@ -466,17 +466,29 @@ def parse_throughput(worker_lines, data_query_ids):
     return measurements
 
 
-def write_throughput_csv(measurements, output_path):
-    """Write all per-window throughput samples to a CSV for time-series plotting."""
+def write_throughput_csv(measurements, output_path, duration_ms=None):
+    """Write all per-window throughput samples to a CSV for time-series plotting.
+
+    Timestamps are normalized to the first sample so all variants share the same
+    source-start anchor, keeping regime slumps at the same x positions across runs.
+    If duration_ms is given, measurements beyond that window are dropped — this trims
+    the extra setup-phase measurements that variants like Prometheus collect before the
+    benchmark timer starts, without shifting the alignment origin.
+    """
     if not measurements:
         printError("No throughput data collected.")
         return
-    min_ts = measurements[0][0]
+    origin = measurements[0][0]
+    if duration_ms is not None:
+        measurements = [m for m in measurements if m[0] - origin <= duration_ms]
+    if not measurements:
+        printError("No throughput data within duration window.")
+        return
     with open(output_path, "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(["timestamp_ms", "query_id", "query_type", "throughput_tup_per_s"])
         for ts, qid, qtype, tput in measurements:
-            writer.writerow([ts - min_ts, qid, qtype, tput])
+            writer.writerow([ts - origin, qid, qtype, tput])
     printSuccess(f"Throughput data ({len(measurements)} samples) written to {os.path.abspath(output_path)}")
 
 
@@ -552,7 +564,7 @@ def run_benchmark(
             "--data_address=0.0.0.0:9090",
             "--worker.default_query_execution.operator_buffer_size=4194304",
             "--worker.number_of_buffers_in_global_buffer_manager=1024",
-            "--worker.query_engine.number_of_worker_threads=12",
+            "--worker.query_engine.number_of_worker_threads=4",
         ],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -746,7 +758,7 @@ def run_benchmark(
     data_query_ids = collect_all_data_query_ids(repl_lines)
     printInfo(f"Data query IDs observed across all deployments: {data_query_ids}")
     measurements = parse_throughput(worker_lines, data_query_ids)
-    write_throughput_csv(measurements, output)
+    write_throughput_csv(measurements, output, duration_ms=duration * 1000)
 
     printSuccess("Benchmark complete.")
 

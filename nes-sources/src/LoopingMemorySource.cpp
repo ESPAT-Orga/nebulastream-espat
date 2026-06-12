@@ -14,6 +14,7 @@
 
 #include <LoopingMemorySource.hpp>
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -43,6 +44,7 @@ namespace NES
 LoopingMemorySource::LoopingMemorySource(const SourceDescriptor& sourceDescriptor, const size_t bufferSizeInBytes)
     : loop(sourceDescriptor.getFromConfig(ConfigParametersLoopingMemory::LOOP))
     , replaysPerFile(sourceDescriptor.getFromConfig(ConfigParametersLoopingMemory::REPLAYS_PER_FILE))
+    , millisPerFile(sourceDescriptor.getFromConfig(ConfigParametersLoopingMemory::MILLIS_PER_FILE))
     , monotonicTimestampField(sourceDescriptor.getFromConfig(ConfigParametersLoopingMemory::MONOTONIC_TIMESTAMP_FIELD))
     , schema(*sourceDescriptor.getLogicalSource().getSchema())
     , parserConfig(sourceDescriptor.getParserConfig())
@@ -130,6 +132,14 @@ bool LoopingMemorySource::setup(const std::shared_ptr<AbstractBufferProvider>& b
 
 Source::FillTupleBufferResult LoopingMemorySource::fillTupleBuffer(TupleBuffer& tupleBuffer, const std::stop_token&)
 {
+    /// Start the wall-clock regime timer on the first emit rather than in setup(), so the (possibly
+    /// multi-second) CSV parse done in setup() does not eat into the first file's time budget.
+    if (not fileTimerStarted)
+    {
+        currentFileStart = std::chrono::steady_clock::now();
+        fileTimerStarted = true;
+    }
+
     if (currentBufferIter == preFormattedBuffers[currentFileIdx].end())
     {
         /// Current file fully drained once. Bump the timestamp offset by one cycle's worth so
@@ -137,7 +147,16 @@ Source::FillTupleBufferResult LoopingMemorySource::fillTupleBuffer(TupleBuffer& 
         globalTimestampOffset += tuplesPerFile[currentFileIdx];
 
         ++currentReplayCount;
-        if (currentReplayCount >= replaysPerFile)
+        /// Decide whether to advance to the next file. Wall-clock mode (millisPerFile > 0) switches
+        /// once this many milliseconds have elapsed on the current file, keeping every regime the
+        /// same wall-clock duration regardless of throughput; otherwise switch after replaysPerFile
+        /// full passes. The check runs at pass boundaries, so the actual switch lands at the end of
+        /// the pass in flight when the budget is reached.
+        const bool switchFile = millisPerFile > 0
+            ? std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - currentFileStart).count()
+                >= static_cast<int64_t>(millisPerFile)
+            : currentReplayCount >= replaysPerFile;
+        if (switchFile)
         {
             ++currentFileIdx;
             currentReplayCount = 0;
@@ -149,6 +168,7 @@ Source::FillTupleBufferResult LoopingMemorySource::fillTupleBuffer(TupleBuffer& 
                 }
                 currentFileIdx = 0;
             }
+            currentFileStart = std::chrono::steady_clock::now();
         }
         if (preFormattedBuffers[currentFileIdx].empty())
         {
@@ -208,7 +228,11 @@ std::ostream& LoopingMemorySource::toString(std::ostream& str) const
     {
         str << " " << path;
     }
-    str << std::format(", replaysPerFile: {}, totalTuplesEmitted: {})", this->replaysPerFile, this->totalTuplesEmitted.load());
+    str << std::format(
+        ", replaysPerFile: {}, millisPerFile: {}, totalTuplesEmitted: {})",
+        this->replaysPerFile,
+        this->millisPerFile,
+        this->totalTuplesEmitted.load());
     return str;
 }
 

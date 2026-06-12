@@ -55,9 +55,9 @@ from scripts.benchmarking.utils import (
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from generate_bid_data import DEFAULT_OUTPUT_A, DEFAULT_OUTPUT_B, ensure_dataset_a, ensure_dataset_b
 
-# How many full passes through the current dataset before MemorySource flips to the other one.
-# At ~400 MTup/s and 30M-row datasets one pass is ~75 ms, so 130 ≈ 10 s of one regime.
-REPLAYS_PER_FILE = 130
+# Wall-clock milliseconds the LoopingMemory source spends on each dataset before flipping to the
+# other one. Wall-clock based so the regime duration is the same regardless of throughput (10 s).
+MILLIS_PER_FILE = 10000
 
 #### Build Configuration
 build_dir = os.path.join(".", "build_dir")
@@ -79,9 +79,9 @@ WORKER_GRPC = "localhost:8080"
 WORKER_DATA = "localhost:9090"
 
 # Pure passthrough: no filters, no expressions, no expensive intermediate pipeline.
-# Memory source alternates between regime-A and regime-B datasets every REPLAYS_PER_FILE
-# full passes — for the passthrough the regime doesn't matter, but keeping the same source
-# config across all four scripts makes them directly comparable.
+# Memory source alternates between regime-A and regime-B datasets every MILLIS_PER_FILE
+# wall-clock milliseconds — for the passthrough the regime doesn't matter, but keeping the same
+# source config across all four scripts makes them directly comparable.
 def _expensive_filter_clause(sqrts: int) -> str:
     """Per-tuple SQRT chain summed > 0 (always passes). Empty for sqrts <= 0."""
     if sqrts <= 0:
@@ -117,7 +117,7 @@ SET(
     'NATIVE' as PARSER.`TYPE`,
     '{data_path_a}' AS `SOURCE`.FILE_PATH,
     '{data_path_b}' AS `SOURCE`.FILE_PATH_2,
-    '{REPLAYS_PER_FILE}' AS `SOURCE`.REPLAYS_PER_FILE,
+    '{MILLIS_PER_FILE}' AS `SOURCE`.MILLIS_PER_FILE,
     'true' AS `SOURCE`.LOOP,
     '{WORKER_GRPC}' AS `SOURCE`.HOST
 );

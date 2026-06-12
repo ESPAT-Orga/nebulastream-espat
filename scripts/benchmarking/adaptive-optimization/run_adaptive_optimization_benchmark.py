@@ -492,6 +492,7 @@ def run_benchmark(
     baseline_switch_threshold: float = 888.49,
     baseline_poll_interval_ms: int = 1000,
     millis_per_file: int = 0,
+    verbose_build: bool = False,
 ):
     check_repository_root()
 
@@ -502,7 +503,7 @@ def run_benchmark(
 
     if not skip_build:
         printInfo("Building NebulaStream...")
-        compile_nebulastream(cmake_flags, build_dir)
+        compile_nebulastream(cmake_flags, build_dir, verbose=verbose_build)
         printSuccess("Build complete.")
     else:
         printInfo("Skipping build (--skip-build)")
@@ -827,6 +828,11 @@ if __name__ == "__main__":
         help="How often (ms) the coordinator poll loop queries Prometheus (default: 1000).",
     )
     parser.add_argument(
+        "--verbose-build",
+        action="store_true",
+        help="Stream cmake configure and build output to stdout instead of suppressing it.",
+    )
+    parser.add_argument(
         "--millis-per-file",
         type=int,
         default=0,
@@ -851,4 +857,5 @@ if __name__ == "__main__":
         baseline_switch_threshold=args.baseline_switch_threshold,
         baseline_poll_interval_ms=args.baseline_poll_interval_ms,
         millis_per_file=args.millis_per_file,
+        verbose_build=args.verbose_build,
     )

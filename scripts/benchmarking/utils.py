@@ -174,16 +174,17 @@ def find_suitable_cmake() -> Optional[str]:
 
     return None
 
-def compile_nebulastream(cmake_flags, build_dir):
+def compile_nebulastream(cmake_flags, build_dir, verbose: bool = False):
     cmake_path = find_suitable_cmake()
     if not cmake_path:
         raise RuntimeError("No suitable cmake (version >= 3.21) found in PATH.")
 
-    cmake_command = f"MOLD_JOBS=1 {cmake_path} {cmake_flags} -S . -B {build_dir}"
+    cmake_command = f"VCPKG_DOWNLOADS=/tmp/vcpkg_downloads MOLD_JOBS=1 {cmake_path} {cmake_flags} -S . -B {build_dir}"
     build_command = f"MOLD_JOBS=1 {cmake_path} --build {build_dir}"
 
+    run = run_command_and_show_output if verbose else run_command
     print(f"Using cmake at: {cmake_path}")
     printInfo("Running cmake...")
-    run_command(cmake_command)
+    run(cmake_command)
     printInfo("Building the project...")
-    run_command(build_command)
+    run(build_command)

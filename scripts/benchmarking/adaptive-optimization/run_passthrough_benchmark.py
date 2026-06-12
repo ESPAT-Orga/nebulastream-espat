@@ -112,7 +112,7 @@ def make_setup_sql(data_path_a: str, data_path_b: str, sqrts: int) -> str:
 CREATE WORKER "{WORKER_GRPC}" SET ('{WORKER_DATA}' AS DATA);
 CREATE LOGICAL SOURCE bid(timestamp UINT64 NOT NULL, auctionId INT32 NOT NULL, bidValue FLOAT64 NOT NULL, price FLOAT64 NOT NULL);
 CREATE PHYSICAL SOURCE FOR bid
-TYPE Memory
+TYPE LoopingMemory
 SET(
     'NATIVE' as PARSER.`TYPE`,
     '{data_path_a}' AS `SOURCE`.FILE_PATH,

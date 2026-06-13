@@ -336,7 +336,7 @@ def build_probe_trials(args, num_probe_tuples_list) -> list:
     num_probe_tuples) are stamped into Trial.extras."""
     datasets = filter_datasets(args)
     (worker_threads, buffer_configs, statistic_types_to_run,
-     memory_budgets_to_run, _window_sizes_unused, store_types) = select_sweeps(args)
+     memory_budgets_to_run, window_sizes_to_run, store_types) = select_sweeps(args)
 
     trials = []
     for dataset in datasets:
@@ -351,7 +351,7 @@ def build_probe_trials(args, num_probe_tuples_list) -> list:
                         bufSize, buffersGBM, has_explicit_buffer_config=bool(args.buffer_config))
                     worker_cfg = (execMode, nThreads, bufSize, buffersGBM, joinStrat, pageSize)
                     for num_statistic_ids in allNumStatisticIds:
-                        for build_window_size_sec in allBuildWindowSizesSec:
+                        for build_window_size_sec in window_sizes_to_run:
                             for build_windows_per_probe_window in allBuildWindowsPerProbeWindow:
                                 for num_probe_repetitions in allNumProbeRepetitions:
                                     for num_probe_tuples in num_probe_tuples_list:

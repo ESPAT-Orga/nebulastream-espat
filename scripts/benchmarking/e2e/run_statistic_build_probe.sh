@@ -14,45 +14,30 @@
 
 set -euo pipefail
 
+# Create a timestamped output directory for this experiment run
 OUTPUT_DIR="benchmark_run_$(date +%Y%m%d_%H%M%S)"
 mkdir -p "$OUTPUT_DIR"
 echo "Output directory: $(realpath "$OUTPUT_DIR")"
 
-DOCKER="docker run --rm --workdir /tmp/espat-1 -v $(pwd):/tmp/espat-1"
+# Create a Python virtual environment and install the required python libraries
+python3 -m venv myenv
+source myenv/bin/activate
+pip3 install argparse requests pandas pyyaml
 
-# Step 1: Rebuild nes-single-node-worker with the current source (incremental).
-$DOCKER nebulastream/nes-development:local \
-    cmake --build cmake-build-release -j --target nes-single-node-worker
+# Build (throughput) — writes results_statistic_build.csv
+#myenv/bin/python3 -m scripts.benchmarking.e2e.run_statistic_build --queries ClusterMonitoring --statistic-types EquiWidthHistogram CountMin --output-dir "$OUTPUT_DIR" --statistic-store-types SUB_STORES
+#myenv/bin/python3 -m scripts.benchmarking.e2e.run_statistic_build --queries ClusterMonitoring --output-dir "$OUTPUT_DIR" --statistic-store-types SUB_STORES
+myenv/bin/python3 -m scripts.benchmarking.e2e.run_statistic_build    --all --output-dir "$OUTPUT_DIR" --statistic-store-types SUB_STORES
 
-# Step 2: Probe benchmark — for each trial, runs a build query to populate the
-# statistic store, then a probe query and records throughput / latency.
-# Parameters match the original StatisticProbe experiment:
-#   dataset       : ClusterMonitoring
-#   statistic types: Reservoir, EquiWidthHistogram, CountMin
-#   memory budgets : 1024, 5120, 10240 bytes  (from configs.py)
-#   worker threads : 16
-#   window size    : 1 s  (single value, others are held constant)
-#   store type     : DEFAULT
-#   statistic IDs  : 1    (allNumStatisticIds = [1] in configs.py)
-#   windows/probe  : 1, 100 (allBuildWindowsPerProbeWindow, always swept)
-#   runs           : 3
-$DOCKER \
-    -e NES_BUILD_DIR=cmake-build-release \
-    nebulastream/nes-development:local \
-    sh -c "
-        python3 -m venv /tmp/bench_venv \
-        && /tmp/bench_venv/bin/pip install --quiet pyyaml requests pandas \
-        && /tmp/bench_venv/bin/python3 -m scripts.benchmarking.e2e.run_statistic_probe \
-            --queries ClusterMonitoring \
-            --statistic-types Reservoir EquiWidthHistogram CountMin \
-            --worker-threads 16 \
-            --window-sizes 1 60 \
-            --statistic-store-types DEFAULT \
-            --output-dir $OUTPUT_DIR \
-            --skip-build
-    "
+# Accuracy — writes results_statistic_accuracy.csv.
+#myenv/bin/python3 -m scripts.benchmarking.e2e.run_statistic_accuracy --all --output-dir "$OUTPUT_DIR" --statistic-store-types SUB_STORES
 
-echo ""
-echo "Results written to $OUTPUT_DIR/results_statistic_probe.csv"
-echo "Generate the plot with:"
-echo "  python3 scripts/benchmarking/e2e/plots/plot_statistic_probe.py $OUTPUT_DIR/results_statistic_probe.csv"
+# Probe (probe throughput) — writes results_statistic_probe.csv
+#myenv/bin/python3 -m scripts.benchmarking.e2e.run_statistic_probe    --all --output-dir "$OUTPUT_DIR" --statistic-store-types SUB_STORES
+#myenv/bin/python3 -m scripts.benchmarking.e2e.run_statistic_probe  --queries ClusterMonitoring --output-dir "$OUTPUT_DIR" --statistic-store-types WINDOW --statistic-types Reservoir EquiWidthHistogram CountMin --memory-budgets 1024 10240 --worker-threads 1 --num-runs 1
+#myenv/bin/python3 -m scripts.benchmarking.e2e.run_statistic_probe  --queries ClusterMonitoring --output-dir "$OUTPUT_DIR" --statistic-store-types WINDOW --worker-threads 1 16 --num-runs 3
+#myenv/bin/python3 -m scripts.benchmarking.e2e.run_statistic_probe  --all --output-dir "$OUTPUT_DIR" --statistic-store-types WINDOW --worker-threads 1 16 --num-runs 3
+
+# Deactivate the virtual environment
+deactivate
+rm -rf myenv

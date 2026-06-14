@@ -95,7 +95,7 @@ allBuildWindowSizesSec = [1, 5, 10]
 # Memory budgets (bytes) used to size each synopsis. The actual rows / cols /
 # buckets / sample-size are derived inside the C++ logical functions'
 # calculateConfigs() during lowering.
-memoryBudgetConfig = [1 * 1024, 10 * 1024]
+memoryBudgetConfig = [1 * 1024, 5 * 1024, 10 * 1024]
 # memoryBudgetConfig =  [1 * 1024, 10 * 1024]
 
 # Legacy histogram bounds; the runner now derives min/max from the data instead.
@@ -137,7 +137,7 @@ allNumProbeTuples = [1]
 allNumProbeRepetitions = [1000]
 
 # Number of distinct statistic IDs probed concurrently.
-allNumStatisticIds = [1]
+allNumStatisticIds = [1, 10]
 
 # Latency listener for probe — enabled (we want both throughput and latency).
 enableLatencyForProbe = [True]

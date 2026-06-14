@@ -14,7 +14,6 @@
 
 #pragma once
 
-#include <map>
 #include <unordered_map>
 #include <StatisticStore/AbstractStatisticStore.hpp>
 #include <WindowTypes/Measures/TimeMeasure.hpp>
@@ -24,10 +23,6 @@
 namespace NES
 {
 
-/// Single-shard statistic store behind one folly::Synchronized lock.
-/// Inner storage is an ordered map keyed by startTs so that getStatistics range queries
-/// run in O(log N + k) rather than O(N), where N is the number of stored windows per
-/// statistic ID and k is the number of matches.
 class DefaultStatisticStore final : public AbstractStatisticStore
 {
 public:
@@ -41,8 +36,7 @@ public:
     std::vector<IdStatisticPair> getAllStatistics() override;
 
 private:
-    using WindowMap = std::map<Windowing::TimeMeasure, std::vector<Statistic>>;
-    folly::Synchronized<std::unordered_map<Statistic::StatisticId, WindowMap>> statistics;
+    folly::Synchronized<std::unordered_map<Statistic::StatisticId, std::vector<Statistic>>> statistics;
 };
 
 }

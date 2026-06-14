@@ -45,13 +45,9 @@ from scripts.benchmarking.utils import get_vcpkg_dir
 build_dir = BUILD_DIR
 working_dir = WORKING_DIR
 output_dir = "."
-try:
-    _vcpkg = get_vcpkg_dir()
-except ValueError:
-    _vcpkg = ""   # not needed when --skip-build is passed
 cmake_flags = ("-G Ninja "
                "-DCMAKE_BUILD_TYPE=Release "
-               f"-DCMAKE_TOOLCHAIN_FILE={_vcpkg} "
+               f"-DCMAKE_TOOLCHAIN_FILE={get_vcpkg_dir()} "
                "-DUSE_LIBCXX_IF_AVAILABLE:BOOL=OFF "
                "-DENABLE_LARGE_TESTS=1 "
                "-DNES_BUILD_NATIVE:BOOL=ON "

@@ -14,7 +14,6 @@
 
 #pragma once
 
-#include <map>
 #include <unordered_map>
 
 #include <StatisticStore/AbstractStatisticStore.hpp>
@@ -24,21 +23,13 @@
 namespace NES
 {
 
-/// Thread-sharded statistic store: each worker thread always writes to the same shard
-/// (determined by hashing std::this_thread::get_id()), so inserts from different threads
-/// never contend. Reads must scan all shards, but each shard's inner storage is now an
-/// ordered map keyed by startTs so that getStatistics range queries run in O(log N + k)
-/// per shard rather than O(N), where N is the number of stored windows per statistic ID
-/// in that shard and k is the number of matches.
+/// Has multiple sub stores (std::unordered_map keyed by statisticId) per expected no. concurrent access.
+/// The main idea is that the thread id hashes to distribute the access to the sub stores,
+/// and within each sub store the statisticId indexes directly to the relevant bucket.
 class SubStoresStatisticStore final : public AbstractStatisticStore
 {
-    /// startTs → statistics sharing that startTs
-    using WindowMap = std::map<Windowing::TimeMeasure, std::vector<Statistic>>;
-    /// statisticId → windowMap
-    using IdWindowMap = std::unordered_map<Statistic::StatisticId, WindowMap>;
-
     uint64_t numberOfExpectedConcurrentAccess;
-    std::vector<folly::Synchronized<IdWindowMap>> allSubStores;
+    std::vector<folly::Synchronized<std::unordered_map<Statistic::StatisticId, std::vector<Statistic>>>> allSubStores;
 
 public:
     explicit SubStoresStatisticStore(uint64_t numberOfExpectedConcurrentAccess);

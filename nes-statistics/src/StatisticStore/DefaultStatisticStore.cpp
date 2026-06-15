@@ -16,13 +16,17 @@
 #include <WindowTypes/Measures/TimeMeasure.hpp>
 #include <Statistic.hpp>
 
+#include <ranges>
+#include <utility>
+
 namespace NES
 {
 
 bool DefaultStatisticStore::insertStatistic(const Statistic::StatisticId& statisticId, Statistic statistic)
 {
+    const auto startTs = statistic.getStartTs();
     const auto statisticsLocked = statistics.wlock();
-    (*statisticsLocked)[statisticId].emplace_back(std::move(statistic));
+    (*statisticsLocked)[statisticId][startTs].emplace_back(std::move(statistic));
     return true;
 }
 
@@ -30,13 +34,36 @@ bool DefaultStatisticStore::deleteStatistics(
     const Statistic::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs)
 {
     const auto statisticsLocked = statistics.wlock();
-    auto& statisticsVec = (*statisticsLocked)[statisticId];
+    const auto idIt = statisticsLocked->find(statisticId);
+    if (idIt == statisticsLocked->end())
+    {
+        return {};
+    }
+    auto& windowMap = idIt->second;
 
-    const auto range = std::ranges::remove_if(
-        statisticsVec,
-        [startTs, endTs](const Statistic& statistic) { return startTs <= statistic.getStartTs() && statistic.getEndTs() <= endTs; });
-    const bool foundAnyStatistic = range.begin() != statisticsVec.end();
-    statisticsVec.erase(range.begin(), statisticsVec.end());
+    bool foundAnyStatistic = false;
+    const auto lowerBound = windowMap.lower_bound(startTs);
+    const auto higherBound = windowMap.upper_bound(endTs);
+    for (auto it = lowerBound; it != higherBound;)
+    {
+        auto& statisticsVec = it->second;
+        const auto range
+            = std::ranges::remove_if(statisticsVec, [endTs](const Statistic& statistic) { return statistic.getEndTs() <= endTs; });
+        if (range.begin() != statisticsVec.end())
+        {
+            statisticsVec.erase(range.begin(), statisticsVec.end());
+            foundAnyStatistic = true;
+        }
+        if (statisticsVec.empty())
+        {
+            it = windowMap.erase(it);
+        }
+        else
+        {
+            ++it;
+        }
+    }
+
     return foundAnyStatistic;
 }
 
@@ -49,13 +76,19 @@ std::vector<Statistic> DefaultStatisticStore::getStatistics(
     {
         return {};
     }
+    const auto& windowMap = idIt->second;
 
     std::vector<Statistic> returnStatisticsVector;
-    const auto& statisticsVec = idIt->second;
-    std::ranges::copy_if(
-        statisticsVec,
-        std::back_inserter(returnStatisticsVector),
-        [startTs, endTs](const Statistic& statistic) { return startTs <= statistic.getStartTs() && statistic.getEndTs() <= endTs; });
+    const auto lowerBound = windowMap.lower_bound(startTs);
+    const auto higherBound = windowMap.upper_bound(endTs);
+    for (auto it = lowerBound; it != higherBound; ++it)
+    {
+        const auto& statisticsVec = it->second;
+        std::ranges::copy_if(
+            statisticsVec,
+            std::back_inserter(returnStatisticsVector),
+            [endTs](const Statistic& statistic) { return statistic.getEndTs() <= endTs; });
+    }
     return returnStatisticsVector;
 }
 
@@ -68,7 +101,13 @@ std::optional<Statistic> DefaultStatisticStore::getSingleStatistic(
     {
         return std::nullopt;
     }
-    const auto& statisticsVec = idIt->second;
+    const auto& windowMap = idIt->second;
+    const auto statisticsVecketIt = windowMap.find(startTs);
+    if (statisticsVecketIt == windowMap.end())
+    {
+        return std::nullopt;
+    }
+    const auto& statisticsVec = statisticsVecketIt->second;
 
     const auto it = std::ranges::find_if(
         statisticsVec,
@@ -81,11 +120,14 @@ std::vector<DefaultStatisticStore::IdStatisticPair> DefaultStatisticStore::getAl
     std::vector<IdStatisticPair> returnStatisticsVector;
     const auto statisticsLocked = statistics.rlock();
 
-    for (const auto& [statisticId, statisticVec] : *statisticsLocked)
+    for (const auto& [statisticId, windowMap] : *statisticsLocked)
     {
-        for (const auto& statistic : statisticVec)
+        for (const auto& statisticsVecket : windowMap | std::views::values)
         {
-            returnStatisticsVector.emplace_back(statisticId, statistic);
+            for (const auto& statistic : statisticsVecket)
+            {
+                returnStatisticsVector.emplace_back(statisticId, statistic);
+            }
         }
     }
     return returnStatisticsVector;

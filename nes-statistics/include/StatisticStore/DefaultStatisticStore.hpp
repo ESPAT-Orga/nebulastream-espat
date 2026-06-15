@@ -14,6 +14,7 @@
 
 #pragma once
 
+#include <map>
 #include <unordered_map>
 #include <StatisticStore/AbstractStatisticStore.hpp>
 #include <WindowTypes/Measures/TimeMeasure.hpp>
@@ -36,7 +37,8 @@ public:
     std::vector<IdStatisticPair> getAllStatistics() override;
 
 private:
-    folly::Synchronized<std::unordered_map<Statistic::StatisticId, std::vector<Statistic>>> statistics;
+    using WindowMap = std::map<Windowing::TimeMeasure, std::vector<Statistic>>;
+    folly::Synchronized<std::unordered_map<Statistic::StatisticId, WindowMap>> statistics;
 };
 
 }

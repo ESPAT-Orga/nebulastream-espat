@@ -24,7 +24,6 @@
 #include <iterator>
 #include <ranges>
 #include <thread>
-#include <unordered_map>
 #include <utility>
 
 namespace NES
@@ -48,15 +47,16 @@ SubStoresStatisticStore::SubStoresStatisticStore(const uint64_t numberOfExpected
     allSubStores.reserve(numberOfExpectedConcurrentAccess);
     for (uint64_t i = 0; i < numberOfExpectedConcurrentAccess; ++i)
     {
-        allSubStores.emplace_back(folly::Synchronized<std::unordered_map<Statistic::StatisticId, std::vector<Statistic>>>{});
+        allSubStores.emplace_back();
     }
 }
 
 bool SubStoresStatisticStore::insertStatistic(const Statistic::StatisticId& statisticId, Statistic statistic)
 {
+    const auto startTs = statistic.getStartTs();
     const auto pos = getPos(numberOfExpectedConcurrentAccess);
     const auto lockedStatisticStore = allSubStores[pos].wlock();
-    (*lockedStatisticStore)[statisticId].emplace_back(std::move(statistic));
+    (*lockedStatisticStore)[statisticId][startTs].emplace_back(std::move(statistic));
     return true;
 }
 
@@ -67,19 +67,32 @@ bool SubStoresStatisticStore::deleteStatistics(
     for (auto& statisticStore : allSubStores)
     {
         const auto lockedStatisticStore = statisticStore.wlock();
-        const auto bucketIt = lockedStatisticStore->find(statisticId);
-        if (bucketIt == lockedStatisticStore->end())
+        const auto idIt = lockedStatisticStore->find(statisticId);
+        if (idIt == lockedStatisticStore->end())
         {
             continue;
         }
-        auto& bucket = bucketIt->second;
-        const auto removed = std::ranges::remove_if(
-            bucket,
-            [startTs, endTs](const Statistic& statistic) { return statistic.getStartTs() >= startTs and statistic.getEndTs() <= endTs; });
-        if (removed.begin() != bucket.end())
+        auto& windowMap = idIt->second;
+        const auto lowerBound = windowMap.lower_bound(startTs);
+        const auto higherBound = windowMap.upper_bound(endTs);
+        for (auto it = lowerBound; it != higherBound;)
         {
-            bucket.erase(removed.begin(), removed.end());
-            foundAnyStatistic = true;
+            auto& bucket = it->second;
+            const auto removed
+                = std::ranges::remove_if(bucket, [endTs](const Statistic& statistic) { return statistic.getEndTs() <= endTs; });
+            if (removed.begin() != bucket.end())
+            {
+                bucket.erase(removed.begin(), removed.end());
+                foundAnyStatistic = true;
+            }
+            if (bucket.empty())
+            {
+                it = windowMap.erase(it);
+            }
+            else
+            {
+                ++it;
+            }
         }
     }
     return foundAnyStatistic;
@@ -92,15 +105,22 @@ std::vector<Statistic> SubStoresStatisticStore::getStatistics(
     for (const auto& statisticStore : allSubStores)
     {
         const auto lockedStatisticStore = statisticStore.rlock();
-        const auto bucketIt = lockedStatisticStore->find(statisticId);
-        if (bucketIt == lockedStatisticStore->end())
+        const auto idIt = lockedStatisticStore->find(statisticId);
+        if (idIt == lockedStatisticStore->end())
         {
             continue;
         }
-        std::ranges::copy_if(
-            bucketIt->second,
-            std::back_inserter(foundStatistics),
-            [startTs, endTs](const Statistic& statistic) { return statistic.getStartTs() >= startTs and statistic.getEndTs() <= endTs; });
+        const auto& windowMap = idIt->second;
+
+        const auto lowerBound = windowMap.lower_bound(startTs);
+        const auto higherBound = windowMap.upper_bound(endTs);
+        for (auto it = lowerBound; it != higherBound; ++it)
+        {
+            std::ranges::copy_if(
+                it->second,
+                std::back_inserter(foundStatistics),
+                [endTs](const Statistic& statistic) { return statistic.getEndTs() <= endTs; });
+        }
     }
     return foundStatistics;
 }
@@ -111,8 +131,14 @@ std::optional<Statistic> SubStoresStatisticStore::getSingleStatistic(
     for (const auto& statisticStore : allSubStores)
     {
         const auto lockedStatisticStore = statisticStore.rlock();
-        const auto bucketIt = lockedStatisticStore->find(statisticId);
-        if (bucketIt == lockedStatisticStore->end())
+        const auto idIt = lockedStatisticStore->find(statisticId);
+        if (idIt == lockedStatisticStore->end())
+        {
+            continue;
+        }
+        const auto& windowMap = idIt->second;
+        const auto bucketIt = windowMap.find(startTs);
+        if (bucketIt == windowMap.end())
         {
             continue;
         }
@@ -129,15 +155,18 @@ std::optional<Statistic> SubStoresStatisticStore::getSingleStatistic(
 
 std::vector<AbstractStatisticStore::IdStatisticPair> SubStoresStatisticStore::getAllStatistics()
 {
-    std::vector<AbstractStatisticStore::IdStatisticPair> retStatistics;
+    std::vector<IdStatisticPair> retStatistics;
     for (const auto& statisticStore : allSubStores)
     {
         const auto lockedStatisticStore = statisticStore.rlock();
-        for (const auto& [statisticId, bucket] : *lockedStatisticStore)
+        for (const auto& [statisticId, windowMap] : *lockedStatisticStore)
         {
-            for (const auto& statistic : bucket)
+            for (const auto& bucket : windowMap | std::views::values)
             {
-                retStatistics.emplace_back(statisticId, statistic);
+                for (const auto& statistic : bucket)
+                {
+                    retStatistics.emplace_back(statisticId, statistic);
+                }
             }
         }
     }

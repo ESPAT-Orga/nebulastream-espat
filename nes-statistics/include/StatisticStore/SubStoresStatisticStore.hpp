@@ -14,6 +14,7 @@
 
 #pragma once
 
+#include <map>
 #include <unordered_map>
 
 #include <StatisticStore/AbstractStatisticStore.hpp>
@@ -28,8 +29,9 @@ namespace NES
 /// and within each sub store the statisticId indexes directly to the relevant bucket.
 class SubStoresStatisticStore final : public AbstractStatisticStore
 {
+    using WindowMap = std::map<Windowing::TimeMeasure, std::vector<Statistic>>;
     uint64_t numberOfExpectedConcurrentAccess;
-    std::vector<folly::Synchronized<std::unordered_map<Statistic::StatisticId, std::vector<Statistic>>>> allSubStores;
+    std::vector<folly::Synchronized<std::unordered_map<Statistic::StatisticId, WindowMap>>> allSubStores;
 
 public:
     explicit SubStoresStatisticStore(uint64_t numberOfExpectedConcurrentAccess);

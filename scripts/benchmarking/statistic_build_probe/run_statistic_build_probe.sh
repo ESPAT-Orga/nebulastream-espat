@@ -36,7 +36,7 @@ pip3 install argparse requests pandas pyyaml
 # NES into ./build_dir AND the ENABLE_LARGE_TESTS=1 configure downloads the large datasets (resolving the
 # .md5 placeholders); subsequent runs reuse ./build_dir. No --build-dataset → configured paths.
 #myenv/bin/python3 -m scripts.benchmarking.statistic_build_probe.run_synopsis_amortization --queries ClusterMonitoring Manufacturing --memory-budgets 1024 10240 --window-sizes 1 10 --worker-threads 1 16 --num-runs 3 --output-dir "$OUTPUT_DIR"
-myenv/bin/python3 -m scripts.benchmarking.statistic_build_probe.run_synopsis_amortization --memory-budgets 1024 10240 --window-sizes 1 10 --worker-threads 1 16 --num-runs 3 --output-dir "$OUTPUT_DIR"
+myenv/bin/python3 -m scripts.benchmarking.statistic_build_probe.run_synopsis_amortization --memory-budgets 5120 --window-sizes 1 10 --worker-threads 1 16 --num-runs 3 --output-dir "$OUTPUT_DIR"
 #myenv/bin/python3 -m scripts.benchmarking.statistic_build_probe.run_synopsis_amortization --memory-budgets 1024 5120 10240 --worker-threads 1 16 --num-runs 3 --output-dir "$OUTPUT_DIR"
 
 

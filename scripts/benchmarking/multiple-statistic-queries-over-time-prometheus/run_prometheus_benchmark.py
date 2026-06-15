@@ -47,6 +47,7 @@ import shlex
 import statistics
 import subprocess
 import sys
+import threading
 import time
 
 from scripts.benchmarking.utils import (
@@ -164,17 +165,18 @@ def ensure_tcpgen_image():
     )
 
 
-def _worker_args():
+def _worker_args(condition):
     """Command-line passed to nes-single-node-worker inside the container.
 
     Bind on 0.0.0.0 so the published Docker ports can reach the server. Otherwise
     mirrors the host-binary launch in scripts.benchmarking.common.worker_lifecycle.start_single_node_worker
-    so the worker behaves identically.
+    so the worker behaves identically. The worker-thread count is tied to the tier's CPU budget
+    (config.worker_threads_for) so a capped tier isn't oversubscribed.
     """
     return [
         f"--grpc=0.0.0.0:{GRPC_PORT}",
         f"--data_address=0.0.0.0:{DATA_PORT}",
-        f"--worker.query_engine.number_of_worker_threads={config.WORKER_THREADS}",
+        f"--worker.query_engine.number_of_worker_threads={config.worker_threads_for(condition)}",
         f"--worker.default_query_execution.execution_mode={config.EXECUTION_MODE}",
         f"--worker.number_of_buffers_in_global_buffer_manager={config.NUMBER_OF_BUFFERS}",
         f"--worker.default_query_optimization.join_strategy={config.JOIN_STRATEGY}",
@@ -244,7 +246,7 @@ def start_combined_container(condition, run_name, *, enable_prometheus, num_prom
         cmd += ["-e", "NES_RUN_PROMETHEUS=0"]
 
     cmd += [config.WORKER_DOCKER_IMAGE]
-    cmd += _worker_args()
+    cmd += _worker_args(condition)
 
     printInfo(f"docker run: {' '.join(shlex.quote(c) for c in cmd)}")
     container_id = subprocess.run(cmd, check=True, capture_output=True, text=True).stdout.strip()
@@ -292,6 +294,82 @@ def stop_combined_container(name, logs_proc):
     ### linger; best-effort prune.
     subprocess.run(["docker", "rm", "-f", name], capture_output=True)
     return state
+
+
+### --- Per-process RSS sampling -----------------------------------------
+### Memory-budget story: on a capped edge tier the co-located Prometheus server occupies a fixed
+### chunk of the cgroup's --memory budget that is then unavailable to the worker's buffer pool. We
+### sample per-process RSS for the whole run and report the peak per process group, so the cost can
+### be framed as "X% of the device budget" rather than (mis)attributed to a throughput slowdown.
+###
+### RSS is read via `docker top` (host-side ps against the container's PID namespace), so the
+### container image needs no ps of its own. RSS double-counts shared pages, so treat these as a
+### per-process footprint estimate, not an exact unique-set size.
+RSS_SAMPLE_INTERVAL_SECONDS = float(os.environ.get("RSS_SAMPLE_INTERVAL_SECONDS", "1.0"))
+
+
+def _sample_container_rss_kb(name):
+    """Return {'prometheus', 'worker', 'total'} RSS in KiB for the container, or None if it can't be
+    sampled (container exited / docker error). RSS is summed per process group via `ps -eo rss,args`."""
+    proc = subprocess.run(["docker", "top", name, "-eo", "rss,args"], capture_output=True, text=True)
+    if proc.returncode != 0:
+        return None
+    totals = {"prometheus": 0, "worker": 0, "total": 0}
+    for line in proc.stdout.splitlines()[1:]:  ### skip the "RSS COMMAND" header row
+        parts = line.split(None, 1)
+        if len(parts) != 2:
+            continue
+        try:
+            rss = int(parts[0])
+        except ValueError:
+            continue
+        cmd = parts[1]
+        totals["total"] += rss
+        if "prometheus" in cmd:
+            totals["prometheus"] += rss
+        elif "nes-single-node-worker" in cmd:
+            totals["worker"] += rss
+    return totals
+
+
+class RssSampler:
+    """Polls per-process RSS inside a running container on a background thread until stop()."""
+
+    def __init__(self, name, interval=RSS_SAMPLE_INTERVAL_SECONDS):
+        self.name = name
+        self.interval = interval
+        self.samples = []  ### list of (elapsed_s, prometheus_kb, worker_kb, total_kb)
+        self.peak = {"prometheus": 0, "worker": 0, "total": 0}
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    def _run(self):
+        t0 = time.time()
+        while not self._stop.is_set():
+            sample = _sample_container_rss_kb(self.name)
+            if sample is not None:
+                self.samples.append((time.time() - t0, sample["prometheus"], sample["worker"], sample["total"]))
+                for key in self.peak:
+                    self.peak[key] = max(self.peak[key], sample[key])
+            self._stop.wait(self.interval)
+
+    def start(self):
+        self._thread.start()
+        return self
+
+    def stop(self):
+        self._stop.set()
+        self._thread.join(timeout=self.interval + 5)
+        return self.peak
+
+
+def write_rss_timeseries(samples, csv_path):
+    """Write the per-process RSS time-series (one row per sample) in MiB for downstream plotting."""
+    with open(csv_path, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["elapsed_s", "prometheus_rss_mb", "worker_rss_mb", "total_rss_mb"])
+        for elapsed, prom_kb, worker_kb, total_kb in samples:
+            w.writerow([f"{elapsed:.3f}", prom_kb / 1024.0, worker_kb / 1024.0, total_kb / 1024.0])
 
 
 def _tcpgen_name(condition, run_name):
@@ -486,10 +564,35 @@ def write_latency_timeseries(samples, query_ids, output_path):
     if not filtered:
         return
     t0 = min(s[2] for s in filtered)
+
+    ### The latency listener emits one sample per completed task, so a single query can produce tens of
+    ### millions of rows (multi-GB CSV). Uniformly stride each query's samples down to at most
+    ### config.LATENCY_MAX_SAMPLES_PER_QUERY rows (0 = keep all). Striding (vs head-truncation) keeps the
+    ### distribution and the time spread, so percentile / over-time plots stay representative.
+    cap = config.LATENCY_MAX_SAMPLES_PER_QUERY
+    stride = {}
+    if cap and cap > 0:
+        counts = {}
+        for s in filtered:
+            counts[s[0]] = counts.get(s[0], 0) + 1
+        stride = {q: (c + cap - 1) // cap for q, c in counts.items()}
+        if any(st > 1 for st in stride.values()):
+            kept = sum(min(c, cap) for c in counts.values())
+            printInfo(
+                f"latency CSV {os.path.basename(output_path)}: downsampling to <= {cap} samples/query "
+                f"(~{len(filtered) - kept} of {len(filtered)} rows dropped)"
+            )
+
+    seen = {}
     with open(output_path, "w", newline="") as f:
         w = csv.writer(f)
         w.writerow(["query_id", "num_tasks", "duration_start_ms", "duration_end_ms", "duration_start_ms_normalized", "latency_s"])
         for query_id, num_tasks, duration_start, duration_end, value in filtered:
+            if stride:
+                idx = seen.get(query_id, 0)
+                seen[query_id] = idx + 1
+                if idx % stride[query_id] != 0:
+                    continue
             w.writerow([query_id, num_tasks, duration_start, duration_end, duration_start - t0, value])
 
 
@@ -522,8 +625,15 @@ def run_one(name, working_dir, prepare_query_for, csv_output_dir, condition, *, 
     tcpgen_name = None
     tcpgen_logs_proc = None
     tcpgen_log_stream = None
+    rss_sampler = None
     query_ids = []
-    container_state = {"oom_killed": False, "exit_code": None}
+    container_state = {
+        "oom_killed": False,
+        "exit_code": None,
+        "rss_peak_prometheus_kb": 0,
+        "rss_peak_worker_kb": 0,
+        "rss_peak_total_kb": 0,
+    }
 
     try:
         container_name, logs_proc = start_combined_container(
@@ -534,6 +644,10 @@ def run_one(name, working_dir, prepare_query_for, csv_output_dir, condition, *, 
             log_stream=worker_stdout,
         )
         time.sleep(5)  ### give the worker a moment to bind its grpc port
+
+        ### Poll per-process RSS for the whole run so we can report the peak Prometheus footprint
+        ### (and the worker's, as a baseline) against the tier's --memory budget.
+        rss_sampler = RssSampler(container_name).start()
 
         total = config.TOTAL_QUERIES_PER_RUN[name]
 
@@ -577,8 +691,15 @@ def run_one(name, working_dir, prepare_query_for, csv_output_dir, condition, *, 
                 stop_tcp_generator(tcpgen_name, tcpgen_logs_proc, tcpgen_log_stream)
             except Exception as e:
                 printError(f"[tcpgen/{condition}/{name}] stop failed: {e}")
+        ### Stop the RSS sampler before the container so the last `docker top` still has a live target.
+        if rss_sampler is not None:
+            rss_sampler.stop()
         if container_name is not None:
             container_state = stop_combined_container(container_name, logs_proc)
+        if rss_sampler is not None:
+            container_state["rss_peak_prometheus_kb"] = rss_sampler.peak["prometheus"]
+            container_state["rss_peak_worker_kb"] = rss_sampler.peak["worker"]
+            container_state["rss_peak_total_kb"] = rss_sampler.peak["total"]
         worker_stdout.close()
         cli_log.close()
 
@@ -606,6 +727,18 @@ def run_one(name, working_dir, prepare_query_for, csv_output_dir, condition, *, 
         printSuccess(f"[{condition}/{name}] throughput time-series: {os.path.abspath(throughput_csv)}")
     if os.path.exists(latency_csv):
         printSuccess(f"[{condition}/{name}] latency time-series:    {os.path.abspath(latency_csv)}")
+
+    ### Per-process RSS time-series + peak. The peak Prometheus RSS is the memory-budget cost we care
+    ### about on capped tiers; the worker RSS is the baseline it competes with.
+    if rss_sampler is not None and rss_sampler.samples:
+        rss_csv = os.path.join(csv_output_dir, f"{prefix}{name}_rss.csv")
+        write_rss_timeseries(rss_sampler.samples, rss_csv)
+        printSuccess(f"[{condition}/{name}] RSS time-series:        {os.path.abspath(rss_csv)}")
+        printInfo(
+            f"[{condition}/{name}] peak RSS — prometheus {container_state['rss_peak_prometheus_kb'] / 1024.0:.1f} MiB, "
+            f"worker {container_state['rss_peak_worker_kb'] / 1024.0:.1f} MiB, "
+            f"total {container_state['rss_peak_total_kb'] / 1024.0:.1f} MiB"
+        )
 
     total_throughput = sum(per_query_throughput) if per_query_throughput else 0.0
     median_latency = statistics.median(per_query_latency) if per_query_latency else float("nan")
@@ -640,9 +773,18 @@ def write_summary(output_dir, results, condition):
     with open(csv_path, mode, newline="") as f:
         w = csv.writer(f)
         if write_header:
-            w.writerow(["condition", "run", "total_throughput_tps", "median_latency_s", "num_queries", "oom_killed", "exit_code"])
+            w.writerow([
+                "condition", "run", "total_throughput_tps", "median_latency_s", "num_queries",
+                "oom_killed", "exit_code",
+                "peak_prometheus_rss_mb", "peak_worker_rss_mb", "peak_total_rss_mb",
+            ])
         for name, (tp, lat, per_tp, per_lat, qids, state) in results.items():
-            w.writerow([condition, name, tp, lat, len(qids), state["oom_killed"], state["exit_code"]])
+            w.writerow([
+                condition, name, tp, lat, len(qids), state["oom_killed"], state["exit_code"],
+                state.get("rss_peak_prometheus_kb", 0) / 1024.0,
+                state.get("rss_peak_worker_kb", 0) / 1024.0,
+                state.get("rss_peak_total_kb", 0) / 1024.0,
+            ])
     printSuccess(f"Summary written to {os.path.abspath(csv_path)}")
 
 

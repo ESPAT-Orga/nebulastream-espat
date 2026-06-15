@@ -26,6 +26,7 @@ Usage (run from repository root):
 
 import argparse
 import csv
+import getpass
 import json
 import os
 import re
@@ -358,7 +359,10 @@ def launch_and_validate_prometheus(worker_lines_label="PROM"):
 
     here = os.path.dirname(os.path.abspath(__file__))
     cfg_path = write_prometheus_scrape_config(os.path.join(here, "prometheus_baseline.yml"), PROM_SINK_TARGET)
-    tsdb_dir = os.path.join("/tmp", "nes_prom_tsdb")
+    # User-namespaced TSDB path: on a shared host the fixed "/tmp/nes_prom_tsdb" is created+owned
+    # by whoever runs first, and every other user's rmtree() then fails with PermissionError on the
+    # queries.active lock file. Scoping by username gives each user their own directory.
+    tsdb_dir = os.path.join("/tmp", f"nes_prom_tsdb_{getpass.getuser()}")
     create_folder_and_remove_if_exists(tsdb_dir)  # fresh TSDB so PromQL rates aren't polluted by prior runs
 
     printInfo(f"Launching Prometheus ({prom_bin}) scraping {PROM_SINK_TARGET}, web={PROM_WEB_BIND} ...")

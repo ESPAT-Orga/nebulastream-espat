@@ -244,7 +244,8 @@ int main(int argc, char** argv)
                 magic_enum::enum_name(NES::Metric::MinVal),
                 magic_enum::enum_name(NES::Metric::MaxVal),
                 magic_enum::enum_name(NES::Metric::Rate),
-                magic_enum::enum_name(NES::Metric::Average))
+                magic_enum::enum_name(NES::Metric::Average),
+                magic_enum::enum_name(NES::Metric::Selectivity))
             .help("Metric type for the companion statistic (default: Cardinality)");
         program.add_argument("--companion-window-size-ms")
             .default_value(std::string{"1000000"})

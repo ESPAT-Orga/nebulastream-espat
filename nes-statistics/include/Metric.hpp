@@ -27,6 +27,10 @@ enum class Metric : uint8_t
     MaxVal,
     Rate,
     Average,
+    /// Selectivity-oriented metric; like MinVal/MaxVal it maps to an Equi_Width_Histogram, whose
+    /// bins a gated probe thresholds as a selectivity proxy. Appended last to keep the underlying
+    /// values of the existing metrics stable (Metric is used as a StatisticRegistry key).
+    Selectivity,
 };
 
 

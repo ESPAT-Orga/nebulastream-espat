@@ -80,6 +80,7 @@ Statistic::StatisticType toStatisticType(const Metric& metric)
             return Statistic::StatisticType::Count_Min_Sketch;
         case Metric::MinVal:
         case Metric::MaxVal:
+        case Metric::Selectivity:
             return Statistic::StatisticType::Equi_Width_Histogram;
         case Metric::Average:
             return Statistic::StatisticType::Reservoir_Sample;

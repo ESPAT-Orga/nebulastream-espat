@@ -624,7 +624,7 @@ def run_benchmark(
             "--companion-statistic",
             "--companion-field", "price",
             "--companion-metric", "Selectivity",
-            "--companion-window-size-ms", "60000000",
+            "--companion-window-size-ms", "40000000",
             "--companion-event-time-field", "BID$TIMESTAMP",
             "--companion-host", WORKER_GRPC,
             "--companion-switch-to-sql", make_reversed_query_sql(sqrts),
@@ -653,7 +653,7 @@ def run_benchmark(
             # closes ~3× per wall-clock second, low enough to keep the statistic store bounded
             # while frequent enough that gated-probe trigger fires arrive within ~1s. Smaller
             # windows have OOM'd the worker (event time advances at the tuple-emit rate).
-            "--companion-window-size-ms", "60000000",
+            "--companion-window-size-ms", "40000000",
             "--companion-event-time-field", "BID$TIMESTAMP",
             "--companion-host", WORKER_GRPC,
             "--companion-switch-to-sql", make_reversed_query_sql(sqrts),

@@ -313,7 +313,7 @@ int main(int argc, char** argv)
         program.add_argument("--baseline-promql")
             .default_value(std::string{""})
             .help("PromQL instant-query expression returning a scalar that the poll loop thresholds to pick the "
-                  "filter order. Empty (default) auto-builds histogram_quantile(0.5, rate(<FIELD>_bucket[30s])) from "
+                  "filter order. Empty (default) auto-builds histogram_quantile(0.5, rate(<FIELD>_bucket[4s])) from "
                   "--companion-field.");
         program.add_argument("--baseline-switch-threshold")
             .default_value(std::string{"888.49"})
@@ -620,7 +620,7 @@ int main(int argc, char** argv)
                 std::string promql = program.get<std::string>("--baseline-promql");
                 if (promql.empty())
                 {
-                    /// Default: median of the monitored field over the last 30s, from the sink's
+                    /// Default: median of the monitored field over the last 4s, from the sink's
                     /// histogram buckets. Metric name = uppercased field (the PrometheusSink names the
                     /// metric after the projected field), e.g. price -> PRICE_bucket.
                     std::string fieldUpper = companionField;

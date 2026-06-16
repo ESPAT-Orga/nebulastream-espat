@@ -101,7 +101,7 @@ def make_setup_sql(data_path: str, sqrts: int) -> str:
 SELECT timestamp, auctionId, bidValue, price
 FROM (
   SELECT timestamp, auctionId, bidValue, price
-  FROM (SELECT timestamp, auctionId, bidValue, price FROM bid WHERE bidValue < FLOAT64(10.45))
+  FROM (SELECT timestamp, auctionId, bidValue, price FROM bid WHERE bidValue < FLOAT64(20.45))
   WHERE {expensive}
 )
 WHERE price < FLOAT64(888.49)
@@ -110,7 +110,7 @@ SET (FALSE as `QUERY`.FUSE);"""
     else:
         select_block = """\
 SELECT timestamp, auctionId, bidValue, price
-FROM (SELECT timestamp, auctionId, bidValue, price FROM bid WHERE bidValue < FLOAT64(10.45))
+FROM (SELECT timestamp, auctionId, bidValue, price FROM bid WHERE bidValue < FLOAT64(20.45))
 WHERE price < FLOAT64(888.49)
 INTO someSink
 SET (FALSE as `QUERY`.FUSE);"""
@@ -149,14 +149,14 @@ def make_reversed_query_sql(sqrts: int) -> str:
             "FROM (SELECT timestamp, auctionId, bidValue, price FROM bid WHERE price < FLOAT64(888.49)) "
             f"WHERE {expensive}"
             ") "
-            "WHERE bidValue < FLOAT64(10.45) "
+            "WHERE bidValue < FLOAT64(20.45) "
             "INTO someSink "
             "SET (FALSE as `QUERY`.FUSE);"
         )
     return (
         "SELECT timestamp, auctionId, bidValue, price "
         "FROM (SELECT timestamp, auctionId, bidValue, price FROM bid WHERE price < FLOAT64(888.49)) "
-        "WHERE bidValue < FLOAT64(10.45) "
+        "WHERE bidValue < FLOAT64(20.45) "
         "INTO someSink "
         "SET (FALSE as `QUERY`.FUSE);"
     )
@@ -325,9 +325,10 @@ def run_benchmark(duration: int, skip_build: bool, clean: bool, output: str, sqr
             # under one shared source, gated by a SwitchRegistry atomic that the swap callback
             # flips via gRPC SetSwitch (no stop/redeploy, source thread keeps running).
             "--companion-field", "price",
-            # MinVal maps to Equi_Width_Histogram, the only metric the histogram-probe operator
-            # can read. Cardinality (Count_Min_Sketch) wouldn't work with the gated probe path.
-            "--companion-metric", "MinVal",
+            # Selectivity maps to Equi_Width_Histogram (same as MinVal/MaxVal), the only metric the
+            # histogram-probe operator can read. Cardinality (Count_Min_Sketch) wouldn't work with
+            # the gated probe path.
+            "--companion-metric", "Selectivity",
             # 60 M event-time ms — at the steady-state ingest rate of ~200 M tup/s the histogram
             # closes ~3× per wall-clock second, low enough to keep the statistic store bounded
             # while frequent enough that gated-probe trigger fires become observable within a

@@ -58,14 +58,17 @@ DEFAULT_SEED = 1
 _DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 
 # Filter thresholds — must match the SQL filters in run_adaptive_optimization_benchmark.py
-# (bidValue < 10.45, price < 888.49). The absolute values are arbitrary; only the pass
+# (bidValue < 20.45, price < 888.49). The absolute values are arbitrary; only the pass
 # fractions below matter, since selectivity is set by construction.
-BID_THRESHOLD = 10.45
+BID_THRESHOLD = 20.45
 PRICE_THRESHOLD = 888.49
 
 # Low (pass, below threshold) and high (fail, above threshold) cluster centers, placed well
-# clear of each threshold on both sides so the sharp clusters never straddle it.
-BID_PASS_MEAN, BID_FAIL_MEAN = 0.0, 20.0
+# clear of each threshold on both sides so the sharp clusters never straddle it. The bid pass
+# cluster is held at 10 (>=0 by >5 stddev) so every bidValue stays non-negative: the statistic
+# histogram has min=0 and indexes bins via an unsigned (value-min)/binWidth, so a negative value
+# would hit an undefined float->uint clamp. A non-negative field keeps binning well-defined.
+BID_PASS_MEAN, BID_FAIL_MEAN = 10.0, 30.0
 PRICE_PASS_MEAN, PRICE_FAIL_MEAN = 800.0, 980.0
 
 # Cluster spread. Small => sharp boundary. Kept far below the gap from each cluster center to

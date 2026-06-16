@@ -57,11 +57,11 @@ from generate_bid_data import DEFAULT_OUTPUT_A, DEFAULT_OUTPUT_B, ensure_dataset
 
 # Number of regime changes (A↔B file switches) we want per run. The per-file wall-clock duration
 # is derived from this and the run duration: N changes split the run into N+1 equal segments, so
-# MILLIS_PER_FILE = duration / (N+1). Keeping this small (4) keeps the time-series plots uncluttered
+# MILLIS_PER_FILE = duration / (N+1). Keeping this small (3) keeps the time-series plots uncluttered
 # while still exercising several adaptive swaps. Wall-clock based (not replay-count based) so every
 # regime lasts the same duration regardless of throughput — with replay counting a faster regime
 # cycles sooner, so the periodic throughput slumps would drift apart in the plots.
-REGIME_CHANGES_PER_RUN = 4
+REGIME_CHANGES_PER_RUN = 6
 
 
 def millis_per_file_for(duration_s: int) -> int:
@@ -108,7 +108,7 @@ PROM_QUERY_BASE = "http://localhost:9595"
 # generate_bid_data.py (each field is two tight clusters straddling its threshold, with an
 # EXACT fraction in the low/pass cluster) — not via a distribution tail — so the realized
 # pass rates hit the targets precisely with a sharp boundary:
-#   bidValue < 10.45  →  selectivity 0.01 (selective)
+#   bidValue < 20.45  →  selectivity 0.01 (selective)
 #   price    < 888.49 →  selectivity 0.99 (non-selective)
 #   Combined selectivity (AND): 0.01 * 0.99 = 0.0099
 #
@@ -150,9 +150,9 @@ def make_data_select_sql(variant: str, sqrts: int) -> str:
     expensive = _expensive_filter_clause(sqrts)
     if variant == "price_first":
         first_filter = "price < FLOAT64(888.49)"
-        second_filter = "bidValue < FLOAT64(10.45)"
+        second_filter = "bidValue < FLOAT64(20.45)"
     else:
-        first_filter = "bidValue < FLOAT64(10.45)"
+        first_filter = "bidValue < FLOAT64(20.45)"
         second_filter = "price < FLOAT64(888.49)"
     if expensive:
         return f"""\
@@ -394,15 +394,15 @@ def launch_and_validate_prometheus(worker_lines_label="PROM"):
     printInfo(f"PromQL PRICE_count                                 = {count}")
     printInfo(f"PromQL rate(PRICE_count[4s])                       = {obs_rate} obs/s")
     printInfo(f"PromQL histogram_quantile(0.5, rate(PRICE_bucket[4s])) = {median}")
-    if median is not None and 300.0 < median < 800.0:
+    if median is not None and 700.0 < median < 900.0:
         printSuccess(
             f"Prometheus + PromQL validated: median price ≈ {median:.1f} "
-            f"(regime A is price~N(500,167), so ~500 is expected). The coordinator poll loop can "
-            f"query this same expression to detect the regime.")
+            f"(regime A puts 99% of price in the ≈800 pass-cluster, so ~800 is expected). The "
+            f"coordinator poll loop can query this same expression to detect the regime.")
     elif count and count > 0:
         printError(
             f"Prometheus is scraping (PRICE_count={count}) but histogram_quantile returned {median} "
-            f"(outside the expected ~500 band) — check bucket range / metric name.")
+            f"(outside the expected ~800 band) — check bucket range / metric name.")
     else:
         printError("Prometheus returned no data for the sink metrics — scrape target or metric name is wrong.")
     return prom_proc
@@ -623,7 +623,7 @@ def run_benchmark(
         repl_cmd += [
             "--companion-statistic",
             "--companion-field", "price",
-            "--companion-metric", "MinVal",
+            "--companion-metric", "Selectivity",
             "--companion-window-size-ms", "60000000",
             "--companion-event-time-field", "BID$TIMESTAMP",
             "--companion-host", WORKER_GRPC,
@@ -644,11 +644,11 @@ def run_benchmark(
             # Splice the build branch into the data query (one source thread feeds both
             # subtrees) and run gated probes whose swap callbacks flip the workload-switch.
             "--companion-field", "price",
-            # MinVal maps to Equi_Width_Histogram, which is the only metric the gated probe
-            # supports (StatisticStoreReader returns histogram bins as rows for the Selection
-            # predicate to filter on). Cardinality goes to a CountMinSketch — different probe
-            # operator, no in-pipeline bin filtering.
-            "--companion-metric", "MinVal",
+            # Selectivity maps to Equi_Width_Histogram (same as MinVal/MaxVal), which is the only
+            # metric the gated probe supports (StatisticStoreReader returns histogram bins as rows
+            # for the Selection predicate to filter on). Cardinality goes to a CountMinSketch —
+            # different probe operator, no in-pipeline bin filtering.
+            "--companion-metric", "Selectivity",
             # 60M event-time ms — at the steady-state ingest rate of ~200M tup/s the histogram
             # closes ~3× per wall-clock second, low enough to keep the statistic store bounded
             # while frequent enough that gated-probe trigger fires arrive within ~1s. Smaller
@@ -657,43 +657,46 @@ def run_benchmark(
             "--companion-event-time-field", "BID$TIMESTAMP",
             "--companion-host", WORKER_GRPC,
             "--companion-switch-to-sql", make_reversed_query_sql(sqrts),
-            # Histogram bucket range widened to [0, 2000] so both regimes' price distributions
-            # fit (regime A: price~N(500,167); regime B: price~N(1277,167); regime B would be
-            # clipped at the default max=1000).
+            # Histogram bucket range [0, 2000] covers both of price's clusters (the pass-cluster at
+            # 800, dominant in regime A, and the fail-cluster at 980, dominant in regime B; each
+            # tight, stddev 1.0). The 980 cluster would be clipped at the default max=1000, hence 2000.
             "--companion-histogram-min", "0",
             "--companion-histogram-max", "2000",
-            # Two gated probes covering the two regimes by NON-OVERLAPPING price-bin ranges.
-            # Probe A (fires on regime A: price~N(500, 167)): BINSTART < 900 → set switch=0
-            #   (bid-first variant). Regime A's bidValue~N(50, 17) makes `bidValue < 10.45`
-            #   the more selective filter (~0.9% pass) so we want it first.
-            # Probe B (fires on regime B: price~N(1277, 167)): BINSTART >= 900 → set switch=1
-            #   (price-first variant). Regime B's bidValue~N(-30, 17) makes `bidValue < 10.45`
-            #   match ~99%, while `price < 888.49` is the selective one (~1%), so price-first wins.
-            # Density threshold UINT64(500000): regime A's right-tail mass at BINSTART=900 is
-            # ~160K tuples (~0.27% of 60M); regime B's left-tail there is ~2.16M (~3.6%). 500K
-            # filters out the leaky tails so each probe matches only when its regime is
-            # genuinely dominant.
+            # Two gated probes covering the two regimes by NON-OVERLAPPING price-bin ranges. Each
+            # field is two tight clusters (stddev 1.0); the regime sets which cluster holds ~99% of
+            # the rows (generate_bid_data.py: REGIME_A bid_pass=0.01/price_pass=0.99, REGIME_B flipped).
+            # Probe A (fires on regime A): regime A puts 99% of price in the 800 pass-cluster, so
+            #   BINSTART < 900 holds almost all price rows → set switch=0 (bid-first variant). In
+            #   regime A bidValue is 1% pass, so `bidValue < 20.45` is the selective filter — run it first.
+            # Probe B (fires on regime B): regime B puts 99% of price in the 980 fail-cluster, so
+            #   BINSTART >= 900 → set switch=1 (price-first variant). In regime B bidValue is 99%
+            #   pass (non-selective) while `price < 888.49` is the selective one (1%), so price-first wins.
+            # Density threshold UINT64(500000): with stddev-1.0 clusters there is no Gaussian tail
+            # across the 900 boundary — the BINSTART<900 count is essentially the whole price
+            # pass-cluster: ~99% of a window's rows when regime A is present, ~1% when it isn't.
+            # 500K sits between those two counts so Probe A fires only when regime A dominates.
             # Phase 2: two build branches monitoring TWO different fields, each with its own
             # predicate-and-target. Each request gets its own statisticId; both build branches
             # splice into BID via SpliceToRunningSourceTrait, and the source defers emission until
             # both have wired in (expected_splice_count=2). The probe inside each build branch
             # routes survivors to its own callback (no shared probe, no Generator polling).
             #
-            # Probe A monitors PRICE (set via --companion-field "price" above): in regime A
-            # (price ~ N(500, 167)) most mass is in [0, 900), so BINSTART < 900 → fires → target
-            # switch=0 (bid-first variant; bidValue<10.45 is very selective in regime A).
+            # Probe A monitors PRICE (set via --companion-field "price" above): in regime A 99% of
+            # price is in the 800 pass-cluster, so almost all rows land in BINSTART < 900 → fires →
+            # target switch=0 (bid-first variant; bidValue<20.45 is very selective in regime A).
             "--companion-condition", "BINSTART < UINT64(900) AND BINCOUNTER > UINT64(500000)",
             "--companion-target-value", "0",
-            # Probe B monitors BIDVALUE: in regime B (bidValue ~ N(-30, 17)) most mass is below
-            # the filter threshold 10.45, so BINSTART < 11 → fires → target switch=1.
-            # Threshold 1500000: regime A's bidValue left-tail mass in [0, 11) is ~564K
-            # (P(bidValue<11 | N(50, 17)) ≈ 0.94% × 60M); regime B's positive-tail mass there
-            # is ~1.87M (P(0<bidValue<11 | N(-30, 17)) ≈ 3.12% × 60M). 1.5M cleanly separates.
-            # NOTE: histogram-min=0/max=2000 (set globally for the bench) clips regime B's
-            # negative bidValues — only its right shoulder survives, which is enough to
-            # produce the distinguishable density spike Probe B's predicate keys on.
+            # Probe B monitors BIDVALUE: in regime B 99% of bidValue is in the 10 pass-cluster (below
+            # the filter threshold 20.45), so BINSTART < 22 → fires → target switch=1.
+            # Threshold 1500000: as with Probe A there is no tail across the 22 boundary — the
+            # BINSTART<22 count is essentially the whole bidValue pass-cluster: ~99% of a window's
+            # rows in regime B, ~1% in regime A. 1.5M sits between those two counts.
+            # The bid pass cluster sits at 10 (>=0 by >5 stddev), so with histogram-min=0 every
+            # bidValue bins cleanly — no negative values to hit the undefined float->uint clamp at
+            # bin 0. At binWidth=11 the 10/30 clusters map to bin starts {0,11} and {22,33}, so the
+            # 22 boundary separates them.
             "--companion-field-2", "bidValue",
-            "--companion-condition-2", "BINSTART < UINT64(11) AND BINCOUNTER > UINT64(1500000)",
+            "--companion-condition-2", "BINSTART < UINT64(22) AND BINCOUNTER > UINT64(1500000)",
             "--companion-target-value-2", "1",
         ]
 
@@ -850,7 +853,8 @@ if __name__ == "__main__":
         type=float,
         default=888.49,
         help="Poll-loop decision threshold on the PromQL median price: >= picks price-first (switch=1), "
-        "below picks bid-first (switch=0). Default 888.49 (between regime A ~500 and regime B ~1277).",
+        "below picks bid-first (switch=0). Default 888.49 (the price filter threshold; between "
+        "regime A's median price ≈800 and regime B's ≈980).",
     )
     parser.add_argument(
         "--baseline-poll-interval-ms",

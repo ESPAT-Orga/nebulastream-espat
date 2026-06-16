@@ -27,8 +27,13 @@
 #
 # All user-passed flags after the script name are forwarded to every individual run
 # (so e.g. `--duration 60 --sqrts 150 --replays-per-file 120` applies uniformly).
-# DO NOT pass `--fixed-variant`, `--baseline-prometheus`, or `--output` here — the wrapper
-# sets those itself per run.
+# DO NOT pass `--fixed-variant`, `--baseline-prometheus`, `--baseline-poll-interval-ms`, or
+# `--output` here — the wrapper sets those itself per run.
+#
+# The `prometheus` variant is swept across the poll intervals in POLL_INTERVALS (1000/5000/10000 ms)
+# below, producing one CSV per interval (prometheus_<ms>.csv). It is the ONLY variant with a
+# coordinator poll loop, so `adaptive` (in-engine gated probes) and the fixed variants ignore the
+# interval and run exactly once.
 #
 # Pass `--results-dir <path>` to override the output directory. The directory
 # is REMOVED and recreated on every invocation so old CSVs can't leak between
@@ -52,7 +57,7 @@ while [[ $# -gt 0 ]]; do
             RESULTS_DIR="${1#*=}"
             shift
             ;;
-        --fixed-variant|--baseline-prometheus|--output)
+        --fixed-variant|--baseline-prometheus|--baseline-poll-interval-ms|--output)
             echo "Error: $1 is set per-run by this wrapper; do not pass it on the command line." >&2
             exit 1
             ;;
@@ -79,17 +84,23 @@ pip3 install argparse requests pandas pyyaml numpy
 PYBIN="myenv/bin/python3"
 PYSCRIPT="scripts/benchmarking/adaptive-optimization/run_adaptive_optimization_benchmark.py"
 
+# Poll intervals (ms) to sweep for the prometheus variant. Only the prometheus baseline has a
+# coordinator poll loop, so this sweep applies to it alone.
+POLL_INTERVALS=(1000 5000 10000)
+
 # Each run also redirects its console output to a log file alongside the CSV
 # so failures can be diagnosed without re-running.
 # Each element is on its own line (no `\` continuation) so any variant can be
 # commented out independently without breaking the list.
-variant_specs=(
+#
+# Non-prometheus variants: run ONCE each. The poll interval is inert for them (it's only read in
+# the Python script's --baseline-prometheus branch), so we don't pass it.
+single_run_specs=(
     "adaptive::adaptive.csv"
-    "prometheus:--baseline-prometheus:prometheus.csv"
     "bid_first:--fixed-variant bid_first:bid_first.csv"
     "price_first:--fixed-variant price_first:price_first.csv"
 )
-for variant_spec in "${variant_specs[@]}"; do
+for variant_spec in "${single_run_specs[@]}"; do
     IFS=':' read -r label variant_flag csv_name <<<"$variant_spec"
     echo "[wrapper] --- Running variant: $label ---"
     csv_path="$RESULTS_DIR/$csv_name"
@@ -101,9 +112,21 @@ for variant_spec in "${variant_specs[@]}"; do
     echo "[wrapper] --- Done: $label (csv=$csv_path, log=$log_path) ---"
 done
 
+# Prometheus SOTA baseline: sweep the coordinator poll interval. Each interval gets its own
+# CSV (prometheus_<ms>.csv) + log so the reaction-time curves can be compared across polling
+# granularities.
+for poll_ms in "${POLL_INTERVALS[@]}"; do
+    label="prometheus_${poll_ms}ms"
+    echo "[wrapper] --- Running variant: $label (poll-interval=${poll_ms}ms) ---"
+    csv_path="$RESULTS_DIR/prometheus_${poll_ms}.csv"
+    log_path="$RESULTS_DIR/${label}.log"
+    "$PYBIN" "$PYSCRIPT" --sqrts 200 --duration 120 --baseline-prometheus --baseline-poll-interval-ms "$poll_ms" --output "$csv_path" "${FORWARDED_ARGS[@]}" 2>&1 | tee "$log_path"
+    echo "[wrapper] --- Done: $label (csv=$csv_path, log=$log_path) ---"
+done
+
 # Deactivate the virtual environment
 deactivate
 rm -rf myenv
 
-echo "[wrapper] All four runs complete. Results in: $RESULTS_DIR"
+echo "[wrapper] All runs complete (${#single_run_specs[@]} single + ${#POLL_INTERVALS[@]} prometheus sweep). Results in: $RESULTS_DIR"
 ls -la "$RESULTS_DIR"

@@ -255,17 +255,21 @@ void BackpressureListener::wait(const std::stop_token& stopToken) const
     /// Sub-microsecond difference vs sampling after the scope, but it's the more honest place.
     std::chrono::steady_clock::time_point blockStart;
     std::chrono::steady_clock::time_point blockEnd;
+    /// Block while ANY channel is closed; resume when all are open (or stop is requested).
+    for (const auto& channel : channels)
     {
-        auto state = channel->stateMtx.lock();
-        /// If the channel is open, backpressureListener can proceed
-        if (*state == Channel::State::OPEN)
+        if (stopToken.stop_requested())
         {
             return;
+        }
+        auto state = channel->stateMtx.lock();
+        if (*state == Channel::State::OPEN)
+        {
+            continue;
         }
 
         blockStart = std::chrono::steady_clock::now();
         bool destroyed = false;
-        /// Wait for the channel state to change
         channel->change.wait(
             state.as_lock(),
             stopToken,
@@ -275,6 +279,7 @@ void BackpressureListener::wait(const std::stop_token& stopToken) const
                 return destroyed || *state == Channel::OPEN;
             });
         blockEnd = std::chrono::steady_clock::now();
+
 
         INVARIANT(!destroyed, "Backpressure Controller was destroyed before the BackpressureListener");
     }
@@ -288,6 +293,14 @@ void BackpressureListener::wait(const std::stop_token& stopToken) const
     {
         const auto blockedNs = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(blockEnd - blockStart).count());
         statisticListener->onEvent(NES::BackpressureBlockedEvent{statQueryId, statPriority, blockedNs});
+    }
+}
+
+void BackpressureListener::merge(BackpressureListener other)
+{
+    for (auto& channel : other.channels)
+    {
+        channels.push_back(std::move(channel));
     }
 }
 

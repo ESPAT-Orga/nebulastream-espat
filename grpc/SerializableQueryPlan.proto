@@ -30,4 +30,5 @@ message SerializableQueryPlan{
   repeated uint64 rootOperatorIds = 2;
   optional SerializableQueryId queryId = 3;
   SerializablePriority priority = 4;
+  optional bool operatorFusing = 5;
 }

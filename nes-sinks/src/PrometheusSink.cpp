@@ -24,6 +24,7 @@
 #include <system_error>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include <Configurations/Descriptor.hpp>
 #include <Runtime/TupleBuffer.hpp>
@@ -77,10 +78,10 @@ void PrometheusSink::start(PipelineExecutionContext&)
 {
     NES_DEBUG("register prometheus metrics");
 
-    /// Compute equi-width bucket boundaries once: numBuckets finite boundaries with the last equal to histogramMaxValue,
-    /// so prometheus-cpp materializes numBuckets+1 buckets including the implicit +Inf overflow. Values > histogramMaxValue
+    /// Compute equi-width bucket boundaries once (stored as a member, reused per buffer in execute):
+    /// numBuckets finite boundaries with the last equal to histogramMaxValue, so prometheus-cpp
+    /// materializes numBuckets+1 buckets including the implicit +Inf overflow. Values > histogramMaxValue
     /// land in the overflow bucket; values < histogramMinValue land in the first bucket.
-    prometheus::Histogram::BucketBoundaries boundaries;
     boundaries.reserve(histogramNumBuckets);
     const double width = (histogramMaxValue - histogramMinValue) / static_cast<double>(histogramNumBuckets);
     for (uint64_t i = 1; i <= histogramNumBuckets; ++i)
@@ -102,9 +103,7 @@ void PrometheusSink::start(PipelineExecutionContext&)
                            .Name(nameCopy)
                            .Help(fmt::format("NebulaStream sink histogram for field {}", nameCopy))
                            .Register(*registry);
-        /// Cache the Histogram& once per field: per-tuple `Family::Add({}, ...)` would re-acquire the family's mutex
-        /// for every observation. The per-tuple cost we actually want to measure is Histogram::Observe's internal
-        /// mutex + bucket-find + counter increment.
+        /// Cache the Histogram& once per field so the hot path never re-acquires the family's mutex.
         auto& histogram = family.Add({}, boundaries);
         metrics.push_back({&histogram, offset, field.dataType.type});
         offset += field.dataType.getSizeInBytesWithoutNull();
@@ -120,14 +119,29 @@ void PrometheusSink::execute(const TupleBuffer& inputTupleBuffer, PipelineExecut
     NES_DEBUG("Executing prometheus sink");
 
     const auto numberOfTuples = inputTupleBuffer.getNumberOfTuples();
-    for (size_t i = 0; i < numberOfTuples; i++)
+    const auto memory = inputTupleBuffer.getAvailableMemoryArea<>();
+    const auto stride = schema.getSizeOfSchemaInBytes();
+    const auto numBucketSlots = boundaries.size() + 1; /// +1 for the implicit +Inf overflow bucket
+
+    /// Per-buffer batching. prometheus-cpp's Histogram::Observe takes the histogram's std::mutex on
+    /// EVERY call (core/src/histogram.cc), so observing one value per tuple serializes the hot path on
+    /// that lock — the dominant cost when a high-throughput source fans out into this sink. Instead we
+    /// tally each tuple into a local bucket-increment vector (lock-free) and flush the whole buffer with
+    /// a single ObserveMultiple per field, amortizing one lock acquisition over the entire buffer
+    /// (hundreds of thousands of tuples). This is prometheus-cpp's own bulk API, so the emitted metrics
+    /// are byte-identical to per-tuple Observe — only the locking granularity changes.
+    std::vector<std::vector<double>> increments(metrics.size(), std::vector<double>(numBucketSlots, 0.0));
+    std::vector<double> sums(metrics.size(), 0.0);
+
+    for (size_t i = 0; i < numberOfTuples; ++i)
     {
-        const auto* tuple = &inputTupleBuffer.getAvailableMemoryArea<>()[i * schema.getSizeOfSchemaInBytes()];
-        for (auto [histogram, fieldOffset, type] : metrics)
+        const auto* tuple = &memory[i * stride];
+        for (size_t m = 0; m < metrics.size(); ++m)
         {
-            /// Read the typed value out of the raw tuple bytes and widen to double; Histogram::Observe always takes a
-            /// double. UINT64/INT64 values above 2^53 would lose precision on the widening cast, which is fine for the
-            /// benchmark's [0, 1e6] and 1e9 sequence schemas.
+            const auto [histogram, fieldOffset, type] = metrics[m];
+            (void)histogram;
+            /// Read the typed value out of the raw tuple bytes and widen to double. UINT64/INT64 values
+            /// above 2^53 would lose precision on the widening cast, fine for the benchmark's schemas.
             double value = 0.0;
             switch (type)
             {
@@ -164,10 +178,18 @@ void PrometheusSink::execute(const TupleBuffer& inputTupleBuffer, PipelineExecut
                 default:
                     INVARIANT(false, "Invalid field type in prometheus sink");
             }
-            /// Histogram::Observe takes the histogram's internal std::mutex per call. The per-tuple cost is mutex +
-            /// bucket-find + counter increment — this is the SOTA cost the paper measures.
-            histogram->Observe(value);
+            /// Bucket index = first boundary >= value (matches prometheus-cpp's Observe bucketing);
+            /// values past the last boundary land in the +Inf slot at index numBuckets.
+            const auto idx
+                = static_cast<size_t>(std::lower_bound(boundaries.begin(), boundaries.end(), value) - boundaries.begin());
+            increments[m][idx] += 1.0;
+            sums[m] += value;
         }
+    }
+
+    for (size_t m = 0; m < metrics.size(); ++m)
+    {
+        metrics[m].histogram->ObserveMultiple(increments[m], sums[m]);
     }
 }
 

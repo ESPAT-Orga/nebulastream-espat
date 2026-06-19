@@ -15,7 +15,10 @@
 #pragma once
 
 #include <string>
+#include <CollectionDomain.hpp>
+#include <Operators/LogicalOperator.hpp>
 #include <Plans/LogicalPlan.hpp>
+#include <RequestStatisticStatement.hpp>
 #include <Statistic.hpp>
 #include <StatisticQueryGenerator.hpp>
 
@@ -31,6 +34,28 @@ public:
         const RequestStatisticBuildStatement& request,
         Statistic::StatisticId statisticId,
         const std::string& coordinatorAddress) const override;
+
+    /// Builds the "build branch" sub-plan for a WorkloadDomain statistic: a chain rooted at the
+    /// gRPC sink with WatermarkAssign → StatisticBuild → StatisticStoreWriter → GrpcSink stacked
+    /// on top of `spliceLeaf`. The caller passes the data query's source operator (a
+    /// SourceNameLogicalOperator) as `spliceLeaf`; the returned plan can then be merged into the
+    /// data query via addRootOperators, so the LogicalSourceExpansionRule produces a single
+    /// Union(SourceDescriptors) shared by both the data query's filter chain and the build branch.
+    [[nodiscard]] LogicalPlan generateWorkloadBranch(
+        const WorkloadDomain& domain,
+        const RequestStatisticBuildStatement& request,
+        Statistic::StatisticId statisticId,
+        const std::string& coordinatorAddress,
+        const LogicalOperator& spliceLeaf) const override;
+
+    /// Prometheus-baseline build branch: Source → Projection(field) → PrometheusSink. See the base
+    /// interface declaration for the contract. The sink is given an empty schema; type inference
+    /// fills it from the projection's single-field output (the field type isn't resolved on the
+    /// splice leaf until the optimizer runs).
+    [[nodiscard]] LogicalPlan generateWorkloadBranchPrometheus(
+        const WorkloadDomain& domain,
+        const RequestStatisticBuildStatement& request,
+        const LogicalOperator& spliceLeaf) const override;
 };
 
 }

@@ -20,6 +20,7 @@
 #include <iterator>
 #include <memory>
 #include <ranges>
+#include <string>
 #include <tuple>
 #include <unordered_map>
 #include <utility>
@@ -35,6 +36,7 @@
 #include <ExecutableQueryPlan.hpp>
 #include <Interfaces.hpp>
 #include <RunningSource.hpp>
+#include <RunningSourceRegistry.hpp>
 
 namespace NES
 {
@@ -119,16 +121,27 @@ void RunningQueryPlanNode::fail(Exception exception) const
     unregisterWithError(std::move(exception));
 }
 
-std::
-    pair<std::vector<std::pair<std::unique_ptr<SourceHandle>, std::vector<std::shared_ptr<RunningQueryPlanNode>>>>, std::vector<std::weak_ptr<RunningQueryPlanNode>>> static createRunningNodes(
-        QueryId queryId,
-        ExecutableQueryPlan& queryPlan,
-        std::function<void(Exception)> unregisterWithError,
-        const CallbackRef& terminationCallbackRef,
-        const CallbackRef& pipelineSetupCallbackRef,
-        WorkEmitter& emitter)
+/// Per-source instantiation result. For a normal source, `source` is non-null. For a splice
+/// source it is null and `spliceToRunningSource` is true with the logical source name pinned.
+struct InstantiatedSourceEntry
 {
-    std::vector<std::pair<std::unique_ptr<SourceHandle>, std::vector<std::shared_ptr<RunningQueryPlanNode>>>> sources;
+    std::unique_ptr<SourceHandle> source;
+    std::vector<std::shared_ptr<RunningQueryPlanNode>> successorNodes;
+    bool spliceToRunningSource = false;
+    bool deferStart = false;
+    uint32_t deferStartExpectedSpliceCount = 1;
+    std::string logicalSourceName;
+};
+
+static std::pair<std::vector<InstantiatedSourceEntry>, std::vector<std::weak_ptr<RunningQueryPlanNode>>> createRunningNodes(
+    QueryId queryId,
+    ExecutableQueryPlan& queryPlan,
+    std::function<void(Exception)> unregisterWithError,
+    const CallbackRef& terminationCallbackRef,
+    const CallbackRef& pipelineSetupCallbackRef,
+    WorkEmitter& emitter)
+{
+    std::vector<InstantiatedSourceEntry> sources;
     std::vector<std::weak_ptr<RunningQueryPlanNode>> pipelines;
     std::unordered_map<ExecutablePipeline*, std::shared_ptr<RunningQueryPlanNode>> cache;
     std::function<std::shared_ptr<RunningQueryPlanNode>(ExecutablePipeline*)> getOrCreate = [&](ExecutablePipeline* pipeline)
@@ -157,14 +170,20 @@ std::
         return cache[pipeline];
     };
 
-    for (auto& [source, successors] : queryPlan.sources)
+    for (auto& entry : queryPlan.sources)
     {
         std::vector<std::shared_ptr<RunningQueryPlanNode>> successorNodes;
-        for (const auto& successor : successors)
+        for (const auto& successor : entry.successors)
         {
             successorNodes.push_back(getOrCreate(successor.lock().get()));
         }
-        sources.emplace_back(std::move(source), std::move(successorNodes));
+        sources.push_back(InstantiatedSourceEntry{
+            .source = std::move(entry.source),
+            .successorNodes = std::move(successorNodes),
+            .spliceToRunningSource = entry.spliceToRunningSource,
+            .deferStart = entry.deferStart,
+            .deferStartExpectedSpliceCount = entry.deferStartExpectedSpliceCount,
+            .logicalSourceName = entry.logicalSourceName});
     }
 
     return {std::move(sources), pipelines};
@@ -229,15 +248,30 @@ std::pair<std::unique_ptr<RunningQueryPlan>, CallbackRef> RunningQueryPlan::star
                 auto& internal = *lock;
 
                 ENGINE_LOG_DEBUG("Pipeline Setup Completed");
-                for (auto& [source, successors] : sources)
+                for (auto& sourceEntry : sources)
                 {
-                    auto sourceId = source->getSourceId();
+                    if (sourceEntry.spliceToRunningSource)
+                    {
+                        /// Splice path: don't spawn a new source thread. Graft our successor
+                        /// pipelines onto the already-running source for the same logical name. If
+                        /// that source has not registered yet (the data query compiles slower, so
+                        /// its setup callback can run after ours), the graft is QUEUED and applied
+                        /// automatically when the source registers — deployment order is irrelevant.
+                        /// appendSuccessors (immediate or on drain) handles the deferred-start
+                        /// countdown: each call decrements pendingSplices and the last one fires
+                        /// startEmitting(), so N build branches can splice in before the source
+                        /// begins emitting.
+                        RunningSourceRegistry::instance().spliceOrEnqueue(
+                            sourceEntry.logicalSourceName, std::move(sourceEntry.successorNodes));
+                        continue;
+                    }
+                    auto sourceId = sourceEntry.source->getSourceId();
                     internal.sources.emplace(
                         sourceId,
                         RunningSource::create(
                             queryId,
-                            std::move(source),
-                            std::move(successors),
+                            std::move(sourceEntry.source),
+                            std::move(sourceEntry.successorNodes),
                             [&emitter, queryId](std::vector<std::shared_ptr<RunningQueryPlanNode>>&& successors)
                             {
                                 /// On source unregistration all successor pipelines are soft stopped.
@@ -250,7 +284,10 @@ std::pair<std::unique_ptr<RunningQueryPlan>, CallbackRef> RunningQueryPlan::star
                             },
                             [listener](const Exception& exception) { listener->onFailure(exception); },
                             controller,
-                            emitter));
+                            emitter,
+                            sourceEntry.logicalSourceName,
+                            sourceEntry.deferStart,
+                            sourceEntry.deferStartExpectedSpliceCount));
                 }
                 /// release lock
             }

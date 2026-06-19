@@ -150,6 +150,98 @@ void QueryManager::QueryManagerBackends::rebuildBackendsIfNeeded() const
     return id;
 }
 
+std::expected<DistributedQueryId, Exception> QueryManager::registerQueryDeferred(const DistributedLogicalPlan& plan)
+{
+    std::unordered_map<Host, std::vector<QueryId>> localQueries;
+
+    auto id = plan.getQueryId();
+    if (id == DistributedQueryId(DistributedQueryId::INVALID))
+    {
+        id = uniqueDistributedQueryId(state);
+    }
+    else if (this->state.queries.contains(plan.getQueryId()))
+    {
+        throw QueryAlreadyRegistered("{}", plan.getQueryId());
+    }
+
+    for (const auto& [host, localPlans] : plan)
+    {
+        INVARIANT(backends.contains(host), "Plan was assigned to a node ({}) that is not part of the cluster", host);
+        for (auto localPlan : localPlans)
+        {
+            try
+            {
+                localPlan.setQueryId(QueryId::createDistributed(id));
+                const auto result = backends.at(host).registerQueryDeferred(localPlan);
+                if (result)
+                {
+                    NES_DEBUG("Deferred registration to node {} was successful.", host);
+                    localQueries[host].emplace_back(*result);
+                    continue;
+                }
+                return std::unexpected{result.error()};
+            }
+            catch (const std::exception& e)
+            {
+                return std::unexpected{QueryRegistrationFailed("Message from external exception: {}", e.what())};
+            }
+        }
+    }
+
+    this->state.queries.emplace(id, std::move(localQueries));
+    return id;
+}
+
+std::expected<void, std::vector<Exception>> QueryManager::attachAlternatePipeline(
+    DistributedQueryId queryId,
+    const DistributedLogicalPlan& alternatePlan,
+    const std::string& switchName,
+    int64_t alternateExpectedValue)
+{
+    auto queryResult = getQuery(queryId);
+    if (!queryResult.has_value())
+    {
+        return std::unexpected(std::vector{queryResult.error()});
+    }
+    auto query = queryResult.value();
+    std::vector<Exception> exceptions;
+
+    /// Iterate the alternate's host plans in lock-step with the registered query. We currently
+    /// expect a single host plan per query (single-node worker setup); for multi-host the caller
+    /// is responsible for aligning the alternate's host layout with the data plan's.
+    for (const auto& [host, localQueryId] : query.iterate())
+    {
+        try
+        {
+            INVARIANT(backends.contains(host), "Local query references node ({}) that is not part of the cluster", host);
+            if (const auto it = alternatePlan.begin(); it == alternatePlan.end() || alternatePlan[host].empty())
+            {
+                exceptions.emplace_back(NotImplemented(
+                    "attachAlternatePipeline: alternate plan has no local plan for host {}", host));
+                continue;
+            }
+            auto alternateLocalPlan = alternatePlan[host].front();
+            alternateLocalPlan.setQueryId(QueryId::createDistributed(queryId));
+            const auto result = backends.at(host).attachAlternatePipeline(
+                localQueryId, alternateLocalPlan, switchName, alternateExpectedValue);
+            if (not result)
+            {
+                exceptions.push_back(result.error());
+            }
+        }
+        catch (const std::exception& e)
+        {
+            exceptions.emplace_back(UnknownException("attachAlternatePipeline external exception: {}", e.what()));
+        }
+    }
+
+    if (not exceptions.empty())
+    {
+        return std::unexpected(std::move(exceptions));
+    }
+    return {};
+}
+
 std::expected<void, std::vector<Exception>> QueryManager::start(DistributedQueryId queryId)
 {
     auto queryResult = getQuery(std::move(queryId));

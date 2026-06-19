@@ -15,8 +15,11 @@
 #pragma once
 
 #include <string>
+#include <CollectionDomain.hpp>
+#include <Operators/LogicalOperator.hpp>
 #include <Plans/LogicalPlan.hpp>
 #include <Statistic.hpp>
+#include <ErrorHandling.hpp>
 
 namespace NES
 {
@@ -39,6 +42,41 @@ public:
     [[nodiscard]] virtual LogicalPlan generateQuery(
         const RequestStatisticBuildStatement& request, Statistic::StatisticId statisticId, const std::string& coordinatorAddress) const
         = 0;
+
+    /// Builds the "build branch" sub-plan for a WorkloadDomain statistic: a chain rooted at the
+    /// gRPC sink stacked on top of `spliceLeaf` (the data query's source operator). The caller
+    /// then merges the returned plan's roots into the data query's plan so the optimizer's
+    /// LogicalSourceExpansionRule produces a single shared Union(SourceDescriptors). Default impl
+    /// throws NotImplemented — generators that don't support WorkloadDomain can leave it that way.
+    [[nodiscard]] virtual LogicalPlan generateWorkloadBranch(
+        const WorkloadDomain& domain,
+        const RequestStatisticBuildStatement& request,
+        Statistic::StatisticId statisticId,
+        const std::string& coordinatorAddress,
+        const LogicalOperator& spliceLeaf) const
+    {
+        (void)domain;
+        (void)request;
+        (void)statisticId;
+        (void)coordinatorAddress;
+        (void)spliceLeaf;
+        throw NotImplemented("This StatisticQueryGenerator does not support WorkloadDomain build-branch generation");
+    }
+
+    /// Prometheus-baseline counterpart of generateWorkloadBranch. Produces a build branch
+    /// (Source → Projection(field) → PrometheusSink) spliced onto the same `spliceLeaf`, but
+    /// instead of the in-engine StatisticBuild/StoreWriter/Probe chain it routes the monitored
+    /// field straight into a PrometheusSink that builds the histogram itself and exposes it for an
+    /// external Prometheus to scrape. No statisticId / coordinatorAddress: this branch reports
+    /// nothing back over gRPC — the coordinator polls Prometheus instead. Default impl throws.
+    [[nodiscard]] virtual LogicalPlan generateWorkloadBranchPrometheus(
+        const WorkloadDomain& domain, const RequestStatisticBuildStatement& request, const LogicalOperator& spliceLeaf) const
+    {
+        (void)domain;
+        (void)request;
+        (void)spliceLeaf;
+        throw NotImplemented("This StatisticQueryGenerator does not support Prometheus-baseline build-branch generation");
+    }
 };
 
 }

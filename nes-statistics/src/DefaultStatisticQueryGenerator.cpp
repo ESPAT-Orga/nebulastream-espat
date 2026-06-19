@@ -14,8 +14,11 @@
 
 #include <DefaultStatisticQueryGenerator.hpp>
 
+#include <algorithm>
+#include <cctype>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <type_traits>
 #include <unordered_map>
@@ -26,9 +29,16 @@
 #include <DataTypes/DataTypeProvider.hpp>
 #include <DataTypes/Schema.hpp>
 #include <Functions/FieldAccessLogicalFunction.hpp>
+#include <Functions/LogicalFunction.hpp>
+#include <Identifiers/Identifiers.hpp>
 #include <Identifiers/SketchDimensions.hpp>
+#include <Operators/ProjectionLogicalOperator.hpp>
+#include <Operators/Sources/SourceNameLogicalOperator.hpp>
 #include <Operators/Statistic/LogicalStatisticFields.hpp>
+#include <Traits/SpliceToRunningSourceTrait.hpp>
+#include <Traits/TraitSet.hpp>
 #include <Operators/Windows/Aggregations/Histogram/EquiWidthHistogramLogicalFunction.hpp>
+#include <Operators/Windows/Aggregations/Histogram/EquiWidthHistogramProbeLogicalOperator.hpp>
 #include <Operators/Windows/Aggregations/Sample/ReservoirSampleLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/Sketch/CountMinSketchLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/WindowAggregationLogicalFunction.hpp>
@@ -158,6 +168,105 @@ LogicalPlan generateForDataDomain(
     return plan;
 }
 
+/// Build the windowed-aggregation + store-writer chain on top of `basePlan`, stopping before
+/// any sink is attached. The workload-domain caller appends either Probe + Selection + Projection
+/// + GrpcSink (predicate present — per-window-close the just-written histogram is read back,
+/// filtered, and surviving bins ship to the coordinator) or VoidSink (no predicate — the chain
+/// quietly populates the store without firing reports).
+LogicalPlan stackWorkloadBuildChainOnTop(
+    LogicalPlan basePlan,
+    const std::string& fieldNameUpper,
+    const RequestStatisticBuildStatement& request,
+    const Statistic::StatisticId statisticId)
+{
+    auto timeChar = request.eventTimeFieldName.has_value()
+        ? Windowing::TimeCharacteristic::createEventTime(FieldAccessLogicalFunction{*request.eventTimeFieldName})
+        : Windowing::TimeCharacteristic::createIngestionTime();
+    std::shared_ptr<Windowing::WindowType> windowType;
+    if (request.windowAdvanceMs.has_value())
+    {
+        windowType = std::make_shared<Windowing::SlidingWindow>(
+            timeChar, Windowing::TimeMeasure{request.windowSizeMs}, Windowing::TimeMeasure{*request.windowAdvanceMs});
+    }
+    else
+    {
+        windowType = std::make_shared<Windowing::TumblingWindow>(timeChar, Windowing::TimeMeasure{request.windowSizeMs});
+    }
+
+    const FieldAccessLogicalFunction onField{fieldNameUpper};
+    auto agg = createAggregationFunction(onField, request.metric, statisticId, request.options);
+
+    /// The build and statistic store writer need to have a connection for the statistic fields, e.g., statisticDataField.
+    /// As the field names change during type inference
+    const auto logicalStatisticFields = std::make_shared<LogicalStatisticFields>();
+    auto plan = std::move(basePlan);
+    plan = LogicalPlanBuilder::addStatisticBuild(std::move(plan), windowType, {agg}, {}, logicalStatisticFields);
+    plan = LogicalPlanBuilder::addStatisticStoreWriter(plan, logicalStatisticFields, statisticId, toStatisticType(request.metric));
+    /// The trigger's `condition` is intentionally NOT applied here: in the workload-domain path
+    /// it is a probe-pipeline predicate (binds against histogram bin fields BINSTART/BINEND/
+    /// BINCOUNTER) and gets added downstream of the histogram probe, not on the build chain's
+    /// StatisticStoreWriter output.
+    return plan;
+}
+
+/// Append a gRPC sink terminating the workload-domain build/probe chain. Schema mirrors the
+/// StatisticStoreWriter's output (the four LogicalStatisticFields), qualified with the source
+/// name so the runtime can resolve the qualified field names on the wire.
+LogicalPlan appendWorkloadGrpcSink(
+    LogicalPlan plan,
+    const std::string& sourceNameUpper,
+    const std::string& coordinatorAddress,
+    const std::unordered_map<std::string, std::string>& options)
+{
+    PRECONDITION(not coordinatorAddress.empty(), "Required to have a coordinator gRPC address!");
+    const auto colonPos = coordinatorAddress.find(':');
+    const auto sinkHost = coordinatorAddress.substr(0, colonPos);
+    const auto sinkPort = coordinatorAddress.substr(colonPos + 1);
+
+    const auto qualifier = sourceNameUpper + "$";
+    LogicalStatisticFields outputStatisticFields;
+    outputStatisticFields.addQualifierName(qualifier);
+    Schema grpcSinkSchema;
+    grpcSinkSchema.addField(outputStatisticFields.statisticIdField);
+    grpcSinkSchema.addField(outputStatisticFields.statisticStartTsField);
+    grpcSinkSchema.addField(outputStatisticFields.statisticEndTsField);
+    grpcSinkSchema.addField(outputStatisticFields.statisticNumberOfSeenTuplesField);
+    /// "host" specifies on which worker to place the gRPC sink. Falls back to the coordinator
+    /// host (i.e. the same machine) when not provided, which is correct for single-worker setups.
+    const auto hostIt = options.find("host");
+    const auto& sinkWorkerHost = hostIt != options.end() ? hostIt->second : sinkHost;
+    return LogicalPlanBuilder::addInlineSink(
+        "Grpc",
+        grpcSinkSchema,
+        {{"grpc_host", sinkHost}, {"grpc_port", sinkPort}, {"host", sinkWorkerHost}, {"output_format", "NATIVE"}},
+        {},
+        plan);
+}
+
+/// Append a void sink terminating the workload-domain build chain when no predicate is attached.
+/// The chain quietly populates the store without firing per-window-close reports.
+LogicalPlan appendWorkloadVoidSink(
+    LogicalPlan plan, const std::string& sourceNameUpper, const std::unordered_map<std::string, std::string>& options)
+{
+    const auto qualifier = sourceNameUpper + "$";
+    LogicalStatisticFields outputStatisticFields;
+    outputStatisticFields.addQualifierName(qualifier);
+    Schema voidSinkSchema;
+    voidSinkSchema.addField(outputStatisticFields.statisticIdField);
+    voidSinkSchema.addField(outputStatisticFields.statisticStartTsField);
+    voidSinkSchema.addField(outputStatisticFields.statisticEndTsField);
+    voidSinkSchema.addField(outputStatisticFields.statisticNumberOfSeenTuplesField);
+    const auto hostIt = options.find("host");
+    const auto& sinkWorkerHost = hostIt != options.end() ? hostIt->second : std::string{"localhost:8080"};
+    return LogicalPlanBuilder::addInlineSink("Void", voidSinkSchema, {{"host", sinkWorkerHost}}, {}, plan);
+}
+
+std::string toUpper(std::string s)
+{
+    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return std::toupper(c); });
+    return s;
+}
+
 }
 
 LogicalPlan DefaultStatisticQueryGenerator::generateQuery(
@@ -173,9 +282,14 @@ LogicalPlan DefaultStatisticQueryGenerator::generateQuery(
             }
             else if constexpr (std::is_same_v<DomainType, WorkloadDomain>)
             {
+                /// generateQuery is used by callers that submit the plan as a standalone query.
+                /// WorkloadDomain produces a build branch meant to be spliced into a running data
+                /// query (so it has no source on its own); callers must use generateWorkloadBranch
+                /// directly with the data query's source operator as the splice leaf.
                 throw NotImplemented(
-                    "REQUEST STATISTIC WORKLOAD is not yet implemented. "
-                    "Requires extracting subplans from running queries (query {}, operator {}).",
+                    "REQUEST STATISTIC WORKLOAD cannot be deployed via the standard generateQuery path. "
+                    "The caller must invoke generateWorkloadBranch with the data query's source operator "
+                    "(query {}, operator {}) and splice the result into that query's plan via addRootOperators.",
                     domain.queryId,
                     domain.operatorId);
             }
@@ -188,6 +302,182 @@ LogicalPlan DefaultStatisticQueryGenerator::generateQuery(
             }
         },
         request.domain);
+}
+
+LogicalPlan DefaultStatisticQueryGenerator::generateWorkloadBranch(
+    const WorkloadDomain& domain,
+    const RequestStatisticBuildStatement& request,
+    const Statistic::StatisticId statisticId,
+    const std::string& coordinatorAddress,
+    const LogicalOperator& spliceLeaf) const
+{
+    /// We require the splice leaf to be the data query's SourceNameLogicalOperator so we can lift
+    /// the logical-source name out for the gRPC-sink schema qualifier (the StatisticStoreWriter
+    /// prefixes its output fields with "<SOURCE>$"). The splice leaf is also the operator the
+    /// build branch will share with the data query's filter chain: after LogicalSourceExpansionRule
+    /// rewrites the multi-parent source-name into a Union(SourceDescriptors), both subtrees point
+    /// at the same expansion and the runtime fans one source thread out to both pipelines.
+    const auto sourceNameOp = spliceLeaf.tryGetAs<SourceNameLogicalOperator>();
+    if (not sourceNameOp.has_value())
+    {
+        throw InvalidConfigParameter(
+            "generateWorkloadBranch expects the splice leaf to be a SourceNameLogicalOperator (got operator id {}); "
+            "the WorkloadDomain MVP only supports splicing at the data query's source operator.",
+            spliceLeaf.getId());
+    }
+    const auto sourceNameUpper = toUpper((*sourceNameOp)->getLogicalSourceName());
+    const auto fieldNameUpper = toUpper(domain.fieldName);
+
+    /// Stamp SpliceToRunningSourceTrait on the build branch's source operator so the worker, on
+    /// instantiating this source, splices into the already-running data-query source thread for
+    /// the same logical source instead of spawning a second source thread.
+    auto taggedSource = spliceLeaf;
+    {
+        auto ts = taggedSource.getTraitSet();
+        [[maybe_unused]] const auto inserted = tryInsert(ts, SpliceToRunningSourceTrait{});
+        taggedSource = taggedSource.withTraitSet(ts);
+    }
+
+    LogicalPlan basePlan{INVALID_QUERY_ID, {taggedSource}};
+    /// applyConditionSelection=false: the trigger's `condition` is a probe-pipeline predicate
+    /// (binds against histogram bin fields), not a build-chain output filter.
+    auto plan = stackWorkloadBuildChainOnTop(std::move(basePlan), fieldNameUpper, request, statisticId);
+
+    const auto predicate
+        = request.conditionTrigger.has_value() ? request.conditionTrigger->condition : std::optional<LogicalFunction>{};
+
+    if (not predicate.has_value())
+    {
+        /// No predicate: terminate at VoidSink so the build chain quietly populates the store
+        /// without shipping window-close records anywhere. (Heartbeat-style probe is no longer
+        /// deployed separately; users wiring a callback without a predicate get no triggers.)
+        (void)coordinatorAddress;
+        return appendWorkloadVoidSink(std::move(plan), sourceNameUpper, request.options);
+    }
+
+    /// Probe-in-build path: instead of VoidSink we chain
+    ///   StatisticStoreWriter → EquiWidthHistogramProbe → Selection(predicate) → GrpcSink
+    /// The writer does two things per window-close:
+    ///  (1) Side effect: drops the histogram blob into the in-memory AbstractStatisticStore.
+    ///  (2) Pipeline output: emits a 4-field record (statId, startTs, endTs, seenTuples) — just
+    ///      the lookup key, not the histogram itself.
+    /// The probe receives that key record as input and uses (statId, startTs, endTs) to fetch
+    /// the just-written histogram back from the store. At lowering time, EquiWidthHistogramProbe
+    /// becomes a StatisticStoreReader physical operator (see LowerToPhysicalEquiWidthHistogramProbe),
+    /// so the "reader" exists at runtime even though no separate logical operator appears in this
+    /// chain. The reader emits one record per histogram bin (key fields + BINSTART/BINEND/BINCOUNTER).
+    /// So:
+    ///  - No Generator-driven polling: triggers fire per window-close, at the build's natural
+    ///    cadence (~3 Hz here).
+    ///  - No latest-window guessing: the probe's lookup key matches the just-written window
+    ///    exactly. No stale data, no ambiguity.
+    ///  - Selection filters which bin rows make it to the GrpcSink (the bin-level predicate).
+    ///  - The GrpcSink reports each surviving bin row to the coordinator; the report's
+    ///    STATISTICID is the build's statisticId, which is also the routing key for the
+    ///    coordinator-side probe callback registered by collectWorkloadStatistic.
+    plan = promoteOperatorToRoot(
+        plan,
+        EquiWidthHistogramProbeLogicalOperator{
+            statisticId,
+            DataTypeProvider::provideDataType(DataType::Type::UINT64, DataType::NULLABLE::NOT_NULLABLE),
+            DataTypeProvider::provideDataType(DataType::Type::UINT64, DataType::NULLABLE::NOT_NULLABLE)});
+    plan = LogicalPlanBuilder::addSelection(*predicate, plan);
+
+    /// GrpcSink schema mirrors the StatisticStoreWriter's output schema (the four
+    /// LogicalStatisticFields), qualified with the source name. The probe operator adds bin
+    /// fields (BINSTART/BINCOUNTER/BINEND) to its output schema; we drop them via a Projection
+    /// so the sink only carries the four reporting fields the coordinator's gRPC service
+    /// expects. STATISTICID stays = build's statisticId, so coordinator-side
+    /// `probeCallbacks[statisticId]` routes correctly.
+    const auto& systemQualifier = sourceNameUpper + "$";
+    LogicalStatisticFields outputStatisticFields;
+    outputStatisticFields.addQualifierName(systemQualifier);
+    std::vector<ProjectionLogicalOperator::Projection> projections;
+    projections.emplace_back(
+        FieldIdentifier{outputStatisticFields.statisticIdField.name},
+        LogicalFunction{FieldAccessLogicalFunction{"STATISTICID"}});
+    projections.emplace_back(
+        FieldIdentifier{outputStatisticFields.statisticStartTsField.name},
+        LogicalFunction{FieldAccessLogicalFunction{"STATISTICSTART"}});
+    projections.emplace_back(
+        FieldIdentifier{outputStatisticFields.statisticEndTsField.name},
+        LogicalFunction{FieldAccessLogicalFunction{"STATISTICEND"}});
+    projections.emplace_back(
+        FieldIdentifier{outputStatisticFields.statisticNumberOfSeenTuplesField.name},
+        LogicalFunction{FieldAccessLogicalFunction{"STATISTICNUMBEROFSEENTUPLES"}});
+    plan = LogicalPlanBuilder::addProjection(std::move(projections), /*asterisk=*/false, plan);
+
+    return appendWorkloadGrpcSink(std::move(plan), sourceNameUpper, coordinatorAddress, request.options);
+}
+
+LogicalPlan DefaultStatisticQueryGenerator::generateWorkloadBranchPrometheus(
+    const WorkloadDomain& domain, const RequestStatisticBuildStatement& request, const LogicalOperator& spliceLeaf) const
+{
+    /// Same splice contract as generateWorkloadBranch: the leaf must be the data query's
+    /// SourceNameLogicalOperator so the build branch shares one source thread with the data query
+    /// (SpliceToRunningSourceTrait → the worker fans the running source out to both pipelines
+    /// instead of spawning a second source thread).
+    const auto sourceNameOp = spliceLeaf.tryGetAs<SourceNameLogicalOperator>();
+    if (not sourceNameOp.has_value())
+    {
+        throw InvalidConfigParameter(
+            "generateWorkloadBranchPrometheus expects the splice leaf to be a SourceNameLogicalOperator (got operator id {}); "
+            "the WorkloadDomain MVP only supports splicing at the data query's source operator.",
+            spliceLeaf.getId());
+    }
+    const auto fieldNameUpper = toUpper(domain.fieldName);
+
+    /// server_url is the host:port this sink's Prometheus exposer binds its /metrics endpoint to;
+    /// the external Prometheus instance scrapes it. It must be unique per sink, so we require it
+    /// explicitly rather than defaulting (a silent default would collide across fields/sources).
+    const auto serverUrlIt = request.options.find("prometheus_server_url");
+    if (serverUrlIt == request.options.end() or serverUrlIt->second.empty())
+    {
+        throw InvalidConfigParameter(
+            "generateWorkloadBranchPrometheus requires a 'prometheus_server_url' option "
+            "(the host:port the sink's Prometheus exposer binds to).");
+    }
+    const auto& serverUrl = serverUrlIt->second;
+
+    /// Tag the shared source so the worker splices it into the already-running data-query source.
+    auto taggedSource = spliceLeaf;
+    {
+        auto ts = taggedSource.getTraitSet();
+        [[maybe_unused]] const auto inserted = tryInsert(ts, SpliceToRunningSourceTrait{});
+        taggedSource = taggedSource.withTraitSet(ts);
+    }
+
+    /// Baseline branch: Source → Projection(field) → PrometheusSink. No in-engine
+    /// StatisticBuild/StoreWriter/Probe — the PrometheusSink builds the histogram itself (one
+    /// Observe() per tuple), the external Prometheus scrapes the cumulative bucket counters, and
+    /// windowing happens at query time via PromQL rate(). We project down to the single monitored
+    /// field so the sink builds exactly one histogram, matching the native path's single-field
+    /// EquiWidthHistogram for an apples-to-apples per-tuple cost.
+    LogicalPlan plan{INVALID_QUERY_ID, {taggedSource}};
+    std::vector<ProjectionLogicalOperator::Projection> projections;
+    projections.emplace_back(FieldIdentifier{fieldNameUpper}, LogicalFunction{FieldAccessLogicalFunction{fieldNameUpper}});
+    plan = LogicalPlanBuilder::addProjection(std::move(projections), /*asterisk=*/false, plan);
+
+    /// Pass an EMPTY schema: SinkLogicalOperator::withInferredSchema fills an inline sink's empty
+    /// schema from its input (the projection's single-field output), so we don't need the field's
+    /// concrete type here — it isn't resolved on the splice leaf until the optimizer's
+    /// type-inference phase runs on submit.
+    const auto getOpt = [&](const std::string& key, const std::string& dflt)
+    {
+        const auto it = request.options.find(key);
+        return it != request.options.end() ? it->second : dflt;
+    };
+    /// min/max default to the PrometheusSink's own equi-width bounds; "min"/"max" are the same
+    /// option keys the native EquiWidthHistogram reads (createAggregationFunction), so a single
+    /// --companion-histogram-min/max pair configures both paths identically.
+    std::unordered_map<std::string, std::string> sinkConfig{
+        {"server_url", serverUrl},
+        {"histogram_num_buckets", getOpt("histogram_num_buckets", "100")},
+        {"histogram_min_value", getOpt("min", "0")},
+        {"histogram_max_value", getOpt("max", "1000000")},
+        {"output_format", "NATIVE"},
+        {"host", getOpt("host", "localhost:8080")}};
+    return LogicalPlanBuilder::addInlineSink("Prometheus", Schema{}, std::move(sinkConfig), {}, plan);
 }
 
 }

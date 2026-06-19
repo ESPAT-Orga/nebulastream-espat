@@ -276,6 +276,46 @@ std::expected<ExplainQueryStatementResult, Exception> QueryStatementHandler::ope
     std::unreachable();
 }
 
+std::expected<QueryStatementResult, Exception> QueryStatementHandler::deployWithSwitchableAlternate(
+    const QueryStatement& data, const QueryStatement& alternate, const std::string& switchName, int64_t alternateExpectedValue)
+{
+    CPPTRACE_TRY
+    {
+        auto dataDistributed = queryOptimizer->optimize(data.plan);
+        if (data.id)
+        {
+            dataDistributed.setQueryId(*data.id);
+        }
+        auto alternateDistributed = queryOptimizer->optimize(alternate.plan);
+
+        const auto registeredId = queryManager->registerQueryDeferred(dataDistributed);
+        if (not registeredId)
+        {
+            return std::unexpected{registeredId.error()};
+        }
+        if (const auto attachResult = queryManager->attachAlternatePipeline(
+                *registeredId, alternateDistributed, switchName, alternateExpectedValue);
+            not attachResult)
+        {
+            return std::unexpected{QueryRegistrationFailed(
+                "attachAlternatePipeline failed: {}",
+                fmt::join(std::views::transform(attachResult.error(), [](const auto& e) { return e.what(); }), ", "))};
+        }
+        if (const auto startResult = queryManager->start(*registeredId); not startResult)
+        {
+            return std::unexpected{QueryStartFailed(
+                "Failed to start workload-switch query: {}",
+                fmt::join(std::views::transform(startResult.error(), [](const auto& e) { return e.what(); }), ", "))};
+        }
+        return QueryStatementResult{*registeredId};
+    }
+    CPPTRACE_CATCH(...)
+    {
+        return std::unexpected(wrapExternalException());
+    }
+    std::unreachable();
+}
+
 std::expected<QueryStatementResult, Exception> QueryStatementHandler::operator()(const QueryStatement& statement)
 {
     CPPTRACE_TRY
@@ -448,6 +488,14 @@ std::expected<CollectStatisticResult, Exception>
 StatisticRequestHandler::collectNewStatistic(const RequestStatisticBuildStatement& statement)
 {
     return statisticCoordinator->collectNewStatistic(statement);
+}
+
+std::expected<CollectStatisticResult, Exception> StatisticRequestHandler::collectWorkloadStatistic(
+    const RequestStatisticBuildStatement& statement,
+    const LogicalPlan& dataQueryPlan,
+    const std::function<std::expected<QueryId, Exception>(LogicalPlan)>& submitPlan)
+{
+    return statisticCoordinator->collectWorkloadStatistic(statement, dataQueryPlan, submitPlan);
 }
 
 std::string StatisticRequestHandler::startGrpcServer()

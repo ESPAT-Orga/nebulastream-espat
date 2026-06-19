@@ -600,13 +600,39 @@ public:
         }
         if (auto* workloadChar = dynamic_cast<AntlrSQLParser::WorkloadCharacteristicContext*>(characteristic); workloadChar != nullptr)
         {
-            const auto queryId = workloadChar->queryId->getText();
-            const auto operatorId = workloadChar->operatorId->getText();
-            throw NotImplemented(
-                "REQUEST STATISTIC WORKLOAD is not yet implemented. "
-                "Requires extracting subplans from running queries (query {}, operator {}).",
-                queryId,
-                operatorId);
+            const auto metric = bindMetricType(workloadChar->metricType());
+            const auto queryIdStr = workloadChar->queryId->getText();
+            const auto operatorIdStr = workloadChar->operatorId->getText();
+            const auto fieldName = bindIdentifier(workloadChar->fieldName);
+            const auto [windowSizeMs, windowAdvanceMs] = bindWindowClause(workloadChar->windowClause());
+
+            std::unordered_map<std::string, std::string> options;
+            if (workloadChar->optionsClause() != nullptr)
+            {
+                auto configOptions
+                    = bindConfigOptionsWithDuplicates(workloadChar->optionsClause()->options->namedConfigExpression());
+                for (const auto& [path, value] : configOptions)
+                {
+                    if (std::holds_alternative<Literal>(value) && !path.empty())
+                    {
+                        const auto key = fmt::format("{}", fmt::join(path | std::views::transform(toLowerCase), "."));
+                        options[key] = literalToString(std::get<Literal>(value));
+                    }
+                }
+            }
+
+            WorkloadDomain domain{
+                .queryId = QueryId::createDistributed(DistributedQueryId{queryIdStr}),
+                .operatorId = OperatorId{std::stoull(operatorIdStr)},
+                .fieldName = fieldName};
+            return RequestStatisticBuildStatement{
+                .domain = domain,
+                .metric = metric,
+                .windowSizeMs = windowSizeMs,
+                .windowAdvanceMs = windowAdvanceMs,
+                .eventTimeFieldName = {},
+                .conditionTrigger = {},
+                .options = std::move(options)};
         }
         if (auto* infraChar = dynamic_cast<AntlrSQLParser::InfrastructureCharacteristicContext*>(characteristic); infraChar != nullptr)
         {
@@ -648,6 +674,7 @@ public:
             {
                 std::optional<DistributedQueryId> queryId;
                 std::optional<Priority> queryPriority;
+                auto plan = queryBinder(queryAst->query());
                 if (queryAst->optionsClause() != nullptr)
                 {
                     auto options = bindConfigOptions(queryAst->optionsClause()->options->namedConfigExpression());
@@ -683,9 +710,17 @@ public:
                                 throw InvalidQuerySyntax("Query priority must be 'HIGH' or 'LOW', got '{}'", value);
                             }
                         }
+                        if (auto fuseIter = optionsIter->second.find("FUSE"); fuseIter != optionsIter->second.end())
+                        {
+                            auto* literal = std::get_if<Literal>(&fuseIter->second);
+                            if ((literal == nullptr) || !std::holds_alternative<bool>(*literal))
+                            {
+                                throw InvalidQuerySyntax("QUERY.FUSE must be a boolean");
+                            }
+                            plan.setOperatorFusing(std::get<bool>(*literal));
+                        }
                     }
                 }
-                auto plan = queryBinder(queryAst->query());
                 if (queryPriority.has_value())
                 {
                     plan.setPriority(*queryPriority);

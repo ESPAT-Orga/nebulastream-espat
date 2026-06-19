@@ -29,8 +29,8 @@
 namespace NES
 {
 
-const static int8_t* getStatisticDataProxy(
-    OperatorHandler* ptrOpHandler, const Statistic::StatisticId statisticId, const Timestamp startTs, const Timestamp endTs)
+const static int8_t*
+getStatisticDataProxy(OperatorHandler* ptrOpHandler, const Statistic::StatisticId statisticId, const Timestamp startTs, const Timestamp endTs)
 {
     PRECONDITION(ptrOpHandler != nullptr, "opHandler should not be null!");
 

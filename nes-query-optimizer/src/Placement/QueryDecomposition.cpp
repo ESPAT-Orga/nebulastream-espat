@@ -58,10 +58,12 @@ struct DecompositionContext
     SharedPtr<const SourceCatalog> sourceCatalog;
     SharedPtr<const SinkCatalog> sinkCatalog;
     SharedPtr<const WorkerCatalog> workerCatalog;
+    bool operatorFusing = true;
 
     void addPlanToNode(LogicalOperator&& op, const NetworkTopology::NodeId& nodeId)
     {
-        plansByNode[nodeId].emplace_back(INVALID_QUERY_ID, std::vector{std::move(op)});
+        auto& plan = plansByNode[nodeId].emplace_back(INVALID_QUERY_ID, std::vector{std::move(op)});
+        plan.setOperatorFusing(operatorFusing);
     }
 };
 
@@ -225,7 +227,8 @@ DistributedLogicalPlan QueryDecomposer::decompose(const LogicalPlan& placedPlan,
         .config = configuration,
         .sourceCatalog = copyPtr(sourceCatalog),
         .sinkCatalog = copyPtr(sinkCatalog),
-        .workerCatalog = copyPtr(workerCatalog)};
+        .workerCatalog = copyPtr(workerCatalog),
+        .operatorFusing = placedPlan.getOperatorFusing()};
 
     auto root = decomposePlanRecursive(context, placedPlan.getRootOperators().front());
     context.addPlanToNode(std::move(root), getPlacementFor(root));

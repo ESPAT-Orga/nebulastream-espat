@@ -20,8 +20,10 @@
 #include <LoweringRules/AbstractLoweringRule.hpp>
 #include <Operators/LogicalOperator.hpp>
 #include <Operators/Sources/SourceDescriptorLogicalOperator.hpp>
+#include <Traits/DeferSourceStartTrait.hpp>
 #include <Traits/MemoryLayoutTypeTrait.hpp>
 #include <Traits/OutputOriginIdsTrait.hpp>
+#include <Traits/SpliceToRunningSourceTrait.hpp>
 #include <Traits/TraitSet.hpp>
 #include <ErrorHandling.hpp>
 #include <LoweringRuleRegistry.hpp>
@@ -40,6 +42,16 @@ LoweringRuleResultSubgraph LowerToPhysicalSource::apply(
     const auto outputOriginIdsOpt = getTrait<OutputOriginIdsTrait>(source.getTraitSet());
     PRECONDITION(outputOriginIdsOpt.has_value(), "OutputOriginIdsTrait missing in LowerToPhysicalSource");
     auto physicalOperator = SourcePhysicalOperator(source->getSourceDescriptor(), outputOriginIdsOpt.value().get()[0]);
+    /// Carry the splice-to-running-source signal + logical source name through to the runtime. The
+    /// trait, if set, was stamped by the workload-domain build-branch generator; LogicalSource-
+    /// ExpansionRule propagates it to every expanded SourceDescriptor operator.
+    physicalOperator.spliceToRunningSource = hasTrait<SpliceToRunningSourceTrait>(source.getTraitSet());
+    if (const auto deferTrait = source.getTraitSet().tryGet<DeferSourceStartTrait>(); deferTrait.has_value())
+    {
+        physicalOperator.deferStart = true;
+        physicalOperator.deferStartExpectedSpliceCount = deferTrait.value()->expectedSpliceCount;
+    }
+    physicalOperator.logicalSourceName = source->getSourceDescriptor().getLogicalSource().getLogicalSourceName();
 
     const auto inputSchemas = logicalOperator.getInputSchemas();
     PRECONDITION(

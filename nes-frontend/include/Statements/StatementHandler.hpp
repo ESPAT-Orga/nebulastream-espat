@@ -225,6 +225,14 @@ public:
     std::expected<ExplainQueryStatementResult, Exception> operator()(const ExplainQueryStatement& statement);
     std::expected<ShowQueriesStatementResult, Exception> operator()(const ShowQueriesStatement& statement);
     std::expected<DropQueryStatementResult, Exception> operator()(const DropQueryStatement& statement);
+
+    /// Workload-switch deploy: compiles `data` and `alternate` (both single-sink filter chains),
+    /// registers the data plan deferred, attaches the alternate so each intermediate pipeline
+    /// stage becomes a SwitchableCompiledExecutablePipelineStage selecting between the two
+    /// compiled functions via the named switch in SwitchRegistry, then starts. The swap callback
+    /// flips the named switch via SetSwitch instead of redeploying.
+    [[nodiscard]] std::expected<QueryStatementResult, Exception> deployWithSwitchableAlternate(
+        const QueryStatement& data, const QueryStatement& alternate, const std::string& switchName, int64_t alternateExpectedValue = 1);
 };
 
 class TopologyStatementHandler final : public StatementHandler<TopologyStatementHandler>
@@ -253,6 +261,14 @@ public:
     /// Directly deploys a statistic collection query without going through the SQL parser.
     /// Used internally to co-deploy companion statistic queries alongside data queries.
     [[nodiscard]] std::expected<CollectStatisticResult, Exception> collectNewStatistic(const RequestStatisticBuildStatement& statement);
+
+    /// Workload-domain variant: splices the build branch into the data query's plan and submits
+    /// the merged plan via `submitPlan`. The probe runs inline with the build chain and fires its
+    /// condition trigger on every window-close. See StatisticCoordinator::collectWorkloadStatistic.
+    [[nodiscard]] std::expected<CollectStatisticResult, Exception> collectWorkloadStatistic(
+        const RequestStatisticBuildStatement& statement,
+        const LogicalPlan& dataQueryPlan,
+        const std::function<std::expected<QueryId, Exception>(LogicalPlan)>& submitPlan);
 
     /// Starts the gRPC server on the owned coordinator. Must be called after construction.
     /// Returns "host:port" of the listening server.

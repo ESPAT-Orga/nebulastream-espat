@@ -65,6 +65,7 @@ SerializableQueryPlan QueryPlanSerializationUtil::serializeQueryPlan(const Logic
     /// Serialize the root operator ids
     auto rootOperatorId = rootOperator.getId();
     serializableQueryPlan.add_rootoperatorids(rootOperatorId.getRawValue());
+    serializableQueryPlan.set_operatorfusing(queryPlan.getOperatorFusing());
     return serializableQueryPlan;
 }
 
@@ -199,6 +200,10 @@ LogicalPlan QueryPlanSerializationUtil::deserializeQueryPlan(const SerializableQ
     }
     LogicalPlan plan{queryId, std::move(rootOperators)};
     plan.setPriority(serializedQueryPlan.priority() == SerializablePriority::LOW ? Priority::LOW : Priority::HIGH);
+    if (serializedQueryPlan.has_operatorfusing())
+    {
+        plan.setOperatorFusing(serializedQueryPlan.operatorfusing());
+    }
     return plan;
 }
 

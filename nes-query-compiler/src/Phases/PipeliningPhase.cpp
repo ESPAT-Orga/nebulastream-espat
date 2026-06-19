@@ -186,8 +186,15 @@ void buildPipelineRecursively(
     OperatorPipelineMap& pipelineMap,
     PipelinePolicy policy,
     uint64_t configuredBufferSize,
-    const MergePointSet& mergePoints)
+    const MergePointSet& mergePoints,
+    bool fuseOperators)
 {
+    /// If operator fusing is disabled, every fusible operator must start its own pipeline.
+    /// Continue -> ForceNew substitution achieves this without altering source/sink/emit handling.
+    if (not fuseOperators && policy == PipelinePolicy::Continue)
+    {
+        policy = PipelinePolicy::ForceNew;
+    }
     /// Check if we've already seen this operator
     const OperatorId opId = opWrapper->getPhysicalOperator().getId();
     if (const auto it = pipelineMap.find(opId); it != pipelineMap.end())
@@ -239,7 +246,7 @@ void buildPipelineRecursively(
         for (auto& child : opWrapper->getChildren())
         {
             buildPipelineRecursively(
-                child, opWrapper, newPipelinePtr, pipelineMap, PipelinePolicy::Continue, configuredBufferSize, mergePoints);
+                child, opWrapper, newPipelinePtr, pipelineMap, PipelinePolicy::Continue, configuredBufferSize, mergePoints, fuseOperators);
         }
         return;
     }
@@ -263,7 +270,7 @@ void buildPipelineRecursively(
             for (auto& child : opWrapper->getChildren())
             {
                 buildPipelineRecursively(
-                    child, opWrapper, newPipeline, pipelineMap, PipelinePolicy::ForceNew, configuredBufferSize, mergePoints);
+                    child, opWrapper, newPipeline, pipelineMap, PipelinePolicy::ForceNew, configuredBufferSize, mergePoints, fuseOperators);
             }
         }
         else
@@ -276,7 +283,14 @@ void buildPipelineRecursively(
             for (auto& child : opWrapper->getChildren())
             {
                 buildPipelineRecursively(
-                    child, opWrapper, currentPipeline, pipelineMap, PipelinePolicy::ForceNew, configuredBufferSize, mergePoints);
+                    child,
+                    opWrapper,
+                    currentPipeline,
+                    pipelineMap,
+                    PipelinePolicy::ForceNew,
+                    configuredBufferSize,
+                    mergePoints,
+                    fuseOperators);
             }
         }
 
@@ -353,7 +367,7 @@ void buildPipelineRecursively(
         for (auto& child : opWrapper->getChildren())
         {
             buildPipelineRecursively(
-                child, opWrapper, newPipelinePtr, pipelineMap, PipelinePolicy::Continue, configuredBufferSize, mergePoints);
+                child, opWrapper, newPipelinePtr, pipelineMap, PipelinePolicy::Continue, configuredBufferSize, mergePoints, fuseOperators);
         }
         return;
     }
@@ -387,7 +401,7 @@ void buildPipelineRecursively(
         for (auto& child : opWrapper->getChildren())
         {
             buildPipelineRecursively(
-                child, opWrapper, newPipelinePtr, pipelineMap, PipelinePolicy::Continue, configuredBufferSize, mergePoints);
+                child, opWrapper, newPipelinePtr, pipelineMap, PipelinePolicy::Continue, configuredBufferSize, mergePoints, fuseOperators);
         }
         return;
     }
@@ -417,7 +431,7 @@ void buildPipelineRecursively(
         for (auto& child : opWrapper->getChildren())
         {
             buildPipelineRecursively(
-                child, opWrapper, currentPipeline, pipelineMap, PipelinePolicy::Continue, configuredBufferSize, mergePoints);
+                child, opWrapper, currentPipeline, pipelineMap, PipelinePolicy::Continue, configuredBufferSize, mergePoints, fuseOperators);
         }
     }
 }
@@ -427,6 +441,7 @@ void buildPipelineRecursively(
 std::shared_ptr<PipelinedQueryPlan> apply(const PhysicalPlan& physicalPlan)
 {
     const uint64_t configuredBufferSize = physicalPlan.getOperatorBufferSize();
+    const bool fuseOperators = physicalPlan.getOperatorFusing();
     auto pipelinedPlan = std::make_shared<PipelinedQueryPlan>(physicalPlan.getQueryId(), physicalPlan.getExecutionMode());
 
     OperatorPipelineMap pipelineMap;
@@ -442,7 +457,7 @@ std::shared_ptr<PipelinedQueryPlan> apply(const PhysicalPlan& physicalPlan)
         for (const auto& child : rootWrapper->getChildren())
         {
             buildPipelineRecursively(
-                child, nullptr, rootPipeline, pipelineMap, PipelinePolicy::ForceNew, configuredBufferSize, mergePoints);
+                child, nullptr, rootPipeline, pipelineMap, PipelinePolicy::ForceNew, configuredBufferSize, mergePoints, fuseOperators);
         }
     }
 

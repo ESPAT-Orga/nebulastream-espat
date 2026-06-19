@@ -19,6 +19,7 @@
 #include <string_view>
 #include <typeindex>
 #include <typeinfo>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -28,6 +29,9 @@
 #include <Operators/UnionLogicalOperator.hpp>
 #include <Plans/LogicalPlan.hpp>
 #include <Rules/Semantic/SourceInferenceRule.hpp>
+#include <Traits/DeferSourceStartTrait.hpp>
+#include <Traits/SpliceToRunningSourceTrait.hpp>
+#include <Traits/TraitSet.hpp>
 #include <Util/PlanRenderer.hpp>
 #include <ErrorHandling.hpp>
 
@@ -63,8 +67,18 @@ bool LogicalSourceExpansionRule::operator==(const LogicalSourceExpansionRule& ot
 
 LogicalPlan LogicalSourceExpansionRule::apply(LogicalPlan queryPlan) const
 {
+    /// A SourceNameLogicalOperator reachable from multiple root operators (e.g. a workload-domain
+    /// splice where a stat-build subtree shares the data-query's source) appears multiple times in
+    /// the BFS getOperatorByType traversal. Deduplicate by OperatorId so we expand each unique
+    /// source once and let replaceSubtree update every occurrence in the plan in one pass.
+    std::unordered_set<OperatorId> processed;
     for (const auto& sourceOp : getOperatorByType<SourceNameLogicalOperator>(queryPlan))
     {
+        if (not processed.insert(sourceOp.getId()).second)
+        {
+            continue;
+        }
+
         const auto logicalSourceOpt = sourceCatalog->getLogicalSource(sourceOp->getLogicalSourceName());
         if (not logicalSourceOpt.has_value())
         {
@@ -83,24 +97,47 @@ LogicalPlan LogicalSourceExpansionRule::apply(LogicalPlan queryPlan) const
             throw UnknownSourceName("No physical sources present for logical source \"{}\"", sourceOp->getLogicalSourceName());
         }
 
+        /// Preserve SpliceToRunningSourceTrait / DeferSourceStartTrait across expansion: if the
+        /// source-name op was tagged, every expanded SourceDescriptor must carry the same marker
+        /// (and the DeferSourceStartTrait's expectedSpliceCount payload) so the runtime hooks
+        /// can recognize it at instantiation time.
+        const bool spliceMarker = hasTrait<SpliceToRunningSourceTrait>(sourceOp.getTraitSet());
+        const auto deferStartTrait = sourceOp.getTraitSet().tryGet<DeferSourceStartTrait>();
         auto expandedSourceOperators = entries
-            | std::views::transform([](const auto& entry) { return LogicalOperator{SourceDescriptorLogicalOperator{entry}}; })
+            | std::views::transform(
+                [spliceMarker, &deferStartTrait](const auto& entry)
+                {
+                    LogicalOperator op{SourceDescriptorLogicalOperator{entry}};
+                    auto ts = op.getTraitSet();
+                    if (spliceMarker)
+                    {
+                        [[maybe_unused]] const auto inserted = tryInsert(ts, SpliceToRunningSourceTrait{});
+                    }
+                    if (deferStartTrait.has_value())
+                    {
+                        [[maybe_unused]] const auto inserted = tryInsert(ts, deferStartTrait.value().get());
+                    }
+                    if (spliceMarker or deferStartTrait.has_value())
+                    {
+                        op = op.withTraitSet(ts);
+                    }
+                    return op;
+                })
             | std::ranges::to<std::vector>();
 
-        INVARIANT(getParents(queryPlan, sourceOp).size() == 1, "Source name operator must have exactly one parent");
-        auto parent = getParents(queryPlan, sourceOp).front();
-        INVARIANT(
-            parent.getChildren().size() == 1 && parent.getChildren().front() == sourceOp,
-            "Parent of source name operator must have exactly one child, the source itself");
-
-        auto newParent = parent.withChildren({UnionLogicalOperator{}.withChildren(std::move(expandedSourceOperators))});
-        auto replaceResult = replaceSubtree(queryPlan, parent.getId(), newParent);
+        /// Replace the source-name op (rather than its parent) with the Union(SourceDescriptors)
+        /// subtree. This handles both single-parent (the historical assumption) and multi-parent
+        /// DAG-shaped plans uniformly: replaceSubtree by id substitutes every occurrence in the
+        /// plan, so all parents converge on the same expanded subtree without further bookkeeping.
+        const auto unionWithExpansion
+            = LogicalOperator{UnionLogicalOperator{}.withChildren(std::move(expandedSourceOperators))};
+        auto replaceResult = replaceSubtree(queryPlan, sourceOp.getId(), unionWithExpansion);
 
         INVARIANT(
             replaceResult.has_value(),
-            "Failed to replace operator {} with {}",
-            parent.explain(ExplainVerbosity::Debug),
-            newParent.explain(ExplainVerbosity::Debug));
+            "Failed to replace SourceNameLogicalOperator {} with expansion {}",
+            sourceOp.explain(ExplainVerbosity::Debug),
+            unionWithExpansion.explain(ExplainVerbosity::Debug));
         queryPlan = std::move(replaceResult.value());
     }
     return queryPlan;

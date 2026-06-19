@@ -16,6 +16,7 @@
 
 #include <chrono>
 #include <exception>
+#include <iostream>
 #include <string>
 #include <utility>
 #include <Identifiers/Identifiers.hpp>
@@ -29,6 +30,7 @@
 #include <grpcpp/support/status.h>
 #include <ErrorHandling.hpp>
 #include <SingleNodeWorkerRPCService.pb.h>
+#include <SwitchRegistry.hpp>
 #include <WorkerStatus.hpp>
 
 namespace NES
@@ -204,6 +206,70 @@ grpc::Status GRPCServer::RequestStatus(grpc::ServerContext* context, const Worke
 
         serializeWorkerStatus(status, response);
 
+        return grpc::Status::OK;
+    }
+    CPPTRACE_CATCH(const Exception& e)
+    {
+        return handleError(e, context);
+    }
+    CPPTRACE_CATCH_ALT(const std::exception& e)
+    {
+        return handleError(e, context);
+    }
+    return {grpc::INTERNAL, "unknown exception"};
+}
+
+grpc::Status GRPCServer::SetSwitch(grpc::ServerContext* context, const SetSwitchRequest* request, google::protobuf::Empty*)
+{
+    CPPTRACE_TRY
+    {
+        SwitchRegistry::instance().set(request->name(), request->value());
+        /// Surface filter-order switches on stdout (like the worker's throughput line) so benchmarks
+        /// can observe redeployments uniformly for both the native and Prometheus-baseline paths.
+        std::cout << "SetSwitch: " << request->name() << " = " << request->value() << "\n" << std::flush;
+        return grpc::Status::OK;
+    }
+    CPPTRACE_CATCH(const Exception& e)
+    {
+        return handleError(e, context);
+    }
+    CPPTRACE_CATCH_ALT(const std::exception& e)
+    {
+        return handleError(e, context);
+    }
+    return {grpc::INTERNAL, "unknown exception"};
+}
+
+grpc::Status GRPCServer::RegisterQueryDeferred(
+    grpc::ServerContext* context, const RegisterQueryRequest* request, RegisterQueryReply* response)
+{
+    auto plan = QueryPlanSerializationUtil::deserializeQueryPlan(request->queryplan());
+    CPPTRACE_TRY
+    {
+        auto result = delegate.registerQueryDeferred(std::move(plan));
+        if (result.has_value())
+        {
+            *response->mutable_queryid() = QueryPlanSerializationUtil::serializeQueryId(*result);
+            return grpc::Status::OK;
+        }
+        return handleError(result.error(), context);
+    }
+    CPPTRACE_CATCH(const std::exception& e)
+    {
+        return handleError(e, context);
+    }
+    return {grpc::INTERNAL, "unknown exception"};
+}
+
+grpc::Status GRPCServer::AttachAlternatePipeline(
+    grpc::ServerContext* context, const AttachAlternatePipelineRequest* request, google::protobuf::Empty*)
+{
+    const auto queryId = QueryPlanSerializationUtil::deserializeQueryId(request->query_id());
+    auto alternatePlan = QueryPlanSerializationUtil::deserializeQueryPlan(request->alternate_plan());
+    CPPTRACE_TRY
+    {
+        getValueOrThrow(delegate.attachAlternatePipeline(
+            queryId, std::move(alternatePlan), request->switch_name(), request->alternate_expected_value()));
         return grpc::Status::OK;
     }
     CPPTRACE_CATCH(const Exception& e)

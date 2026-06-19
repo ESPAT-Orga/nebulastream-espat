@@ -424,11 +424,13 @@ struct Repl::Impl
                 {
                     if constexpr (std::is_same_v<std::remove_cvref_t<decltype(stmt)>, QueryStatement>)
                     {
-                        /// Workload-domain companion: splice the build branch into the data query's
-                        /// LogicalPlan and submit the merged plan as the data query. Only one source
-                        /// thread runs; the engine fans buffers out to both subtrees via the multi-
-                        /// successor pipeline emit path (QueryEngine.cpp:512). The companion is not
-                        /// deployed as a separate query.
+                        /// Workload-domain companion: deploy the build branch as a SEPARATE query whose
+                        /// source carries SpliceToRunningSourceTrait, so at runtime it latches onto the
+                        /// data query's already-running source instead of spawning a second source thread
+                        /// (collectWorkloadStatistic calls submitMerged once for the data plan and once
+                        /// for the build branch — two distinct QueryIds; they are NOT merged into one
+                        /// LogicalPlan). Only one source thread runs; the engine fans buffers out to both
+                        /// subtrees via the multi-successor pipeline emit path (QueryEngine.cpp:512).
                         if (not companionStatisticRequests.empty())
                         {
                             try

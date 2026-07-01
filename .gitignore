@@ -67,3 +67,4 @@ __pycache__/
 .ipynb_checkpoints
 *.ipynb
 *.csv
+*.png

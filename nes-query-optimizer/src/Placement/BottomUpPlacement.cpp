@@ -37,7 +37,9 @@
 #include <Operators/Windows/Aggregations/Sample/ReservoirProbeLogicalOperator.hpp>
 #include <Operators/Windows/Aggregations/Sketch/CountMinSketchProbeLogicalOperator.hpp>
 #include <Plans/LogicalPlan.hpp>
+#include <Traits/PinnedHostTrait.hpp>
 #include <Traits/PlacementTrait.hpp>
+#include <Traits/TraitSet.hpp>
 #include <Util/Logger/Logger.hpp>
 #include <Util/Overloaded.hpp>
 #include <fmt/format.h>
@@ -403,6 +405,33 @@ void addStatisticColocationConstraints(PlacementModel& model, const LogicalPlan&
     }
 }
 
+/// Constraint: pin a StatisticStoreWriter carrying a PinnedHostTrait to that host. This is how the
+/// `writer_host` SET option on REQUEST STATISTIC DATA forces the writer onto the root node (the build
+/// stays on the leaf via the distance objective). Without the trait nothing is pinned and the writer
+/// falls to the leaf as usual.
+void addStatisticWriterPinningConstraints(PlacementModel& model, const LogicalPlan& logicalPlan, const NetworkTopology& topology)
+{
+    for (const LogicalOperator& op : BFSRange(logicalPlan.getRootOperators().front()))
+    {
+        if (not op.tryGetAs<StatisticStoreWriterLogicalOperator>())
+        {
+            continue;
+        }
+        const auto pin = getTrait<PinnedHostTrait>(op.getTraitSet());
+        if (not pin.has_value())
+        {
+            continue;
+        }
+        const Host& host = (*pin)->onNode;
+        if (not topology.contains(host))
+        {
+            throw PlacementFailure("writer_host '{}' is not a worker in the topology", host);
+        }
+        const auto var = model.operatorPlacementMatrix.at({op.getId(), host});
+        checkError(Highs_changeColBounds(model.highs, static_cast<HighsInt>(var), 1.0, 1.0), model.highs);
+    }
+}
+
 /// Objective: minimize the sum of distances for all operator placements to their descendant sources
 void addDistanceObjective(PlacementModel& model, const LogicalPlan& logicalPlan, const NetworkTopology& topology)
 {
@@ -476,6 +505,7 @@ std::optional<std::unordered_map<OperatorId, NetworkTopology::NodeId>> solvePlac
     addSinkPlacementConstraint(model, logicalPlan);
     addConnectivityConstraints(model, logicalPlan, topology);
     addStatisticColocationConstraints(model, logicalPlan, topology);
+    addStatisticWriterPinningConstraints(model, logicalPlan, topology);
     addDistanceObjective(model, logicalPlan, topology);
     return extractPlacement(model);
 }

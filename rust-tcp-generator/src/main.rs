@@ -44,6 +44,13 @@ struct Args {
     /// PRNG seed for the lookup table. Same seed -> identical id/value sequence.
     #[arg(long, default_value_t = 42)]
     seed: u64,
+
+    /// Target emission rate per connection in tuples/sec. 0 = unlimited (stream as fast as the
+    /// consumer reads, the original behaviour). A finite rate decouples window-close cadence from
+    /// raw throughput so windowed statistic queries close windows on a predictable wall-clock
+    /// schedule (rate / window_size_in_tuples closes per second).
+    #[arg(long, default_value_t = 0)]
+    rate: u64,
 }
 
 /// Xorshift64* — small, deterministic, plenty of statistical quality for benchmark data.
@@ -85,14 +92,21 @@ async fn handle_connection(
     peer: std::net::SocketAddr,
     port: u16,
     lookup: Arc<Vec<(u64, u64)>>,
+    rate: u64,
 ) {
-    eprintln!("accept port={} peer={}", port, peer);
+    eprintln!("accept port={} peer={} rate={}", port, peer, rate);
     let _ = sock.set_nodelay(true);
     let mut writer = BufWriter::with_capacity(64 * 1024, sock);
 
     let mut ts: u64 = 0;
     let mut idx: usize = 0;
     let lookup_len = lookup.len();
+
+    // Pacing for rate>0: emit in batches of ~1ms worth of tuples, flush, then sleep until the next
+    // batch is due (against a fixed start instant, so pacing doesn't drift). rate==0 disables it.
+    let batch = if rate == 0 { 0 } else { (rate / 1000).max(1) };
+    let start = std::time::Instant::now();
+    let mut emitted: u64 = 0;
 
     let mut line = [0u8; 64];
     let mut id_buf = itoa::Buffer::new();
@@ -141,16 +155,33 @@ async fn handle_connection(
 
         ts = ts.wrapping_add(1);
         idx = idx.wrapping_add(1);
+
+        if rate > 0 {
+            emitted += 1;
+            if emitted % batch == 0 {
+                // Flush so the consumer sees this batch before we sleep (BufWriter would otherwise
+                // hold it), keeping the input cadence steady.
+                if writer.flush().await.is_err() {
+                    eprintln!("disconnect port={} peer={} tuples={}", port, peer, ts);
+                    return;
+                }
+                let target = std::time::Duration::from_secs_f64(emitted as f64 / rate as f64);
+                let elapsed = start.elapsed();
+                if target > elapsed {
+                    tokio::time::sleep(target - elapsed).await;
+                }
+            }
+        }
     }
 }
 
-async fn run_listener(listener: TcpListener, port: u16, lookup: Arc<Vec<(u64, u64)>>) {
+async fn run_listener(listener: TcpListener, port: u16, lookup: Arc<Vec<(u64, u64)>>, rate: u64) {
     loop {
         match listener.accept().await {
             Ok((sock, peer)) => {
                 let lookup = lookup.clone();
                 tokio::spawn(async move {
-                    handle_connection(sock, peer, port, lookup).await;
+                    handle_connection(sock, peer, port, lookup, rate).await;
                 });
             }
             Err(e) => {
@@ -195,7 +226,8 @@ async fn main() -> io::Result<()> {
 
     for (port, listener) in listeners {
         let lookup = lookup.clone();
-        tokio::spawn(async move { run_listener(listener, port, lookup).await });
+        let rate = args.rate;
+        tokio::spawn(async move { run_listener(listener, port, lookup, rate).await });
     }
 
     // Wait for SIGINT (Ctrl-C) or SIGTERM (docker stop) and shut down.

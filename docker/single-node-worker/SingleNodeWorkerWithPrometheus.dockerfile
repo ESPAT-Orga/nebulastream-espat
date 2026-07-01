@@ -46,6 +46,12 @@ FROM ${RUNTIME_BASE} AS app
 COPY --from=prom-fetch /tmp/prometheus/prometheus /usr/bin/prometheus
 COPY --from=prom-fetch /tmp/prometheus/promtool   /usr/bin/promtool
 
+# iproute2 provides `tc`, used by the distributed contention benchmark to cap the root container's
+# ingress bandwidth (tc ingress + police). Harmless for the other experiments that use this image.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends iproute2 \
+ && rm -rf /var/lib/apt/lists/*
+
 COPY bench-entrypoint.sh /usr/local/bin/bench-entrypoint.sh
 RUN chmod +x /usr/local/bin/bench-entrypoint.sh
 

@@ -39,12 +39,6 @@
 #include <Plans/LogicalPlan.hpp>
 #include <QueryManager/GRPCQuerySubmissionBackend.hpp>
 #include <QueryManager/QueryManager.hpp>
-#include <SingleNodeWorkerRPCService.grpc.pb.h>
-#include <SingleNodeWorkerRPCService.pb.h>
-#include <google/protobuf/empty.pb.h>
-#include <grpcpp/client_context.h>
-#include <grpcpp/create_channel.h>
-#include <grpcpp/security/credentials.h>
 #include <SQLQueryParser/AntlrSQLQueryParser.hpp>
 #include <SQLQueryParser/StatementBinder.hpp>
 #include <Sinks/SinkCatalog.hpp>
@@ -62,14 +56,20 @@
 #include <cpptrace/from_current.hpp>
 #include <fmt/format.h>
 #include <fmt/ranges.h>
+#include <google/protobuf/empty.pb.h>
+#include <grpcpp/client_context.h>
+#include <grpcpp/create_channel.h>
+#include <grpcpp/security/credentials.h>
 #include <magic_enum/magic_enum.hpp>
 #include <nlohmann/json.hpp>
 #include <DefaultStatisticQueryGenerator.hpp>
 #include <ErrorHandling.hpp>
+#include <PrometheusQuery.hpp>
 #include <QueryOptimizer.hpp>
 #include <QueryOptimizerConfiguration.hpp>
-#include <PrometheusQuery.hpp>
 #include <Repl.hpp>
+#include <SingleNodeWorkerRPCService.grpc.pb.h>
+#include <SingleNodeWorkerRPCService.pb.h>
 #include <StatisticCoordinator.hpp>
 #include <Thread.hpp>
 #include <WorkerCatalog.hpp>
@@ -224,19 +224,16 @@ int main(int argc, char** argv)
             .help("changes optimizer default values. e.g. join_strategy=HASH_JOIN");
 
         /// companion statistic config
-        program.add_argument("--companion-statistic")
-            .flag()
-            .help("Deploy a companion statistic query alongside every SELECT query");
+        program.add_argument("--companion-statistic").flag().help("Deploy a companion statistic query alongside every SELECT query");
         program.add_argument("--companion-field")
             .default_value(std::string{"price"})
             .help("Field name for the companion statistic (default: price)");
         program.add_argument("--companion-field-2")
-            .help(
-                "Field name for the SECOND companion statistic (when paired with --companion-condition-2). "
-                "If omitted, the secondary statistic reuses --companion-field. Use a different field here to "
-                "deploy a second build branch monitoring a separate column — the data source defers emission "
-                "until both build branches have spliced in, and the source still serves a single thread to "
-                "all of them.");
+            .help("Field name for the SECOND companion statistic (when paired with --companion-condition-2). "
+                  "If omitted, the secondary statistic reuses --companion-field. Use a different field here to "
+                  "deploy a second build branch monitoring a separate column — the data source defers emission "
+                  "until both build branches have spliced in, and the source still serves a single thread to "
+                  "all of them.");
         program.add_argument("--companion-metric")
             .default_value(std::string(magic_enum::enum_name(NES::Metric::Cardinality)))
             .choices(
@@ -250,41 +247,34 @@ int main(int argc, char** argv)
         program.add_argument("--companion-window-size-ms")
             .default_value(std::string{"1000000"})
             .help("Window size in milliseconds for the companion statistic (default: 1000000)");
-        program.add_argument("--companion-window-advance-ms")
-            .help("Window advance in milliseconds; if omitted, uses a tumbling window");
-        program.add_argument("--companion-event-time-field")
-            .help("Event-time field name; if omitted, uses ingestion time");
+        program.add_argument("--companion-window-advance-ms").help("Window advance in milliseconds; if omitted, uses a tumbling window");
+        program.add_argument("--companion-event-time-field").help("Event-time field name; if omitted, uses ingestion time");
         program.add_argument("--companion-condition")
-            .help(
-                "SQL filter expression interpreted as a predicate over EquiWidthHistogram bin fields "
-                "(BINSTART, BINEND, BINCOUNTER) when paired with --companion-metric MinVal. Gates the probe: "
-                "only bins matching the predicate flow to the swap callback. The callback then drives the "
-                "workload switch to --companion-target-value.");
+            .help("SQL filter expression interpreted as a predicate over EquiWidthHistogram bin fields "
+                  "(BINSTART, BINEND, BINCOUNTER) when paired with --companion-metric MinVal. Gates the probe: "
+                  "only bins matching the predicate flow to the swap callback. The callback then drives the "
+                  "workload switch to --companion-target-value.");
         program.add_argument("--companion-target-value")
             .default_value(std::string{"1"})
-            .help(
-                "Target value for the workload-switch gate when --companion-condition's predicate matches. "
-                "The callback is idempotent: if the gate is already at this value, the firing is a quiet no-op. "
-                "Default: 1.");
+            .help("Target value for the workload-switch gate when --companion-condition's predicate matches. "
+                  "The callback is idempotent: if the gate is already at this value, the firing is a quiet no-op. "
+                  "Default: 1.");
         program.add_argument("--companion-condition-2")
-            .help(
-                "Second gated-probe predicate. Deploys an additional probe pipeline reading the same build "
-                "branch's histogram, with this Selection predicate. When it fires, the callback sets the gate "
-                "to --companion-target-value-2. Lets a constant-workload run flip ONCE to the optimal regime "
-                "and an A↔B alternating workload flip back and forth as the histogram shifts.");
+            .help("Second gated-probe predicate. Deploys an additional probe pipeline reading the same build "
+                  "branch's histogram, with this Selection predicate. When it fires, the callback sets the gate "
+                  "to --companion-target-value-2. Lets a constant-workload run flip ONCE to the optimal regime "
+                  "and an A↔B alternating workload flip back and forth as the histogram shifts.");
         program.add_argument("--companion-target-value-2")
             .default_value(std::string{"0"})
             .help("Target value for the workload-switch gate when --companion-condition-2's predicate matches. Default: 0.");
         program.add_argument("--companion-histogram-min")
             .default_value(std::string{"0"})
-            .help(
-                "Minimum value for the EquiWidthHistogram bucket range (only used with --companion-metric MinVal). "
-                "Values below this fall outside the histogram. Default: 0.");
+            .help("Minimum value for the EquiWidthHistogram bucket range (only used with --companion-metric MinVal). "
+                  "Values below this fall outside the histogram. Default: 0.");
         program.add_argument("--companion-histogram-max")
             .default_value(std::string{"1000"})
-            .help(
-                "Maximum value for the EquiWidthHistogram bucket range (only used with --companion-metric MinVal). "
-                "Values above this fall outside the histogram. Default: 1000.");
+            .help("Maximum value for the EquiWidthHistogram bucket range (only used with --companion-metric MinVal). "
+                  "Values above this fall outside the histogram. Default: 1000.");
         program.add_argument("--companion-host")
             .default_value(std::string{"localhost:8080"})
             .help("Worker host for the companion statistic sink (default: localhost:8080)");
@@ -292,17 +282,15 @@ int main(int argc, char** argv)
             .help("Full SELECT SQL to deploy when the companion statistic first fires, replacing the original query");
         program.add_argument("--companion-switch-name")
             .default_value(std::string{"filter_order"})
-            .help(
-                "Name of the workload-switch gate (SwitchRegistry slot) used to flip between two filter-chain "
-                "pipelines without redeploying. The data sink is gated with expected=0, the paired sink "
-                "(--companion-switch-to-sql) with expected=1. Default: filter_order");
+            .help("Name of the workload-switch gate (SwitchRegistry slot) used to flip between two filter-chain "
+                  "pipelines without redeploying. The data sink is gated with expected=0, the paired sink "
+                  "(--companion-switch-to-sql) with expected=1. Default: filter_order");
         program.add_argument("--baseline-prometheus")
             .flag()
-            .help(
-                "Run the Prometheus SOTA baseline instead of the native in-engine statistic path. The companion "
-                "build branch routes the monitored field into a PrometheusSink (which builds the histogram and "
-                "exposes it for scraping) instead of the StatisticBuild→StoreWriter→Probe→GrpcSink chain. Switching "
-                "is driven by the coordinator polling Prometheus rather than by gRPC probe reports.");
+            .help("Run the Prometheus SOTA baseline instead of the native in-engine statistic path. The companion "
+                  "build branch routes the monitored field into a PrometheusSink (which builds the histogram and "
+                  "exposes it for scraping) instead of the StatisticBuild→StoreWriter→Probe→GrpcSink chain. Switching "
+                  "is driven by the coordinator polling Prometheus rather than by gRPC probe reports.");
         program.add_argument("--prometheus-server-url")
             .default_value(std::string{"0.0.0.0:9464"})
             .help("host:port the Prometheus-baseline sink's exposer binds its /metrics endpoint to (scraped by the "
@@ -478,16 +466,15 @@ int main(int argc, char** argv)
             /// Catch all exceptions: a malformed expression must not crash the REPL silently. Print
             /// a clear diagnostic to stderr and return nullopt so the caller skips wiring this
             /// predicate into the companion request.
-            const auto sql
-                = fmt::format("SELECT * FROM _nes_stat_dummy_ WHERE {} INTO _nes_stat_dummy_sink_", conditionStr);
+            const auto sql = fmt::format("SELECT * FROM _nes_stat_dummy_ WHERE {} INTO _nes_stat_dummy_sink_", conditionStr);
             try
             {
                 auto plan = NES::AntlrSQLQueryParser::createLogicalQueryPlanFromSQLString(sql);
                 auto selections = NES::getOperatorByType<NES::SelectionLogicalOperator>(plan);
                 if (selections.empty())
                 {
-                    std::cerr << "[--companion-condition] No SelectionLogicalOperator found in parsed expression: '"
-                              << conditionStr << "' — ignoring.\n";
+                    std::cerr << "[--companion-condition] No SelectionLogicalOperator found in parsed expression: '" << conditionStr
+                              << "' — ignoring.\n";
                     return std::nullopt;
                 }
                 return selections.front()->getPredicate();
@@ -500,8 +487,7 @@ int main(int argc, char** argv)
             }
             catch (...)
             {
-                std::cerr << "[--companion-condition] Unknown exception parsing expression: '" << conditionStr
-                          << "' — ignoring.\n";
+                std::cerr << "[--companion-condition] Unknown exception parsing expression: '" << conditionStr << "' — ignoring.\n";
                 return std::nullopt;
             }
         };
@@ -510,8 +496,7 @@ int main(int argc, char** argv)
         /// which runs on a gRPC thread and cannot use the binder that was moved into Repl.
         /// Wrapped in shared_ptr so the non-copyable StatementBinder can be captured by a std::function.
         auto callbackBinder = std::make_shared<NES::StatementBinder>(
-            sourceCatalog,
-            [](auto&& pH1) { return NES::AntlrSQLQueryParser::bindLogicalQueryPlan(std::forward<decltype(pH1)>(pH1)); });
+            sourceCatalog, [](auto&& pH1) { return NES::AntlrSQLQueryParser::bindLogicalQueryPlan(std::forward<decltype(pH1)>(pH1)); });
 
         /// Each entry is one (predicate, callback) pair to register with collectWorkloadStatistic.
         /// The first call deploys the data query + build branch + first gated probe; subsequent
@@ -526,8 +511,7 @@ int main(int argc, char** argv)
             onCompanionAssociatedWithQuery = std::nullopt;
         if (program.get<bool>("--companion-statistic"))
         {
-            const auto metric =
-                magic_enum::enum_cast<NES::Metric>(program.get<std::string>("--companion-metric")).value();
+            const auto metric = magic_enum::enum_cast<NES::Metric>(program.get<std::string>("--companion-metric")).value();
 
             std::optional<uint64_t> windowAdvanceMs;
             if (program.is_used("--companion-window-advance-ms"))
@@ -673,7 +657,9 @@ int main(int argc, char** argv)
             /// generated request drives the workload-switch gate to its own regime when it fires.
             /// All other captures are shared across the requests (build chain spec, swapState,
             /// re-deploy plumbing, gRPC stub config).
-            auto makeRequest = [&](std::optional<NES::LogicalFunction> cond, int64_t targetSwitchValue, std::optional<std::string> fieldOverride = std::nullopt)
+            auto makeRequest = [&](std::optional<NES::LogicalFunction> cond,
+                                   int64_t targetSwitchValue,
+                                   std::optional<std::string> fieldOverride = std::nullopt)
             {
                 /// If fieldOverride is set, construct a fresh WorkloadDomain with that field
                 /// name — different fieldName → different registry key → distinct build branch.
@@ -681,9 +667,7 @@ int main(int argc, char** argv)
                 if (fieldOverride.has_value())
                 {
                     perRequestDomain = NES::WorkloadDomain{
-                        .queryId = NES::QueryId::invalid(),
-                        .operatorId = NES::INVALID_OPERATOR_ID,
-                        .fieldName = *fieldOverride};
+                        .queryId = NES::QueryId::invalid(), .operatorId = NES::INVALID_OPERATOR_ID, .fieldName = *fieldOverride};
                 }
                 return NES::RequestStatisticBuildStatement{
                 .domain = perRequestDomain,
@@ -715,110 +699,110 @@ int main(int argc, char** argv)
                             NES::Windowing::TimeMeasure startTs,
                             NES::Windowing::TimeMeasure endTs)
                     {
-                        /// Workload-switch path: set the named gate to the regime favored by THIS
-                        /// trigger via gRPC. No query stop/redeploy — the source thread keeps
-                        /// running, and the merged plan's two chains see the new gate value on
-                        /// their next buffer.
-                        ///
-                        /// Idempotency: each gated probe represents a single workload regime; its
-                        /// firing condition holds only while that regime is favored. The intended
-                        /// target switch value for this trigger is `targetSwitchValue` (set to 1
-                        /// — the alternate filter chain — by default). If the gate is already at
-                        /// the target, skip the gRPC call. Without this guard the previous code
-                        /// blindly toggled 0↔1 on every fire, producing one redeploy per matching
-                        /// histogram bin per probe tick instead of one redeploy per regime change.
-                        if (workloadSwitchMode)
-                        {
-                            /// Flip the named filter-order gate through the shared switch client
-                            /// (gRPC SetSwitch + the once-per-regime-change guard). This is the exact
-                            /// same action the Prometheus-baseline poll loop performs, so the two
-                            /// adaptive paths differ only in HOW the regime is detected (in-engine
-                            /// gated probe vs. Prometheus poll), not in how the switch is applied.
-                            switchClient->setSwitch(switchName, targetSwitchValue);
-                            return;
-                        }
+                            /// Workload-switch path: set the named gate to the regime favored by THIS
+                            /// trigger via gRPC. No query stop/redeploy — the source thread keeps
+                            /// running, and the merged plan's two chains see the new gate value on
+                            /// their next buffer.
+                            ///
+                            /// Idempotency: each gated probe represents a single workload regime; its
+                            /// firing condition holds only while that regime is favored. The intended
+                            /// target switch value for this trigger is `targetSwitchValue` (set to 1
+                            /// — the alternate filter chain — by default). If the gate is already at
+                            /// the target, skip the gRPC call. Without this guard the previous code
+                            /// blindly toggled 0↔1 on every fire, producing one redeploy per matching
+                            /// histogram bin per probe tick instead of one redeploy per regime change.
+                            if (workloadSwitchMode)
+                            {
+                                /// Flip the named filter-order gate through the shared switch client
+                                /// (gRPC SetSwitch + the once-per-regime-change guard). This is the exact
+                                /// same action the Prometheus-baseline poll loop performs, so the two
+                                /// adaptive paths differ only in HOW the regime is detected (in-engine
+                                /// gated probe vs. Prometheus poll), not in how the switch is applied.
+                                switchClient->setSwitch(switchName, targetSwitchValue);
+                                return;
+                            }
 
-                        std::optional<NES::DistributedQueryId> currentQueryId;
-                        std::string currentSql;
-                        std::string nextSql;
-                        {
-                            std::lock_guard lock(swapState->mutex);
-                            if (!swapState->currentQueryId.has_value() || swapState->nextSql.empty())
+                            std::optional<NES::DistributedQueryId> currentQueryId;
+                            std::string currentSql;
+                            std::string nextSql;
+                            {
+                                std::lock_guard lock(swapState->mutex);
+                                if (!swapState->currentQueryId.has_value() || swapState->nextSql.empty())
+                                {
+                                    return;
+                                }
+                                currentQueryId = swapState->currentQueryId;
+                                currentSql = swapState->currentSql;
+                                nextSql = swapState->nextSql;
+                            }
+
+                            auto stopResult = (*queryStatementHandler)(NES::DropQueryStatement{.id = *currentQueryId});
+                            if (!stopResult.has_value())
                             {
                                 return;
                             }
-                            currentQueryId = swapState->currentQueryId;
-                            currentSql = swapState->currentSql;
-                            nextSql = swapState->nextSql;
-                        }
 
-                        auto stopResult = (*queryStatementHandler)(NES::DropQueryStatement{.id = *currentQueryId});
-                        if (!stopResult.has_value())
-                        {
-                            return;
-                        }
-
-                        auto bindResult = callbackBinder->parseAndBindSingle(nextSql);
-                        if (!bindResult.has_value())
-                        {
-                            return;
-                        }
-                        auto* queryStmt = std::get_if<NES::QueryStatement>(&bindResult.value());
-                        if (!queryStmt)
-                        {
-                            return;
-                        }
-
-                        /// Re-splice the workload build branch into the new query's plan so the
-                        /// merged plan keeps reporting under the original statisticId — the existing
-                        /// registry entry continues firing this very callback on each window close.
-                        std::optional<NES::Statistic::StatisticId> originalStatisticId;
-                        {
-                            std::lock_guard lock(swapState->mutex);
-                            originalStatisticId = swapState->statisticId;
-                        }
-                        if (originalStatisticId.has_value())
-                        {
-                            try
+                            auto bindResult = callbackBinder->parseAndBindSingle(nextSql);
+                            if (!bindResult.has_value())
                             {
-                                const auto sources = NES::getOperatorByType<NES::SourceNameLogicalOperator>(queryStmt->plan);
-                                if (sources.size() == 1)
+                                return;
+                            }
+                            auto* queryStmt = std::get_if<NES::QueryStatement>(&bindResult.value());
+                            if (!queryStmt)
+                            {
+                                return;
+                            }
+
+                            /// Re-splice the workload build branch into the new query's plan so the
+                            /// merged plan keeps reporting under the original statisticId — the existing
+                            /// registry entry continues firing this very callback on each window close.
+                            std::optional<NES::Statistic::StatisticId> originalStatisticId;
+                            {
+                                std::lock_guard lock(swapState->mutex);
+                                originalStatisticId = swapState->statisticId;
+                            }
+                            if (originalStatisticId.has_value())
+                            {
+                                try
                                 {
-                                    const NES::WorkloadDomain workloadDomain{
-                                        .queryId = NES::QueryId::invalid(),
-                                        .operatorId = NES::INVALID_OPERATOR_ID,
-                                        .fieldName = companionField};
-                                    NES::RequestStatisticBuildStatement swapRequest{
-                                        .domain = workloadDomain,
-                                        .metric = metric,
-                                        .windowSizeMs = windowSizeMs,
-                                        .windowAdvanceMs = windowAdvanceMs,
-                                        .eventTimeFieldName = eventTimeFieldName,
-                                        .conditionTrigger = NES::ConditionTrigger{.condition = cond, .callback = {}},
-                                        .options = {{"host", companionHost}}};
-                                    const NES::LogicalOperator spliceLeaf{sources.front()};
-                                    auto branch = swapGenerator->generateWorkloadBranch(
-                                        workloadDomain, swapRequest, *originalStatisticId, swapCoordinatorAddr, spliceLeaf);
-                                    queryStmt->plan = NES::addRootOperators(queryStmt->plan, branch.getRootOperators());
+                                    const auto sources = NES::getOperatorByType<NES::SourceNameLogicalOperator>(queryStmt->plan);
+                                    if (sources.size() == 1)
+                                    {
+                                        const NES::WorkloadDomain workloadDomain{
+                                            .queryId = NES::QueryId::invalid(),
+                                            .operatorId = NES::INVALID_OPERATOR_ID,
+                                            .fieldName = companionField};
+                                        NES::RequestStatisticBuildStatement swapRequest{
+                                            .domain = workloadDomain,
+                                            .metric = metric,
+                                            .windowSizeMs = windowSizeMs,
+                                            .windowAdvanceMs = windowAdvanceMs,
+                                            .eventTimeFieldName = eventTimeFieldName,
+                                            .conditionTrigger = NES::ConditionTrigger{.condition = cond, .callback = {}},
+                                            .options = {{"host", companionHost}}};
+                                        const NES::LogicalOperator spliceLeaf{sources.front()};
+                                        auto branch = swapGenerator->generateWorkloadBranch(
+                                            workloadDomain, swapRequest, *originalStatisticId, swapCoordinatorAddr, spliceLeaf);
+                                        queryStmt->plan = NES::addRootOperators(queryStmt->plan, branch.getRootOperators());
+                                    }
+                                }
+                                catch (const std::exception&)
+                                {
                                 }
                             }
-                            catch (const std::exception&)
+
+                            auto startResult = (*queryStatementHandler)(*queryStmt);
+                            if (!startResult.has_value())
                             {
+                                return;
                             }
-                        }
 
-                        auto startResult = (*queryStatementHandler)(*queryStmt);
-                        if (!startResult.has_value())
-                        {
-                            return;
-                        }
-
-                        {
-                            std::lock_guard lock(swapState->mutex);
-                            swapState->currentQueryId = startResult->id;
-                            swapState->currentSql = nextSql;
-                            swapState->nextSql = currentSql;
-                        }
+                            {
+                                std::lock_guard lock(swapState->mutex);
+                                swapState->currentQueryId = startResult->id;
+                                swapState->currentSql = nextSql;
+                                swapState->nextSql = currentSql;
+                            }
                     }},
                 .options
                 = {{"host", program.get<std::string>("--companion-host")},

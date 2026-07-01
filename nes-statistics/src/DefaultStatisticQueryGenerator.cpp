@@ -42,6 +42,7 @@
 #include <Operators/Windows/Aggregations/WindowAggregationLogicalFunction.hpp>
 #include <Plans/LogicalPlan.hpp>
 #include <Plans/LogicalPlanBuilder.hpp>
+#include <Traits/PinnedHostTrait.hpp>
 #include <Traits/SpliceToRunningSourceTrait.hpp>
 #include <Traits/TraitSet.hpp>
 #include <WindowTypes/Measures/TimeCharacteristic.hpp>
@@ -116,6 +117,17 @@ std::shared_ptr<WindowAggregationLogicalFunction> createAggregationFunction(
     std::unreachable();
 }
 
+/// Defined further down in this anonymous namespace; forward-declared so generateForDataDomain can
+/// reuse the same terminal-sink builders and uppercaser the workload-domain path uses.
+std::string toUpper(std::string s);
+LogicalPlan appendWorkloadGrpcSink(
+    LogicalPlan plan,
+    const std::string& sourceNameUpper,
+    const std::string& coordinatorAddress,
+    const std::unordered_map<std::string, std::string>& options);
+LogicalPlan
+appendWorkloadVoidSink(LogicalPlan plan, const std::string& sourceNameUpper, const std::unordered_map<std::string, std::string>& options);
+
 LogicalPlan generateForDataDomain(
     const DataDomain& domain,
     const RequestStatisticBuildStatement& request,
@@ -147,26 +159,57 @@ LogicalPlan generateForDataDomain(
     auto plan = LogicalPlanBuilder::createLogicalPlan(domain.logicalSourceName);
     plan = LogicalPlanBuilder::addStatisticBuild(std::move(plan), windowType, {agg}, {}, logicalStatisticFields);
     plan = LogicalPlanBuilder::addStatisticStoreWriter(plan, logicalStatisticFields, statisticId, toStatisticType(request.metric));
+
+    /// Optional `writer_host` SET option: pin the StatisticStoreWriter to a specific worker. The build
+    /// stays near the source (leaf) via the placement distance objective; only the writer is forced
+    /// onto the named host (e.g. the root), so the per-window synopsis crosses the network to the
+    /// writer. Without the option the writer falls to the leaf and only the small terminal-sink record
+    /// crosses. Enforced by addStatisticWriterPinningConstraints in BottomUpPlacement.
+    if (const auto writerHostIt = request.options.find("writer_host"); writerHostIt != request.options.end())
+    {
+        auto writer = plan.getRootOperators().front();
+        auto ts = writer.getTraitSet();
+        [[maybe_unused]] const auto inserted = tryInsert(ts, PinnedHostTrait{Host{writerHostIt->second}});
+        plan = plan.withRootOperators({writer.withTraitSet(ts)});
+    }
+
     if (request.conditionTrigger.has_value())
     {
         plan = LogicalPlanBuilder::addSelection(request.conditionTrigger->condition.value(), plan);
     }
 
-    /// Append a gRPC sink to send results back to the StatisticCoordinator
+    /// Project away the VARSIZED synopsis the StatisticStoreWriter passes through, keeping only the four
+    /// scalar report fields. This is what makes the `local` variant cheap: with the writer on the leaf,
+    /// only these scalars cross to the root sink. In the `split` variant the synopsis already crossed
+    /// upstream (build -> writer over the network), so dropping it here costs nothing.
+    const auto sourceNameUpper = toUpper(domain.logicalSourceName);
+    LogicalStatisticFields outputStatisticFields;
+    outputStatisticFields.addQualifierName(sourceNameUpper + "$");
+    std::vector<ProjectionLogicalOperator::Projection> projections;
+    projections.emplace_back(
+        FieldIdentifier{outputStatisticFields.statisticIdField.name}, LogicalFunction{FieldAccessLogicalFunction{"STATISTICID"}});
+    projections.emplace_back(
+        FieldIdentifier{outputStatisticFields.statisticStartTsField.name}, LogicalFunction{FieldAccessLogicalFunction{"STATISTICSTART"}});
+    projections.emplace_back(
+        FieldIdentifier{outputStatisticFields.statisticEndTsField.name}, LogicalFunction{FieldAccessLogicalFunction{"STATISTICEND"}});
+    projections.emplace_back(
+        FieldIdentifier{outputStatisticFields.statisticNumberOfSeenTuplesField.name},
+        LogicalFunction{FieldAccessLogicalFunction{"STATISTICNUMBEROFSEENTUPLES"}});
+    plan = LogicalPlanBuilder::addProjection(std::move(projections), /*asterisk=*/false, plan);
 
-    const auto colonPos = coordinatorAddress.find(':');
-    const auto sinkHost = coordinatorAddress.substr(0, colonPos);
-    const auto sinkPort = coordinatorAddress.substr(colonPos + 1);
-
-    /// The StatisticStoreWriter outputs: startTs, endTs, and statisticId
-    Schema grpcSinkSchema;
-    const LogicalStatisticFields statisticFields;
-    grpcSinkSchema.addField(statisticFields.statisticIdField);
-    grpcSinkSchema.addField(statisticFields.statisticStartTsField);
-    grpcSinkSchema.addField(statisticFields.statisticEndTsField);
-    plan = LogicalPlanBuilder::addInlineSink("Grpc", grpcSinkSchema, {{"grpc_host", sinkHost}, {"grpc_port", sinkPort}}, {}, plan);
-
-    return plan;
+    /// Terminate the plan. Default "grpc" reports the statistic to a StatisticCoordinator listening at
+    /// coordinatorAddress (the REPL path). "void" pins a discarding sink on coordinatorAddress instead:
+    /// a plain worker cannot receive Grpc reports (only StatisticCoordinatorService can), so distributed
+    /// deployments that only need the writer to run on a target node use the void terminal. Either way
+    /// the terminal sink is placed on coordinatorAddress (root), so the projected report record crosses
+    /// the network to it.
+    auto sinkOptions = request.options;
+    sinkOptions["host"] = coordinatorAddress;
+    if (const auto it = request.options.find("terminal_sink"); it != request.options.end() && it->second == "void")
+    {
+        return appendWorkloadVoidSink(std::move(plan), sourceNameUpper, sinkOptions);
+    }
+    return appendWorkloadGrpcSink(std::move(plan), sourceNameUpper, coordinatorAddress, sinkOptions);
 }
 
 /// Build the windowed-aggregation + store-writer chain on top of `basePlan`, stopping before
@@ -430,9 +473,8 @@ LogicalPlan DefaultStatisticQueryGenerator::generateWorkloadBranchPrometheus(
     const auto serverUrlIt = request.options.find("prometheus_server_url");
     if (serverUrlIt == request.options.end() or serverUrlIt->second.empty())
     {
-        throw InvalidConfigParameter(
-            "generateWorkloadBranchPrometheus requires a 'prometheus_server_url' option "
-            "(the host:port the sink's Prometheus exposer binds to).");
+        throw InvalidConfigParameter("generateWorkloadBranchPrometheus requires a 'prometheus_server_url' option "
+                                     "(the host:port the sink's Prometheus exposer binds to).");
     }
     const auto& serverUrl = serverUrlIt->second;
 

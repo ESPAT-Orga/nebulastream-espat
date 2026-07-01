@@ -180,8 +180,7 @@ void PrometheusSink::execute(const TupleBuffer& inputTupleBuffer, PipelineExecut
             }
             /// Bucket index = first boundary >= value (matches prometheus-cpp's Observe bucketing);
             /// values past the last boundary land in the +Inf slot at index numBuckets.
-            const auto idx
-                = static_cast<size_t>(std::lower_bound(boundaries.begin(), boundaries.end(), value) - boundaries.begin());
+            const auto idx = static_cast<size_t>(std::lower_bound(boundaries.begin(), boundaries.end(), value) - boundaries.begin());
             increments[m][idx] += 1.0;
             sums[m] += value;
         }

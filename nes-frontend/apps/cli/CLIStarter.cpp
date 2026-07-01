@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <exception>
 #include <filesystem>
@@ -30,6 +31,7 @@
 #include <string_view>
 #include <unordered_map>
 #include <utility>
+#include <variant>
 #include <vector>
 #include <unistd.h>
 #include <DataTypes/DataType.hpp>
@@ -37,6 +39,7 @@
 #include <DataTypes/Schema.hpp>
 #include <Identifiers/Identifiers.hpp>
 #include <Identifiers/NESStrongTypeJson.hpp> ///NOLINT(misc-include-cleaner)
+#include <Plans/LogicalPlan.hpp>
 #include <QueryManager/GRPCQuerySubmissionBackend.hpp>
 #include <QueryManager/QueryManager.hpp>
 #include <SQLQueryParser/AntlrSQLQueryParser.hpp>
@@ -58,12 +61,15 @@
 #include <nlohmann/json.hpp> ///NOLINT(misc-include-cleaner)
 #include <yaml-cpp/node/node.h>
 #include <yaml-cpp/yaml.h> ///NOLINT(misc-include-cleaner)
+#include <DefaultStatisticQueryGenerator.hpp>
 #include <DistributedQuery.hpp>
 #include <ErrorHandling.hpp>
 #include <Priority.hpp>
 #include <QueryOptimizer.hpp>
 #include <QueryOptimizerConfiguration.hpp>
 #include <QueryStateBackend.hpp>
+#include <RequestStatisticStatement.hpp>
+#include <Statistic.hpp>
 #include <WorkerCatalog.hpp>
 
 namespace
@@ -415,6 +421,69 @@ std::vector<std::string> loadQueries(
     return queries;
 }
 
+/// The root worker is the topology DAG sink: the only worker with no `downstream` link of its own.
+std::string deriveRootAddress(const std::vector<NES::CLI::WorkerConfig>& workers)
+{
+    std::vector<std::string> roots;
+    for (const auto& worker : workers)
+    {
+        if (worker.downstream.empty())
+        {
+            roots.push_back(worker.host);
+        }
+    }
+    if (roots.size() != 1)
+    {
+        throw NES::InvalidConfigParameter(
+            "Could not derive a unique root worker (found {} workers with no downstream); "
+            "set 'report_host' in the REQUEST STATISTIC SET clause",
+            roots.size());
+    }
+    return roots.front();
+}
+
+/// nes-cli's `query:` field normally carries a plain SELECT query. A REQUEST STATISTIC DATA statement
+/// is not a query (the query parser rejects statements), so we detect it, bind it, and turn it into a
+/// submittable LogicalPlan via DefaultStatisticQueryGenerator — the same plan the REPL's coordinator
+/// builds, but submitted through the ordinary QueryStatement path. A unique `statistic_id` SET option
+/// is required (concurrent statistic queries must not collide in the per-worker store); `report_host`
+/// overrides the derived root as the coordinator address the terminal sink is placed on.
+NES::LogicalPlan buildSubmittablePlan(
+    const std::string& query, const std::shared_ptr<NES::SourceCatalog>& sourceCatalog, const std::vector<NES::CLI::WorkerConfig>& workers)
+{
+    auto trimmed = query;
+    trimmed.erase(trimmed.begin(), std::ranges::find_if(trimmed, [](unsigned char c) { return std::isspace(c) == 0; }));
+    if (not NES::toUpperCase(trimmed).starts_with("REQUEST"))
+    {
+        return NES::AntlrSQLQueryParser::createLogicalQueryPlanFromSQLString(query);
+    }
+
+    NES::StatementBinder binder{
+        sourceCatalog, [](auto&& ctx) { return NES::AntlrSQLQueryParser::bindLogicalQueryPlan(std::forward<decltype(ctx)>(ctx)); }};
+    auto bound = binder.parseAndBindSingle(query);
+    if (not bound)
+    {
+        throw std::move(bound.error());
+    }
+    auto* request = std::get_if<NES::RequestStatisticBuildStatement>(&bound.value());
+    if (request == nullptr)
+    {
+        throw NES::InvalidConfigParameter("Query is a statement, but only REQUEST STATISTIC DATA statements are submittable via nes-cli");
+    }
+
+    const auto statisticIdIt = request->options.find("statistic_id");
+    if (statisticIdIt == request->options.end())
+    {
+        throw NES::InvalidConfigParameter("REQUEST STATISTIC DATA requires a unique 'statistic_id' in the SET clause");
+    }
+    const auto statisticId = NES::Statistic::StatisticId{static_cast<uint64_t>(std::stoull(statisticIdIt->second))};
+
+    const auto reportHostIt = request->options.find("report_host");
+    const auto rootAddress = reportHostIt != request->options.end() ? reportHostIt->second : deriveRootAddress(workers);
+
+    return NES::DefaultStatisticQueryGenerator{}.generateQuery(*request, statisticId, rootAddress);
+}
+
 std::vector<NES::Statement> loadStatements(const NES::CLI::QueryConfig& topologyConfig)
 {
     const auto& [query, sinks, logical, physical, optimizer, workers, priority] = topologyConfig;
@@ -595,7 +664,7 @@ void doQuerySubmission(const argparse::ArgumentParser& program, const argparse::
         NES::QueryStatementHandler queryStatementHandler{queryManager, queryOptimizer};
         for (const auto& query : queries)
         {
-            auto plan = NES::AntlrSQLQueryParser::createLogicalQueryPlanFromSQLString(query);
+            auto plan = buildSubmittablePlan(query, sourceCatalog, topologyConfig.workers);
             plan.setPriority(topologyConfig.priority);
             if (auto result = queryStatementHandler(NES::QueryStatement{std::move(plan), {}}))
             {
@@ -616,7 +685,7 @@ void doQuerySubmission(const argparse::ArgumentParser& program, const argparse::
         for (const auto& query : queries)
         {
             auto result
-                = queryStatementHandler(NES::ExplainQueryStatement(NES::AntlrSQLQueryParser::createLogicalQueryPlanFromSQLString(query)));
+                = queryStatementHandler(NES::ExplainQueryStatement(buildSubmittablePlan(query, sourceCatalog, topologyConfig.workers)));
             if (result)
             {
                 std::cout << result->explainString << "\n";

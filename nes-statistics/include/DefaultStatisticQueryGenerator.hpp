@@ -53,9 +53,7 @@ public:
     /// fills it from the projection's single-field output (the field type isn't resolved on the
     /// splice leaf until the optimizer runs).
     [[nodiscard]] LogicalPlan generateWorkloadBranchPrometheus(
-        const WorkloadDomain& domain,
-        const RequestStatisticBuildStatement& request,
-        const LogicalOperator& spliceLeaf) const override;
+        const WorkloadDomain& domain, const RequestStatisticBuildStatement& request, const LogicalOperator& spliceLeaf) const override;
 };
 
 }

@@ -62,8 +62,8 @@ makeDataQuery(TestingHarness& test, uint32_t expectedSplices)
 std::tuple<std::unique_ptr<ExecutableQueryPlan>, QueryPlanBuilder::identifier_t> makeBuildBranch(TestingHarness& test)
 {
     auto builder = test.buildNewQuery();
-    auto source
-        = builder.addSource(QueryPlanBuilder::SourceConfig{.spliceToRunningSource = true, .logicalSourceName = std::string{LOGICAL_SOURCE}});
+    auto source = builder.addSource(
+        QueryPlanBuilder::SourceConfig{.spliceToRunningSource = true, .logicalSourceName = std::string{LOGICAL_SOURCE}});
     auto sink = builder.addSink({builder.addPipeline({source})});
     auto query = test.addNewQuery(std::move(builder));
     return {std::move(query), sink};

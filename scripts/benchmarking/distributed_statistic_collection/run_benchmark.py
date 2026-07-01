@@ -79,7 +79,7 @@ def _worker_args(worker):
         "--worker.query_engine.admission_queue_size=1000000",
         f"--worker.default_query_execution.page_size={config.PAGE_SIZE}",
         f"--worker.default_query_execution.operator_buffer_size={config.BUFFER_SIZE_BYTES}",
-        "--worker.latency_listener=true",
+        "--worker.latency_listener=false",
         "--worker.throughput_listener_interval_in_ms=200",
     ]
 

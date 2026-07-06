@@ -126,29 +126,35 @@ def stop_worker(name, logs_proc):
     subprocess.run(["docker", "rm", "-f", name], capture_output=True)
 
 
-def apply_ingress_cap(root_name, mbit):
-    """Cap the root's aggregate incoming bandwidth to `mbit` Mbit by *shaping* it: redirect eth0 ingress
+def apply_ingress_cap(root_name, kbit):
+    """Cap the root's aggregate incoming bandwidth to `kbit` kbit by *shaping* it: redirect eth0 ingress
     to an ifb device and put a tbf (token bucket) on it. Shaping queues+delays (rather than dropping like
     police), so the TCP senders (leaf NetworkSinks) are throttled via congestion control and backpressure
     propagates up to the leaf sources — which is what makes the leaf-side throughput reflect the shared
-    cap. mbit<=0 leaves it uncapped. Requires --cap-add=NET_ADMIN + tc (iproute2); the kernel auto-loads
+    cap. kbit<=0 leaves it uncapped. Requires --cap-add=NET_ADMIN + tc (iproute2); the kernel auto-loads
     ifb/act_mirred on first use."""
-    if mbit <= 0:
+    if kbit <= 0:
         return
+    ### Size the burst to the rate: tbf needs burst >= rate/HZ to actually reach `rate` (otherwise the
+    ### effective rate collapses to burst*HZ, silently throttling the high Mbit caps), but a burst much
+    ### larger than that lets a chunk through instantly and stops a low kbit cap from binding over the
+    ### measurement window. Use a conservative HZ=100 so the rate is met on any kernel, with
+    ### config.INGRESS_BURST as a ~2-packet floor for the smallest caps.
+    burst_bytes = max(config.INGRESS_BURST, (kbit * 1000) // (8 * 100))
     script = (
         "ip link add ifb0 type ifb && ip link set ifb0 up && "
         f"tc qdisc add dev {config.NET_IFACE} handle ffff: ingress && "
         f"tc filter add dev {config.NET_IFACE} parent ffff: protocol ip u32 match u32 0 0 "
         "action mirred egress redirect dev ifb0 && "
-        f"tc qdisc add dev ifb0 root tbf rate {mbit}mbit burst {config.INGRESS_BURST} latency 400ms"
+        f"tc qdisc add dev ifb0 root tbf rate {kbit}kbit burst {burst_bytes} latency 400ms"
     )
     res = subprocess.run(["docker", "exec", root_name, "sh", "-c", script], capture_output=True, text=True)
     if res.returncode != 0:
         raise RuntimeError(
-            f"failed to apply {mbit}mbit ingress shaping on {root_name} (need NET_ADMIN + tc + ifb): "
+            f"failed to apply {kbit}kbit ingress shaping on {root_name} (need NET_ADMIN + tc + ifb): "
             f"{res.stderr.strip() or res.stdout.strip()}"
         )
-    printInfo(f"applied {mbit}mbit ingress shaping on {root_name}:{config.NET_IFACE} (ifb0/tbf)")
+    printInfo(f"applied {kbit}kbit ingress shaping on {root_name}:{config.NET_IFACE} (ifb0/tbf)")
 
 
 ### --- Per-query TCP generators (one per source) --------------------------
@@ -482,11 +488,11 @@ def _gp_sources(leaves):
             gidx += 1
 
 
-def run_contention(topology, variant, workers, bandwidth_mbit, out_dir):
+def run_contention(topology, variant, workers, bandwidth_kbit, out_dir):
     """Run the statistic workload (set by `variant`) AND general-purpose passthrough queries together,
     under a capped root-ingress bandwidth, and measure the GP queries' throughput at the root."""
-    bw_label = bandwidth_mbit if bandwidth_mbit > 0 else "inf"
-    printInfo(f"=== topology {topology} | variant {variant} | bandwidth {bandwidth_mbit or 'uncapped'} mbit ===")
+    bw_label = bandwidth_kbit if bandwidth_kbit > 0 else "inf"
+    printInfo(f"=== topology {topology} | variant {variant} | bandwidth {bandwidth_kbit or 'uncapped'} kbit ===")
     root = next(w for w in workers if w["role"] == "root")
     leaves = [w for w in workers if w["role"] == "leaf"]
     work_dir = os.path.join(out_dir, f"{variant}_bw{bw_label}")
@@ -549,14 +555,14 @@ def run_contention(topology, variant, workers, bandwidth_mbit, out_dir):
 
         ### Apply the cap AFTER deployment so the CLI's gRPC deploy traffic to the root isn't policed;
         ### the measurement hold then runs under the capped link.
-        apply_ingress_cap(root["name"], bandwidth_mbit)
+        apply_ingress_cap(root["name"], bandwidth_kbit)
         ### Settle first (let the shaper drain the pre-cap backlog), then count delivered rows over a
         ### fixed window: rows written to the root's File sinks are tuples that actually crossed the
         ### capped link, so (rows_end - rows_start)/elapsed is the true delivered GP throughput.
         time.sleep(config.MEASURE_SETTLE_MS / 1000.0)
         rows_start = count_gp_rows(root["name"])
         t0 = time.monotonic()
-        printInfo(f"holding {config.RUN_DURATION_SECONDS}s under {bandwidth_mbit or 'uncapped'} mbit cap")
+        printInfo(f"holding {config.RUN_DURATION_SECONDS}s under {bandwidth_kbit or 'uncapped'} kbit cap")
         time.sleep(config.RUN_DURATION_SECONDS)
         rows_end = count_gp_rows(root["name"])
         measured_s = max(1e-3, time.monotonic() - t0)
@@ -582,11 +588,11 @@ def run_contention(topology, variant, workers, bandwidth_mbit, out_dir):
 
     ### Delivered GP throughput = rows that reached the root's File sinks during the capped window.
     gp_tps = (rows_end - rows_start) / measured_s
-    printSuccess(f"[{topology}/{variant}/{bandwidth_mbit}mbit] delivered GP throughput={gp_tps:.0f} tup/s")
+    printSuccess(f"[{topology}/{variant}/{bandwidth_kbit}kbit] delivered GP throughput={gp_tps:.0f} tup/s")
     return {
         "topology": topology,
         "variant": variant,
-        "bandwidth_mbit": bandwidth_mbit,
+        "bandwidth_kbit": bandwidth_kbit,
         "gp_throughput_tps": gp_tps,
         "gp_num_queries": len(gp_ids),
         "num_leaves": len(leaves),
@@ -604,7 +610,7 @@ def run_topology(topology, output_root, mode):
         return [
             run_contention(topology, v, workers, bw, out_dir)
             for v in config.VARIANTS
-            for bw in config.BANDWIDTH_LIMITS_MBIT
+            for bw in config.BANDWIDTH_LIMITS_KBIT
         ]
     return [run_variant(topology, v, workers, out_dir) for v in config.VARIANTS]
 
@@ -614,10 +620,10 @@ def write_summary(output_root, results, mode):
         path = os.path.join(output_root, "contention_summary.csv")
         with open(path, "w", newline="") as f:
             writer = csv.writer(f)
-            writer.writerow(["topology", "variant", "bandwidth_mbit", "gp_throughput_tps", "gp_num_queries", "num_leaves"])
+            writer.writerow(["topology", "variant", "bandwidth_kbit", "gp_throughput_tps", "gp_num_queries", "num_leaves"])
             for r in results:
                 writer.writerow(
-                    [r["topology"], r["variant"], r["bandwidth_mbit"], f"{r['gp_throughput_tps']:.1f}",
+                    [r["topology"], r["variant"], r["bandwidth_kbit"], f"{r['gp_throughput_tps']:.1f}",
                      r["gp_num_queries"], r["num_leaves"]]
                 )
         return path
@@ -659,7 +665,7 @@ def main():
     printInfo(f"output dir: {output_root}")
     printInfo(f"modes: {config.MODES} | topologies: {config.TOPOLOGIES}")
     if "contention" in config.MODES:
-        printInfo(f"bandwidth caps (mbit, 0=uncapped): {config.BANDWIDTH_LIMITS_MBIT}")
+        printInfo(f"bandwidth caps (kbit, 0=uncapped): {config.BANDWIDTH_LIMITS_KBIT}")
 
     if not os.path.exists(SINGLE_NODE_BINARY):
         printError(f"worker binary not found: {SINGLE_NODE_BINARY} (set BUILD_DIR / build first)")

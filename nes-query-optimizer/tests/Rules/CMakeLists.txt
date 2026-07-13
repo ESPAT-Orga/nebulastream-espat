@@ -13,3 +13,5 @@
 add_subdirectory(Static)
 
 add_nes_optimizer_test(RuleManagerTest RuleManagerTest.cpp)
+# Reproduction tests for MULTI_ROOT_PLAN_ISSUES.md issue 1 — expected to FAIL until fixed
+add_nes_optimizer_test(MultiRootPlanRulesTest MultiRootPlanRulesTest.cpp)

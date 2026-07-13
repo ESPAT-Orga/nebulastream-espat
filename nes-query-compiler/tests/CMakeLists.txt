@@ -18,3 +18,8 @@ function(add_nes_compiler_test)
 endfunction()
 
 add_nes_compiler_test(PhysicalPlanBuilderFlipTest UnitTests/PhysicalPlanBuilderFlipTest.cpp)
+
+# Reproduction tests for MULTI_ROOT_PLAN_ISSUES.md issues 2 and 3 — expected to FAIL until fixed
+add_nes_compiler_test(MultiRootLoweringTest UnitTests/MultiRootLoweringTest.cpp)
+target_link_libraries(MultiRootLoweringTest nes-query-optimizer)
+add_nes_compiler_test(PipeliningMultiConsumerTest UnitTests/PipeliningMultiConsumerTest.cpp)

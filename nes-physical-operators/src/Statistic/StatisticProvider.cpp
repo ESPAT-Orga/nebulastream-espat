@@ -15,6 +15,7 @@
 
 #include <Statistic/Histogram/EquiWidthHistogramIteratorImpl.hpp>
 #include <Statistic/Sample/ReservoirSampleIteratorImpl.hpp>
+#include <Statistic/Scalar/ScalarStatisticIteratorImpl.hpp>
 #include <Statistic/Sketch/CountMinSketchIteratorImpl.hpp>
 #include <ErrorHandling.hpp>
 
@@ -117,10 +118,16 @@ StatisticProvider::StatisticProviderIterator StatisticProvider::begin(const naut
             iterator.advanceToBegin();
             return iterator;
         }
+        /// The scalar statistics all persist a single value and differ only in its data type, so one iterator serves them all
         case Statistic::StatisticType::Count:
         case Statistic::StatisticType::Sum:
-        case Statistic::StatisticType::Avg:
-            throw NotImplemented("Scalar statistics (Count/Sum/Avg) are build-only and cannot be probed");
+        case Statistic::StatisticType::Avg: {
+            const auto scalarArguments = dynamic_cast<ScalarStatisticProviderArguments*>(statisticProviderArguments.get());
+            INVARIANT(scalarArguments != nullptr, "ScalarStatisticProviderArguments is expected!");
+            StatisticProviderIterator iterator{std::make_unique<ScalarStatisticIteratorImpl>(statisticMemArea, *scalarArguments)};
+            iterator.advanceToBegin();
+            return iterator;
+        }
     }
 
     std::unreachable();
@@ -154,8 +161,13 @@ StatisticProvider::StatisticProviderIterator StatisticProvider::end(const nautil
         }
         case Statistic::StatisticType::Count:
         case Statistic::StatisticType::Sum:
-        case Statistic::StatisticType::Avg:
-            throw NotImplemented("Scalar statistics (Count/Sum/Avg) are build-only and cannot be probed");
+        case Statistic::StatisticType::Avg: {
+            const auto scalarArguments = dynamic_cast<ScalarStatisticProviderArguments*>(statisticProviderArguments.get());
+            INVARIANT(scalarArguments != nullptr, "ScalarStatisticProviderArguments is expected!");
+            StatisticProviderIterator iterator{std::make_unique<ScalarStatisticIteratorImpl>(statisticMemArea, *scalarArguments)};
+            iterator.advanceToEnd();
+            return iterator;
+        }
     }
 
     std::unreachable();

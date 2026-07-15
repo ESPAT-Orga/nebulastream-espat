@@ -43,8 +43,8 @@ public:
         Equi_Width_Histogram,
         Reservoir_Sample,
         Count_Min_Sketch,
-        /// Scalar statistics: build-only (never probed) statistic-store-backed aggregations used to
-        /// benchmark the StatisticStoreWriter overhead for a small (8-byte) synopsis payload.
+        /// Scalar statistics: statistic-store-backed aggregations whose synopsis is a single scalar. Used to benchmark
+        /// the StatisticStoreWriter overhead for a minimal payload, and probed via SUMSTATISTIC_PROBE and friends.
         Count,
         Sum,
         Avg

@@ -27,8 +27,9 @@ namespace NES
 {
 
 /// Extracts the (statisticId, statisticType) of a statistic aggregation function (CountMinSketch /
-/// EquiWidthHistogram / ReservoirSample). Returns nullopt for a non-statistic aggregation. The type is taken
-/// from the matched concrete function, so it is the single source of truth (no name-string mapping).
+/// EquiWidthHistogram / ReservoirSample / the scalar Count / Sum / Avg). Returns nullopt for a non-statistic
+/// aggregation. The type is taken from the matched concrete function, so it is the single source of truth
+/// (no name-string mapping).
 inline std::optional<StatisticTarget> tryGetStatisticTarget(const WindowAggregationLogicalFunction& aggregation)
 {
     if (const auto countMin = aggregation.tryGetAs<CountMinSketchLogicalFunction>())

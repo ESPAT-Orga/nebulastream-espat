@@ -29,10 +29,11 @@ namespace NES
 
 /// A store-backed scalar statistic (Count / Sum / Avg). Unlike the synopsis statistics
 /// (CountMinSketch / EquiWidthHistogram / ReservoirSample) it carries no memory budget: its persisted
-/// payload is a single 8-byte scalar. It shares ONE plugin name ("ScalarStatistic") and one physical
-/// function across the three ops; the op only selects the StatisticType stored and the SQL surface
-/// (SUMSTATISTIC / COUNTSTATISTIC / AVGSTATISTIC). Used to benchmark the StatisticStoreWriter overhead
-/// for a minimal synopsis payload; these statistics are build-only and never probed.
+/// payload is the bare aggregate. The three ops share ONE plugin name ("ScalarStatistic") and are told
+/// apart by the op, which selects the StatisticType stored, the SQL surface
+/// (SUMSTATISTIC / COUNTSTATISTIC / AVGSTATISTIC), the stamps inferred below, and which physical
+/// function the registrar builds (see ScalarStatisticPhysicalFunction.hpp). Used to benchmark the
+/// StatisticStoreWriter overhead for a minimal synopsis payload.
 class ScalarStatisticLogicalFunction
 {
 public:

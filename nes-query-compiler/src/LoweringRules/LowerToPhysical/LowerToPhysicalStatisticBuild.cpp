@@ -140,7 +140,8 @@ std::vector<std::shared_ptr<AggregationPhysicalFunction>> getAggregationPhysical
             std::move(physicalFinalType),
             std::move(aggregationInputFunction),
             resultFieldIdentifier,
-            bufferRef};
+            bufferRef,
+            descriptor->shallIncludeNullValues()};
 
         /// We should think about another way to store the additional arguments for each statistic physical function.
         /// The current approach requries us to add here an if block for every new statistic build physical function.
@@ -187,9 +188,10 @@ std::vector<std::shared_ptr<AggregationPhysicalFunction>> getAggregationPhysical
         }
         else if (name.contains("ScalarStatistic"))
         {
-            /// Scalar statistics (Count / Sum / Avg) only need the number-of-seen-tuples field; the payload is
-            /// an 8-byte count wrapped as VariableSizedData by ScalarStatisticPhysicalFunction.
+            /// Scalar statistics (Count / Sum / Avg) share one plugin name; the op selects which physical function
+            /// the registrar returns. The payload is the bare aggregate wrapped as VariableSizedData.
             aggregationArguments.numberOfSeenTuplesFieldName = logicalOperator.getNumberOfSeenTuplesFieldName();
+            aggregationArguments.scalarOp = statisticTarget->statisticType;
         }
 
         if (auto aggregationPhysicalFunction

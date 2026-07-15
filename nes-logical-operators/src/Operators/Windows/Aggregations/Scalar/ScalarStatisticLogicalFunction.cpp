@@ -101,10 +101,38 @@ ScalarStatisticLogicalFunction ScalarStatisticLogicalFunction::withInferredStamp
         const auto fieldName = asFieldName.substr(asFieldName.find_last_of(Schema::ATTRIBUTE_NAME_SEPARATOR) + 1);
         newAsFieldName = attributeNameResolver + fieldName;
     }
-    auto newAsField = this->getAsField().withFieldName(newAsFieldName).withDataType(newOnField.getDataType());
-    return this->withOnField(newOnField)
-        .withInputStamp(newOnField.getDataType())
-        .withFinalAggregateStamp(newOnField.getDataType())
+    /// The stamps must match the aggregation physical function each op derives from, since those size their state from
+    /// the input stamp and compute their result in the final stamp (see ScalarStatisticPhysicalFunction.hpp):
+    ///   Count: a UINT64 counter, mirroring CountAggregationLogicalFunction.
+    ///   Sum:   the on-field type, mirroring SumAggregationLogicalFunction, which does not widen.
+    ///   Avg:   the widened on-field type for the running sum and FLOAT64 for the quotient, mirroring
+    ///          AvgAggregationLogicalFunction. Without both, the average would be an integer division.
+    const auto nullable = newOnField.getDataType().nullable ? DataType::NULLABLE::IS_NULLABLE : DataType::NULLABLE::NOT_NULLABLE;
+    auto newInputStamp = newOnField.getDataType();
+    auto newFinalAggregateStamp = newOnField.getDataType();
+    switch (op)
+    {
+        case Statistic::StatisticType::Count:
+            newInputStamp = DataTypeProvider::provideDataType(DataType::Type::UINT64, nullable);
+            newFinalAggregateStamp = DataTypeProvider::provideDataType(DataType::Type::UINT64, DataType::NULLABLE::NOT_NULLABLE);
+            break;
+        case Statistic::StatisticType::Sum:
+            break;
+        case Statistic::StatisticType::Avg:
+            newInputStamp = newOnField.getDataType().isInteger()
+                ? DataTypeProvider::provideDataType(
+                      newOnField.getDataType().isSignedInteger() ? DataType::Type::INT64 : DataType::Type::UINT64, nullable)
+                : DataTypeProvider::provideDataType(DataType::Type::FLOAT64, nullable);
+            newFinalAggregateStamp = DataTypeProvider::provideDataType(DataType::Type::FLOAT64, nullable);
+            break;
+        default:
+            throw CannotDeserialize("ScalarStatistic expects a scalar statistic type but got {}", magic_enum::enum_name(op));
+    }
+
+    auto newAsField = this->getAsField().withFieldName(newAsFieldName).withDataType(newFinalAggregateStamp);
+    return this->withOnField(newOnField.withDataType(newInputStamp))
+        .withInputStamp(newInputStamp)
+        .withFinalAggregateStamp(newFinalAggregateStamp)
         .withAsField(newAsField);
 }
 

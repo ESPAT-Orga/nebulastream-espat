@@ -15,81 +15,115 @@
 #include <Aggregation/Function/Statistic/Scalar/ScalarStatisticPhysicalFunction.hpp>
 
 #include <cstdint>
+#include <memory>
+#include <string>
+#include <string_view>
 #include <utility>
-#include <Nautilus/DataTypes/DataTypesUtil.hpp>
+#include <DataTypes/DataType.hpp>
 #include <Nautilus/DataTypes/VarVal.hpp>
 #include <Nautilus/DataTypes/VariableSizedData.hpp>
 #include <Nautilus/Interface/Record.hpp>
-#include <std/cstring.h>
+#include <magic_enum/magic_enum.hpp>
 #include <AggregationPhysicalFunctionRegistry.hpp>
 #include <ErrorHandling.hpp>
 #include <ExecutionContext.hpp>
+#include <Statistic.hpp>
 
 namespace NES
 {
 
-ScalarStatisticPhysicalFunction::ScalarStatisticPhysicalFunction(
+namespace
+{
+/// Builds the record contract every statistic physical function emits (cf. CountMinSketchPhysicalFunction::lower):
+/// exactly two fields -- the number of seen tuples, and the payload as arena-backed VariableSizedData. A scalar
+/// statistic carries no metadata, so the payload is the bare value with no header (see ScalarStatisticIteratorImpl).
+Record makeScalarStatisticRecord(
+    const Record::RecordFieldIdentifier& resultFieldIdentifier,
+    const std::string& numberOfSeenTuplesFieldName,
+    const VarVal& payload,
+    const DataType& payloadType,
+    const VarVal& numberOfSeenTuples,
+    PipelineMemoryProvider& pipelineMemoryProvider)
+{
+    const nautilus::val<uint64_t> payloadSize{payloadType.getSizeInBytesWithoutNull()};
+    const auto payloadMemory = pipelineMemoryProvider.arena.allocateMemory(payloadSize);
+    payload.castToType(payloadType.type).writeToMemory(payloadMemory);
+
+    Record record;
+    record.write(numberOfSeenTuplesFieldName, numberOfSeenTuples.castToType(DataType::Type::UINT64));
+    record.write(resultFieldIdentifier, VariableSizedData{payloadMemory, payloadSize});
+    return record;
+}
+}
+
+CountStatisticPhysicalFunction::CountStatisticPhysicalFunction(
     DataType inputType,
     DataType resultType,
     PhysicalFunction inputFunction,
     Record::RecordFieldIdentifier resultFieldIdentifier,
+    const bool includeNullValues,
     const std::string_view numberOfSeenTuplesFieldName)
-    : AggregationPhysicalFunction(std::move(inputType), std::move(resultType), std::move(inputFunction), std::move(resultFieldIdentifier))
+    : CountAggregationPhysicalFunction(
+          std::move(inputType), std::move(resultType), std::move(inputFunction), std::move(resultFieldIdentifier), includeNullValues)
     , numberOfSeenTuplesFieldName(numberOfSeenTuplesFieldName)
 {
 }
 
-void ScalarStatisticPhysicalFunction::lift(const nautilus::val<AggregationState*>& aggregationState, PipelineMemoryProvider&, const Record&)
+Record CountStatisticPhysicalFunction::lower(
+    const nautilus::val<AggregationState*> aggregationState, PipelineMemoryProvider& pipelineMemoryProvider)
 {
-    /// Count-only: we ignore the input value (see class comment). The build cost cancels in the
-    /// with/without-writer throughput delta the benchmark measures.
-    const auto counterRef = static_cast<nautilus::val<int8_t*>>(aggregationState);
-    auto count = readValueFromMemRef<uint64_t>(counterRef);
-    count = count + nautilus::val<uint64_t>{1};
-    VarVal{count}.writeToMemory(counterRef);
+    /// The counter is the whole state, so we let the base read it and only re-wrap it as the statistic contract.
+    const auto count = CountAggregationPhysicalFunction::lower(aggregationState, pipelineMemoryProvider).read(resultFieldIdentifier);
+    return makeScalarStatisticRecord(resultFieldIdentifier, numberOfSeenTuplesFieldName, count, resultType, count, pipelineMemoryProvider);
 }
 
-void ScalarStatisticPhysicalFunction::combine(
-    nautilus::val<AggregationState*> aggregationState1, nautilus::val<AggregationState*> aggregationState2, PipelineMemoryProvider&)
+SumStatisticPhysicalFunction::SumStatisticPhysicalFunction(
+    DataType inputType,
+    DataType resultType,
+    PhysicalFunction inputFunction,
+    Record::RecordFieldIdentifier resultFieldIdentifier,
+    const bool includeNullValues,
+    const std::string_view numberOfSeenTuplesFieldName)
+    : AvgAggregationPhysicalFunction(
+          std::move(inputType), std::move(resultType), std::move(inputFunction), std::move(resultFieldIdentifier), includeNullValues)
+    , numberOfSeenTuplesFieldName(numberOfSeenTuplesFieldName)
 {
-    const auto counterRef1 = static_cast<nautilus::val<int8_t*>>(aggregationState1);
-    const auto counterRef2 = static_cast<nautilus::val<int8_t*>>(aggregationState2);
-    auto count1 = readValueFromMemRef<uint64_t>(counterRef1);
-    const auto count2 = readValueFromMemRef<uint64_t>(counterRef2);
-    count1 = count1 + count2;
-    VarVal{count1}.writeToMemory(counterRef1);
 }
 
 Record
-ScalarStatisticPhysicalFunction::lower(nautilus::val<AggregationState*> aggregationState, PipelineMemoryProvider& pipelineMemoryProvider)
+SumStatisticPhysicalFunction::lower(const nautilus::val<AggregationState*> aggregationState, PipelineMemoryProvider& pipelineMemoryProvider)
 {
-    const auto counterRef = static_cast<nautilus::val<int8_t*>>(aggregationState);
-    const auto count = readValueFromMemRef<uint64_t>(counterRef);
-
-    /// Persist the 8-byte count as the statistic payload (wrapped as VariableSizedData so the existing
-    /// StatisticStoreWriter path handles it unchanged).
-    const nautilus::val<uint64_t> payloadSize{payloadSizeInBytes};
-    const auto payloadMemory = pipelineMemoryProvider.arena.allocateMemory(payloadSize);
-    VarVal{count}.writeToMemory(payloadMemory);
-
-    Record record;
-    record.write(numberOfSeenTuplesFieldName, count);
-    record.write(resultFieldIdentifier, VariableSizedData{payloadMemory, payloadSize});
-    return record;
+    /// Unlike AvgAggregationPhysicalFunction::lower we emit the running sum verbatim rather than dividing it by the
+    /// count; the count becomes the number of seen tuples instead.
+    return makeScalarStatisticRecord(
+        resultFieldIdentifier,
+        numberOfSeenTuplesFieldName,
+        readSum(aggregationState),
+        resultType,
+        readCount(aggregationState),
+        pipelineMemoryProvider);
 }
 
-void ScalarStatisticPhysicalFunction::reset(nautilus::val<AggregationState*> aggregationState, PipelineMemoryProvider&)
+AvgStatisticPhysicalFunction::AvgStatisticPhysicalFunction(
+    DataType inputType,
+    DataType resultType,
+    PhysicalFunction inputFunction,
+    Record::RecordFieldIdentifier resultFieldIdentifier,
+    const bool includeNullValues,
+    const std::string_view numberOfSeenTuplesFieldName)
+    : AvgAggregationPhysicalFunction(
+          std::move(inputType), std::move(resultType), std::move(inputFunction), std::move(resultFieldIdentifier), includeNullValues)
+    , numberOfSeenTuplesFieldName(numberOfSeenTuplesFieldName)
 {
-    nautilus::memset(aggregationState, 0, stateSizeInBytes);
 }
 
-void ScalarStatisticPhysicalFunction::cleanup(nautilus::val<AggregationState*>)
+Record
+AvgStatisticPhysicalFunction::lower(const nautilus::val<AggregationState*> aggregationState, PipelineMemoryProvider& pipelineMemoryProvider)
 {
-}
-
-size_t ScalarStatisticPhysicalFunction::getSizeOfStateInBytes() const
-{
-    return stateSizeInBytes;
+    /// The average itself is exactly what the base computes; we only re-wrap it and add the count.
+    const auto avg = AvgAggregationPhysicalFunction::lower(aggregationState, pipelineMemoryProvider).read(resultFieldIdentifier);
+    return makeScalarStatisticRecord(
+        resultFieldIdentifier, numberOfSeenTuplesFieldName, avg, resultType, readCount(aggregationState), pipelineMemoryProvider);
 }
 
 AggregationPhysicalFunctionRegistryReturnType
@@ -97,12 +131,41 @@ AggregationPhysicalFunctionGeneratedRegistrar::RegisterScalarStatisticAggregatio
     AggregationPhysicalFunctionRegistryArguments arguments)
 {
     INVARIANT(arguments.numberOfSeenTuplesFieldName.has_value(), "Number of seen tuples is not set");
-    return std::make_shared<ScalarStatisticPhysicalFunction>(
-        std::move(arguments.inputType),
-        std::move(arguments.resultType),
-        arguments.inputFunction,
-        arguments.resultFieldIdentifier,
-        arguments.numberOfSeenTuplesFieldName.value());
+    INVARIANT(arguments.scalarOp.has_value(), "Scalar statistic op is not set");
+    /// The result stamp sizes the payload, and ScalarStatisticLogicalFunction's ctor leaves it VARSIZED until
+    /// withInferredStamp has run, which would silently produce a garbage payload width here.
+    INVARIANT(arguments.resultType.isNumeric(), "A scalar statistic needs a numeric result stamp, but got {}", arguments.resultType);
+
+    switch (arguments.scalarOp.value())
+    {
+        case Statistic::StatisticType::Count:
+            return std::make_shared<CountStatisticPhysicalFunction>(
+                std::move(arguments.inputType),
+                std::move(arguments.resultType),
+                arguments.inputFunction,
+                arguments.resultFieldIdentifier,
+                arguments.includeNullValues,
+                arguments.numberOfSeenTuplesFieldName.value());
+        case Statistic::StatisticType::Sum:
+            return std::make_shared<SumStatisticPhysicalFunction>(
+                std::move(arguments.inputType),
+                std::move(arguments.resultType),
+                arguments.inputFunction,
+                arguments.resultFieldIdentifier,
+                arguments.includeNullValues,
+                arguments.numberOfSeenTuplesFieldName.value());
+        case Statistic::StatisticType::Avg:
+            return std::make_shared<AvgStatisticPhysicalFunction>(
+                std::move(arguments.inputType),
+                std::move(arguments.resultType),
+                arguments.inputFunction,
+                arguments.resultFieldIdentifier,
+                arguments.includeNullValues,
+                arguments.numberOfSeenTuplesFieldName.value());
+        default:
+            throw UnknownAggregationType(
+                "ScalarStatistic expects a scalar statistic type but got {}", magic_enum::enum_name(arguments.scalarOp.value()));
+    }
 }
 
 }

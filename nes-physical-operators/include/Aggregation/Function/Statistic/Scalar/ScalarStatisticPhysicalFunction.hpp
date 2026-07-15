@@ -13,50 +13,79 @@
 */
 
 #pragma once
-#include <cstdint>
 #include <string>
 #include <string_view>
 #include <Aggregation/Function/AggregationPhysicalFunction.hpp>
+#include <Aggregation/Function/AvgAggregationPhysicalFunction.hpp>
+#include <Aggregation/Function/CountAggregationPhysicalFunction.hpp>
 
 namespace NES
 {
 
-/// Physical function backing the scalar statistics (Count / Sum / Avg). Its persisted synopsis is a single
-/// 8-byte value wrapped as VariableSizedData, so the existing StatisticStoreWriter (which reads a
-/// VariableSizedData payload) needs no changes. Because the store-writer-overhead benchmark measures the
-/// throughput DELTA between running with and without the writer -- and the build runs identically in both
-/// variants -- the exact aggregated value is irrelevant; the function simply counts tuples and emits that
-/// count as both the payload and the number-of-seen-tuples field. One physical function serves all three
-/// ops (the op only selects the StatisticType label).
-class ScalarStatisticPhysicalFunction final : public AggregationPhysicalFunction
+/// The physical functions backing the scalar statistics (Count / Sum / Avg). Each one reuses the aggregation
+/// physical function that already implements its arithmetic and overrides only lower(), which re-wraps the
+/// aggregate as the statistic contract: the number of seen tuples plus the value as a VariableSizedData payload.
+/// Unlike the synopsis statistics (CountMinSketch / EquiWidthHistogram / ReservoirSample) they carry no memory
+/// budget and no payload metadata, so the payload is the bare value (see ScalarStatisticIteratorImpl).
+/// They share ONE plugin name ("ScalarStatistic"); the registrar picks the class from the op.
+
+/// Real COUNT semantics persisted as a statistic. The base's single counter is both the payload and the number of
+/// seen tuples, because we are registered with includeNullValues = true and so lift() counts every tuple.
+class CountStatisticPhysicalFunction final : public CountAggregationPhysicalFunction
 {
 public:
-    ScalarStatisticPhysicalFunction(
+    CountStatisticPhysicalFunction(
         DataType inputType,
         DataType resultType,
         PhysicalFunction inputFunction,
         Record::RecordFieldIdentifier resultFieldIdentifier,
+        bool includeNullValues,
         std::string_view numberOfSeenTuplesFieldName);
-    void lift(
-        const nautilus::val<AggregationState*>& aggregationState,
-        PipelineMemoryProvider& pipelineMemoryProvider,
-        const Record& record) override;
-    void combine(
-        nautilus::val<AggregationState*> aggregationState1,
-        nautilus::val<AggregationState*> aggregationState2,
-        PipelineMemoryProvider& pipelineMemoryProvider) override;
     Record lower(nautilus::val<AggregationState*> aggregationState, PipelineMemoryProvider& pipelineMemoryProvider) override;
-    void reset(nautilus::val<AggregationState*> aggregationState, PipelineMemoryProvider& pipelineMemoryProvider) override;
-    void cleanup(nautilus::val<AggregationState*> aggregationState) override;
-    [[nodiscard]] size_t getSizeOfStateInBytes() const override;
-    ~ScalarStatisticPhysicalFunction() override = default;
+    ~CountStatisticPhysicalFunction() override = default;
 
 private:
     std::string numberOfSeenTuplesFieldName;
-    /// State is a single uint64 counter (the number of seen tuples).
-    static constexpr uint64_t stateSizeInBytes = sizeof(uint64_t);
-    /// The persisted payload is a single uint64 (8 bytes).
-    static constexpr uint64_t payloadSizeInBytes = sizeof(uint64_t);
+};
+
+/// Real SUM semantics persisted as a statistic. We derive from AvgAggregationPhysicalFunction purely for its
+/// [sum][count] state: STATISTICNUMBEROFSEENTUPLES needs a tuple counter that SumAggregationPhysicalFunction's
+/// state does not carry, and Avg's lift/combine/reset already maintain exactly that pair. This is implementation
+/// inheritance, not an is-a relationship. Only lower() differs: we emit the sum itself and skip the division.
+class SumStatisticPhysicalFunction final : public AvgAggregationPhysicalFunction
+{
+public:
+    SumStatisticPhysicalFunction(
+        DataType inputType,
+        DataType resultType,
+        PhysicalFunction inputFunction,
+        Record::RecordFieldIdentifier resultFieldIdentifier,
+        bool includeNullValues,
+        std::string_view numberOfSeenTuplesFieldName);
+    Record lower(nautilus::val<AggregationState*> aggregationState, PipelineMemoryProvider& pipelineMemoryProvider) override;
+    ~SumStatisticPhysicalFunction() override = default;
+
+private:
+    std::string numberOfSeenTuplesFieldName;
+};
+
+/// Real AVG semantics persisted as a statistic. The base already computes the quotient, so lower() only re-wraps it
+/// and adds the count, which is the tuple count because we are registered with includeNullValues = true.
+class AvgStatisticPhysicalFunction final : public AvgAggregationPhysicalFunction
+{
+public:
+    AvgStatisticPhysicalFunction(
+        DataType inputType,
+        DataType resultType,
+        PhysicalFunction inputFunction,
+        Record::RecordFieldIdentifier resultFieldIdentifier,
+        bool includeNullValues,
+        std::string_view numberOfSeenTuplesFieldName);
+    Record lower(nautilus::val<AggregationState*> aggregationState, PipelineMemoryProvider& pipelineMemoryProvider) override;
+    ~AvgStatisticPhysicalFunction() override = default;
+
+private:
+    std::string numberOfSeenTuplesFieldName;
 };
 
 }

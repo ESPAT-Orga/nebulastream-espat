@@ -76,10 +76,10 @@ registerWithDemand(AdaptiveSendingScheduler& scheduler, QueryId queryId, Priorit
     return state;
 }
 
-constexpr uint64_t HIGH_SHARE_PER_TICK = 10'000; // 0.8 × 125000 B/s × 0.1 s
-constexpr uint64_t LOW_SHARE_PER_TICK = 2'500; //  0.2 × 125000 B/s × 0.1 s
-constexpr uint64_t BUDGET_PER_TICK = HIGH_SHARE_PER_TICK + LOW_SHARE_PER_TICK; // 12500
-} // namespace
+constexpr uint64_t HIGH_SHARE_PER_TICK = 10'000; /// 0.8 × 125000 B/s × 0.1 s
+constexpr uint64_t LOW_SHARE_PER_TICK = 2'500; ///  0.2 × 125000 B/s × 0.1 s
+constexpr uint64_t BUDGET_PER_TICK = HIGH_SHARE_PER_TICK + LOW_SHARE_PER_TICK; /// 12500
+} /// namespace
 
 class AdaptiveSendingSchedulerTest : public ::testing::Test
 {
@@ -167,7 +167,7 @@ TEST_F(AdaptiveSendingSchedulerTest, ChannelRegistersMidRun)
     AdaptiveSendingScheduler scheduler(makeConfig());
     auto high = registerWithDemand(scheduler, makeQueryId(), Priority::HIGH, BUDGET_PER_TICK * 2);
     scheduler.assignContingents();
-    EXPECT_EQ(high->contingent_bytes.load(), BUDGET_PER_TICK); // sole channel gets all budget
+    EXPECT_EQ(high->contingent_bytes.load(), BUDGET_PER_TICK); /// sole channel gets all budget
 
     auto low = registerWithDemand(scheduler, makeQueryId(), Priority::LOW, BUDGET_PER_TICK * 2);
     /// Set HIGH's contingent back to 0 to isolate this tick's allocation.
@@ -193,8 +193,8 @@ TEST_F(AdaptiveSendingSchedulerTest, ChannelDeregistersMidRun)
     /// LOW's atomic state still alive (we hold the shared_ptr), but scheduler no longer touches it.
     const auto lowBefore = low->contingent_bytes.load();
     scheduler.assignContingents();
-    EXPECT_EQ(high->contingent_bytes.load(), BUDGET_PER_TICK); // HIGH again sole channel
-    EXPECT_EQ(low->contingent_bytes.load(), lowBefore); // untouched
+    EXPECT_EQ(high->contingent_bytes.load(), BUDGET_PER_TICK); /// HIGH again sole channel
+    EXPECT_EQ(low->contingent_bytes.load(), lowBefore); /// untouched
 }
 
 /// Test 9: Token-bucket accumulation. With share-per-tick (10 KB) just above buffer size (8 KB),
@@ -204,7 +204,7 @@ TEST_F(AdaptiveSendingSchedulerTest, TokenBucketAccumulates)
     AdaptiveSendingScheduler scheduler(makeConfig());
     auto high = registerWithDemand(scheduler, makeQueryId(), Priority::HIGH, BUDGET_PER_TICK * 2);
     scheduler.assignContingents();
-    EXPECT_EQ(high->contingent_bytes.load(), BUDGET_PER_TICK); // 12500 (single channel, gets full budget)
+    EXPECT_EQ(high->contingent_bytes.load(), BUDGET_PER_TICK); /// 12500 (single channel, gets full budget)
     /// Simulate sending a buffer: deduct 8192 from contingent.
     high->contingent_bytes.fetch_sub(8192);
     EXPECT_EQ(high->contingent_bytes.load(), BUDGET_PER_TICK - 8192);
@@ -286,7 +286,7 @@ TEST_F(AdaptiveSendingSchedulerTest, FixedCapacityEstimatorIgnoresDeliveredBytes
     for (int i = 0; i < 50; ++i)
     {
         high->delivered_bytes_last_tick.store(1'000);
-        high->contingent_bytes.store(0); // simulate "send burned all contingent"
+        high->contingent_bytes.store(0); /// simulate "send burned all contingent"
         scheduler.assignContingents();
         EXPECT_EQ(scheduler.capacityEstimateBps(), 200'000U);
     }
@@ -295,4 +295,4 @@ TEST_F(AdaptiveSendingSchedulerTest, FixedCapacityEstimatorIgnoresDeliveredBytes
     EXPECT_EQ(high->contingent_bytes.load(), std::min<uint64_t>(20'000U, 32U * 1024U));
 }
 
-} // namespace NES
+} /// namespace NES

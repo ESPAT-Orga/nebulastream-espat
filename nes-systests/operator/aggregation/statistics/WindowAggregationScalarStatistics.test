@@ -1,0 +1,79 @@
+# name: window/synopsis/WindowAggregationScalarStatistics.test
+# description: Build-only test for the store-backed scalar statistics (Sum / Count / Avg).
+#              These are build-only (never probed): they persist an 8-byte scalar synopsis via the
+#              StatisticStoreWriter. The build sink reports the per-window metadata row
+#              (statisticId, statisticStart, statisticEnd, statisticNumberOfSeenTuples). The metadata is
+#              identical across the three ops because numberOfSeenTuples is just the tuple count per window.
+# groups: [Synopsis, Aggregation, WindowOperators]
+
+CREATE LOGICAL SOURCE stream(id UINT64 NOT NULL, value UINT64 NOT NULL, timestamp UINT64 NOT NULL);
+CREATE PHYSICAL SOURCE FOR stream TYPE File;
+ATTACH INLINE
+1,1,1000
+12,1,1001
+4,1,1002
+1,2,2000
+11,2,2001
+16,2,2002
+1,3,3000
+11,3,3001
+1,3,3003
+1,3,3200
+1,4,4000
+1,5,5000
+1,6,6000
+1,7,7000
+1,8,8000
+1,9,9000
+1,10,10000
+1,11,11000
+1,12,12000
+1,13,13000
+1,14,14000
+1,15,15000
+1,16,16000
+1,17,17000
+1,18,18000
+1,19,19000
+1,20,20000
+1,21,21000
+
+CREATE SINK sinkStreamBuild(stream.statisticId UINT64 NOT NULL, stream.statisticStart UINT64 NOT NULL, stream.statisticEnd UINT64 NOT NULL, stream.statisticNumberOfSeenTuples UINT64 NOT NULL) TYPE File;
+
+# Sum statistic build. arguments: statisticId, field. Per-window metadata: numberOfSeenTuples = tuple count.
+SELECT SUMSTATISTIC(100, value) FROM stream WINDOW TUMBLING(timestamp, size 5 sec) INTO sinkStreamBuild;
+----
+100 0 5000 11
+100 10000 15000 5
+100 15000 20000 5
+100 20000 25000 2
+100 5000 10000 5
+
+# Count statistic build.
+SELECT COUNTSTATISTIC(200, value) FROM stream WINDOW TUMBLING(timestamp, size 5 sec) INTO sinkStreamBuild;
+----
+200 0 5000 11
+200 10000 15000 5
+200 15000 20000 5
+200 20000 25000 2
+200 5000 10000 5
+
+# Avg statistic build.
+SELECT AVGSTATISTIC(300, value) FROM stream WINDOW TUMBLING(timestamp, size 5 sec) INTO sinkStreamBuild;
+----
+300 0 5000 11
+300 10000 15000 5
+300 15000 20000 5
+300 20000 25000 2
+300 5000 10000 5
+
+# Multiple scalar statistics in a SINGLE query (one shared scan, distinct statisticIds). Both are inserted via
+# chained store writers; the record flows through the chain, so the build sink reports one row per window
+# carrying the last writer's id (302). numberOfSeenTuples per window matches the single-statistic case above.
+SELECT SUMSTATISTIC(301, value), COUNTSTATISTIC(302, id) FROM stream WINDOW TUMBLING(timestamp, size 5 sec) INTO sinkStreamBuild;
+----
+302 0 5000 11
+302 10000 15000 5
+302 15000 20000 5
+302 20000 25000 2
+302 5000 10000 5

@@ -53,8 +53,8 @@ cmake_flags = ("-G Ninja "
                "-DNES_BUILD_NATIVE:BOOL=ON "
                "-DNES_LOG_LEVEL:STRING=LEVEL_NONE "
                "-DNES_BUILD_NATIVE:BOOL=ON")
-#NUM_RUNS_PER_EXPERIMENT = 3
-NUM_RUNS_PER_EXPERIMENT = 10
+NUM_RUNS_PER_EXPERIMENT = 5
+# NUM_RUNS_PER_EXPERIMENT = 10
 
 QUERY_CONFIGS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "query-configs")
 
@@ -172,7 +172,7 @@ STATISTIC_TYPES_WITHOUT_SYNOPSIS_PARAMS = {"Passthrough", "Sum"}
 DATASET_PATHS = {
     "Nexmark": "nes-systests/testdata/large/nexmark/bid_6GB.csv",
     "ClusterMonitoring": "nes-systests/testdata/large/cluster_monitoring/google-cluster-data-original_1G.csv",
-    "Manufacturing": "nes-systests/testdata/large/manufacturing/manufacturing_1G.csv",
+    # "Manufacturing": "nes-systests/testdata/large/manufacturing/manufacturing_1G.csv",
 }
 
 
@@ -229,6 +229,9 @@ SYNOPSIS_AMORT_BASE_IDS = {
     "Reservoir": 3000,
     "Sum": 4000,
     "Passthrough": 5000,
+    # Store-backed scalar statistics (used by run_store_writer_overhead.py).
+    "Count": 6000,
+    "Avg": 7000,
 }
 
 
@@ -264,5 +267,35 @@ PROBE_FIELDNAMES = IDENTITY_FIELDNAMES + [
 # EquiWidthHistogram rows with num_synopses > 1 carry the scaling data.
 SYNOPSIS_AMORT_FIELDNAMES = IDENTITY_FIELDNAMES + [
     'num_synopses', 'query_name', 'tuplesPerSecond_listener', 'build_duration_s',
+    'issue',
+]
+
+
+## Store-writer overhead #######################################################
+#
+# Measures the overhead of the StatisticStoreWriter operator: each build query runs twice — WITH the
+# writer (default) and WITHOUT it (NES_STAT_OMIT_STORE_WRITER set on the worker). The build runs
+# identically in both variants, so overhead = throughput(off) - throughput(on) isolates the writer's
+# per-window insertion cost. Covers the six aggregations count / avg / sum (store-backed scalars) and
+# sample / histogram / sketch (synopses).
+
+# STORE_WRITER_DATASETS = ["Nexmark", "ClusterMonitoring"]
+STORE_WRITER_DATASETS = ["Nexmark"]
+STORE_WRITER_AGGS = ["Count", "Avg", "Sum", "Reservoir", "EquiWidthHistogram", "CountMin"]
+# STORE_WRITER_AGGS = ["Count", "Reservoir", "EquiWidthHistogram", "CountMin"]
+# Scalars carry no memory budget; the synopses do. Both are still swept over all budgets so every
+# memory_budget group in the plot shows all six aggregations (the scalar query ignores the budget).
+STORE_WRITER_SCALAR_AGGS = {"Count", "Avg", "Sum"}
+# STORE_WRITER_MEMORY_BUDGETS = memoryBudgetConfig  # [1, 5, 10] KiB
+STORE_WRITER_MEMORY_BUDGETS = [5 * 1024]  # [1, 5, 10] KiB
+# STORE_WRITER_WINDOW_SIZES = allBuildWindowSizesSec  # [1, 5, 10]
+STORE_WRITER_WINDOW_SIZES = [1, 5, 10]  # [1, 5, 10]
+STORE_WRITER_WORKER_THREADS = ["1", "16"]
+# Environment variable read by the SQL planner to omit the StatisticStoreWriter chain (benchmark knob).
+STORE_WRITER_ENV = "NES_STAT_OMIT_STORE_WRITER"
+
+STORE_WRITER_FIELDNAMES = IDENTITY_FIELDNAMES + [
+    'store_writer', 'aggregation', 'query_name',
+    'tuplesPerSecond_listener', 'build_duration_s',
     'issue',
 ]

@@ -18,6 +18,7 @@
 #include <Operators/Statistic/LogicalStatisticFields.hpp>
 #include <Operators/Windows/Aggregations/Histogram/EquiWidthHistogramLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/Sample/ReservoirSampleLogicalFunction.hpp>
+#include <Operators/Windows/Aggregations/Scalar/ScalarStatisticLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/Sketch/CountMinSketchLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/WindowAggregationLogicalFunction.hpp>
 #include <Statistic.hpp>
@@ -41,6 +42,10 @@ inline std::optional<StatisticTarget> tryGetStatisticTarget(const WindowAggregat
     if (const auto sample = aggregation.tryGetAs<ReservoirSampleLogicalFunction>())
     {
         return StatisticTarget{sample->get().statisticId, Statistic::StatisticType::Reservoir_Sample};
+    }
+    if (const auto scalar = aggregation.tryGetAs<ScalarStatisticLogicalFunction>())
+    {
+        return StatisticTarget{scalar->get().statisticId, scalar->get().op};
     }
     return std::nullopt;
 }

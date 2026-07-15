@@ -125,9 +125,17 @@ _SYNOPSIS_META_SINK_FIELDS = [
 ]
 
 
-def _sink_fields_for(dataset_name: str, synopsis_kind: str) -> list:
-    """The (name, type) pairs the void sink must declare for this query's output."""
-    if synopsis_kind in ("CountMin", "EquiWidthHistogram", "Reservoir"):
+def _sink_fields_for(dataset_name: str, synopsis_kind: str,
+                     store_backed: bool = False, omit_store_writer: bool = False) -> list:
+    """The (name, type) pairs the void sink must declare for this query's output.
+
+    Store-backed statistics (the synopses and, when ``store_backed`` is set, the scalar Count/Avg/Sum)
+    emit the statistic-metadata sink. Without the StatisticStoreWriter (``omit_store_writer``) the
+    STATISTICID field is not produced, so it is dropped from the sink schema.
+    """
+    if store_backed or synopsis_kind in ("CountMin", "EquiWidthHistogram", "Reservoir"):
+        if omit_store_writer:
+            return list(_SYNOPSIS_META_SINK_FIELDS[1:])  # drop statisticid (added by the writer)
         return list(_SYNOPSIS_META_SINK_FIELDS)
     if synopsis_kind == "Sum":
         field = numeric_fields_for(dataset_name)[0]
@@ -137,11 +145,20 @@ def _sink_fields_for(dataset_name: str, synopsis_kind: str) -> list:
     raise ValueError(f"Unknown synopsis kind: {synopsis_kind}")
 
 
+# Store-backed scalar statistics: the SQL function name per aggregation (all take (statisticId, field)).
+_SCALAR_STATISTIC_FUNCS = {"Count": "COUNTSTATISTIC", "Avg": "AVGSTATISTIC", "Sum": "SUMSTATISTIC"}
+
+
 def _query_string(dataset_name: str, synopsis_kind: str, num_synopses: int,
-                  memory_budget: int, window_size: int) -> str:
+                  memory_budget: int, window_size: int, store_backed: bool = False) -> str:
     fields = numeric_fields_for(dataset_name)
     window = f"WINDOW TUMBLING({_event_time_field(dataset_name)}, size {window_size} sec)"
     base = SYNOPSIS_AMORT_BASE_IDS[synopsis_kind]
+
+    # Store-backed scalar statistics (Count / Avg / Sum): a single (statisticId, field) synopsis with no
+    # memory budget. Checked before the plain-Sum branch so store_backed Sum -> SUMSTATISTIC, not SUM(...).
+    if store_backed and synopsis_kind in _SCALAR_STATISTIC_FUNCS:
+        return f"SELECT {_SCALAR_STATISTIC_FUNCS[synopsis_kind]}({base}, {fields[0]}) FROM build_source {window} INTO void_sink;"
 
     # memory_budget is the TOTAL budget for the whole query, split evenly across the N synopses
     # (e.g. 1 KiB / 10 synopses -> ~102 B each). This keeps the total state fixed as N grows,
@@ -177,18 +194,25 @@ def _query_string(dataset_name: str, synopsis_kind: str, num_synopses: int,
 
 
 def build_query_yaml(*, dataset_name: str, dataset_path: str, synopsis_kind: str,
-                     num_synopses: int, memory_budget: int, window_size: int) -> str:
+                     num_synopses: int, memory_budget: int, window_size: int,
+                     store_backed: bool = False, omit_store_writer: bool = False) -> str:
     """Render a full, ready-to-submit single-node-worker query YAML for one (kind, N, budget).
 
     Loads the per-dataset skeleton (schema + Memory/Native source) and overwrites the query, the void-sink
     schema, and the source file_path. The Memory source + Native parser keep CSV parsing out of the timed
     path (it happens once in setup()).
+
+    ``store_backed`` routes the scalar Count/Avg/Sum kinds through their statistic-store functions
+    (SUMSTATISTIC / ...). ``omit_store_writer`` drops STATISTICID from the sink schema to match a query
+    submitted to a worker running with NES_STAT_OMIT_STORE_WRITER set (build without the store writer).
     """
     doc = yaml.safe_load(_skeleton_text(dataset_name))
-    doc["query"] = _query_string(dataset_name, synopsis_kind, num_synopses, memory_budget, window_size)
+    doc["query"] = _query_string(dataset_name, synopsis_kind, num_synopses, memory_budget, window_size,
+                                 store_backed=store_backed)
     doc["sinks"][0]["schema"] = [
         {"name": name, "type": nes_type, "nullable": False}
-        for name, nes_type in _sink_fields_for(dataset_name, synopsis_kind)
+        for name, nes_type in _sink_fields_for(dataset_name, synopsis_kind,
+                                               store_backed=store_backed, omit_store_writer=omit_store_writer)
     ]
     doc["physical"][0]["source_config"]["file_path"] = dataset_path
     per_synopsis_budget = max(1, memory_budget // num_synopses)

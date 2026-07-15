@@ -42,7 +42,12 @@ public:
     {
         Equi_Width_Histogram,
         Reservoir_Sample,
-        Count_Min_Sketch
+        Count_Min_Sketch,
+        /// Scalar statistics: build-only (never probed) statistic-store-backed aggregations used to
+        /// benchmark the StatisticStoreWriter overhead for a small (8-byte) synopsis payload.
+        Count,
+        Sum,
+        Avg
     };
 
     Statistic(

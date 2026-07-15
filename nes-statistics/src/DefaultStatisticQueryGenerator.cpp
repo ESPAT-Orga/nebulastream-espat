@@ -113,6 +113,10 @@ std::shared_ptr<WindowAggregationLogicalFunction> createAggregationFunction(
             const auto memoryBudget = getOption(options, "memory_budget", 8192);
             return std::make_shared<WindowAggregationLogicalFunction>(CountMinSketchLogicalFunction{onField, memoryBudget, statisticId});
         }
+        case Statistic::StatisticType::Count:
+        case Statistic::StatisticType::Sum:
+        case Statistic::StatisticType::Avg:
+            throw NotImplemented("Scalar statistics (Count/Sum/Avg) are not produced by the metric-based query generator");
     }
     std::unreachable();
 }

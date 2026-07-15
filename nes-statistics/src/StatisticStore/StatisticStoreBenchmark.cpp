@@ -100,7 +100,7 @@ struct GetParams
 {
     static inline const std::vector<StatisticStoreType> storeTypes{
         StatisticStoreType::DEFAULT, StatisticStoreType::SUB_STORES, StatisticStoreType::WINDOW};
-    // static inline const std::vector<uint64_t> windowSizes{1'000, 10'000, 60'000};
+    /// static inline const std::vector<uint64_t> windowSizes{1'000, 10'000, 60'000};
     static inline const std::vector<uint64_t> windowSizes{1'000};
     /// Total number of statistics (see Statistic.hpp) to retrieve
     static inline const std::vector<uint64_t> numStatisticsVals{1, 100'000};
@@ -927,7 +927,7 @@ void runBenchmarks(int argc, char* argv[])
     std::cout << "\nBenchmarks complete in " << formatHMS(progress.getElapsedSeconds()) << ". Results written to "
               << std::filesystem::absolute(BENCHMARK_CSV).string() << "\n";
 
-    // progress.printSkipped();
+    /// progress.printSkipped();
 }
 }
 }

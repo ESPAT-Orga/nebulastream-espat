@@ -24,6 +24,7 @@
 #include <Operators/Statistic/StatisticStoreWriterLogicalOperator.hpp>
 #include <Operators/Statistic/StatisticTargetUtil.hpp>
 #include <Operators/Windows/Aggregations/Histogram/EquiWidthHistogramLogicalFunction.hpp>
+#include <Operators/Windows/Aggregations/Scalar/ScalarStatisticLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/Sketch/CountMinSketchLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/WindowAggregationLogicalFunction.hpp>
 #include <Operators/Windows/StatisticBuildLogicalOperator.hpp>
@@ -57,6 +58,13 @@ protected:
     {
         return std::make_shared<WindowAggregationLogicalFunction>(EquiWidthHistogramLogicalFunction{
             FieldAccessLogicalFunction(field), MemoryBudget, /*minValue*/ 0, /*maxValue*/ 1000, Statistic::StatisticId{id}});
+    }
+
+    static std::shared_ptr<WindowAggregationLogicalFunction>
+    scalar(const std::string& field, const uint64_t id, const Statistic::StatisticType op)
+    {
+        return std::make_shared<WindowAggregationLogicalFunction>(ScalarStatisticLogicalFunction{
+            FieldAccessLogicalFunction(field), FieldAccessLogicalFunction(field), Statistic::StatisticId{id}, op});
     }
 
     static std::shared_ptr<Windowing::WindowType> tumblingWindow()
@@ -114,6 +122,35 @@ TEST_F(StatisticOperatorsReflectionTest, MixedSynopsisStatisticBuildSurvivesRefl
         {202, Statistic::StatisticType::Equi_Width_Histogram},
         {303, Statistic::StatisticType::Count_Min_Sketch},
     };
+    for (size_t i = 0; i < aggregations.size(); ++i)
+    {
+        const auto target = tryGetStatisticTarget(*aggregations[i]);
+        ASSERT_TRUE(target.has_value());
+        EXPECT_EQ(target->statisticId, Statistic::StatisticId{expected[i].first});
+        EXPECT_EQ(target->statisticType, expected[i].second);
+    }
+}
+
+/// The scalar statistics (Count / Sum / Avg) share one logical class distinguished by an `op` field; that op
+/// selects the StatisticType and must survive the reflect -> unreflect round trip alongside the statisticId.
+TEST_F(StatisticOperatorsReflectionTest, ScalarStatisticBuildSurvivesReflectionRoundTrip)
+{
+    const std::vector<std::pair<uint64_t, Statistic::StatisticType>> expected = {
+        {601, Statistic::StatisticType::Count},
+        {602, Statistic::StatisticType::Sum},
+        {603, Statistic::StatisticType::Avg},
+    };
+    const StatisticBuildLogicalOperator op(
+        {scalar("stream.a", expected[0].first, expected[0].second),
+         scalar("stream.b", expected[1].first, expected[1].second),
+         scalar("stream.c", expected[2].first, expected[2].second)},
+        tumblingWindow(),
+        std::make_shared<LogicalStatisticFields>());
+
+    const auto roundTripped = unreflect<StatisticBuildLogicalOperator>(NES::reflect(op));
+
+    const auto aggregations = roundTripped.getWindowAggregation();
+    ASSERT_EQ(aggregations.size(), expected.size());
     for (size_t i = 0; i < aggregations.size(); ++i)
     {
         const auto target = tryGetStatisticTarget(*aggregations[i]);

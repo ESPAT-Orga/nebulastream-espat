@@ -467,7 +467,7 @@ int main(int argc, char** argv)
             /// a clear diagnostic to stderr and return nullopt so the caller skips wiring this
             /// predicate into the companion request.
             const auto sql = fmt::format("SELECT * FROM _nes_stat_dummy_ WHERE {} INTO _nes_stat_dummy_sink_", conditionStr);
-            try
+            CPPTRACE_TRY
             {
                 auto plan = NES::AntlrSQLQueryParser::createLogicalQueryPlanFromSQLString(sql);
                 auto selections = NES::getOperatorByType<NES::SelectionLogicalOperator>(plan);
@@ -479,17 +479,20 @@ int main(int argc, char** argv)
                 }
                 return selections.front()->getPredicate();
             }
-            catch (const std::exception& e)
+            CPPTRACE_CATCH(const std::exception& e)
             {
                 std::cerr << "[--companion-condition] Failed to parse expression: '" << conditionStr << "': " << e.what()
                           << " — ignoring.\n";
                 return std::nullopt;
             }
-            catch (...)
+            CPPTRACE_CATCH_ALT(...)
             {
                 std::cerr << "[--companion-condition] Unknown exception parsing expression: '" << conditionStr << "' — ignoring.\n";
                 return std::nullopt;
             }
+            /// The CPPTRACE_TRY/CATCH macros wrap the try in an extra scope, so the compiler cannot prove every
+            /// path returns; this unreachable fallthrough keeps -Werror=return-type satisfied.
+            return std::nullopt;
         };
 
         /// A second binder instance sharing the same source catalog. Used inside the companion callback,

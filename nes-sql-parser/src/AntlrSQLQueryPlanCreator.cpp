@@ -17,6 +17,7 @@
 #include <cctype>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <memory>
 #include <optional>
 #include <ranges>
@@ -61,6 +62,7 @@
 #include <Operators/Windows/Aggregations/MinAggregationLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/Sample/ReservoirProbeLogicalOperator.hpp>
 #include <Operators/Windows/Aggregations/Sample/ReservoirSampleLogicalFunction.hpp>
+#include <Operators/Windows/Aggregations/Scalar/ScalarStatisticLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/Sketch/CountMinSketchLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/Sketch/CountMinSketchProbeLogicalOperator.hpp>
 #include <Operators/Windows/Aggregations/SumAggregationLogicalFunction.hpp>
@@ -499,19 +501,27 @@ void AntlrSQLQueryPlanCreator::exitPrimaryQuery(AntlrSQLParser::PrimaryQueryCont
         queryPlan = LogicalPlanBuilder::addProjection(helpers.top().preAggregationProjections, /*asterisk=*/true, queryPlan);
     }
 
-    auto statisticAggs = std::initializer_list<std::string>{"ReservoirSample", "EquiWidthHistogram", "CountMinSketch"};
+    auto statisticAggs = std::initializer_list<std::string>{"ReservoirSample", "EquiWidthHistogram", "CountMinSketch", "ScalarStatistic"};
     if (helpers.top().windowType != nullptr && helpers.top().joinKeyRelationHelper.empty() and not helpers.top().windowAggs.empty()
         and std::ranges::find(statisticAggs, helpers.top().windowAggs.front().get()->getName()) != std::end(statisticAggs))
     {
+        /// Benchmark knob (store-writer-overhead experiment): when NES_STAT_OMIT_STORE_WRITER is set, build the
+        /// synopsis but omit the StatisticStoreWriter chain (and the STATISTICID projection it would populate), so
+        /// the throughput delta against the default run isolates the store-writer's cost.
+        const bool omitStoreWriter = std::getenv("NES_STAT_OMIT_STORE_WRITER") != nullptr;
+
         /// This is actually a statistic operation, not an aggregation
         auto logicalStatisticFields = std::make_shared<LogicalStatisticFields>();
         queryPlan = LogicalPlanBuilder::addStatisticBuild(
             queryPlan, helpers.top().windowType, helpers.top().windowAggs, helpers.top().groupByFields, logicalStatisticFields);
         if (not helpers.top().statProbe.has_value())
         {
-            const auto hash = FieldAccessLogicalFunction{
-                LogicalStatisticFields().statisticIdField.dataType, LogicalStatisticFields().statisticIdField.name};
-            helpers.top().addProjection({}, hash);
+            if (not omitStoreWriter)
+            {
+                const auto hash = FieldAccessLogicalFunction{
+                    LogicalStatisticFields().statisticIdField.dataType, LogicalStatisticFields().statisticIdField.name};
+                helpers.top().addProjection({}, hash);
+            }
             const auto start = FieldAccessLogicalFunction{
                 LogicalStatisticFields().statisticStartTsField.dataType, LogicalStatisticFields().statisticStartTsField.name};
             helpers.top().addProjection({}, start);
@@ -526,12 +536,15 @@ void AntlrSQLQueryPlanCreator::exitPrimaryQuery(AntlrSQLParser::PrimaryQueryCont
 
         /// Chain one StatisticStoreWriter per synopsis. Each inserts its statistic and forwards the record, so the
         /// next writer still sees every data field. Each aggregation carries its own (id, type).
-        for (const auto& aggregation : helpers.top().windowAggs)
+        if (not omitStoreWriter)
         {
-            const auto target = tryGetStatisticTarget(*aggregation);
-            INVARIANT(target.has_value(), "Statistic query contains a non-statistic aggregation: {}", aggregation->getName());
-            queryPlan = LogicalPlanBuilder::addStatisticStoreWriter(
-                queryPlan, logicalStatisticFields, target->statisticId, target->statisticType);
+            for (const auto& aggregation : helpers.top().windowAggs)
+            {
+                const auto target = tryGetStatisticTarget(*aggregation);
+                INVARIANT(target.has_value(), "Statistic query contains a non-statistic aggregation: {}", aggregation->getName());
+                queryPlan = LogicalPlanBuilder::addStatisticStoreWriter(
+                    queryPlan, logicalStatisticFields, target->statisticId, target->statisticType);
+            }
         }
     }
     else if (helpers.top().isInAggFunction())
@@ -1188,6 +1201,40 @@ void AntlrSQLQueryPlanCreator::exitFunctionCall(AntlrSQLParser::FunctionCallCont
                     LogicalStatisticFields().statisticDataField.dataType, LogicalStatisticFields().statisticDataField.name};
                 helpers.top().windowAggs.push_back(std::make_shared<WindowAggregationLogicalFunction>(
                     CountMinSketchLogicalFunction{fieldName, asFieldIfNotOverwritten, memoryBudget, statisticId}));
+                break;
+            }
+            else if (funcName == "SUMSTATISTIC" || funcName == "COUNTSTATISTIC" || funcName == "AVGSTATISTIC")
+            {
+                /// Store-backed scalar statistics (Count / Sum / Avg): SQL is <NAME>(statisticId, field). They
+                /// carry no memory budget; the persisted payload is an 8-byte scalar (see ScalarStatistic*).
+                if (helpers.top().constantBuilder.empty())
+                {
+                    throw InvalidQuerySyntax(
+                        "Expected constant (statistic hash) as first argument of {} function call, got nothing at {}",
+                        funcName,
+                        context->getText());
+                }
+                if (helpers.top().functionBuilder.size() != 1
+                    || !helpers.top().functionBuilder.back().tryGetAs<FieldAccessLogicalFunction>().has_value())
+                {
+                    throw InvalidQuerySyntax("{} requires the second argument to be a fieldname", funcName);
+                }
+                const auto fieldName = helpers.top().functionBuilder.back().tryGetAs<FieldAccessLogicalFunction>().value().get();
+                helpers.top().functionBuilder.pop_back();
+                if (helpers.top().constantBuilder.size() != 1)
+                {
+                    throw InvalidQuerySyntax("{} requires exactly the statisticId as a constant", funcName);
+                }
+                const Statistic::StatisticId statisticId{parseConstant(helpers.top().constantBuilder.back(), "statisticId")};
+                helpers.top().constantBuilder.pop_back();
+                helpers.top().statisticId = statisticId;
+                const auto op = funcName == "SUMSTATISTIC" ? Statistic::StatisticType::Sum
+                    : funcName == "COUNTSTATISTIC"         ? Statistic::StatisticType::Count
+                                                           : Statistic::StatisticType::Avg;
+                const auto asFieldIfNotOverwritten = FieldAccessLogicalFunction{
+                    LogicalStatisticFields().statisticDataField.dataType, LogicalStatisticFields().statisticDataField.name};
+                helpers.top().windowAggs.push_back(std::make_shared<WindowAggregationLogicalFunction>(
+                    ScalarStatisticLogicalFunction{fieldName, asFieldIfNotOverwritten, statisticId, op}));
                 break;
             }
             else if (funcName == "COUNTMIN_PROBE")

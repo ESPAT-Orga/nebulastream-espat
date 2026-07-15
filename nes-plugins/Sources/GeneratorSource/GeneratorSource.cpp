@@ -152,8 +152,8 @@ Source::FillTupleBufferResult GeneratorSource::fillTupleBuffer(TupleBuffer& tupl
             if (writtenBytes + insertedBytes > rawTBSize)
             {
                 this->orphanTuples = tuplesStream.str().substr(writtenBytes, tuplesStream.str().length() - writtenBytes);
-                //TODO: this is firing a lot with the currently used ingestion rate, adjust ingestion and reactivate
-                // NES_WARNING("Not all required tuples fit into buffer of size {}. {} are left over", rawTBSize, tuplesStream.str().size());
+                /// NOTE: this fires a lot with the currently used ingestion rate; adjust ingestion and reactivate
+                /// NES_WARNING("Not all required tuples fit into buffer of size {}. {} are left over", rawTBSize, tuplesStream.str().size());
                 break;
             }
             writtenBytes += insertedBytes;

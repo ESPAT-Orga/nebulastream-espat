@@ -329,9 +329,13 @@ def run_grid(*, args, runner_config: RunnerConfig, trials: list,
             desc = f"{trial.dataset_name}/{trial.statistic_type} mb={trial.memory_budget} run={run_idx}"
 
             try:
-                row, issues = run_combination(trial, run_dir, cli_log_file)
-                row['run_idx'] = run_idx
-                row['issue'] = ';'.join(issues) if issues else 'ok'
+                result, issues = run_combination(trial, run_dir, cli_log_file)
+                # run_combination returns one row, or a list of rows for runners that emit several
+                # rows per run (the store-writer runner runs on+off as one paired run). Normalise.
+                rows = result if isinstance(result, list) else [result]
+                for row in rows:
+                    row['run_idx'] = run_idx
+                    row.setdefault('issue', ';'.join(issues) if issues else 'ok')
 
                 if issues:
                     for issue in issues:
@@ -342,9 +346,9 @@ def run_grid(*, args, runner_config: RunnerConfig, trials: list,
                 with step("done") as add:
                     with open(csv_path, 'a', newline='') as f:
                         writer = csv.DictWriter(f, fieldnames=runner_config.fieldnames)
-                        writer.writerow(row)
+                        writer.writerows(rows)
                     add(f"run={run_idx}")
-                    add("row written")
+                    add(f"{len(rows)} row(s) written")
                     if completed_runs + 1 < total_runs:
                         eta_h, eta_m, eta_s, eta_time = estimate_eta(
                             start_time, time.time(), completed_runs + 1, total_runs)

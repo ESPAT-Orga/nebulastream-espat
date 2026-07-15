@@ -16,6 +16,7 @@
 #include <Statistic/Histogram/EquiWidthHistogramIteratorImpl.hpp>
 #include <Statistic/Sample/ReservoirSampleIteratorImpl.hpp>
 #include <Statistic/Sketch/CountMinSketchIteratorImpl.hpp>
+#include <ErrorHandling.hpp>
 
 namespace NES
 {
@@ -116,6 +117,10 @@ StatisticProvider::StatisticProviderIterator StatisticProvider::begin(const naut
             iterator.advanceToBegin();
             return iterator;
         }
+        case Statistic::StatisticType::Count:
+        case Statistic::StatisticType::Sum:
+        case Statistic::StatisticType::Avg:
+            throw NotImplemented("Scalar statistics (Count/Sum/Avg) are build-only and cannot be probed");
     }
 
     std::unreachable();
@@ -147,6 +152,10 @@ StatisticProvider::StatisticProviderIterator StatisticProvider::end(const nautil
             iterator.advanceToEnd();
             return iterator;
         }
+        case Statistic::StatisticType::Count:
+        case Statistic::StatisticType::Sum:
+        case Statistic::StatisticType::Avg:
+            throw NotImplemented("Scalar statistics (Count/Sum/Avg) are build-only and cannot be probed");
     }
 
     std::unreachable();

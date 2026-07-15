@@ -33,6 +33,7 @@
 #include <Util/Logger/Logger.hpp>
 #include <Util/PlanRenderer.hpp>
 #include <WindowTypes/Measures/TimeMeasure.hpp>
+#include <cpptrace/from_current.hpp>
 #include <google/protobuf/empty.pb.h>
 #include <grpcpp/client_context.h>
 #include <grpcpp/create_channel.h>
@@ -195,11 +196,11 @@ std::expected<CollectStatisticResult, Exception> StatisticCoordinator::collectWo
     uint32_t expectedSpliceCount = 1;
     if (const auto countIt = statement.options.find("expected_splice_count"); countIt != statement.options.end())
     {
-        try
+        CPPTRACE_TRY
         {
             expectedSpliceCount = std::max<uint32_t>(1, static_cast<uint32_t>(std::stoul(countIt->second)));
         }
-        catch (...)
+        CPPTRACE_CATCH(...)
         {
             /// keep default 1
         }

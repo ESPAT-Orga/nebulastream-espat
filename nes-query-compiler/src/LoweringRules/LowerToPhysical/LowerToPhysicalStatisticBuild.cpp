@@ -185,6 +185,12 @@ std::vector<std::shared_ptr<AggregationPhysicalFunction>> getAggregationPhysical
                 aggregationArguments.seed = countMinConfig.seed;
             }
         }
+        else if (name.contains("ScalarStatistic"))
+        {
+            /// Scalar statistics (Count / Sum / Avg) only need the number-of-seen-tuples field; the payload is
+            /// an 8-byte count wrapped as VariableSizedData by ScalarStatisticPhysicalFunction.
+            aggregationArguments.numberOfSeenTuplesFieldName = logicalOperator.getNumberOfSeenTuplesFieldName();
+        }
 
         if (auto aggregationPhysicalFunction
             = AggregationPhysicalFunctionRegistry::instance().create(std::string(name), std::move(aggregationArguments)))

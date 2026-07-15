@@ -81,6 +81,8 @@ public:
 
     [[nodiscard]] const int8_t* getStatisticData() const { return reinterpret_cast<const int8_t*>(statisticData.get()); }
 
+    [[nodiscard]] uint64_t getStatisticDataSize() const { return statisticDataSize; }
+
     [[nodiscard]] uint64_t getNumberOfSeenTuples() const { return numberOfSeenTuples; }
 
     [[nodiscard]] StatisticId getStatisticId() const { return statisticId; }

@@ -72,7 +72,13 @@ public:
     [[nodiscard]] StatisticProviderIterator begin(const nautilus::val<int8_t*>& statisticMemArea) const;
     [[nodiscard]] StatisticProviderIterator end(const nautilus::val<int8_t*>& statisticMemArea) const;
 
+    [[nodiscard]] Statistic::StatisticType getStatisticType() const;
+
 private:
+    /// The per-type iterator this provider reads with. begin()/end() differ only in where they position it, so they
+    /// share this rather than each repeating the dispatch.
+    [[nodiscard]] std::unique_ptr<StatisticProviderIteratorImpl> makeIteratorImpl(const nautilus::val<int8_t*>& statisticMemArea) const;
+
     Statistic::StatisticType statisticType;
     std::unique_ptr<StatisticProviderArguments> statisticProviderArguments;
 };

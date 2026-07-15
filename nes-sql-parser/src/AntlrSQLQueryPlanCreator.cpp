@@ -954,6 +954,41 @@ static uint64_t parseConstant(std::string constant, const char* fieldName)
     return result;
 }
 
+/// The statistic probes all share the surface `<NAME>(statisticId, datatype)`: the id says which statistic to read and
+/// the datatype how to interpret its payload, since schema inference runs long before the store is consulted. Antlr
+/// parses the datatype as a field access, so it must be lowercase and name a DataType. Everything here is user input, so
+/// every failure is InvalidQuerySyntax rather than an INVARIANT.
+static std::pair<Statistic::StatisticId, DataType>
+parseProbeIdAndDatatype(AntlrSQLHelper& helper, const std::string& funcName, const std::string& text)
+{
+    if (helper.constantBuilder.empty())
+    {
+        throw InvalidQuerySyntax(
+            "Expected constant (statisticId) as first argument of {} function call, got nothing at {}", funcName, text);
+    }
+    const Statistic::StatisticId statisticId{parseConstant(helper.constantBuilder.back(), "statisticId")};
+    helper.constantBuilder.pop_back();
+
+    if (helper.functionBuilder.empty())
+    {
+        throw InvalidQuerySyntax("Expected a lowercase datatype as second argument of {} function call, got {}", funcName, text);
+    }
+    const auto datatypeOption = helper.functionBuilder.back();
+    helper.functionBuilder.pop_back();
+    const auto datatypeFn = datatypeOption.tryGetAs<FieldAccessLogicalFunction>();
+    if (not datatypeFn.has_value())
+    {
+        throw InvalidQuerySyntax("Expected a lowercase datatype as second argument of {} function call, got {}", funcName, text);
+    }
+    const auto datatypeName = datatypeFn.value().get().getFieldName();
+    const auto datatype = DataTypeProvider::tryProvideDataType(datatypeName);
+    if (not datatype.has_value())
+    {
+        throw InvalidQuerySyntax("`{}` is not a datatype, in the second argument of {} function call at {}", datatypeName, funcName, text);
+    }
+    return {statisticId, datatype.value()};
+}
+
 void AntlrSQLQueryPlanCreator::exitFunctionCall(AntlrSQLParser::FunctionCallContext* context)
 {
     const auto funcName = toUpperCase(context->children[0]->getText());
@@ -1250,56 +1285,17 @@ void AntlrSQLQueryPlanCreator::exitFunctionCall(AntlrSQLParser::FunctionCallCont
                 /// Reads back the single value of a scalar statistic: <NAME>(statisticId, valueDatatype). The value type
                 /// must be given because nothing links the probe back to the build's on-field, and schema inference runs
                 /// long before the store is consulted (same reason COUNTMIN_PROBE takes a counter datatype).
-                if (helpers.top().constantBuilder.empty())
-                {
-                    throw InvalidQuerySyntax(
-                        "Expected constant (statistic hash) as first argument of {} function call, got nothing at {}",
-                        funcName,
-                        context->getText());
-                }
-                const Statistic::StatisticId statisticId{parseConstant(helpers.top().constantBuilder.back(), "statisticId")};
-                helpers.top().constantBuilder.pop_back();
-                if (helpers.top().functionBuilder.empty())
-                {
-                    throw InvalidQuerySyntax("Expected value datatype as lowercase argument, got {}", context->getText());
-                }
-                auto valueDatatypeOption = helpers.top().functionBuilder.back();
-                helpers.top().functionBuilder.pop_back();
-                INVARIANT(
-                    valueDatatypeOption.tryGetAs<FieldAccessLogicalFunction>().has_value(),
-                    "value datatype was not a FieldAccessLogicalFunction");
-                auto valueDatatypeFn = valueDatatypeOption.getAs<FieldAccessLogicalFunction>().get();
-                auto valueDatatype = DataTypeProvider::tryProvideDataType(valueDatatypeFn.getFieldName());
-                INVARIANT(valueDatatype.has_value(), "value datatype was not a datatype");
+                const auto [statisticId, valueDatatype] = parseProbeIdAndDatatype(helpers.top(), funcName, context->getText());
                 const auto op = funcName == "SUMSTATISTIC_PROBE" ? Statistic::StatisticType::Sum
                     : funcName == "COUNTSTATISTIC_PROBE"         ? Statistic::StatisticType::Count
                                                                  : Statistic::StatisticType::Avg;
-                helpers.top().statProbe = ScalarStatisticProbeLogicalOperator(statisticId, op, valueDatatype.value());
+                helpers.top().statProbe = ScalarStatisticProbeLogicalOperator{statisticId, op, valueDatatype};
                 break;
             }
             else if (funcName == "COUNTMIN_PROBE")
             {
-                if (helpers.top().constantBuilder.empty())
-                {
-                    throw InvalidQuerySyntax(
-                        "Expected constant (sample hash) as first argument of COUNTMIN_PROBE function call, got nothing at {}",
-                        context->getText());
-                }
-                const Statistic::StatisticId statisticId{parseConstant(helpers.top().constantBuilder.back(), "statisticId")};
-                helpers.top().constantBuilder.pop_back();
-                if (helpers.top().functionBuilder.empty())
-                {
-                    throw InvalidQuerySyntax("Expected counter datatype as lowercase argument, got {}", context->getText());
-                }
-                auto counterDatatypeOption = helpers.top().functionBuilder.back();
-                helpers.top().functionBuilder.pop_back();
-                INVARIANT(
-                    counterDatatypeOption.tryGetAs<FieldAccessLogicalFunction>().has_value(),
-                    "counter datatype was not a FieldAccessLogicalFunction");
-                auto counterDatatypeFn = counterDatatypeOption.getAs<FieldAccessLogicalFunction>().get();
-                auto counterDatatype = DataTypeProvider::tryProvideDataType(counterDatatypeFn.getFieldName());
-                INVARIANT(counterDatatype.has_value(), "counter datatype was not a datatype");
-                helpers.top().statProbe = CountMinSketchProbeLogicalOperator(statisticId, counterDatatype.value());
+                const auto [statisticId, counterDatatype] = parseProbeIdAndDatatype(helpers.top(), funcName, context->getText());
+                helpers.top().statProbe = CountMinSketchProbeLogicalOperator{statisticId, counterDatatype};
                 break;
             }
             else

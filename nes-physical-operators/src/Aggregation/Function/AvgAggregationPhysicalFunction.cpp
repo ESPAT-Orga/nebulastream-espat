@@ -51,43 +51,32 @@ void AvgAggregationPhysicalFunction::lift(
     const nautilus::val<AggregationState*>& aggregationState, PipelineMemoryProvider& pipelineMemoryProvider, const Record& record)
 {
     const auto value = inputFunction.execute(record, pipelineMemoryProvider.arena);
+    const auto sum = readSum(aggregationState);
+    const auto count = readCount(aggregationState);
     if (inputType.nullable)
     {
         /// If the value is null and we do not include null values, we need to set the multiplication factor to 0
         const auto multiplicationFactor
             = nautilus::select(not includeNullValues and value.isNull(), nautilus::val<int8_t>{0}, nautilus::val<int8_t>{1});
 
-        /// Reading old sum and count from the aggregation state. The sum is stored at the beginning of the aggregation state and the count is stored after the sum
-        const auto memAreaSum = static_cast<nautilus::val<int8_t*>>(aggregationState + nautilus::val<uint64_t>{1});
-        const auto memAreaCount = memAreaSum + nautilus::val<uint64_t>(inputType.getSizeInBytesWithoutNull());
-        const auto isNull = readNull(aggregationState);
-        const auto sum = VarVal::readVarValFromMemory(memAreaSum, inputType, isNull);
-        const auto count = VarVal::readNonNullableVarValFromMemory(memAreaCount, countType);
-
         /// Updating the sum and count with the new value
         const auto newSum = (sum + (value * multiplicationFactor)).castToType(inputType.type);
         const auto newCount = count + multiplicationFactor;
 
         /// Writing the new isNull, sum, and count back to the aggregation state
-        newSum.writeToMemory(memAreaSum);
-        newCount.writeToMemory(memAreaCount);
+        newSum.writeToMemory(sumMemArea(aggregationState));
+        newCount.writeToMemory(countMemArea(aggregationState));
         storeNull(aggregationState, newSum.isNull());
     }
     else
     {
-        /// Reading old sum and count from the aggregation state. The sum is stored at the beginning of the aggregation state and the count is stored after the sum
-        const auto memAreaSum = static_cast<nautilus::val<int8_t*>>(aggregationState);
-        const auto memAreaCount = memAreaSum + nautilus::val<uint64_t>(inputType.getSizeInBytesWithoutNull());
-        const auto sum = VarVal::readNonNullableVarValFromMemory(memAreaSum, inputType);
-        const auto count = VarVal::readNonNullableVarValFromMemory(memAreaCount, countType);
-
         /// Updating the sum and count with the new value
         const auto newSum = (sum + value).castToType(inputType.type);
         const auto newCount = count + nautilus::val<uint64_t>{1};
 
         /// Writing the new sum, and count back to the aggregation state
-        newSum.writeToMemory(memAreaSum);
-        newCount.writeToMemory(memAreaCount);
+        newSum.writeToMemory(sumMemArea(aggregationState));
+        newCount.writeToMemory(countMemArea(aggregationState));
     }
 }
 
@@ -96,52 +85,15 @@ void AvgAggregationPhysicalFunction::combine(
     const nautilus::val<AggregationState*> aggregationState2,
     PipelineMemoryProvider&)
 {
+    /// Combining the sum and count of both aggregation states into the first one
+    const auto newSum = (readSum(aggregationState1) + readSum(aggregationState2)).castToType(inputType.type);
+    const auto newCount = readCount(aggregationState1) + readCount(aggregationState2);
+
+    newSum.writeToMemory(sumMemArea(aggregationState1));
+    newCount.writeToMemory(countMemArea(aggregationState1));
     if (inputType.nullable)
     {
-        /// Reading the sum and count from the first aggregation state
-        const auto memAreaSum1 = static_cast<nautilus::val<int8_t*>>(aggregationState1 + nautilus::val<uint64_t>{1});
-        const auto memAreaCount1 = memAreaSum1 + nautilus::val<uint64_t>(inputType.getSizeInBytesWithoutNull());
-        const auto isNull1 = readNull(aggregationState1);
-        const auto sum1 = VarVal::readVarValFromMemory(memAreaSum1, inputType, isNull1);
-        const auto count1 = VarVal::readNonNullableVarValFromMemory(memAreaCount1, countType);
-
-        /// Reading the sum and count from the second aggregation state
-        const auto memAreaSum2 = static_cast<nautilus::val<int8_t*>>(aggregationState2 + nautilus::val<uint64_t>{1});
-        const auto memAreaCount2 = memAreaSum2 + nautilus::val<uint64_t>(inputType.getSizeInBytesWithoutNull());
-        const auto isNull2 = readNull(aggregationState2);
-        const auto sum2 = VarVal::readVarValFromMemory(memAreaSum2, inputType, isNull2);
-        const auto count2 = VarVal::readNonNullableVarValFromMemory(memAreaCount2, countType);
-
-        /// Combining the sum and count
-        const auto newSum = (sum1 + sum2).castToType(inputType.type);
-        const auto newCount = count1 + count2;
-
-        /// Writing the new sum, count and null back to the first aggregation state
-        newSum.writeToMemory(memAreaSum1);
-        newCount.writeToMemory(memAreaCount1);
         storeNull(aggregationState1, newSum.isNull());
-    }
-    else
-    {
-        /// Reading the sum and count from the first aggregation state
-        const auto memAreaSum1 = static_cast<nautilus::val<int8_t*>>(aggregationState1);
-        const auto memAreaCount1 = memAreaSum1 + nautilus::val<uint64_t>(inputType.getSizeInBytesWithoutNull());
-        const auto sum1 = VarVal::readNonNullableVarValFromMemory(memAreaSum1, inputType);
-        const auto count1 = VarVal::readNonNullableVarValFromMemory(memAreaCount1, countType);
-
-        /// Reading the sum and count from the second aggregation state
-        const auto memAreaSum2 = static_cast<nautilus::val<int8_t*>>(aggregationState2);
-        const auto memAreaCount2 = memAreaSum2 + nautilus::val<uint64_t>(inputType.getSizeInBytesWithoutNull());
-        const auto sum2 = VarVal::readNonNullableVarValFromMemory(memAreaSum2, inputType);
-        const auto count2 = VarVal::readNonNullableVarValFromMemory(memAreaCount2, countType);
-
-        /// Combining the sum and count
-        const auto newSum = (sum1 + sum2).castToType(inputType.type);
-        const auto newCount = count1 + count2;
-
-        /// Writing the new sum and count back to the first aggregation state
-        newSum.writeToMemory(memAreaSum1);
-        newCount.writeToMemory(memAreaCount1);
     }
 }
 

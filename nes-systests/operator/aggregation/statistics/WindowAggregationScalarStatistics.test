@@ -128,9 +128,9 @@ SELECT statisticStart, statisticEnd, statisticValue FROM (
 20000 25000 20.5
 5000 10000 7.0
 
-# Two scalar statistics over a NULLABLE field in one query. Their aggregation states sit adjacently in the same
-# hashmap entry and are no longer uniformly sized (Sum/Avg carry [sum][count], Count a single counter), so this is
-# what catches a state that is sized differently from the offsets lift/combine/lower actually use.
+# A scalar statistic persists the bare aggregate, and Statistic has no null channel to record that a Sum/Avg came out
+# NULL. Rather than store a NULL sum as its raw bytes (which would silently disagree with SUM/AVG, both of which
+# NULL-poison), a nullable on-field is rejected at schema inference. ERROR 2002 = CannotDeserialize.
 CREATE LOGICAL SOURCE nullableStream(id UINT64 NOT NULL, value UINT64, timestamp UINT64 NOT NULL);
 CREATE PHYSICAL SOURCE FOR nullableStream TYPE File;
 ATTACH INLINE
@@ -141,14 +141,14 @@ ATTACH INLINE
 5,,2001
 6,6,2002
 
-CREATE SINK sinkNullableProbe(nullableStream.statisticStart UINT64 NOT NULL, nullableStream.statisticEnd UINT64 NOT NULL, nullableStream.statisticValue UINT64 NOT NULL) TYPE File;
+CREATE SINK sinkNullableBuild(nullableStream.statisticId UINT64 NOT NULL, nullableStream.statisticStart UINT64 NOT NULL, nullableStream.statisticEnd UINT64 NOT NULL, nullableStream.statisticNumberOfSeenTuples UINT64 NOT NULL) TYPE File;
 
-# The window holds 6 tuples, two of them NULL. numberOfSeenTuples counts tuples, so the Count payload is 6.
-SELECT statisticStart, statisticEnd, statisticValue FROM (
-    SELECT COUNTSTATISTIC_PROBE(501, uint64)
-    FROM (
-        SELECT SUMSTATISTIC(500, value), COUNTSTATISTIC(501, id) FROM nullableStream WINDOW TUMBLING(timestamp, size 5 sec)
-    )
-) INTO sinkNullableProbe;
+SELECT SUMSTATISTIC(500, value) FROM nullableStream WINDOW TUMBLING(timestamp, size 5 sec) INTO sinkNullableBuild;
 ----
-0 5000 6
+ERROR 2002
+
+# The NOT NULL field of the same source is still accepted, so the rejection is about the field and not the source.
+# All six timestamps fall in the first window, NULL `value` rows included: numberOfSeenTuples counts tuples, not values.
+SELECT COUNTSTATISTIC(501, id) FROM nullableStream WINDOW TUMBLING(timestamp, size 5 sec) INTO sinkNullableBuild;
+----
+501 0 5000 6

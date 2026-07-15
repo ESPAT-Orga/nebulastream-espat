@@ -51,7 +51,10 @@ LowerToPhysicalScalarStatisticProbe::apply(LogicalOperator logicalOperator, cons
         scalarProbe->statisticStartTsField.name,
         scalarProbe->statisticEndTsField.name,
         scalarProbe->statisticNumberOfSeenTuplesField.name,
-        std::move(statisticProvider)};
+        std::move(statisticProvider),
+        /// The payload is exactly the declared value, so a build that persisted a different width is a probe error
+        /// rather than something to read past the end of.
+        scalarProbe->valueType.getSizeInBytesWithoutNull()};
 
     auto inputSchema = scalarProbe.getInputSchemas()[0];
     auto outputSchema = scalarProbe.getOutputSchema();

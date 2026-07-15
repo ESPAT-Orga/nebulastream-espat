@@ -92,31 +92,24 @@ StatisticProvider& StatisticProvider::operator=(const StatisticProvider& other) 
     return *this;
 }
 
-StatisticProvider::StatisticProviderIterator StatisticProvider::begin(const nautilus::val<int8_t*>& statisticMemArea) const
+std::unique_ptr<StatisticProviderIteratorImpl> StatisticProvider::makeIteratorImpl(const nautilus::val<int8_t*>& statisticMemArea) const
 {
     switch (statisticType)
     {
         case Statistic::StatisticType::Reservoir_Sample: {
             const auto reservoirSampleArguments = dynamic_cast<ReservoirSampleProviderArguments*>(statisticProviderArguments.get());
             INVARIANT(reservoirSampleArguments != nullptr, "ReservoirSampleProviderArguments is expected!");
-            StatisticProviderIterator iterator{std::make_unique<ReservoirSampleIteratorImpl>(statisticMemArea, *reservoirSampleArguments)};
-            iterator.advanceToBegin();
-            return iterator;
+            return std::make_unique<ReservoirSampleIteratorImpl>(statisticMemArea, *reservoirSampleArguments);
         }
         case Statistic::StatisticType::Equi_Width_Histogram: {
             const auto equiWidthHistogramArguments = dynamic_cast<EquiWidthHistogramProviderArguments*>(statisticProviderArguments.get());
             INVARIANT(equiWidthHistogramArguments != nullptr, "EquiWidthHistogramProviderArguments is expected!");
-            StatisticProviderIterator iterator{
-                std::make_unique<EquiWidthHistogramIteratorImpl>(statisticMemArea, *equiWidthHistogramArguments)};
-            iterator.advanceToBegin();
-            return iterator;
+            return std::make_unique<EquiWidthHistogramIteratorImpl>(statisticMemArea, *equiWidthHistogramArguments);
         }
         case Statistic::StatisticType::Count_Min_Sketch: {
             const auto countMinArguments = dynamic_cast<CountMinSketchProviderArguments*>(statisticProviderArguments.get());
             INVARIANT(countMinArguments != nullptr, "CountMinSketchProviderArguments is expected!");
-            StatisticProviderIterator iterator{std::make_unique<CountMinSketchIteratorImpl>(statisticMemArea, *countMinArguments)};
-            iterator.advanceToBegin();
-            return iterator;
+            return std::make_unique<CountMinSketchIteratorImpl>(statisticMemArea, *countMinArguments);
         }
         /// The scalar statistics all persist a single value and differ only in its data type, so one iterator serves them all
         case Statistic::StatisticType::Count:
@@ -124,53 +117,30 @@ StatisticProvider::StatisticProviderIterator StatisticProvider::begin(const naut
         case Statistic::StatisticType::Avg: {
             const auto scalarArguments = dynamic_cast<ScalarStatisticProviderArguments*>(statisticProviderArguments.get());
             INVARIANT(scalarArguments != nullptr, "ScalarStatisticProviderArguments is expected!");
-            StatisticProviderIterator iterator{std::make_unique<ScalarStatisticIteratorImpl>(statisticMemArea, *scalarArguments)};
-            iterator.advanceToBegin();
-            return iterator;
+            return std::make_unique<ScalarStatisticIteratorImpl>(statisticMemArea, *scalarArguments);
         }
     }
 
     std::unreachable();
 }
 
+StatisticProvider::StatisticProviderIterator StatisticProvider::begin(const nautilus::val<int8_t*>& statisticMemArea) const
+{
+    StatisticProviderIterator iterator{makeIteratorImpl(statisticMemArea)};
+    iterator.advanceToBegin();
+    return iterator;
+}
+
 StatisticProvider::StatisticProviderIterator StatisticProvider::end(const nautilus::val<int8_t*>& statisticMemArea) const
 {
-    switch (statisticType)
-    {
-        case Statistic::StatisticType::Reservoir_Sample: {
-            const auto reservoirSampleArguments = dynamic_cast<ReservoirSampleProviderArguments*>(statisticProviderArguments.get());
-            INVARIANT(reservoirSampleArguments != nullptr, "ReservoirSampleProviderArguments is expected!");
-            StatisticProviderIterator iterator{std::make_unique<ReservoirSampleIteratorImpl>(statisticMemArea, *reservoirSampleArguments)};
-            iterator.advanceToEnd();
-            return iterator;
-        }
-        case Statistic::StatisticType::Equi_Width_Histogram: {
-            const auto equiWidthHistogramArguments = dynamic_cast<EquiWidthHistogramProviderArguments*>(statisticProviderArguments.get());
-            INVARIANT(equiWidthHistogramArguments != nullptr, "EquiWidthHistogramProviderArguments is expected!");
-            StatisticProviderIterator iterator{
-                std::make_unique<EquiWidthHistogramIteratorImpl>(statisticMemArea, *equiWidthHistogramArguments)};
-            iterator.advanceToEnd();
-            return iterator;
-        }
-        case Statistic::StatisticType::Count_Min_Sketch: {
-            const auto countMinArguments = dynamic_cast<CountMinSketchProviderArguments*>(statisticProviderArguments.get());
-            INVARIANT(countMinArguments != nullptr, "CountMinSketchProviderArguments is expected!");
-            StatisticProviderIterator iterator{std::make_unique<CountMinSketchIteratorImpl>(statisticMemArea, *countMinArguments)};
-            iterator.advanceToEnd();
-            return iterator;
-        }
-        case Statistic::StatisticType::Count:
-        case Statistic::StatisticType::Sum:
-        case Statistic::StatisticType::Avg: {
-            const auto scalarArguments = dynamic_cast<ScalarStatisticProviderArguments*>(statisticProviderArguments.get());
-            INVARIANT(scalarArguments != nullptr, "ScalarStatisticProviderArguments is expected!");
-            StatisticProviderIterator iterator{std::make_unique<ScalarStatisticIteratorImpl>(statisticMemArea, *scalarArguments)};
-            iterator.advanceToEnd();
-            return iterator;
-        }
-    }
+    StatisticProviderIterator iterator{makeIteratorImpl(statisticMemArea)};
+    iterator.advanceToEnd();
+    return iterator;
+}
 
-    std::unreachable();
+Statistic::StatisticType StatisticProvider::getStatisticType() const
+{
+    return statisticType;
 }
 
 StatisticProviderIteratorImpl::StatisticProviderIteratorImpl(nautilus::val<int8_t*> statisticMemArea)

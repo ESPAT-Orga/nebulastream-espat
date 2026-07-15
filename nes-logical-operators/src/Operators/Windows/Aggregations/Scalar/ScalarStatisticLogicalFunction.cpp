@@ -22,6 +22,9 @@
 #include <DataTypes/DataTypeProvider.hpp>
 #include <DataTypes/Schema.hpp>
 #include <Functions/FieldAccessLogicalFunction.hpp>
+#include <Operators/Windows/Aggregations/AvgAggregationLogicalFunction.hpp>
+#include <Operators/Windows/Aggregations/CountAggregationLogicalFunction.hpp>
+#include <Operators/Windows/Aggregations/SumAggregationLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/WindowAggregationLogicalFunction.hpp>
 #include <Util/Reflection.hpp>
 #include <fmt/format.h>
@@ -86,6 +89,15 @@ ScalarStatisticLogicalFunction ScalarStatisticLogicalFunction::withInferredStamp
     {
         throw CannotDeserialize("scalar statistics on non numeric fields is not supported, but got {}", newOnField.getDataType());
     }
+    /// A scalar statistic persists the bare aggregate, and Statistic carries no null channel to persist a NULL one in
+    /// (see makeScalarStatisticRecord). Accepting a nullable field would mean either silently storing a NULL sum as its
+    /// raw bytes, or diverging from SUM/AVG, which NULL-poison. Reject it instead of guessing.
+    if (newOnField.getDataType().nullable)
+    {
+        throw CannotDeserialize(
+            "scalar statistics on nullable fields are not supported, but got {}. Cast the field or filter out NULLs first",
+            newOnField.getDataType());
+    }
 
     const auto onFieldName = newOnField.getFieldName();
     const auto asFieldName = this->getAsField().getFieldName();
@@ -101,30 +113,32 @@ ScalarStatisticLogicalFunction ScalarStatisticLogicalFunction::withInferredStamp
         const auto fieldName = asFieldName.substr(asFieldName.find_last_of(Schema::ATTRIBUTE_NAME_SEPARATOR) + 1);
         newAsFieldName = attributeNameResolver + fieldName;
     }
-    /// The stamps must match the aggregation physical function each op derives from, since those size their state from
-    /// the input stamp and compute their result in the final stamp (see ScalarStatisticPhysicalFunction.hpp):
-    ///   Count: a UINT64 counter, mirroring CountAggregationLogicalFunction.
-    ///   Sum:   the on-field type, mirroring SumAggregationLogicalFunction, which does not widen.
-    ///   Avg:   the widened on-field type for the running sum and FLOAT64 for the quotient, mirroring
-    ///          AvgAggregationLogicalFunction. Without both, the average would be an integer division.
-    const auto nullable = newOnField.getDataType().nullable ? DataType::NULLABLE::IS_NULLABLE : DataType::NULLABLE::NOT_NULLABLE;
-    auto newInputStamp = newOnField.getDataType();
-    auto newFinalAggregateStamp = newOnField.getDataType();
+    /// Each op derives from the matching aggregation physical function, which sizes its state from the input stamp and
+    /// computes its result in the final stamp (see ScalarStatisticPhysicalFunction.hpp). So take both stamps from the
+    /// logical function that op mirrors rather than restating its widening rules here -- e.g. Avg widens the running sum
+    /// and returns FLOAT64, without which the average would be an integer division.
+    DataType newInputStamp;
+    DataType newFinalAggregateStamp;
     switch (op)
     {
-        case Statistic::StatisticType::Count:
-            newInputStamp = DataTypeProvider::provideDataType(DataType::Type::UINT64, nullable);
-            newFinalAggregateStamp = DataTypeProvider::provideDataType(DataType::Type::UINT64, DataType::NULLABLE::NOT_NULLABLE);
+        case Statistic::StatisticType::Count: {
+            const auto inferred = CountAggregationLogicalFunction{newOnField}.withInferredStamp(schema);
+            newInputStamp = inferred.getInputStamp();
+            newFinalAggregateStamp = inferred.getFinalAggregateStamp();
             break;
-        case Statistic::StatisticType::Sum:
+        }
+        case Statistic::StatisticType::Sum: {
+            const auto inferred = SumAggregationLogicalFunction{newOnField}.withInferredStamp(schema);
+            newInputStamp = inferred.getInputStamp();
+            newFinalAggregateStamp = inferred.getFinalAggregateStamp();
             break;
-        case Statistic::StatisticType::Avg:
-            newInputStamp = newOnField.getDataType().isInteger()
-                ? DataTypeProvider::provideDataType(
-                      newOnField.getDataType().isSignedInteger() ? DataType::Type::INT64 : DataType::Type::UINT64, nullable)
-                : DataTypeProvider::provideDataType(DataType::Type::FLOAT64, nullable);
-            newFinalAggregateStamp = DataTypeProvider::provideDataType(DataType::Type::FLOAT64, nullable);
+        }
+        case Statistic::StatisticType::Avg: {
+            const auto inferred = AvgAggregationLogicalFunction{newOnField}.withInferredStamp(schema);
+            newInputStamp = inferred.getInputStamp();
+            newFinalAggregateStamp = inferred.getFinalAggregateStamp();
             break;
+        }
         default:
             throw CannotDeserialize("ScalarStatistic expects a scalar statistic type but got {}", magic_enum::enum_name(op));
     }

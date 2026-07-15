@@ -34,7 +34,10 @@ public:
         std::string_view statisticStartTsFieldName,
         std::string_view statisticEndTsFieldName,
         std::string_view statisticNumberOfSeenTuplesFieldName,
-        StatisticProvider statisticProvider);
+        StatisticProvider statisticProvider,
+        /// Width of the payload this probe expects, checked against what the build actually persisted. Pass 0 for the
+        /// synopses, whose payload width depends on their memory budget and so cannot be known here.
+        uint64_t expectedPayloadSizeInBytes = 0);
 
     /// Gets the single statistic for given metadata from the StatisticStore and creates records out of it
     void execute(ExecutionContext& executionCtx, Record& record) const override;
@@ -50,6 +53,7 @@ private:
     std::string statisticEndTsFieldName;
     std::string statisticNumberOfSeenTuplesFieldName;
     StatisticProvider statisticProvider;
+    uint64_t expectedPayloadSizeInBytes;
 };
 
 }

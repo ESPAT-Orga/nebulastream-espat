@@ -35,6 +35,7 @@
 #include <Operators/Statistic/StatisticStoreWriterLogicalOperator.hpp>
 #include <Operators/Windows/Aggregations/Histogram/EquiWidthHistogramProbeLogicalOperator.hpp>
 #include <Operators/Windows/Aggregations/Sample/ReservoirProbeLogicalOperator.hpp>
+#include <Operators/Windows/Aggregations/Scalar/ScalarStatisticProbeLogicalOperator.hpp>
 #include <Operators/Windows/Aggregations/Sketch/CountMinSketchProbeLogicalOperator.hpp>
 #include <Plans/LogicalPlan.hpp>
 #include <Traits/PinnedHostTrait.hpp>
@@ -381,6 +382,10 @@ void addStatisticColocationConstraints(PlacementModel& model, const LogicalPlan&
             statisticId = probe->get().statisticId;
         }
         else if (auto probe = op.tryGetAs<EquiWidthHistogramProbeLogicalOperator>())
+        {
+            statisticId = probe->get().statisticId;
+        }
+        else if (auto probe = op.tryGetAs<ScalarStatisticProbeLogicalOperator>())
         {
             statisticId = probe->get().statisticId;
         }

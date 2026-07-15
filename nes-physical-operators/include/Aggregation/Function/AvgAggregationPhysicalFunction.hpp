@@ -15,10 +15,12 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <Aggregation/Function/AggregationPhysicalFunction.hpp>
 #include <DataTypes/DataType.hpp>
 #include <Functions/PhysicalFunction.hpp>
+#include <Nautilus/DataTypes/VarVal.hpp>
 #include <Nautilus/Interface/Record.hpp>
 #include <Runtime/AbstractBufferProvider.hpp>
 #include <val_concepts.hpp>
@@ -49,8 +51,17 @@ public:
     [[nodiscard]] size_t getSizeOfStateInBytes() const override;
     ~AvgAggregationPhysicalFunction() override = default;
 
-private:
+protected:
+    /// The state is [optional isNull byte][sum : inputType][count : countType]. These locate and read the two halves,
+    /// so that subclasses reusing this state (see ScalarStatisticPhysicalFunction.cpp) do not repeat the offset math.
+    [[nodiscard]] nautilus::val<int8_t*> sumMemArea(const nautilus::val<AggregationState*>& aggregationState) const;
+    [[nodiscard]] nautilus::val<int8_t*> countMemArea(const nautilus::val<AggregationState*>& aggregationState) const;
+    [[nodiscard]] VarVal readSum(const nautilus::val<AggregationState*>& aggregationState) const;
+    [[nodiscard]] VarVal readCount(const nautilus::val<AggregationState*>& aggregationState) const;
+
     DataType countType{DataType::Type::UINT64, DataType::NULLABLE::NOT_NULLABLE};
+
+private:
     bool includeNullValues;
 };
 

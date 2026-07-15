@@ -63,6 +63,7 @@
 #include <Operators/Windows/Aggregations/Sample/ReservoirProbeLogicalOperator.hpp>
 #include <Operators/Windows/Aggregations/Sample/ReservoirSampleLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/Scalar/ScalarStatisticLogicalFunction.hpp>
+#include <Operators/Windows/Aggregations/Scalar/ScalarStatisticProbeLogicalOperator.hpp>
 #include <Operators/Windows/Aggregations/Sketch/CountMinSketchLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/Sketch/CountMinSketchProbeLogicalOperator.hpp>
 #include <Operators/Windows/Aggregations/SumAggregationLogicalFunction.hpp>
@@ -600,6 +601,13 @@ void AntlrSQLQueryPlanCreator::exitPrimaryQuery(AntlrSQLParser::PrimaryQueryCont
             helpers.top().addProjection({}, rowIndex);
             helpers.top().addProjection({}, columnIndex);
             helpers.top().addProjection({}, counter);
+        }
+        else if (auto probeOpt = op.tryGetAs<ScalarStatisticProbeLogicalOperator>())
+        {
+            const auto probe = probeOpt.value().get();
+            const auto value = FieldAccessLogicalFunction{probe.valueType, probe.valueFieldName};
+
+            helpers.top().addProjection({}, value);
         }
     }
 
@@ -1235,6 +1243,38 @@ void AntlrSQLQueryPlanCreator::exitFunctionCall(AntlrSQLParser::FunctionCallCont
                     LogicalStatisticFields().statisticDataField.dataType, LogicalStatisticFields().statisticDataField.name};
                 helpers.top().windowAggs.push_back(std::make_shared<WindowAggregationLogicalFunction>(
                     ScalarStatisticLogicalFunction{fieldName, asFieldIfNotOverwritten, statisticId, op}));
+                break;
+            }
+            else if (funcName == "SUMSTATISTIC_PROBE" || funcName == "COUNTSTATISTIC_PROBE" || funcName == "AVGSTATISTIC_PROBE")
+            {
+                /// Reads back the single value of a scalar statistic: <NAME>(statisticId, valueDatatype). The value type
+                /// must be given because nothing links the probe back to the build's on-field, and schema inference runs
+                /// long before the store is consulted (same reason COUNTMIN_PROBE takes a counter datatype).
+                if (helpers.top().constantBuilder.empty())
+                {
+                    throw InvalidQuerySyntax(
+                        "Expected constant (statistic hash) as first argument of {} function call, got nothing at {}",
+                        funcName,
+                        context->getText());
+                }
+                const Statistic::StatisticId statisticId{parseConstant(helpers.top().constantBuilder.back(), "statisticId")};
+                helpers.top().constantBuilder.pop_back();
+                if (helpers.top().functionBuilder.empty())
+                {
+                    throw InvalidQuerySyntax("Expected value datatype as lowercase argument, got {}", context->getText());
+                }
+                auto valueDatatypeOption = helpers.top().functionBuilder.back();
+                helpers.top().functionBuilder.pop_back();
+                INVARIANT(
+                    valueDatatypeOption.tryGetAs<FieldAccessLogicalFunction>().has_value(),
+                    "value datatype was not a FieldAccessLogicalFunction");
+                auto valueDatatypeFn = valueDatatypeOption.getAs<FieldAccessLogicalFunction>().get();
+                auto valueDatatype = DataTypeProvider::tryProvideDataType(valueDatatypeFn.getFieldName());
+                INVARIANT(valueDatatype.has_value(), "value datatype was not a datatype");
+                const auto op = funcName == "SUMSTATISTIC_PROBE" ? Statistic::StatisticType::Sum
+                    : funcName == "COUNTSTATISTIC_PROBE"         ? Statistic::StatisticType::Count
+                                                                 : Statistic::StatisticType::Avg;
+                helpers.top().statProbe = ScalarStatisticProbeLogicalOperator(statisticId, op, valueDatatype.value());
                 break;
             }
             else if (funcName == "COUNTMIN_PROBE")

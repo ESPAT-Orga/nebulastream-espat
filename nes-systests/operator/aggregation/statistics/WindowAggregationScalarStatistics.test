@@ -1,9 +1,10 @@
 # name: window/synopsis/WindowAggregationScalarStatistics.test
-# description: Build-only test for the store-backed scalar statistics (Sum / Count / Avg).
-#              These are build-only (never probed): they persist an 8-byte scalar synopsis via the
-#              StatisticStoreWriter. The build sink reports the per-window metadata row
-#              (statisticId, statisticStart, statisticEnd, statisticNumberOfSeenTuples). The metadata is
-#              identical across the three ops because numberOfSeenTuples is just the tuple count per window.
+# description: Build and probe test for the store-backed scalar statistics (Sum / Count / Avg). Each persists its
+#              real aggregate as a bare scalar synopsis via the StatisticStoreWriter. The build sink reports the
+#              per-window metadata row (statisticId, statisticStart, statisticEnd, statisticNumberOfSeenTuples);
+#              that metadata is identical across the three ops, because numberOfSeenTuples is the tuple count per
+#              window regardless of op. What tells the ops apart is the payload, so the probe queries below are
+#              what actually pin down the semantics: Sum sums, Count counts, and Avg divides.
 # groups: [Synopsis, Aggregation, WindowOperators]
 
 CREATE LOGICAL SOURCE stream(id UINT64 NOT NULL, value UINT64 NOT NULL, timestamp UINT64 NOT NULL);
@@ -77,3 +78,77 @@ SELECT SUMSTATISTIC(301, value), COUNTSTATISTIC(302, id) FROM stream WINDOW TUMB
 302 15000 20000 5
 302 20000 25000 2
 302 5000 10000 5
+
+# Probe the persisted payload. This is what distinguishes the three ops: the metadata above is op-independent, so
+# only these rows prove that SUMSTATISTIC actually sums rather than counting tuples.
+# probe arguments: statisticId, datatype of the persisted value. The datatype cannot be all caps, otherwise Antlr
+# will not parse it for us; it has to look like the usual datatypes from DataType.hpp.
+CREATE SINK sinkScalarProbe(stream.statisticStart UINT64 NOT NULL, stream.statisticEnd UINT64 NOT NULL, stream.statisticValue UINT64 NOT NULL) TYPE File;
+CREATE SINK sinkScalarProbeFloat(stream.statisticStart UINT64 NOT NULL, stream.statisticEnd UINT64 NOT NULL, stream.statisticValue FLOAT64 NOT NULL) TYPE File;
+
+# Sum probe: the real sum of `value` per window, NOT the tuple count.
+SELECT statisticStart, statisticEnd, statisticValue FROM (
+    SELECT SUMSTATISTIC_PROBE(401, uint64)
+    FROM (
+        SELECT SUMSTATISTIC(401, value) FROM stream WINDOW TUMBLING(timestamp, size 5 sec)
+    )
+) INTO sinkScalarProbe;
+----
+0 5000 25
+10000 15000 60
+15000 20000 85
+20000 25000 41
+5000 10000 35
+
+# Count probe: here the payload and the tuple count do coincide.
+SELECT statisticStart, statisticEnd, statisticValue FROM (
+    SELECT COUNTSTATISTIC_PROBE(402, uint64)
+    FROM (
+        SELECT COUNTSTATISTIC(402, value) FROM stream WINDOW TUMBLING(timestamp, size 5 sec)
+    )
+) INTO sinkScalarProbe;
+----
+0 5000 11
+10000 15000 5
+15000 20000 5
+20000 25000 2
+5000 10000 5
+
+# Avg probe: a FLOAT64 quotient, so window 0-5000 is 25/11 rather than an integer division to 2.
+SELECT statisticStart, statisticEnd, statisticValue FROM (
+    SELECT AVGSTATISTIC_PROBE(403, float64)
+    FROM (
+        SELECT AVGSTATISTIC(403, value) FROM stream WINDOW TUMBLING(timestamp, size 5 sec)
+    )
+) INTO sinkScalarProbeFloat;
+----
+0 5000 2.272727
+10000 15000 12.0
+15000 20000 17.0
+20000 25000 20.5
+5000 10000 7.0
+
+# Two scalar statistics over a NULLABLE field in one query. Their aggregation states sit adjacently in the same
+# hashmap entry and are no longer uniformly sized (Sum/Avg carry [sum][count], Count a single counter), so this is
+# what catches a state that is sized differently from the offsets lift/combine/lower actually use.
+CREATE LOGICAL SOURCE nullableStream(id UINT64 NOT NULL, value UINT64, timestamp UINT64 NOT NULL);
+CREATE PHYSICAL SOURCE FOR nullableStream TYPE File;
+ATTACH INLINE
+1,1,1000
+2,,1001
+3,3,1002
+4,4,2000
+5,,2001
+6,6,2002
+
+CREATE SINK sinkNullableProbe(nullableStream.statisticStart UINT64 NOT NULL, nullableStream.statisticEnd UINT64 NOT NULL, nullableStream.statisticValue UINT64 NOT NULL) TYPE File;
+
+# The window holds 6 tuples, two of them NULL. numberOfSeenTuples counts tuples, so the Count payload is 6.
+SELECT statisticStart, statisticEnd, statisticValue FROM (
+    SELECT COUNTSTATISTIC_PROBE(501, uint64)
+    FROM (
+        SELECT SUMSTATISTIC(500, value), COUNTSTATISTIC(501, id) FROM nullableStream WINDOW TUMBLING(timestamp, size 5 sec)
+    )
+) INTO sinkNullableProbe;
+----
+0 5000 6

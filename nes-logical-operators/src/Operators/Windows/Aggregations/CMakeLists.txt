@@ -32,3 +32,4 @@ add_plugin(ScalarStatistic AggregationLogicalFunction nes-logical-operators Scal
 add_plugin(ReservoirProbe LogicalOperator nes-logical-operators Sample/ReservoirProbeLogicalOperator.cpp)
 add_plugin(EquiWidthHistogramProbe LogicalOperator nes-logical-operators Histogram/EquiWidthHistogramProbeLogicalOperator.cpp)
 add_plugin(CountMinSketchProbe LogicalOperator nes-logical-operators Sketch/CountMinSketchProbeLogicalOperator.cpp)
+add_plugin(ScalarStatisticProbe LogicalOperator nes-logical-operators Scalar/ScalarStatisticProbeLogicalOperator.cpp)

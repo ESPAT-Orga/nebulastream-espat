@@ -287,7 +287,7 @@ STORE_WRITER_AGGS = ["Count", "Avg", "Sum", "Reservoir", "EquiWidthHistogram", "
 # memory_budget group in the plot shows all six aggregations (the scalar query ignores the budget).
 STORE_WRITER_SCALAR_AGGS = {"Count", "Avg", "Sum"}
 # STORE_WRITER_MEMORY_BUDGETS = memoryBudgetConfig  # [1, 5, 10] KiB
-STORE_WRITER_MEMORY_BUDGETS = [5 * 1024]  # [1, 5, 10] KiB
+STORE_WRITER_MEMORY_BUDGETS = [10 * 1024]  # [1, 5, 10] KiB
 # STORE_WRITER_WINDOW_SIZES = allBuildWindowSizesSec  # [1, 5, 10]
 STORE_WRITER_WINDOW_SIZES = [1, 5, 10]  # [1, 5, 10]
 STORE_WRITER_WORKER_THREADS = ["1", "16"]

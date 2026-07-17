@@ -298,7 +298,10 @@ if __name__ == "__main__":
         except OSError:
             pass
 
-    initialize_csv_file(csv_path, STORE_WRITER_FIELDNAMES)
+    # Write the header only for a fresh/empty CSV; a run_grid appends, so re-invoking to accumulate
+    # more runs into an existing file must not re-emit the header. Delete the file to start clean.
+    if not os.path.exists(csv_path) or os.path.getsize(csv_path) == 0:
+        initialize_csv_file(csv_path, STORE_WRITER_FIELDNAMES)
 
     runner_config = RunnerConfig(
         runner_name="storewr",

@@ -113,6 +113,31 @@ multiple *inputs*. Required for deploying statistic sinks together with a query 
   physical plan because the lowering issue currently prevents fan-out graphs from reaching this phase
   through the normal compile path — fixing the lowering issue first allows an end-to-end test.
 
+### Design note: alternative to the third pipeline policy (producer-driven closing)
+
+The pipelining phase is currently *consumer-driven*: whoever starts a new pipeline closes its predecessor
+pipeline (adds the emit) as part of its own break, guarded by "was the previous operator a custom emit?".
+The third policy exists because fan-out introduces closing that is performed by the traversal on behalf of
+several not-yet-visited consumers — a fact those consumers cannot re-derive locally, so it must be handed
+down the recursion.
+
+An alternative is to make closing *producer-driven* with a one-step look-ahead: after placing an operator,
+close its pipeline right there iff no child will fuse into it. Two of the cases already work this way (no
+children → emit; more than one child → the single fan-out emit); the change would extend it to the
+single-child case. Every breaker then finds its predecessor pipeline closed by construction, the policy
+channel disappears (the remaining `Continue`/`ForceNew` distinctions are locally derivable: "current
+pipeline is a source pipeline", "previous operator is a custom emit"), and all emit-adding — including the
+native-vs-formatting flavor choice — collapses into a single site instead of the ~six policy-guarded sites.
+
+The caveat that decides whether this is simpler or more fragile: the look-ahead duplicates the child's
+break decision (scan-located / sink / merge point / already pipelined / custom emit that fuses in as the
+closer). It must be centralized as ONE predicate (`startsNewPipeline(child, context)`) shared by the
+producer's look-ahead and the child's own visit — two drifting copies of that logic would reintroduce
+silent double-emit/missing-emit bugs. Recommended sequencing: fix this issue with the third policy (a small
+additive change to a battle-tested traversal, reviewable as a delta), and treat producer-driven closing as
+a follow-up refactor — it restructures the whole dispatch and requires revalidating all existing shapes;
+the shape tests from this issue transfer unchanged and would carry that refactor.
+
 ---
 
 ## Issue: Instantiate query plans with multiple sinks (incl. backpressure ownership)

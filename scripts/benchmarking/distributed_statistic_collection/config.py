@@ -60,13 +60,14 @@ TOPOLOGIES = [t.strip() for t in os.environ.get("TOPOLOGIES", "1/2").split(",") 
 ### Override with MODES="traffic" (single) or MODE=contention (back-compat single mode).
 MODES = [m.strip() for m in (os.environ.get("MODES") or os.environ.get("MODE") or "traffic,contention").split(",") if m.strip()]
 
-### Contention mode: shared root-ingress bandwidth caps in kbit (0 = uncapped baseline). Chosen to straddle
-### WEAVE's own synopsis upstream load (~2.3 Mbit/s, see summary.csv split total_bytes): all points sit
-### above it (100/30/10/3 Mbit) so WEAVE fits and the SOTA-vs-WEAVE gap is the clean, monotone story. Below
-### ~2.3 Mbit WEAVE's own synopsis no longer fits and GP collapses to ~1x (crossover), and sub-Mbit caps are
-### below the delivered-count noise floor — so those points are dropped here. The cap is a tbf-policed
-### ingress qdisc on the root container's eth0 (needs --cap-add=NET_ADMIN + tc in the image).
-BANDWIDTH_LIMITS_KBIT = [int(x) for x in os.environ.get("BANDWIDTH_LIMITS_KBIT", "0,1000000,100000,10000").split(",")]
+### Contention mode: shared root-ingress bandwidth caps in kbit (0 = uncapped baseline). Points sweep
+### 1000/100/10/1 Mbit, all above WEAVE's own synopsis upstream load (~0.14 Mbit/s at the 1 KiB budget;
+### the 2.3 Mbit/s in summary.csv split total_bytes was measured at 16 KB and scales /16 with the budget),
+### so WEAVE fits at every cap and the SOTA-vs-WEAVE gap stays the clean, monotone story. 1 Mbit is the
+### tightest cap in the sweep — sub-Mbit caps sit near the delivered-count noise floor, so they're left
+### out. The cap is a tbf-policed ingress qdisc on the root container's eth0 (needs --cap-add=NET_ADMIN
+### + tc in the image).
+BANDWIDTH_LIMITS_KBIT = [int(x) for x in os.environ.get("BANDWIDTH_LIMITS_KBIT", "0,1000000,100000,10000,1000").split(",")]
 ### tbf burst FLOOR in bytes. apply_ingress_cap sizes the actual burst to the rate (>= rate/HZ so the shaper
 ### can reach `rate`); this floor (~2 packets) is only the lower bound, so a small kbit cap still binds
 ### instead of letting a large fixed burst through instantly. Reduced from 256k now that low caps are used.
@@ -187,11 +188,11 @@ STATISTIC_WINDOW_SIZE_MS = int(os.environ.get("STATISTIC_WINDOW_SIZE_MS", 100_00
 USE_EVENT_TIME = os.environ.get("USE_EVENT_TIME", "1") == "1"
 ### Synopsis size in bytes (drives the histogram bucket count). Keep it well below the raw bytes per
 ### window (~window_tuples x 12 B) so the synopsis genuinely compresses the window: that is what makes
-### split (synopsis crosses) land between prometheus (raw) and local (4 scalars). 2 KB << 1.2 MB/window.
+### split (synopsis crosses) land between prometheus (raw) and local (4 scalars). 1 KiB << 1.2 MB/window.
 ### This is also WEAVE's per-synopsis upstream cost: footprint ~= (SOURCES_PER_LEAF x leaves) x
-### (GENERATOR_RATE / window_tuples) x HISTOGRAM_MEMORY_BUDGET. At 2 KB that's ~0.26 Mbit/s (was 2.1 at
+### (GENERATOR_RATE / window_tuples) x HISTOGRAM_MEMORY_BUDGET. At 1 KiB that's ~0.13 Mbit/s (was 2.1 at
 ### 16 KB), so WEAVE now fits — and wins — under caps down to a few hundred kbit.
-HISTOGRAM_MEMORY_BUDGET = int(os.environ.get("HISTOGRAM_MEMORY_BUDGET", 2048))
+HISTOGRAM_MEMORY_BUDGET = int(os.environ.get("HISTOGRAM_MEMORY_BUDGET", 1024))
 HISTOGRAM_MIN = int(os.environ.get("HISTOGRAM_MIN", 0))
 HISTOGRAM_MAX = int(os.environ.get("HISTOGRAM_MAX", 1_000_000))
 PROM_HISTOGRAM_NUM_BUCKETS = int(os.environ.get("PROM_HISTOGRAM_NUM_BUCKETS", 100))

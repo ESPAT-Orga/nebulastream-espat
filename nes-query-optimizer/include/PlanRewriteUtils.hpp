@@ -25,4 +25,5 @@ namespace NES
 /// recursively replaces field accesses of given LogicalFunction if they are a key in given field map with the field the key points to
 LogicalFunction replaceFieldAccesses(const LogicalFunction& function, const std::unordered_map<Field, Field>& fields);
 
+
 }

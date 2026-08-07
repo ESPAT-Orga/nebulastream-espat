@@ -43,4 +43,6 @@ LogicalFunction replaceFieldAccesses(const LogicalFunction& function, const std:
 
     return function.withChildren(newChildren);
 }
+
+
 }

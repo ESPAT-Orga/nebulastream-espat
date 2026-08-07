@@ -58,9 +58,9 @@ struct InsertParams
     /// Total number of statistics (see Statistic.hpp) inserted
     static inline const std::vector<uint64_t> numStatisticsVals{10'000'000};
     /// Number of statistic queries that are inserting
-    static inline const std::vector<uint64_t> numStatisticIdsValsInsert{1, 10, 100, 1'000};
+    static inline const std::vector<uint64_t> numStatisticIdsValsInsert{1, 10, 100, 1'000, 10'000};
     static inline const std::vector<uint64_t> statisticSizes{1 * 1024};
-    static inline const std::vector<uint64_t> threadCounts{1, 4, 16};
+    static inline const std::vector<uint64_t> threadCounts{1, 2, 4, 8, 16};
     static constexpr uint64_t windowSize = 60'000;
 
     /// Insert pre-creates numStatistics stats of statisticSize bytes.
@@ -107,10 +107,11 @@ struct GetParams
 
     /// Pairs of (numStatisticIdsInsert, numStatisticIdsGet) to benchmark as-is.
     /// Each pair runs once; there is NO cross product between the two values.
-    static inline const std::vector<std::pair<uint64_t, uint64_t>> numStatisticIdsVals{{1, 1}, {10, 1}, {10, 10}, {100, 1}, {100, 10}};
+    static inline const std::vector<std::pair<uint64_t, uint64_t>> numStatisticIdsVals{
+        {1, 1}, {10, 1}, {10, 10}, {100, 1}, {100, 10}, {1'000, 1}, {1'000, 10}, {1'000, 100}};
 
     static inline const std::vector<uint64_t> statisticSizes{4096};
-    static inline const std::vector<uint64_t> threadCounts{1, 4, 16};
+    static inline const std::vector<uint64_t> threadCounts{1, 2, 4, 8, 16};
 
     static inline const std::vector<uint64_t> pctAccessExistingVals{100};
     static inline const std::vector<uint64_t> numWindowsPerRequestVals{1, 10, 100, 1'000};
@@ -159,7 +160,7 @@ struct MixedParams
     /// Each pair runs once; there is NO cross product between the two values.
     static inline const std::vector<std::pair<uint64_t, uint64_t>> numStatisticIdsVals{{1, 1}, {10, 10}, {1'000, 1'000}};
     static inline const std::vector<uint64_t> statisticSizes{1024, 4 * 1024, 10 * 1024};
-    static inline const std::vector<uint64_t> threadCounts{1, 4, 16};
+    static inline const std::vector<uint64_t> threadCounts{1, 2, 4, 8, 16};
     static inline const std::vector<uint64_t> pctInsertVals{10, 50, 90};
     static inline const std::vector<uint64_t> pctPrePopulateVals{10, 50, 90};
     static inline const std::vector<uint64_t> numWindowsPerRequestVals{1, 10, 100};

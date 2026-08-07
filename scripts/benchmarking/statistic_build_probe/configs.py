@@ -290,7 +290,7 @@ STORE_WRITER_SCALAR_AGGS = {"Count", "Avg", "Sum"}
 STORE_WRITER_MEMORY_BUDGETS = [10 * 1024]  # [1, 5, 10] KiB
 # STORE_WRITER_WINDOW_SIZES = allBuildWindowSizesSec  # [1, 5, 10]
 STORE_WRITER_WINDOW_SIZES = [1, 5, 10]  # [1, 5, 10]
-STORE_WRITER_WORKER_THREADS = ["1", "16"]
+STORE_WRITER_WORKER_THREADS = ["1", "2", "4", "8", "16"]
 # Environment variable read by the SQL planner to omit the StatisticStoreWriter chain (benchmark knob).
 STORE_WRITER_ENV = "NES_STAT_OMIT_STORE_WRITER"
 

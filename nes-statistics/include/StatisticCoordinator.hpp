@@ -156,7 +156,7 @@ private:
     /// instead of submitting a duplicate. Without this, multi-field workload monitoring deploys
     /// N redundant data queries (one per registry-key-distinct call), which would actually run
     /// the user's SELECT N times.
-    folly::Synchronized<std::unordered_map<std::string, QueryId>> deployedDataQueriesBySource;
+    folly::Synchronized<std::unordered_map<std::string, QueryId>> deployedDataQueriesByPlan;
 };
 
 }

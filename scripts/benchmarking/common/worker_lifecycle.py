@@ -55,7 +55,14 @@ def terminate_process_if_exists(process):
     # systemd-run --scope does not forward signals to the child process, so the
     # actual nes-single-node-worker may still be running after we kill systemd-run.
     # Forcibly kill any remaining instances to avoid blocking the next experiment.
-    subprocess.run(["pkill", "-9", "-x", "nes-single-node-worker"], capture_output=True)
+    #
+    # Must match on the command line (-f), not the process name (-x): the worker's comm is "main",
+    # and pkill silently matches nothing for -x patterns longer than 15 characters anyway. With -x
+    # this never killed a straggler, which left ports 8080/9090 held and made the *next* run die
+    # with "Address already in use". The pattern repeats the directory so it cannot match an
+    # unrelated command line that merely mentions the worker.
+    subprocess.run(["pkill", "-9", "-f", "nes-single-node-worker/nes-single-node-worker"],
+                   capture_output=True)
     # Brief pause after process exit to let the OS fully release the port.
     time.sleep(2)
 

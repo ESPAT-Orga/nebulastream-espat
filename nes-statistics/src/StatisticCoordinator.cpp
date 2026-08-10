@@ -14,17 +14,12 @@
 
 #include <StatisticCoordinator.hpp>
 
-#include <algorithm>
 #include <chrono>
 #include <cstdint>
-#include <cstdlib>
 #include <future>
 #include <memory>
 #include <optional>
 #include <string>
-#include <string_view>
-#include <thread>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 #include <DataTypes/Schema.hpp>
@@ -37,10 +32,8 @@
 #include <Traits/TraitSet.hpp>
 #include <Util/Logger/Logger.hpp>
 #include <Util/PlanRenderer.hpp>
-#include <Util/Strings.hpp>
 #include <WindowTypes/Measures/TimeMeasure.hpp>
 #include <cpptrace/from_current.hpp>
-#include <fmt/ranges.h>
 #include <google/protobuf/empty.pb.h>
 #include <grpcpp/client_context.h>
 #include <grpcpp/create_channel.h>
@@ -154,59 +147,22 @@ std::expected<CollectStatisticResult, Exception> StatisticCoordinator::collectWo
         return std::unexpected(InvalidConfigParameter("collectWorkloadStatistic requires a WorkloadDomain in the request"));
     }
 
-    /// Pick the SourceNameLogicalOperator to splice the build branch onto, as a sibling consumer of
-    /// that operator.
-    ///
-    /// Single-source data queries (the adaptive-optimization case: one Memory source feeding a
-    /// filter chain) need no disambiguation. Join-shaped data queries have several sources and each
-    /// companion must say which one it observes — via the `splice_source` option, naming the logical
-    /// source. The field name cannot serve as the discriminator: in Nexmark Q8 both `person` and
-    /// `auction` carry an `id`, so `--companion-field id` would be ambiguous exactly where it
-    /// matters. domain.operatorId would work too, but the REPL companion path leaves it
-    /// INVALID_OPERATOR_ID, so the caller has no way to set it.
+    /// MVP: assume the data query has exactly one SourceNameLogicalOperator and splice the build
+    /// branch as a sibling consumer of that operator. This matches the adaptive-optimization use
+    /// case (single Memory source feeding a filter chain). Multi-source / join-shaped data queries
+    /// would need a richer splice (matching against domain.operatorId explicitly).
     const auto sources = getOperatorByType<SourceNameLogicalOperator>(dataQueryPlan);
     if (sources.empty())
     {
         return std::unexpected(InvalidConfigParameter("WorkloadDomain splice: data query has no source-name operator"));
     }
-
-    auto sourceNamesForDiagnostics = [&sources]
+    if (sources.size() != 1)
     {
-        std::vector<std::string> names;
-        names.reserve(sources.size());
-        for (const auto& source : sources)
-        {
-            names.emplace_back(source->getLogicalSourceName());
-        }
-        return fmt::format("{}", fmt::join(names, ", "));
-    };
-
-    size_t spliceIndex = 0;
-    if (const auto requestedIt = statement.options.find("splice_source");
-        requestedIt != statement.options.end() and not requestedIt->second.empty())
-    {
-        const auto requested = toUpperCase(requestedIt->second);
-        const auto match = std::ranges::find_if(
-            sources, [&requested](const auto& source) { return toUpperCase(source->getLogicalSourceName()) == requested; });
-        if (match == sources.end())
-        {
-            return std::unexpected(InvalidConfigParameter(
-                "WorkloadDomain splice: data query has no source named '{}' (candidates: {})",
-                requestedIt->second,
-                sourceNamesForDiagnostics()));
-        }
-        spliceIndex = static_cast<size_t>(std::ranges::distance(sources.begin(), match));
+        return std::unexpected(
+            NotImplemented("WorkloadDomain splice MVP requires the data query to have exactly one source (got {})", sources.size()));
     }
-    else if (sources.size() != 1)
-    {
-        return std::unexpected(InvalidConfigParameter(
-            "WorkloadDomain splice: data query has {} sources ({}), so the request must name one via the "
-            "'splice_source' option",
-            sources.size(),
-            sourceNamesForDiagnostics()));
-    }
-    const LogicalOperator spliceLeaf{sources[spliceIndex]};
-    const auto sourceNameUpper = sources[spliceIndex]->getLogicalSourceName();
+    const LogicalOperator spliceLeaf{sources.front()};
+    const auto sourceNameUpper = sources.front()->getLogicalSourceName();
 
     const StatisticRegistry::Key key{
         .metric = statement.metric, .collectionDomain = statement.domain, .windowSize = Windowing::TimeMeasure{statement.windowSizeMs}};
@@ -249,66 +205,16 @@ std::expected<CollectStatisticResult, Exception> StatisticCoordinator::collectWo
             /// keep default 1
         }
     }
-
-    /// Per-source splice counts for join-shaped data queries, as "PERSON=1,AUCTION=1" in the
-    /// `splice_counts` option. Each source must defer on the number of build branches that will
-    /// attach to *it*, not on the session-wide total: with one companion per source of a two-source
-    /// join, stamping the session total (2) on one source would make it wait for a splice that
-    /// never lands there. Absent the option we keep the single-source behaviour exactly — stamp the
-    /// first source with `expected_splice_count`.
-    std::unordered_map<std::string, uint32_t> perSourceSpliceCounts;
-    if (const auto countsIt = statement.options.find("splice_counts"); countsIt != statement.options.end() and not countsIt->second.empty())
-    {
-        const std::string_view spec{countsIt->second};
-        for (size_t begin = 0; begin < spec.size();)
-        {
-            const auto end = std::min(spec.find(',', begin), spec.size());
-            const auto pair = spec.substr(begin, end - begin);
-            begin = end + 1;
-            const auto eq = pair.find('=');
-            if (eq == std::string_view::npos)
-            {
-                continue;
-            }
-            CPPTRACE_TRY
-            {
-                perSourceSpliceCounts.insert_or_assign(
-                    toUpperCase(pair.substr(0, eq)),
-                    std::max<uint32_t>(1, static_cast<uint32_t>(std::stoul(std::string{pair.substr(eq + 1)}))));
-            }
-            CPPTRACE_CATCH(...)
-            {
-                /// skip an unparseable entry rather than failing the whole deploy
-            }
-        }
-    }
-
     auto dataPlanWithDeferTrait = dataQueryPlan;
     {
         const auto dataSources = getOperatorByType<SourceNameLogicalOperator>(dataPlanWithDeferTrait);
-        for (size_t i = 0; i < dataSources.size(); ++i)
+        if (not dataSources.empty())
         {
-            uint32_t countForSource = 0;
-            if (perSourceSpliceCounts.empty())
-            {
-                /// Single-source path: only the first source defers, on the session-wide count.
-                countForSource = (i == 0) ? expectedSpliceCount : 0;
-            }
-            else if (const auto it = perSourceSpliceCounts.find(toUpperCase(dataSources[i]->getLogicalSourceName()));
-                     it != perSourceSpliceCounts.end())
-            {
-                countForSource = it->second;
-            }
-            if (countForSource == 0)
-            {
-                /// No build branch attaches here, so nothing to wait for.
-                continue;
-            }
-            auto taggedSource = LogicalOperator{dataSources[i]};
+            auto taggedSource = LogicalOperator{dataSources.front()};
             auto ts = taggedSource.getTraitSet();
-            [[maybe_unused]] const auto inserted = tryInsert(ts, DeferSourceStartTrait{.expectedSpliceCount = countForSource});
+            [[maybe_unused]] const auto inserted = tryInsert(ts, DeferSourceStartTrait{.expectedSpliceCount = expectedSpliceCount});
             taggedSource = taggedSource.withTraitSet(ts);
-            auto replaced = replaceOperator(dataPlanWithDeferTrait, dataSources[i].getId(), taggedSource);
+            auto replaced = replaceOperator(dataPlanWithDeferTrait, dataSources.front().getId(), taggedSource);
             if (replaced.has_value())
             {
                 dataPlanWithDeferTrait = std::move(*replaced);
@@ -316,75 +222,30 @@ std::expected<CollectStatisticResult, Exception> StatisticCoordinator::collectWo
         }
     }
 
-    /// Deploy the (tagged) data plan once, however many companions attach to it. Each companion
-    /// request has its own WorkloadDomain → its own registry key → all of them reach this "new"
-    /// path, so without a cache we would deploy the data query once per companion.
-    ///
-    /// The cache is keyed by the data plan's root operator ids, not by logical source name. Source
-    /// name was wrong in two ways for join-shaped queries: a companion on `auction` would miss the
-    /// entry left by the one on `person` and deploy the join a *second* time, and two different
-    /// data queries reading the same source would collide and the second would never deploy at all.
-    /// Repl.cpp passes the identical LogicalPlan for every companion of one query, so the root ids
-    /// identify it exactly.
-    const auto dataPlanKey = [&dataQueryPlan]
-    {
-        std::vector<std::string> rootIds;
-        for (const auto& root : dataQueryPlan.getRootOperators())
-        {
-            rootIds.emplace_back(std::to_string(root.getId().getRawValue()));
-        }
-        std::ranges::sort(rootIds);
-        return fmt::format("{}", fmt::join(rootIds, "-"));
-    }();
-
+    /// Deploy the (tagged) data plan if no data query for this logical source has been deployed
+    /// yet. With multiple companion-statistic requests covering different fields of the same
+    /// source (each with its own WorkloadDomain → its own registry key → both going through this
+    /// "new" path), we must NOT deploy a duplicate data query. The cache keyed by logical source
+    /// name catches that and reuses the existing queryId.
     std::optional<QueryId> mergedQueryIdOpt;
-    bool deployedHere = false;
     {
-        auto cache = deployedDataQueriesByPlan.wlock();
-        if (const auto it = cache->find(dataPlanKey); it != cache->end())
+        auto cache = deployedDataQueriesBySource.wlock();
+        if (const auto it = cache->find(sourceNameUpper); it != cache->end())
         {
             mergedQueryIdOpt = it->second;
         }
         else
         {
-            deployedHere = true;
             auto submittedData = submitPlan(std::move(dataPlanWithDeferTrait));
             if (not submittedData.has_value())
             {
                 return std::unexpected(submittedData.error());
             }
             mergedQueryIdOpt = std::move(submittedData.value());
-            cache->emplace(dataPlanKey, *mergedQueryIdOpt);
+            cache->emplace(sourceNameUpper, *mergedQueryIdOpt);
         }
     }
     const auto mergedQueryId = *mergedQueryIdOpt;
-
-    /// DIAGNOSTIC, gated on NES_SPLICE_DEPLOY_DELAY_MS (unset = no delay, production behaviour).
-    ///
-    /// Companions are collected one request at a time, so the FIRST one deploys the data plan and
-    /// then submits its build branch immediately, while every later companion finds the plan cached
-    /// and submits into a worker that has had time to instantiate the data query. Observed effect:
-    /// the first companion's branch never splices and its source waits on DeferSourceStartTrait
-    /// forever. If that head start is the cause, pausing here should make the first splice land.
-    ///
-    /// If this confirms the race, the real fix is to deploy the data plan once up front and then
-    /// submit all branches, rather than deploying inside the first request's call.
-    if (deployedHere)
-    {
-        if (const auto* delayMs = std::getenv("NES_SPLICE_DEPLOY_DELAY_MS"))
-        {
-            CPPTRACE_TRY
-            {
-                const auto millis = std::stoul(delayMs);
-                NES_WARNING("collectWorkloadStatistic: NES_SPLICE_DEPLOY_DELAY_MS={} — pausing after data-plan deploy", millis);
-                std::this_thread::sleep_for(std::chrono::milliseconds{millis});
-            }
-            CPPTRACE_CATCH(...)
-            {
-                /// unparseable value: no delay
-            }
-        }
-    }
 
     /// Submit the build branch as its own query. Its source carries SpliceToRunningSourceTrait,
     /// so on the worker side ExecutableQueryPlan::instantiate will redirect it to the data

@@ -14,13 +14,15 @@
 
 """statistic_overhead — how much analytical throughput does statistic collection cost?
 
-Holds a fixed analytical workload (N concurrent Nexmark Q8 windowed joins) and sweeps the number of
-equi-width-histogram statistic queries running alongside it over the *same* logical sources. The
-N=0 arm is the baseline the overhead is measured against.
+Holds a fixed analytical workload (N concurrent ClusterMonitoring Q2 sliding-window aggregations)
+and sweeps how many of them carry a spliced equi-width histogram over their GROUP BY key. Because
+the histogram rides on the query's own source, the ingestion load is identical at every point of the
+sweep — so a change in analytical throughput is the cost of maintaining the synopsis, nothing else.
+The N=0 arm is the baseline.
 
-One run = one (num_statistic_queries, run_idx) pair: start the Nexmark producer, start the worker,
-submit a single topology holding every query, let it reach steady state, then read per-query
-throughput back out of the worker's throughput listener.
+One run = one (num_statistic_queries, run_idx) pair: start the producer, start the worker, start one
+nes-repl per analytical query (k of them with a companion), let it reach steady state, then read
+per-query throughput back out of the worker's throughput listener.
 
 Usage (from the repository root):
     python3 -m scripts.benchmarking.statistic_overhead.run_statistic_overhead --output-dir <dir>
@@ -39,8 +41,6 @@ from scripts.benchmarking.common.worker_lifecycle import (
     check_log_for_buffer_exhaustion,
     dump_worker_log_tail,
     start_single_node_worker,
-    stop_queries_and_wait,
-    submit_query,
     terminate_process_if_exists,
 )
 from scripts.benchmarking.statistic_overhead import config
@@ -61,79 +61,17 @@ ROLE_STATISTIC = "statistic"
 
 ## Query construction ##########################################################
 
-def _q8_query():
-    """Nexmark Q8, verbatim from nes-systests/benchmark/Nexmark_with_varsized.test.
-
-    The inner sub-selects are what that test carries too: until PR #755 lands the projection needs
-    an extra subquery.
-    """
-    return (
-        "SELECT start, end, id, name FROM ( "
-        "SELECT * FROM (SELECT * FROM person) "
-        "INNER JOIN (SELECT * FROM auction) "
-        f"ON id = seller WINDOW TUMBLING (timestamp, size {config.WINDOW_SIZE_SEC} sec) "
-        ") INTO join_void_sink;"
-    )
-
-
-def _histogram_query(source, field, statistic_id, sink):
-    """Equi-width histogram over a join key — the input for join cardinality estimation.
-
-    The third argument is a memory budget in BYTES, not a bucket count.
-    """
-    return (
-        f"SELECT EQUIWIDTHHISTOGRAM({statistic_id}, {field}, {config.MEMORY_BUDGET}, "
-        f"0, {config.PERSON_DOMAIN}) "
-        f"FROM {source} WINDOW TUMBLING(timestamp, size {config.WINDOW_SIZE_SEC} sec) "
-        f"INTO {sink};"
-    )
-
-
-def build_query_list(num_statistic_queries):
-    """Analytical queries first, then the statistic queries — the order nes-cli returns ids in.
-
-    Statistic queries alternate person/auction so that any even prefix is a whole number of
-    join-key *pairs*: estimating a join's cardinality needs a histogram on both sides.
-    """
-    queries = [_q8_query()] * config.NUM_ANALYTICAL_QUERIES
-    for k in range(num_statistic_queries):
-        pair = k // 2
-        if k % 2 == 0:
-            queries.append(_histogram_query(
-                "person", "id", config.STATISTIC_ID_BASE_PERSON + pair, "person_stat_sink"))
-        else:
-            queries.append(_histogram_query(
-                "auction", "seller", config.STATISTIC_ID_BASE_AUCTION + pair, "auction_stat_sink"))
-    return queries
-
-
-def render_topology(queries, out_path):
-    with open(config.TOPOLOGY_TEMPLATE) as f:
-        template = f.read()
-    queries_block = "\n".join(f'  - "{q}"' for q in queries)
-    rendered = template.format(
-        queries_block=queries_block,
-        person_port=config.NEXMARK_PORT_BASE,
-        auction_port=config.NEXMARK_PORT_BASE + 1,
-        flush_interval_ms=config.TCP_FLUSH_INTERVAL_MS,
-        max_operators=config.MAX_OPERATORS,
-    )
-    with open(out_path, "w") as f:
-        f.write(rendered)
-    return out_path
-
-
-## Nexmark producer ############################################################
+## Producer ############################################################
 
 def ensure_generator_image():
     """Build the producer image if it is missing. Idempotent; the shell wrapper also does this."""
-    probe = subprocess.run(["docker", "image", "inspect", config.NEXMARK_GENERATOR_IMAGE],
+    probe = subprocess.run(["docker", "image", "inspect", config.GENERATOR_IMAGE],
                            capture_output=True)
     if probe.returncode == 0:
         return
-    printInfo(f"Building {config.NEXMARK_GENERATOR_IMAGE} from {config.NEXMARK_BUILD_CONTEXT}")
-    subprocess.run(["docker", "build", "-t", config.NEXMARK_GENERATOR_IMAGE,
-                    config.NEXMARK_BUILD_CONTEXT], check=True)
+    printInfo(f"Building {config.GENERATOR_IMAGE} from {config.GENERATOR_BUILD_CONTEXT}")
+    subprocess.run(["docker", "build", "-t", config.GENERATOR_IMAGE,
+                    config.GENERATOR_BUILD_CONTEXT], check=True)
 
 
 def stop_generator(log_path=None):
@@ -143,23 +81,23 @@ def stop_generator(log_path=None):
     query's sources actually connected are only written once the worker dials in.
     """
     if log_path is not None:
-        logs = subprocess.run(["docker", "logs", config.NEXMARK_GENERATOR_CONTAINER],
+        logs = subprocess.run(["docker", "logs", config.GENERATOR_CONTAINER],
                               capture_output=True, text=True)
         with open(log_path, "w") as f:
             f.write(logs.stdout + logs.stderr)
-    subprocess.run(["docker", "rm", "-f", config.NEXMARK_GENERATOR_CONTAINER], capture_output=True)
+    subprocess.run(["docker", "rm", "-f", config.GENERATOR_CONTAINER], capture_output=True)
 
 
 def start_generator(log_path, tuples_per_sec):
     """Start the producer and block until it prints READY, i.e. both ports are bound."""
     stop_generator()
     cmd = [
-        "docker", "run", "-d", "--name", config.NEXMARK_GENERATOR_CONTAINER,
+        "docker", "run", "-d", "--name", config.GENERATOR_CONTAINER,
         "--network", config.GENERATOR_DOCKER_NETWORK,
-        config.NEXMARK_GENERATOR_IMAGE,
-        "--port-base", str(config.NEXMARK_PORT_BASE),
+        config.GENERATOR_IMAGE,
+        "--port-base", str(config.GENERATOR_PORT_BASE),
         "--events-per-sec", str(config.EVENTS_PER_SEC),
-        "--person-domain", str(config.PERSON_DOMAIN),
+        "--job-domain", str(config.JOB_DOMAIN),
         "--seed", str(config.GENERATOR_SEED),
         "--tuples-per-sec", str(tuples_per_sec),
     ]
@@ -167,7 +105,7 @@ def start_generator(log_path, tuples_per_sec):
 
     deadline = time.time() + config.GENERATOR_READY_TIMEOUT_S
     while time.time() < deadline:
-        logs = subprocess.run(["docker", "logs", config.NEXMARK_GENERATOR_CONTAINER],
+        logs = subprocess.run(["docker", "logs", config.GENERATOR_CONTAINER],
                               capture_output=True, text=True)
         combined = logs.stdout + logs.stderr
         if "READY" in combined:
@@ -175,7 +113,7 @@ def start_generator(log_path, tuples_per_sec):
         time.sleep(0.5)
 
     stop_generator(log_path)
-    raise RuntimeError(f"Nexmark generator did not report READY within "
+    raise RuntimeError(f"generator did not report READY within "
                        f"{config.GENERATOR_READY_TIMEOUT_S}s; see {log_path}")
 
 
@@ -254,28 +192,22 @@ def run_one(num_statistic_queries, run_idx, output_dir, tuples_per_sec):
     generator_log = os.path.join(run_dir, "generator.log")
     cli_log_path = os.path.join(run_dir, "nes-cli.log")
 
-    queries = build_query_list(num_statistic_queries)
-    topology = render_topology(queries, os.path.join(run_dir, "topology.yaml"))
-
     row = {
         'num_statistic_queries': num_statistic_queries,
         'run_idx': run_idx,
         'num_analytical_queries': config.NUM_ANALYTICAL_QUERIES,
         'num_worker_threads': config.WORKER_THREADS,
         'window_size_sec': config.WINDOW_SIZE_SEC,
-        'memory_budget': config.MEMORY_BUDGET,
-        'person_domain': config.PERSON_DOMAIN,
+        'window_advance_sec': config.WINDOW_ADVANCE_SEC,
+        'job_domain': config.JOB_DOMAIN,
         'events_per_sec': config.EVENTS_PER_SEC,
         'tuples_per_sec_per_query': tuples_per_sec,
         'offered_tps': config.offered_tps(tuples_per_sec, num_statistic_queries),
-        'mode': config.MODE,
     }
     issues = []
 
     worker_process = None
-    query_ids = []
     analytical_ids = []
-    statistic_ids_known = []
     repl_procs, repl_logs = [], []
     with open(cli_log_path, "w") as cli_log, open(worker_log, "w") as worker_stdout:
         try:
@@ -296,21 +228,12 @@ def run_one(num_statistic_queries, run_idx, output_dir, tuples_per_sec):
             )
             time.sleep(config.WAIT_AFTER_WORKER_START)
 
-            if config.MODE == "shared":
-                # One nes-repl per analytical query; histograms ride along as spliced companions,
-                # so the connection count stays at 2 x NUM_ANALYTICAL_QUERIES for every N.
-                repl_procs, _, repl_logs, analytical_ids = submit_shared(
-                    num_statistic_queries, run_dir)
-                if len(analytical_ids) != config.NUM_ANALYTICAL_QUERIES:
-                    issues.append(f"only {len(analytical_ids)}/{config.NUM_ANALYTICAL_QUERIES} "
-                                  f"analytical queries deployed")
-            else:
-                # One nes-cli topology; every statistic query is independent and re-ingests.
-                query_ids = submit_query(topology, cli_log)
-                if len(query_ids) != len(queries):
-                    issues.append(f"expected {len(queries)} query ids, got {len(query_ids)}")
-                analytical_ids = query_ids[:config.NUM_ANALYTICAL_QUERIES]
-                statistic_ids_known = query_ids[config.NUM_ANALYTICAL_QUERIES:]
+            # One nes-repl per analytical query; histograms ride along as spliced companions, so
+            # the connection count stays at NUM_ANALYTICAL_QUERIES for every N.
+            repl_procs, _, repl_logs, analytical_ids = submit_shared(num_statistic_queries, run_dir)
+            if len(analytical_ids) != config.NUM_ANALYTICAL_QUERIES:
+                issues.append(f"only {len(analytical_ids)}/{config.NUM_ANALYTICAL_QUERIES} "
+                              f"analytical queries deployed")
 
             time.sleep(config.WARMUP_SECONDS + config.MEASUREMENT_WINDOW_SECONDS)
 
@@ -318,10 +241,7 @@ def run_one(num_statistic_queries, run_idx, output_dir, tuples_per_sec):
                 raise RuntimeError(f"worker exited with code {worker_process.returncode}")
 
             # Stop before tearing the worker down: QueryStop flushes the listener's pending windows.
-            if config.MODE == "shared":
-                shutdown_shared(repl_procs, repl_logs)
-            elif not stop_queries_and_wait(query_ids, topology, cli_log):
-                issues.append("queries did not stop cleanly")
+            shutdown_shared(repl_procs, repl_logs)
             time.sleep(2)
         finally:
             if worker_process is not None:
@@ -330,13 +250,13 @@ def run_one(num_statistic_queries, run_idx, output_dir, tuples_per_sec):
 
     samples = parse_throughput_samples(worker_log)
     analytical_set = set(analytical_ids)
-    if config.MODE == "shared":
-        # Companion build branches are submitted inside the coordinator and never print an id, so
-        # they are identified by exclusion: every query the worker reports that is not one of the
-        # ten Q8 queries is a spliced histogram.
-        statistic_ids = {qid for qid, _, _ in samples if qid not in analytical_set}
-    else:
-        statistic_ids = set(statistic_ids_known)
+    # Any query the worker reports that is not one of the analytical queries. In practice this is
+    # EMPTY even when the companions are working: the throughput listener measures "the first
+    # pipeline after the source", and a spliced build branch consumes the data query's source thread
+    # rather than owning one, so it never emits a throughput event. statistic_throughput_tps is
+    # therefore not evidence either way — do not treat 0 as a failure. Confirming the histogram is
+    # populated needs the statistic store, not this listener.
+    statistic_ids = {qid for qid, _, _ in samples if qid not in analytical_set}
     roles = {qid: ROLE_ANALYTICAL for qid in analytical_set}
     roles.update({qid: ROLE_STATISTIC for qid in statistic_ids})
     write_per_query_csv(samples, roles, os.path.join(
@@ -352,8 +272,6 @@ def run_one(num_statistic_queries, run_idx, output_dir, tuples_per_sec):
         dump_worker_log_tail(worker_log)
     if len(analytical) != config.NUM_ANALYTICAL_QUERIES:
         issues.append(f"only {len(analytical)}/{config.NUM_ANALYTICAL_QUERIES} analytical queries measured")
-    if len(statistic) != num_statistic_queries:
-        issues.append(f"only {len(statistic)}/{num_statistic_queries} statistic queries measured")
     if check_log_for_buffer_exhaustion(worker_log):
         issues.append("buffer exhaustion")
 
@@ -376,12 +294,11 @@ def _failure_row(num_statistic_queries, run_idx, tuples_per_sec, message):
         'num_analytical_queries': config.NUM_ANALYTICAL_QUERIES,
         'num_worker_threads': config.WORKER_THREADS,
         'window_size_sec': config.WINDOW_SIZE_SEC,
-        'memory_budget': config.MEMORY_BUDGET,
-        'person_domain': config.PERSON_DOMAIN,
+        'window_advance_sec': config.WINDOW_ADVANCE_SEC,
+        'job_domain': config.JOB_DOMAIN,
         'events_per_sec': config.EVENTS_PER_SEC,
         'tuples_per_sec_per_query': tuples_per_sec,
         'offered_tps': config.offered_tps(tuples_per_sec, num_statistic_queries),
-        'mode': config.MODE,
         'issue': f"exception:{message}",
     })
     return row
@@ -399,14 +316,9 @@ def main():
                              "highest rate the baseline still fully sustains.")
     parser.add_argument("--num-runs", type=int, default=config.NUM_RUNS,
                         help="Repetitions per sweep point")
-    parser.add_argument("--mode", choices=["shared", "isolated"], default=config.MODE,
-                        help="shared: histograms spliced onto the join's sources via nes-repl "
-                             "companions (constant 20 TCP connections). isolated:each statistic query "
-                             "is its own nes-cli query with its own source.")
     parser.add_argument("--skip-build", action="store_true", help="Do not rebuild NebulaStream")
     args = parser.parse_args()
 
-    config.MODE = args.mode
     check_repository_root()
     if not args.skip_build:
         compile_nebulastream(config.cmake_flags(), config.build_dir)
@@ -426,7 +338,7 @@ def main():
             for run_idx in range(args.num_runs):
                 completed += 1
                 printInfo(f"[{completed}/{total}] {tuples_per_sec} tup/s/query, "
-                          f"{config.NUM_ANALYTICAL_QUERIES} Q8 joins + "
+                          f"{config.NUM_ANALYTICAL_QUERIES} Q2 aggregations + "
                           f"{num_statistic_queries} statistic queries, run {run_idx}")
                 try:
                     row = run_one(num_statistic_queries, run_idx, args.output_dir, tuples_per_sec)

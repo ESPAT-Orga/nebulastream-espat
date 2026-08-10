@@ -19,7 +19,6 @@
 #include <exception>
 #include <functional>
 #include <iostream>
-#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -235,15 +234,6 @@ int main(int argc, char** argv)
                   "deploy a second build branch monitoring a separate column — the data source defers emission "
                   "until both build branches have spliced in, and the source still serves a single thread to "
                   "all of them.");
-        program.add_argument("--companion-source")
-            .default_value(std::string{})
-            .help("Logical source the companion statistic observes. Required when the data query reads more than one "
-                  "source (a join): the field name alone cannot disambiguate, e.g. Nexmark's person and auction both "
-                  "have an 'id'. Optional for single-source data queries.");
-        program.add_argument("--companion-source-2")
-            .default_value(std::string{})
-            .help("Logical source for the SECOND companion statistic (see --companion-source). Lets one join query "
-                  "carry a histogram on each of its two inputs.");
         program.add_argument("--companion-metric")
             .default_value(std::string(magic_enum::enum_name(NES::Metric::Cardinality)))
             .choices(
@@ -672,8 +662,7 @@ int main(int argc, char** argv)
             /// re-deploy plumbing, gRPC stub config).
             auto makeRequest = [&](std::optional<NES::LogicalFunction> cond,
                                    int64_t targetSwitchValue,
-                                   std::optional<std::string> fieldOverride = std::nullopt,
-                                   std::string spliceSource = {})
+                                   std::optional<std::string> fieldOverride = std::nullopt)
             {
                 /// If fieldOverride is set, construct a fresh WorkloadDomain with that field
                 /// name — different fieldName → different registry key → distinct build branch.
@@ -713,6 +702,17 @@ int main(int argc, char** argv)
                             NES::Windowing::TimeMeasure startTs,
                             NES::Windowing::TimeMeasure endTs)
                     {
+                            /// VERIFICATION PRINT. Reaching this callback is end-to-end proof that
+                            /// the companion actually ran: StatisticStoreWriter wrote a histogram,
+                            /// EquiWidthHistogramProbe read it back out of the store, and at least
+                            /// one bin row satisfied the trigger condition — so the splice really
+                            /// delivered tuples and windows really closed. Nothing else observes
+                            /// this: the throughput listener never reports a spliced branch, because
+                            /// the branch consumes the data query's source thread and has no source
+                            /// pipeline of its own.
+                            std::cout << "[COMPANION-PROBE-FIRED] statisticId=" << statId.getRawValue()
+                                      << " window=" << startTs.getTime() << "-" << endTs.getTime() << std::endl;
+
                             /// Workload-switch path: set the named gate to the regime favored by THIS
                             /// trigger via gRPC. No query stop/redeploy — the source thread keeps
                             /// running, and the merged plan's two chains see the new gate value on
@@ -832,17 +832,12 @@ int main(int argc, char** argv)
                    {"max", program.get<std::string>("--companion-histogram-max")},
                    /// Non-empty only with --baseline-prometheus: selects the PrometheusSink build
                    /// branch in collectWorkloadStatistic and binds the sink's exposer to this address.
-                   {"prometheus_server_url", baselinePrometheus ? prometheusServerUrl : std::string{}},
-                   /// Names the logical source this build branch splices onto. Empty is fine for a
-                   /// single-source data query; StatisticCoordinator requires it once the data query
-                   /// reads more than one source.
-                   {"splice_source", std::move(spliceSource)}}};
+                   {"prometheus_server_url", baselinePrometheus ? prometheusServerUrl : std::string{}}}};
             };
 
             /// Build the primary statement. When the first --companion-condition predicate fires,
             /// the gate moves to --companion-target-value (default 1).
-            companionStatisticRequests.push_back(
-                makeRequest(condition, targetSwitchValue1, std::nullopt, program.get<std::string>("--companion-source")));
+            companionStatisticRequests.push_back(makeRequest(condition, targetSwitchValue1));
             /// Optional secondary statement: a second gated probe with its own predicate +
             /// target value. With Phase 2 (multi-splice), the data source defers emission
             /// until ALL build branches splice in — count carried via the "expected_splice_count"
@@ -854,33 +849,15 @@ int main(int argc, char** argv)
                 {
                     field2 = program.get<std::string>("--companion-field-2");
                 }
-                companionStatisticRequests.push_back(
-                    makeRequest(condition2, targetSwitchValue2, field2, program.get<std::string>("--companion-source-2")));
+                companionStatisticRequests.push_back(makeRequest(condition2, targetSwitchValue2, field2));
             }
             /// Set expected_splice_count on EVERY request so collectWorkloadStatistic (called
             /// once per request) reads the same total when stamping the data plan's source.
             /// Only the FIRST call uses this to set up the deferred-start budget; later calls
             /// hit the "registry already exists" path and don't re-stamp.
-            /// Per-source counts, as "PERSON=1,AUCTION=1". A join's two sources each defer on the
-            /// number of build branches attaching to *that* source; stamping the session-wide total
-            /// on one source would make it wait for a splice that lands on the other one.
-            std::map<std::string, int> spliceCountBySource;
-            for (const auto& req : companionStatisticRequests)
-            {
-                if (const auto it = req.options.find("splice_source"); it != req.options.end() && !it->second.empty())
-                {
-                    ++spliceCountBySource[it->second];
-                }
-            }
-            std::string spliceCounts;
-            for (const auto& [source, count] : spliceCountBySource)
-            {
-                spliceCounts += (spliceCounts.empty() ? "" : ",") + source + "=" + std::to_string(count);
-            }
             for (auto& req : companionStatisticRequests)
             {
                 req.options["expected_splice_count"] = std::to_string(companionStatisticRequests.size());
-                req.options["splice_counts"] = spliceCounts;
             }
             onCompanionAssociatedWithQuery
                 = [swapState](NES::DistributedQueryId id, const std::string& sql, NES::Statistic::StatisticId statId)

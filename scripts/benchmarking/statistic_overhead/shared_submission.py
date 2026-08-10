@@ -12,27 +12,31 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Shared-source submission path: one nes-repl per analytical query.
+"""Shared-source submission: one nes-repl per analytical query, k of them carrying a companion.
 
-The statistic queries are deployed as *companions*. nes-repl hands each companion request to
-StatisticCoordinator::collectWorkloadStatistic, which splices the histogram build branch onto the
-join's own source operator — the branch is still a separate query, but its source carries
-SpliceToRunningSourceTrait, so the worker redirects it into the data query's already-running source
-thread instead of spawning a second one. Net effect: the histograms cost no extra TCP connections,
-so the run holds a constant 10 x 2 = 20 connections at every point of the sweep.
+The analytical query is ClusterMonitoring Q2 — a sliding-window SUM grouped by `jobId`. The
+statistic query is an equi-width histogram over that same `jobId`, deployed as a *companion*:
+nes-repl hands the request to StatisticCoordinator::collectWorkloadStatistic, which splices the
+histogram build branch onto the data query's own source operator. The branch is still its own query,
+but its source carries SpliceToRunningSourceTrait, so the worker redirects it into the data query's
+already-running source thread instead of spawning a second one.
 
-Why one REPL process per analytical query rather than one for all ten: StatisticCoordinator is
-constructed per REPL process (ReplStarter.cpp), and both its statistic registry and its
-deployed-data-query cache are per-instance. Ten Q8 queries in one session would collide — every
-`person.id` companion hashes to the same registry key (the REPL leaves WorkloadDomain::queryId
-invalid), so only the first would get a build branch. Separate processes give each query its own
-registry and sidestep that entirely.
+That is the whole point of the experiment: the histograms cost NO extra TCP connections, so the run
+holds a constant NUM_ANALYTICAL_QUERIES connections at every point of the sweep. Verify it with
+`grep -c '^accept' generator.log`.
 
-Each session also declares its OWN logical sources (`person_<i>` / `auction_<i>`) — required, because
-the worker-wide RunningSourceRegistry refuses a second live source per logical name. See setup_sql.
+Two structural constraints, both learned the hard way:
+
+- **One REPL process per analytical query.** StatisticCoordinator is constructed per REPL process
+  (ReplStarter.cpp) and its statistic registry is per-instance. Ten queries in one session would
+  collide: every `jobId` companion hashes to the same registry key (the REPL leaves
+  WorkloadDomain::queryId invalid), so only the first would get a build branch.
+- **One companion per query.** Two companions on one query trip a defect where the first never
+  splices — see KNOWN_ISSUE_companion_splice.md. Single-source + single-companion is the
+  configuration the adaptive-optimization benchmark exercises today.
 
 Companions are all-or-nothing per session, so the sweep varies how many of the ten sessions run with
-`--companion-statistic`: k sessions with, 10-k without, giving 2k statistic queries.
+`--companion-statistic`: k sessions with, 10-k without, giving exactly k statistic queries.
 """
 
 import json
@@ -63,60 +67,52 @@ def _stream_output(proc, sink_lines, log_file):
         log_file.flush()
 
 
+def source_name(session):
+    """Logical source name for one session. Must be unique worker-wide — see setup_sql."""
+    return f"cluster_{session}"
+
+
 def setup_sql(session):
-    """DDL for one session: its own logical sources `person_<i>` / `auction_<i>`.
+    """DDL for one session: its own logical source `cluster_<i>`.
 
     The per-session naming is REQUIRED, not cosmetic. RunningSourceRegistry is keyed by logical
     source name and is worker-wide, and it strictly refuses a second live source for a name that
     already has one ("the splice contract assumes a single source thread per logical name",
-    RunningSourceRegistry.cpp). Ten queries all reading a source called `person` therefore abort the
+    RunningSourceRegistry.cpp). Ten queries all reading a source called `cluster` would abort the
     worker on the second registration. Distinct names give each query its own registry entry.
 
-    Both physical sources still dial the same two generator ports, so the connection count is
-    unchanged: 2 per analytical query, 20 in total, whatever N is.
+    Every session's physical source dials the same generator port, so the connection count is one
+    per analytical query however many companions are attached.
 
-    Schemas mirror nes-systests/benchmark/Nexmark_with_varsized.test. Sink schema fields are
-    dot-qualified and uppercase, matching the form the adaptive-optimization benchmark uses.
+    Schema mirrors monitoringClusterData in nes-systests/benchmark/ClusterMonitoring.test, except
+    that `constraints` is INT16 rather than BOOLEAN — Q2 never reads it, and this avoids depending
+    on how the CSV parser spells booleans. Sink schema fields are dot-qualified and uppercase.
 
-    The join's window-bound columns must be backtick-quoted: START and END are reserved tokens in
-    AntlrSQL.g4, and an unquoted `PERSONAUCTION.START` fails to parse. The REPL reports nothing at
-    all when that happens — it simply stops consuming statements — so a bare stall after the last
-    CREATE PHYSICAL SOURCE is the signature of a bad DDL statement, not of a hung worker.
+    The window-bound columns must be backtick-quoted: START and END are reserved tokens in
+    AntlrSQL.g4, and unquoted they fail to parse. The REPL reports nothing at all when that
+    happens — it simply stops consuming statements — so a bare stall after the last CREATE
+    PHYSICAL SOURCE is the signature of a bad DDL statement, not of a hung worker.
     """
-    person_port = config.NEXMARK_PORT_BASE
-    auction_port = config.NEXMARK_PORT_BASE + 1
-    person, auction = source_names(session)
-    # The join's output columns are qualified by the concatenation of its input source names.
-    joined = f"{person}{auction}".upper()
+    source = source_name(session)
+    qualifier = source.upper()
     return f"""\
 CREATE WORKER "{WORKER_GRPC}" SET ('{WORKER_DATA}' AS DATA);
-CREATE LOGICAL SOURCE {person}(id INT32 NOT NULL, name VARSIZED NOT NULL, email_address VARSIZED NOT NULL, \
-credit_card VARSIZED NOT NULL, city VARSIZED NOT NULL, state VARSIZED NOT NULL, timestamp UINT64 NOT NULL, \
-extra VARSIZED NOT NULL);
-CREATE PHYSICAL SOURCE FOR {person}
+CREATE LOGICAL SOURCE {source}(creationTS UINT64 NOT NULL, jobId UINT64 NOT NULL, taskId UINT64 NOT NULL, \
+machineId INT64 NOT NULL, eventType INT16 NOT NULL, userId INT16 NOT NULL, category INT16 NOT NULL, \
+priority INT16 NOT NULL, cpu FLOAT64 NOT NULL, ram FLOAT64 NOT NULL, disk FLOAT64 NOT NULL, \
+constraints INT16 NOT NULL);
+CREATE PHYSICAL SOURCE FOR {source}
 TYPE TCP
 SET(
     'CSV' as PARSER.`TYPE`,
     '127.0.0.1' AS `SOURCE`.SOCKET_HOST,
-    '{person_port}' AS `SOURCE`.SOCKET_PORT,
+    '{config.CLUSTER_PORT}' AS `SOURCE`.SOCKET_PORT,
     '{config.TCP_FLUSH_INTERVAL_MS}' AS `SOURCE`.FLUSH_INTERVAL_MS,
-    '10' AS `SOURCE`.CONNECT_TIMEOUT_SECONDS,
+    '{config.TCP_CONNECT_TIMEOUT_SECONDS}' AS `SOURCE`.CONNECT_TIMEOUT_SECONDS,
     '{WORKER_GRPC}' AS `SOURCE`.HOST
 );
-CREATE LOGICAL SOURCE {auction}(timestamp UINT64 NOT NULL, id INT32 NOT NULL, initialbid INT32 NOT NULL, \
-reserve INT32 NOT NULL, expires UINT64 NOT NULL, seller INT32 NOT NULL, category INT32 NOT NULL);
-CREATE PHYSICAL SOURCE FOR {auction}
-TYPE TCP
-SET(
-    'CSV' as PARSER.`TYPE`,
-    '127.0.0.1' AS `SOURCE`.SOCKET_HOST,
-    '{auction_port}' AS `SOURCE`.SOCKET_PORT,
-    '{config.TCP_FLUSH_INTERVAL_MS}' AS `SOURCE`.FLUSH_INTERVAL_MS,
-    '10' AS `SOURCE`.CONNECT_TIMEOUT_SECONDS,
-    '{WORKER_GRPC}' AS `SOURCE`.HOST
-);
-CREATE SINK join_void_sink({joined}.`START` UINT64 NOT NULL, {joined}.`END` UINT64 NOT NULL, \
-{person.upper()}.ID INT32 NOT NULL, {person.upper()}.NAME VARSIZED NOT NULL)
+CREATE SINK agg_void_sink({qualifier}.`START` UINT64 NOT NULL, {qualifier}.`END` UINT64 NOT NULL, \
+{qualifier}.TOTALCPU FLOAT64 NOT NULL, {qualifier}.JOBID UINT64 NOT NULL)
 TYPE Void
 SET(
     '{WORKER_GRPC}' AS `SINK`.HOST
@@ -124,43 +120,50 @@ SET(
 """
 
 
-def source_names(session):
-    """Logical source names for one session. Must be unique worker-wide — see setup_sql."""
-    return f"person_{session}", f"auction_{session}"
-
-
-def q8_sql(session):
-    """Nexmark Q8, same shape as nes-systests/benchmark/Nexmark_with_varsized.test."""
-    person, auction = source_names(session)
+def analytical_sql(session):
+    """ClusterMonitoring Q2, verbatim in shape from nes-systests/benchmark/ClusterMonitoring.test."""
+    source = source_name(session)
     return (
-        "SELECT start, end, id, name FROM ( "
-        f"SELECT * FROM (SELECT * FROM {person}) "
-        f"INNER JOIN (SELECT * FROM {auction}) "
-        f"ON id = seller WINDOW TUMBLING (timestamp, size {config.WINDOW_SIZE_SEC} sec) "
-        ") INTO join_void_sink;\n"
+        "SELECT start, end, SUM(cpu) AS totalCpu, jobId "
+        f"FROM {source} "
+        "WHERE eventType == INT16(3) "
+        "GROUP BY jobId "
+        f"WINDOW SLIDING(creationTS, SIZE {config.WINDOW_SIZE_SEC} SEC, "
+        f"ADVANCE BY {config.WINDOW_ADVANCE_SEC} SEC) "
+        "INTO agg_void_sink;\n"
     )
 
 
 def _companion_args(session):
-    """Flags that attach one histogram to each of the join's two inputs.
+    """Flags attaching one histogram over the GROUP BY key to this session's query.
 
-    --companion-source / --companion-source-2 name which of the join's sources each branch splices
-    onto. Without them StatisticCoordinator rejects the request: the field name cannot disambiguate,
-    since person and auction both have an `id`.
+    No --companion-source: the data query has a single source, so StatisticCoordinator's existing
+    single-source path resolves the splice target without help. MinVal maps to Equi_Width_Histogram
+    (DefaultStatisticQueryGenerator::toStatisticType), and the histogram bounds options are
+    documented against it.
+
+    DO NOT REMOVE --companion-switch-to-sql AND --companion-condition. They look redundant — we pass
+    the query's own text as the "alternate" plan, and a bin-count threshold no histogram can ever
+    reach, so no workload switch ever happens. They are here because Repl.cpp has two companion
+    paths and only the switchable one works: without a paired SQL the merged plan takes the plain
+    "observability without runtime swap" path, and on that path the data query's source never starts
+    at all — it waits on DeferSourceStartTrait forever and the query produces nothing. Measured on
+    one query with one companion: 0 throughput windows on the plain path, 1649 with the switch.
+    See KNOWN_ISSUE_companion_splice.md.
     """
-    person, auction = source_names(session)
     return [
         "--companion-statistic",
         "--companion-metric", config.COMPANION_METRIC,
-        "--companion-source", person,
-        "--companion-field", "id",
-        "--companion-source-2", auction,
-        "--companion-field-2", "seller",
-        "--companion-window-size-ms", str(config.WINDOW_SIZE_SEC * 1000),
+        "--companion-field", "jobId",
+        "--companion-window-size-ms", str(config.COMPANION_WINDOW_SIZE_SEC * 1000),
         "--companion-event-time-field", config.COMPANION_EVENT_TIME_FIELD,
         "--companion-histogram-min", "0",
-        "--companion-histogram-max", str(config.PERSON_DOMAIN),
+        "--companion-histogram-max", str(config.JOB_DOMAIN),
         "--companion-host", WORKER_GRPC,
+        # Engages deployWithSwitchableAlternate; the "switch" is to the identical plan and is gated
+        # on a condition that never fires.
+        "--companion-switch-to-sql", analytical_sql(session).strip(),
+        "--companion-condition", f"BINCOUNTER > UINT64({config.COMPANION_NEVER_FIRE_THRESHOLD})",
     ]
 
 
@@ -170,20 +173,17 @@ def submit_shared(num_statistic_queries, run_dir):
     Returns (processes, threads, log_handles, analytical_query_ids). Everything else the worker
     reports throughput for is a spliced statistic branch.
     """
-    if num_statistic_queries % 2 != 0:
-        raise ValueError(f"shared mode adds histograms in person/auction pairs, so "
-                         f"num_statistic_queries must be even (got {num_statistic_queries})")
-    sessions_with_companions = num_statistic_queries // 2
+    sessions_with_companions = num_statistic_queries
     if sessions_with_companions > config.NUM_ANALYTICAL_QUERIES:
-        raise ValueError(f"{num_statistic_queries} statistic queries needs "
-                         f"{sessions_with_companions} sessions but only "
-                         f"{config.NUM_ANALYTICAL_QUERIES} analytical queries exist")
+        raise ValueError(f"{num_statistic_queries} statistic queries needs as many sessions, but "
+                         f"only {config.NUM_ANALYTICAL_QUERIES} analytical queries exist "
+                         f"(one companion per query — see KNOWN_ISSUE_companion_splice.md)")
 
     processes, threads, logs, all_lines = [], [], [], []
 
     for i in range(config.NUM_ANALYTICAL_QUERIES):
         with_companion = i < sessions_with_companions
-        sql = setup_sql(i) + q8_sql(i)
+        sql = setup_sql(i) + analytical_sql(i)
         cmd = [REPL_EXECUTABLE, "-f", "JSON", "-s", WORKER_GRPC,
                "--on-exit", "STOP_QUERIES"]
         if with_companion:
@@ -229,7 +229,7 @@ def submit_shared(num_statistic_queries, run_dir):
         printError(f"only {len(analytical_ids)}/{config.NUM_ANALYTICAL_QUERIES} REPL sessions "
                    f"reported a query id; see repl_*.log in {run_dir}")
     printInfo(f"    {len(analytical_ids)} analytical queries deployed, "
-              f"{sessions_with_companions} with a companion pair "
+              f"{sessions_with_companions} with a companion "
               f"({num_statistic_queries} statistic queries)")
     return processes, threads, logs, analytical_ids
 

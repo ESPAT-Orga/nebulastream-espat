@@ -14,15 +14,15 @@
 
 """Configuration for the statistic_overhead benchmark.
 
-The experiment holds a fixed analytical workload (NUM_ANALYTICAL_QUERIES concurrent Nexmark Q8
-windowed joins) and sweeps the number of statistic queries running alongside it, to show that
-in-engine statistic collection is near-free. The statistic queries maintain equi-width histograms
-over the join key (person.id / auction.seller) — i.e. the input a streaming optimizer needs for join
-cardinality estimation.
+The experiment holds a fixed analytical workload (NUM_ANALYTICAL_QUERIES concurrent ClusterMonitoring
+Q2 sliding-window aggregations) and sweeps how many of them carry a spliced equi-width histogram over
+their GROUP BY key `jobId` — the input an optimizer needs for group-cardinality estimation,
+aggregation hash-table sizing and skew detection.
 
-Statistic queries are added in person/auction *pairs*, since estimating a join's cardinality needs a
-histogram on both sides. So STATISTIC_QUERY_COUNTS' maximum of 2 * NUM_ANALYTICAL_QUERIES means
-"every analytical query is covered by a full pair of join-key histograms".
+One histogram per analytical query, so STATISTIC_QUERY_COUNTS runs 0..NUM_ANALYTICAL_QUERIES. The
+histogram is a *companion*: it splices onto the query's own source and adds no ingestion, so the
+offered load is identical at every point of the sweep. That is what makes a throughput change
+attributable to the synopsis rather than to extra input.
 
 Every constant is overridable from the environment so the shell wrapper can drive smoke runs.
 
@@ -30,7 +30,7 @@ Sections (search by ``##``):
   ## General    — paths, cmake flags, repetition count
   ## Workload   — the sweep itself
   ## Worker     — single-node-worker startup parameters
-  ## Generator  — Nexmark TCP producer
+  ## Generator  — ClusterMonitoring TCP producer
   ## Fieldnames — CSV columns
 """
 
@@ -52,9 +52,6 @@ def _int_list(name, default):
 ## General #####################################################################
 
 build_dir = BUILD_DIR
-QUERY_CONFIGS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "query-configs")
-TOPOLOGY_TEMPLATE = os.path.join(QUERY_CONFIGS_DIR, "topology.yaml.template")
-
 def cmake_flags():
     """Lazy, because get_vcpkg_dir() raises on any host it does not know about — evaluating this at
     import time would make the module unimportable there, including for --skip-build runs."""
@@ -62,8 +59,8 @@ def cmake_flags():
             "-DCMAKE_BUILD_TYPE=Release "
             f"-DCMAKE_TOOLCHAIN_FILE={get_vcpkg_dir()} "
             "-DUSE_LIBCXX_IF_AVAILABLE:BOOL=OFF "
-            # No large test data: this benchmark's input comes from the Nexmark TCP generator, so
-            # enabling them would only download multi-GB CSVs nothing here reads.
+            # No large test data: this benchmark's input comes from the TCP generator, so enabling
+            # them would only download multi-GB CSVs nothing here reads.
             "-DENABLE_LARGE_TESTS=0 "
             "-DNES_BUILD_NATIVE:BOOL=ON "
             "-DNES_LOG_LEVEL:STRING=LEVEL_NONE")
@@ -74,29 +71,26 @@ RESULTS_CSV = "results_statistic_overhead.csv"
 
 ## Workload ####################################################################
 
-# Fixed analytical workload: N concurrent Nexmark Q8 joins.
+# Fixed analytical workload: N concurrent ClusterMonitoring Q2 aggregations.
 NUM_ANALYTICAL_QUERIES = _int("NUM_ANALYTICAL_QUERIES", 10)
 
-# The swept axis. 0 is the baseline arm the paper's claim is measured against.
-STATISTIC_QUERY_COUNTS = _int_list("STATISTIC_QUERY_COUNTS", [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20])
+# The swept axis: how many of those queries carry a histogram. 0 is the baseline arm.
+STATISTIC_QUERY_COUNTS = _int_list("STATISTIC_QUERY_COUNTS", list(range(0, 11)))
 
-# Tumbling window size (seconds) used by both the join and the histograms, so the statistic queries
-# close windows on the same cadence as the workload they observe.
-WINDOW_SIZE_SEC = _int("WINDOW_SIZE_SEC", 10)
+# ClusterMonitoring Q2's window: SLIDING(creationTS, SIZE 60 SEC, ADVANCE BY 1 SEC). Sixty windows
+# are open at once, but Q2 aggregates, so the state is per GROUP rather than per tuple —
+# ~60 * JOB_DOMAIN * 24 B per query. JOB_DOMAIN is the knob if that gets tight.
+WINDOW_SIZE_SEC = _int("WINDOW_SIZE_SEC", 60)
+WINDOW_ADVANCE_SEC = _int("WINDOW_ADVANCE_SEC", 1)
 
-# EQUIWIDTHHISTOGRAM's third argument is a memory budget in BYTES, not a bucket count:
-# numBuckets = max(1, (budget - 8) / 24)   [EquiWidthHistogramLogicalFunction.cpp]
-# 10 KiB therefore buys ~426 bins over the key domain.
-MEMORY_BUDGET = _int("MEMORY_BUDGET", 10 * 1024)
-
-# Statistic ids must be unique across all queries alive in one run.
-STATISTIC_ID_BASE_PERSON = _int("STATISTIC_ID_BASE_PERSON", 2000)
-STATISTIC_ID_BASE_AUCTION = _int("STATISTIC_ID_BASE_AUCTION", 3000)
+# The companion histogram's own window. It need not match the analytical query's — a tumbling window
+# keeps the synopsis cheap and the store bounded.
+COMPANION_WINDOW_SIZE_SEC = _int("COMPANION_WINDOW_SIZE_SEC", 10)
 
 # Seconds of steady state to measure, and how much of the run to discard first. Throughput windows
 # whose start falls inside the warm-up are dropped, so query start-up and compilation don't count.
-WARMUP_SECONDS = _int("WARMUP_SECONDS", 20)
-MEASUREMENT_WINDOW_SECONDS = _int("MEASUREMENT_WINDOW_SECONDS", 60)
+WARMUP_SECONDS = _int("WARMUP_SECONDS", 10)
+MEASUREMENT_WINDOW_SECONDS = _int("MEASUREMENT_WINDOW_SECONDS", 30)
 
 # Seconds between starting the worker and submitting the topology.
 WAIT_AFTER_WORKER_START = WAIT_BETWEEN_COMMANDS_LONG
@@ -111,7 +105,8 @@ PAGE_SIZE = _int("PAGE_SIZE", 8192)
 
 # Many small buffers, NOT few large ones. The binding resource for concurrent windowed joins is the
 # buffer COUNT, not the pool's size in bytes: a join takes a buffer per unit of state however full it
-# gets, so a large operator_buffer_size just wastes most of each allocation. Measured at 10 Q8 joins,
+# gets, so a large operator_buffer_size just wastes most of each allocation. Measured on the earlier
+# Nexmark Q8 workload (10 concurrent joins),
 # N=0, 200k tup/s/query (all "fail" = 1 healthy query, the rest starved with BUFFER_EXHAUSTION):
 #
 #   buffer    count   pool    5 joins   10 joins
@@ -136,51 +131,47 @@ USE_SYSTEMD_RUN = os.environ.get("USE_SYSTEMD_RUN", "true").lower() == "true"
 # sink, physical source and worker entry, so moving the worker means editing the template too.
 
 
-## Submission mode ############################################################
-#
-# "shared"   — one nes-repl per analytical query; the histograms ride along as companion statistics,
-#              spliced onto the join's own source operators (SpliceToRunningSourceTrait), so they add
-#              NO extra TCP connections. 10 joins x 2 sources = 20 connections at every N. This is
-#              the arm that measures the *marginal* cost of maintaining a synopsis.
-# "isolated" — one nes-cli topology with every query submitted separately; each statistic query gets
-#              its own source and re-ingests the stream. 20 + N connections. Measures the cost of
-#              monitoring queries *including* their ingestion.
-MODE = os.environ.get("MODE", "shared")
+## Companion statistics ########################################################
 
 # nes-repl companion flags. MinVal/MaxVal/Selectivity all map to Equi_Width_Histogram
 # (DefaultStatisticQueryGenerator::toStatisticType); the histogram bounds options are documented
 # against MinVal, so that is what we ask for.
 COMPANION_METRIC = os.environ.get("COMPANION_METRIC", "MinVal")
-# Field names are resolved inside the build branch, whose plan holds exactly one source, so the
-# unqualified name is unambiguous there. Uppercase because the build chain does not normalise the
-# event-time field the way it does the aggregation field.
-COMPANION_EVENT_TIME_FIELD = os.environ.get("COMPANION_EVENT_TIME_FIELD", "TIMESTAMP")
+# Resolved inside the build branch, whose plan holds exactly one source, so the unqualified name is
+# unambiguous there. Uppercase because the build chain does not normalise the event-time field the
+# way it does the aggregation field.
+COMPANION_EVENT_TIME_FIELD = os.environ.get("COMPANION_EVENT_TIME_FIELD", "CREATIONTS")
+
+# Bin-count threshold for the companion's gated probe. Deliberately unreachable: a histogram bin
+# never holds 1e12 tuples, so the trigger never fires and no workload switch ever happens. See
+# _companion_args in shared_submission.py for why the switch machinery is engaged at all.
+COMPANION_NEVER_FIRE_THRESHOLD = _int("COMPANION_NEVER_FIRE_THRESHOLD", 1_000_000_000_000)
 
 
 ## Generator ###################################################################
 
-NEXMARK_GENERATOR_IMAGE = os.environ.get("NEXMARK_GENERATOR_IMAGE", "nes-bench-nexmark-gen:local")
-NEXMARK_GENERATOR_CONTAINER = os.environ.get("NEXMARK_GENERATOR_CONTAINER", "nes-nexmark-gen")
-NEXMARK_BUILD_CONTEXT = "rust-nexmark-generator"
+# Producer of the real ClusterMonitoring schema, as opposed to the synthetic 3-field stream from
+# rust-tcp-generator.
+GENERATOR_IMAGE = os.environ.get("GENERATOR_IMAGE", "nes-bench-gen:local")
+GENERATOR_CONTAINER = os.environ.get("GENERATOR_CONTAINER", "nes-bench-gen")
+GENERATOR_BUILD_CONTEXT = "rust-benchmark-generator"
 
-# port_base+0 serves `person`, port_base+1 serves `auction`.
-NEXMARK_PORT_BASE = _int("NEXMARK_PORT_BASE", 9200)
+# --streams cluster binds a single port at port_base+0.
+GENERATOR_PORT_BASE = _int("GENERATOR_PORT_BASE", 9200)
+CLUSTER_PORT = GENERATOR_PORT_BASE
 GENERATOR_SEED = _int("GENERATOR_SEED", 42)
 
-# Virtual clock. Decides how many tuples fall into one window, hence how much join state is live:
-#   persons_per_window  = EVENTS_PER_SEC * WINDOW_SIZE_SEC / 50
-#   auctions_per_window = 3 * persons_per_window
-# Lower it if a run hits BUFFER_EXHAUSTION.
+# Virtual clock: events per second of EVENT time. With one tuple per event for the cluster stream,
+# a window of WINDOW_SIZE_SEC holds EVENTS_PER_SEC * WINDOW_SIZE_SEC tuples of event time.
 EVENTS_PER_SEC = _int("EVENTS_PER_SEC", 100_000)
 
-# Join-key domain: person.id cycles through [0, PERSON_DOMAIN) and auction.seller is drawn uniformly
-# from it. Also the histogram's max_value. Set to persons-per-window for ~1 matching person per
-# auction — which is what the default (100_000 * 10 / 50 = 20_000) does.
-PERSON_DOMAIN = _int("PERSON_DOMAIN", 20_000)
+# Grouping-key domain: jobId cycles through [0, JOB_DOMAIN), which is also the histogram's
+# max_value and the number of groups the aggregation tracks per open window.
+JOB_DOMAIN = _int("JOB_DOMAIN", 10_000)
 
 # Offered load, in tuples/sec delivered to ONE query reading both streams (person + auction).
 # 0 = unlimited. The generator converts this to an event-time replay speed internally and paces every
-# stream against that one clock; see rust-nexmark-generator/src/main.rs.
+# stream against that one clock; see rust-benchmark-generator/src/main.rs.
 #
 # Two measured failures forced this to be an event-time knob rather than a tuples/sec one:
 #
@@ -188,39 +179,44 @@ PERSON_DOMAIN = _int("PERSON_DOMAIN", 20_000)
 #     query's sources drain it. With 10 concurrent Q8 joins exactly one query stayed healthy
 #     (314 throughput windows) while the other nine got 1-8 each, and BUFFER_EXHAUSTION appeared
 #     one line after the first throughput line.
-#  2. Paced per connection in tuples/sec: Nexmark puts 1 person and 3 auctions in every 50 events,
-#     so equal tuple rates advance person's event time 3x faster than auction's. The windowed join
-#     then buffers the fast side forever waiting for the slow side's watermark — at only 500k tup/s
-#     offered, ZERO of 10 queries produced any throughput.
+# Pacing is therefore on event time, and the offered load is fixed; the experiment reports sustained
+# throughput against it. Pick the operating point at the calibration knee via --tuples-per-sec at
+# N=0 — a flat overhead curve measured while the engine idles proves nothing.
 #
-# Pacing on event time keeps every stream on one clock whatever its share of the mix. The offered
-# load is then fixed and the experiment reports sustained throughput against it; pick the operating
-# point at the calibration knee via --tuples-per-sec at N=0.
-#
-# Measured on amd7950x3d (10 Q8 joins, 16 worker threads, 8 KiB x 1M buffers): the ceiling is
+# Measured on amd7950x3d (10 ClusterMonitoring Q2 queries, 16 worker threads, 8 KiB x 1M buffers):
 # ~2.17 Mtup/s aggregate, i.e. ~217k per query. 200_000 offers 2.00 Mtup/s and sustains 100% of it,
 # which is 92% of the ceiling — loaded, with enough headroom not to sit on the knee.
-TUPLES_PER_SEC_PER_QUERY = _int("TUPLES_PER_SEC_PER_QUERY", 200_000)
+# Calibrated on amd7950x3d, 10 ClusterMonitoring Q2 queries, 16 worker threads:
+#   1.0 M/query -> 10 M offered, 100.0% sustained
+#   1.5 M/query -> 15 M offered, 100.0% sustained
+#   2.0 M/query -> 20 M offered, 100.0% sustained   <- operating point, 89% of ceiling
+#   2.3 M/query -> 23 M offered,  97.7% sustained   <- knee
+# Unpaced ceiling ~22.5 Mtup/s. Running far below this is the "flat because idling" trap: an
+# overhead curve measured at 200k/query would look flat no matter what the synopsis costs.
+TUPLES_PER_SEC_PER_QUERY = _int("TUPLES_PER_SEC_PER_QUERY", 2_000_000)
 TUPLES_PER_SEC_LIST = _int_list("TUPLES_PER_SEC_LIST", [TUPLES_PER_SEC_PER_QUERY])
 
 
 def offered_tps(tuples_per_sec_per_query, num_statistic_queries):
     """Tuples/sec the generator offers across every connection of one run.
 
-    A join reads both streams and so sees the full per-query rate; a histogram reads one, and the
-    1:3 person:auction mix splits that rate 1/4 : 3/4. Statistic queries alternate person/auction.
+    Deliberately independent of num_statistic_queries: the histograms are spliced onto their query's
+    existing source, so they open no connection and pull no extra tuples. Identical offered load at
+    every point of the sweep is what makes a throughput difference attributable to the synopsis.
     """
-    quarter = tuples_per_sec_per_query / 4.0
-    person_stats = (num_statistic_queries + 1) // 2
-    auction_stats = num_statistic_queries // 2
-    return (tuples_per_sec_per_query * NUM_ANALYTICAL_QUERIES
-            + person_stats * quarter
-            + auction_stats * 3 * quarter)
+    del num_statistic_queries  # by design: companions add no ingestion
+    return tuples_per_sec_per_query * NUM_ANALYTICAL_QUERIES
 
 # The container joins the host network so published-port NAT never becomes the throughput ceiling.
 # On a host where that is unavailable, swap for -p 127.0.0.1:<port>:<port>.
 GENERATOR_DOCKER_NETWORK = os.environ.get("GENERATOR_DOCKER_NETWORK", "host")
 GENERATOR_READY_TIMEOUT_S = _int("GENERATOR_READY_TIMEOUT_S", 30)
+
+# TCPSource's CONNECT_TIMEOUT. Note this is NOT only the connect deadline: TCPSource.cpp sets it as
+# SO_RCVTIMEO/SO_SNDTIMEO too, so it is also the receive timeout for the socket's entire lifetime —
+# any gap longer than this in incoming data kills the source. A companion's data source can sit
+# deferred waiting for its build branch to splice in, so a short value here is a hazard.
+TCP_CONNECT_TIMEOUT_SECONDS = _int("TCP_CONNECT_TIMEOUT_SECONDS", 300)
 
 # TCP source buffering. Under unlimited ingestion the buffer fills long before the interval elapses,
 # so this only bounds how long a partially-filled buffer waits.
@@ -234,8 +230,8 @@ MAX_OPERATORS = _int("MAX_OPERATORS", 100_000)
 
 FIELDNAMES = [
     'num_statistic_queries', 'run_idx', 'num_analytical_queries',
-    'num_worker_threads', 'window_size_sec', 'memory_budget',
-    'person_domain', 'events_per_sec', 'tuples_per_sec_per_query', 'mode',
+    'num_worker_threads', 'window_size_sec', 'window_advance_sec',
+    'job_domain', 'events_per_sec', 'tuples_per_sec_per_query',
     'offered_tps',  # the load the engine was asked to sustain, see config.offered_tps()
     'analytical_throughput_tps',         # sum over the analytical queries — the headline metric
     'analytical_throughput_median_tps',  # per-query median, for variance

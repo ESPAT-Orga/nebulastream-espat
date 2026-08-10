@@ -11,18 +11,19 @@
 # limitations under the License.
 
 [package]
-name = "nes-nexmark-gen"
+name = "nes-bench-gen"
 version = "0.1.0"
 edition = "2021"
 
 [[bin]]
-name = "nes-nexmark-gen"
+name = "nes-bench-gen"
 path = "src/main.rs"
 
 [dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "signal", "time"] }
 clap = { version = "4", features = ["derive"] }
 itoa = "1"
+ryu = "1"
 
 [profile.release]
 lto = "thin"

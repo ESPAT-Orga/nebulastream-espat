@@ -25,11 +25,10 @@ import os
 import tempfile
 
 from scripts.benchmarking.statistic_overhead.run_statistic_overhead import (
-    build_query_list,
     parse_throughput_samples,
     steady_state_means,
 )
-from scripts.benchmarking.statistic_overhead import config
+from scripts.benchmarking.statistic_overhead import config, shared_submission
 
 
 def _line(query_id, start, end, value, prefix):
@@ -78,28 +77,48 @@ def test_warmup_can_discard_everything():
     assert means == {}, means
 
 
-def test_query_list_shape():
-    """Roles are assigned by position, so analytical queries must come first and statistic queries
-    must alternate person/auction with unique statistic ids."""
-    n = 6
-    queries = build_query_list(n)
-    assert len(queries) == config.NUM_ANALYTICAL_QUERIES + n
+def test_sessions_are_independent():
+    """Each session must declare its own logical source: RunningSourceRegistry is keyed by logical
+    source name worker-wide and aborts the worker on a duplicate."""
+    names = [shared_submission.source_name(i) for i in range(config.NUM_ANALYTICAL_QUERIES)]
+    assert len(set(names)) == len(names), f"logical source names collide: {names}"
 
-    analytical = queries[:config.NUM_ANALYTICAL_QUERIES]
-    assert all("INTO join_void_sink" in q for q in analytical)
+    for i, name in enumerate(names):
+        sql = shared_submission.setup_sql(i) + shared_submission.analytical_sql(i)
+        assert f"CREATE LOGICAL SOURCE {name}(" in sql
+        assert f"FROM {name} " in sql, "the query must read its own source"
+        # START/END are reserved tokens; unquoted they fail to parse and nes-repl dies silently.
+        assert f"{name.upper()}.`START`" in sql and f"{name.upper()}.`END`" in sql
+        # Every other session's source must be absent from this session's SQL.
+        for other in names:
+            if other != name:
+                assert other not in sql, f"session {i} leaked {other}"
 
-    stats = queries[config.NUM_ANALYTICAL_QUERIES:]
-    assert [("person_stat_sink" in q) for q in stats] == [True, False] * (n // 2)
 
-    ids = [q.split("EQUIWIDTHHISTOGRAM(")[1].split(",")[0] for q in stats]
-    assert len(set(ids)) == len(ids), f"statistic ids must be unique within a run: {ids}"
+def test_companion_covers_the_group_by_key():
+    """The histogram must be over jobId — the GROUP BY key — and bounded by the generator's domain."""
+    args = shared_submission._companion_args(0)
+    assert "--companion-statistic" in args
+    field = args[args.index("--companion-field") + 1]
+    assert field == "jobId", f"expected the GROUP BY key, got {field}"
+    assert args[args.index("--companion-histogram-max") + 1] == str(config.JOB_DOMAIN)
+    # A single-source data query resolves its own splice target, so naming it would be redundant.
+    assert "--companion-source" not in args
 
-    # An odd count still works, it just leaves the last join key without its partner histogram.
-    assert len(build_query_list(3)) == config.NUM_ANALYTICAL_QUERIES + 3
+
+def test_offered_load_is_independent_of_statistic_count():
+    """The experiment's core property: companions splice onto an existing source, so they add no
+    ingestion. If this ever changes, a throughput drop stops being attributable to the synopsis."""
+    baseline = config.offered_tps(200_000, 0)
+    assert baseline == 200_000 * config.NUM_ANALYTICAL_QUERIES
+    for n in range(0, config.NUM_ANALYTICAL_QUERIES + 1):
+        assert config.offered_tps(200_000, n) == baseline, f"offered load changed at N={n}"
 
 
 if __name__ == "__main__":
     test_parsing_and_warmup()
     test_warmup_can_discard_everything()
-    test_query_list_shape()
+    test_sessions_are_independent()
+    test_companion_covers_the_group_by_key()
+    test_offered_load_is_independent_of_statistic_count()
     print("ok")

@@ -28,7 +28,7 @@ from scripts.benchmarking.statistic_overhead.run_statistic_overhead import (
     parse_throughput_samples,
     steady_state_means,
 )
-from scripts.benchmarking.statistic_overhead import config, shared_submission
+from scripts.benchmarking.statistic_overhead import config, grid_submission, shared_submission
 
 
 def _line(query_id, start, end, value, prefix):
@@ -115,10 +115,49 @@ def test_offered_load_is_independent_of_statistic_count():
         assert config.offered_tps(200_000, n) == baseline, f"offered load changed at N={n}"
 
 
+def test_grid_sql_is_well_formed():
+    """Every query in the isolated grid needs its own source and its own statistic id: RunningSource
+    registers by logical source name worker-wide, and duplicate statistic ids collide in the store."""
+    import re
+    k, j = 3, 4
+    sql = grid_submission.build_sql(k, j)
+
+    assert sql.count("CREATE LOGICAL SOURCE") == k + j
+    assert sql.count("CREATE PHYSICAL SOURCE") == k + j
+    assert sql.count("CREATE SINK") == k + j
+    assert sql.count("SELECT ") == k + j
+
+    sources = re.findall(r"CREATE LOGICAL SOURCE (\w+)\(", sql)
+    assert len(set(sources)) == len(sources), f"duplicate source names: {sources}"
+
+    ids = re.findall(r"EQUIWIDTHHISTOGRAM\((\d+),", sql)
+    assert len(ids) == j and len(set(ids)) == j, f"statistic ids not unique: {ids}"
+
+    # START/END are reserved tokens; unquoted they fail to parse and nes-repl dies silently.
+    assert sql.count(".`START`") == k and sql.count(".`END`") == k
+
+    # Analytical queries must be emitted first — the runner splits the returned id list by position.
+    first_select = sql.index("SELECT ")
+    assert "totalCpu" in sql[first_select:first_select + 200], "analytical queries must come first"
+
+
+def test_grid_offered_load_counts_statistic_ingestion():
+    """The defining difference from the shared experiment: independent statistic queries own their
+    sources, so they DO add ingestion. If this ever stopped being true the grid would be measuring
+    the same thing as the shared sweep."""
+    rate = 100_000
+    assert config.grid_offered_tps(rate, 10, 0) == rate * 10
+    assert config.grid_offered_tps(rate, 10, 50) == rate * 60
+    # The analytical share stays fixed as j grows — it is the denominator for "did they keep up?".
+    assert config.grid_analytical_offered_tps(rate, 10) == rate * 10
+
+
 if __name__ == "__main__":
     test_parsing_and_warmup()
     test_warmup_can_discard_everything()
     test_sessions_are_independent()
     test_companion_covers_the_group_by_key()
     test_offered_load_is_independent_of_statistic_count()
+    test_grid_sql_is_well_formed()
+    test_grid_offered_load_counts_statistic_ingestion()
     print("ok")

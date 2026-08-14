@@ -702,16 +702,18 @@ int main(int argc, char** argv)
                             NES::Windowing::TimeMeasure startTs,
                             NES::Windowing::TimeMeasure endTs)
                     {
-                            /// VERIFICATION PRINT. Reaching this callback is end-to-end proof that
-                            /// the companion actually ran: StatisticStoreWriter wrote a histogram,
-                            /// EquiWidthHistogramProbe read it back out of the store, and at least
-                            /// one bin row satisfied the trigger condition — so the splice really
-                            /// delivered tuples and windows really closed. Nothing else observes
-                            /// this: the throughput listener never reports a spliced branch, because
-                            /// the branch consumes the data query's source thread and has no source
-                            /// pipeline of its own.
-                            std::cout << "[COMPANION-PROBE-FIRED] statisticId=" << statId.getRawValue()
-                                      << " window=" << startTs.getTime() << "-" << endTs.getTime() << std::endl;
+                            /// Reaching this callback is end-to-end proof that the companion ran:
+                            /// StatisticStoreWriter wrote a histogram, EquiWidthHistogramProbe read it
+                            /// back out of the store, and at least one bin row satisfied the trigger
+                            /// condition. Nothing else observes this — the throughput listener never
+                            /// reports a spliced branch, because the branch consumes the data query's
+                            /// source thread and has no source pipeline of its own — so this is the
+                            /// only place to instrument if a companion ever needs verifying again.
+                            NES_DEBUG(
+                                "Companion probe fired: statisticId={} window={}-{}",
+                                statId.getRawValue(),
+                                startTs.getTime(),
+                                endTs.getTime());
 
                             /// Workload-switch path: set the named gate to the regime favored by THIS
                             /// trigger via gRPC. No query stop/redeploy — the source thread keeps

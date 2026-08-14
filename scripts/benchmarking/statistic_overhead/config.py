@@ -96,6 +96,82 @@ MEASUREMENT_WINDOW_SECONDS = _int("MEASUREMENT_WINDOW_SECONDS", 30)
 WAIT_AFTER_WORKER_START = WAIT_BETWEEN_COMMANDS_LONG
 
 
+## Isolated grid ###############################################################
+#
+# A second experiment: k analytical queries and j statistic queries, all INDEPENDENT — each with its
+# own TCP source. No companions, so j is not capped by k, and what is measured is the cost of
+# monitoring queries *including their ingestion*. That is a different claim from the shared sweep's
+# marginal-synopsis cost; the two belong side by side, since the gap between them is what in-engine
+# sharing buys.
+#
+# Deliberately run BELOW saturation. A saturated system invites the objection that we are measuring
+# how capacity gets divided rather than what statistics cost; at a fixed sustainable rate the
+# question is sharp — does monitoring disturb a workload that was comfortably keeping up?
+GRID_ANALYTICAL_COUNTS = _int_list("GRID_ANALYTICAL_COUNTS", [1, 5, 10])
+GRID_STATISTIC_COUNTS = _int_list("GRID_STATISTIC_COUNTS", [0, 10, 2, 50, 60, 70, 80, 90, 100, 150, 200])
+
+# Against the ~22.5 Mtup/s ceiling this puts the whole grid under a third of capacity
+# (k=10,j=0 -> 4%; k=10,j=50 -> 27%), so the surface will very likely be flat: "50 statistic queries
+# do not disturb 10 analytical ones". That is a real result, but it invites the mirror objection
+# that 73% headroom explains it. Raise this to ~350_000 to span 1.5%..93% and show where the free
+# lunch actually ends. Always report the load as a fraction of capacity alongside the figure.
+#
+# Aggregate offered load at the top corner (k=10), against the measured 28.8 Mtup/s ceiling for this
+# mix. Read this before changing either knob: j=100 at 350k is ABOVE capacity, so a throughput drop
+# there is ingestion saturating, not what a statistic query costs.
+#
+#   j =            0        10        25        50       100
+#   100k/query   1.0M/3%   2.0M/7%  3.5M/12%  6.0M/21%  11.0M/38%   <- sub-saturation throughout
+#   350k/query   3.5M/12%  7.0M/24% 12.3M/43% 21.0M/73%  38.5M/134% <- j=100 is over the ceiling
+#
+# A LIST: the grid sweeps every rate, so one run produces both the sub-saturation arm and the
+# over-capacity arm and they are directly comparable (same session, same machine state). Override
+# with a comma-separated env var, e.g. GRID_TUPLES_PER_SEC_PER_QUERY=100000,350000.
+# GRID_TUPLES_PER_SEC_PER_QUERY = _int_list("GRID_TUPLES_PER_SEC_PER_QUERY", [100_000, 350_000])
+GRID_TUPLES_PER_SEC_PER_QUERY = _int_list("GRID_TUPLES_PER_SEC_PER_QUERY", [200_000])
+
+# EQUIWIDTHHISTOGRAM's third argument is a memory budget in BYTES, not a bucket count:
+#   numBuckets = max(1, (budget - 8) / 24)   [EquiWidthHistogramLogicalFunction.cpp]
+# 10 KiB therefore buys ~426 bins over JOB_DOMAIN.
+MEMORY_BUDGET = _int("MEMORY_BUDGET", 10 * 1024)
+
+# Statistic ids must be unique across every query alive in one run.
+STATISTIC_ID_BASE = _int("STATISTIC_ID_BASE", 2000)
+
+# The statistic query's own tumbling window. Independent of the analytical query's sliding window.
+GRID_STATISTIC_WINDOW_SEC = _int("GRID_STATISTIC_WINDOW_SEC", 10)
+
+
+def grid_offered_tps(tuples_per_sec_per_query, num_analytical, num_statistic):
+    """Total tuples/sec offered across every connection of one grid point.
+
+    Unlike the shared experiment, statistic queries DO add ingestion here: each owns a source and
+    pulls its own copy of the stream. That is the whole difference being measured.
+    """
+    return tuples_per_sec_per_query * (num_analytical + num_statistic)
+
+
+def grid_analytical_offered_tps(tuples_per_sec_per_query, num_analytical):
+    """The analytical share only — the denominator for "did the workload keep up?"."""
+    return tuples_per_sec_per_query * num_analytical
+
+
+GRID_RESULTS_CSV = "results_statistic_grid.csv"
+
+GRID_FIELDNAMES = [
+    'num_analytical_queries', 'num_statistic_queries', 'run_idx',
+    'num_worker_threads', 'window_size_sec', 'window_advance_sec',
+    'statistic_window_sec', 'job_domain', 'events_per_sec', 'memory_budget',
+    'tuples_per_sec_per_query', 'offered_tps', 'analytical_offered_tps',
+    'analytical_throughput_tps',         # sum over the analytical queries (diagnostic)
+    'analytical_throughput_median_tps',  # per-query median — the headline scales this by k
+    'num_analytical_measured',
+    'statistic_throughput_tps',          # real data here: each statistic query owns a source
+    'num_statistic_measured',
+    'issue',
+]
+
+
 ## Worker ######################################################################
 
 WORKER_THREADS = _int("WORKER_THREADS", 16)

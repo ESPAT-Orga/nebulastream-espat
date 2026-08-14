@@ -342,7 +342,10 @@ mod tests {
             previous_ts = ts;
 
             let job_id: u64 = fields[1].parse().unwrap();
-            assert!(job_id < args.job_domain, "jobId {job_id} outside the histogram bounds");
+            assert!(
+                job_id < args.job_domain,
+                "jobId {job_id} outside the histogram bounds"
+            );
 
             if fields[4].parse::<u64>().unwrap() == EVENT_TYPE_MATCH {
                 matches += 1;
@@ -357,7 +360,10 @@ mod tests {
 
         // ~25% by construction; assert loosely so the hash's exact spread doesn't make this brittle.
         let fraction = matches as f64 / 10_000.0;
-        assert!((0.20..0.30).contains(&fraction), "eventType==3 fraction was {fraction}");
+        assert!(
+            (0.20..0.30).contains(&fraction),
+            "eventType==3 fraction was {fraction}"
+        );
     }
 
     /// jobId must cycle through the whole domain, or the histogram would only ever see part of its
@@ -380,9 +386,17 @@ mod tests {
         assert_eq!(args.time_scale(), 0.0, "0 must mean unlimited");
 
         args.tuples_per_sec = 200_000;
-        assert!((args.time_scale() - 2.0).abs() < 1e-9, "got {}", args.time_scale());
+        assert!(
+            (args.time_scale() - 2.0).abs() < 1e-9,
+            "got {}",
+            args.time_scale()
+        );
 
         args.tuples_per_sec = 50_000;
-        assert!((args.time_scale() - 0.5).abs() < 1e-9, "got {}", args.time_scale());
+        assert!(
+            (args.time_scale() - 0.5).abs() < 1e-9,
+            "got {}",
+            args.time_scale()
+        );
     }
 }

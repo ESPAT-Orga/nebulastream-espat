@@ -87,9 +87,10 @@ export OUTPUT_DIR
 echo "BUILD_DIR:          ${BUILD_DIR:-<default ./build_dir>}"
 echo "MODES:              ${MODES:-${MODE:-<default traffic,contention>}}"
 echo "TOPOLOGIES:         ${TOPOLOGIES:-<default 1/2>}"
-echo "VARIANTS:           ${VARIANTS:-<default prometheus,split,local>}"
+echo "VARIANTS:           ${VARIANTS:-<default prometheus,split,delta,local>}"
+echo "DATASET:            ${DATASET:-<default cluster_monitoring>}"
 echo "SOURCES_PER_LEAF:   ${SOURCES_PER_LEAF:-<default 4>}"
-echo "RUN_DURATION_SECONDS: ${RUN_DURATION_SECONDS:-<default 60>}"
+echo "RUN_DURATION_SECONDS: ${RUN_DURATION_SECONDS:-<default 30>}"
 
 # The combined worker+Prometheus image FROMs nes-runtime-base:test (not on Docker Hub); build it.
 RUNTIME_BASE_IMAGE="nes-runtime-base:test"

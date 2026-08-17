@@ -222,7 +222,18 @@ void NetworkSink::execute(const TupleBuffer& inputBuffer, PipelineExecutionConte
         {
             auto childBuffer = currentBuffer->loadChildBuffer(VariableSizedAccess::Index(childIdx));
             auto childMemory = childBuffer.getAvailableMemoryArea<const uint8_t>();
-            children.emplace_back(childMemory);
+            /// Send only the bytes the child actually holds, not its allocated capacity. A child that fits in a
+            /// pooled buffer IS a whole pooled buffer (TupleBufferRef::getNewBufferForVarSized only falls back to
+            /// an exactly-sized unpooled buffer when the value does not fit), so getAvailableMemoryArea() would
+            /// put up to operator_buffer_size of padding on the wire for every small variable-sized value. Every
+            /// producer of a child buffer records its used byte count in the numberOfTuples field
+            /// (TupleBufferRef::writeVarSized, CsvBufferParser, OutputFormatterUtil). A received child is
+            /// allocated at exactly the received length and leaves the counter at 0, so 0 means "the whole area
+            /// is used" and relayed buffers keep working unchanged.
+            const auto usedChildBytes = childBuffer.getNumberOfTuples();
+            const auto childPayload
+                = (usedChildBytes > 0 and usedChildBytes <= childMemory.size()) ? childMemory.subspan(0, usedChildBytes) : childMemory;
+            children.emplace_back(childPayload);
         }
 
         std::span usedBufferMemory(

@@ -471,6 +471,166 @@ EOF
   [ "$status" -eq 0 ]
 }
 
+# --- histogram delta compression (GEN/RESOLVER wire) -------------------------------
+# See docs/histogram-delta-wire-compression-plan.md. The single-node systests
+# (nes-systests/operator/aggregation/statistics/WindowAggregationHistogramDelta*.test)
+# co-locate both halves of the split, so nothing there exercises the case the feature
+# exists for: the delta blob travelling over a real network channel between two
+# workers. The tests below do, on the topology in tests/good/histogram-delta-2-nodes.yaml.
+#
+# They drive the feature the way production does: a REQUEST STATISTIC with
+# `optimizer.enable_histogram_delta_compression` set, so the node cut comes from the
+# PlacementHintTrait pins that DefaultStatisticQueryGenerator stamps. Nothing else covers
+# those pins end to end. Because the build's terminal sink is a Void sink (nes-cli runs no
+# StatisticCoordinator), the reconstructed histogram is read back the way the REPL test does
+# it: a second query that probes the node-local store, one row per window key.
+PROBE_SQL='SELECT statisticStart, statisticEnd, binStart, binCounter, binEnd FROM ( SELECT EQUIWIDTHHISTOGRAM_PROBE(71, uint64, uint64) FROM keys ) INTO bins'
+
+# Returns the sub-listing of a `nes-cli dump` "Decomposed Plans:" section that belongs to
+# one worker. The sections come out in unspecified order (they are iterated from a map),
+# so they have to be located by their "<n> plans on <host>:" header rather than by index.
+plans_on_worker() {
+  local worker=$1 dump=$2
+  echo "$dump" | awk -v marker="plans on ${worker}:" '
+    index($0, marker) { capture = 1; next }
+    /plans on .*:$/   { capture = 0 }
+    capture           { print }
+  '
+}
+
+# Polls a query's global status until it reports one of the terminal states. The build's file
+# source ends on its own, and that end-of-stream is what flushes the last window through the
+# network channel and into the store -- so this is what says "the store is now populated" and
+# the probe may be submitted.
+wait_for_query_to_finish() {
+  local query_id=$1
+  for _ in $(seq 1 40); do
+    sleep 1
+    local state
+    state=$(DOCKER_NES_CLI status "$query_id" \
+      | jq -r --arg query_id "$query_id" \
+          '.[] | select(.query_id == $query_id and (has("local_query_id") | not)) | .query_status')
+    case "$state" in
+      Stopped | PartiallyStopped) return 0 ;;
+      Failed) echo "query $query_id failed"; return 1 ;;
+    esac
+  done
+  echo "timed out waiting for query $query_id to finish (last state: ${state:-unknown})"
+  return 1
+}
+
+# Polls for a sink output file inside the shared volume to reach `expected` lines.
+# sync_workdir has to run every iteration: the volume is copied, not bind-mounted, so nothing
+# written by a worker is visible before it does.
+wait_for_sink_lines() {
+  local file=$1 expected=$2
+  for _ in $(seq 1 40); do
+    sleep 1
+    sync_workdir
+    if [ "$(cat "$file" 2>/dev/null | wc -l)" -ge "$expected" ]; then
+      return 0
+    fi
+  done
+  echo "timed out waiting for $expected lines in $file; got:"
+  cat "$file" 2>/dev/null || echo "(file does not exist)"
+  return 1
+}
+
+# The three reconstructed windows, 5 bins each: statisticStart, statisticEnd, binStart,
+# binCounter, binEnd. Identical to the golden block in the single-node systest — the
+# reconstruction has to survive the wire unchanged.
+EXPECTED_HISTOGRAM_BINS=$(cat <<'EOF'
+0,5000,0,1,5
+0,5000,5,1,10
+0,5000,10,1,15
+0,5000,15,1,20
+0,5000,20,1,25
+5000,10000,0,2,5
+5000,10000,5,1,10
+5000,10000,10,1,15
+5000,10000,15,1,20
+5000,10000,20,1,25
+10000,15000,0,2,5
+10000,15000,5,2,10
+10000,15000,10,1,15
+10000,15000,15,1,20
+10000,15000,20,1,25
+EOF
+)
+
+# Compares a probe sink's CSV against EXPECTED_HISTOGRAM_BINS. Drops the sink's schema
+# header line and sorts both sides, so the assertion is on the set of reconstructed bins
+# rather than on the order the windows happen to be emitted in.
+assert_reconstructed_bins() {
+  local file=$1
+  diff <(echo "$EXPECTED_HISTOGRAM_BINS" | sort) <(tail -n +2 "$file" | sort)
+}
+
+@test "histogram delta split cuts the wire between GEN and RESOLVER" {
+  setup_distributed tests/good/histogram-delta-2-nodes.yaml
+
+  run DOCKER_NES_CLI dump
+  [ "$status" -eq 0 ]
+
+  gen_plan=$(plans_on_worker "gen-node:8080" "$output")
+  resolver_plan=$(plans_on_worker "resolver-node:8080" "$output")
+
+  # PlacementHintTrait{Source} keeps the GEN half on the source node, and nothing above it:
+  # the only thing handed to the network sink is the GEN's sparse per-window delta blob.
+  echo "$gen_plan" | grep -q "STAT BUILD(EquiWidthHistogramDeltaGen)"
+  ! echo "$gen_plan" | grep -q "EquiWidthHistogramDeltaResolver"
+  ! echo "$gen_plan" | grep -q "STATISTIC_STORE_WRITER"
+
+  # PlacementHintTrait{Sink} puts the RESOLVER and the writer on the store-owner node named by
+  # the request's `host` option, on the far side of the channel.
+  echo "$resolver_plan" | grep -q "STAT BUILD(EquiWidthHistogramDeltaResolver)"
+  echo "$resolver_plan" | grep -q "STATISTIC_STORE_WRITER"
+  ! echo "$resolver_plan" | grep -q "EquiWidthHistogramDeltaGen"
+}
+
+@test "histogram delta split reconstructs the histogram across two nodes" {
+  setup_distributed tests/good/histogram-delta-2-nodes.yaml
+
+  run DOCKER_NES_CLI start
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ ^[a-z_]+$ ]]
+  build_id=$output
+
+  # The split must actually be deployed on both workers: 1 global + 2 local queries.
+  run DOCKER_NES_CLI status "$build_id"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '(. | length) == 3'
+
+  wait_for_query_to_finish "$build_id"
+
+  # Read the reconstructed histogram back out of resolver-node's store.
+  run DOCKER_NES_CLI start "$PROBE_SQL"
+  [ "$status" -eq 0 ]
+
+  # 3 windows x 5 bins + the file sink's schema header line.
+  wait_for_sink_lines resolver-node/probe-out.csv 16
+  assert_reconstructed_bins resolver-node/probe-out.csv
+}
+
+# Control: the same REQUEST STATISTIC with the flag off builds one plain histogram and ships the
+# full synopsis over the same wire to the same store node (see the topology's header comment).
+# The probed bins must be identical to the delta run's.
+@test "plain histogram build over the same wire yields the same bins" {
+  setup_distributed tests/good/histogram-delta-2-nodes-plain.yaml
+
+  run DOCKER_NES_CLI start
+  [ "$status" -eq 0 ]
+  build_id=$output
+
+  wait_for_query_to_finish "$build_id"
+
+  run DOCKER_NES_CLI start "$PROBE_SQL"
+  [ "$status" -eq 0 ]
+
+  wait_for_sink_lines resolver-node/probe-out.csv 16
+  assert_reconstructed_bins resolver-node/probe-out.csv
+}
+
 @test "launch query using 3-nodes topology" {
   setup_distributed tests/good/3-nodes.yaml
   run DOCKER_NES_CLI start

@@ -1,0 +1,97 @@
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+
+#    https://www.apache.org/licenses/LICENSE-2.0
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Control topology for the histogram delta-compression wire test: identical to
+# histogram-delta-2-nodes.yaml except that `enable_histogram_delta_compression` is OFF, so the
+# same REQUEST STATISTIC produces one plain EquiWidthHistogram build instead of the GEN/RESOLVER
+# split. `writer_host` then does what the placement hints do in the delta case -- keep the
+# StatisticStoreWriter on resolver-node -- so both variants write the same node-local store and
+# are probed by the same query:
+#
+#   plain: gen-node[ WatermarkAssign -> Build ] ==full synopsis==> resolver-node[ StoreWriter ]
+#   delta: gen-node[ WatermarkAssign -> GEN   ] ==delta blob====> resolver-node[ RESOLVER -> StoreWriter ]
+#
+# Both must probe back to identical bins. If this test and the delta one fail together, the
+# topology or the golden data is wrong; if only the delta one fails, delta compression is.
+
+optimizer:
+  enable_histogram_delta_compression: false
+
+query: |
+  REQUEST STATISTIC DATA MINVAL ON stream(value) WINDOW TUMBLING(SIZE 5000 MS) EVENTTIME timestamp
+  SET ('resolver-node:8080' AS host, 71 AS statistic_id, 0 AS `min`, 25 AS `max`,
+       128 AS memory_budget, 'void' AS terminal_sink, 'resolver-node:8080' AS writer_host)
+
+sinks:
+  - name: bins
+    host: resolver-node:8080
+    schema:
+      - name: keys$STATISTICSTART
+        type: UINT64
+      - name: keys$STATISTICEND
+        type: UINT64
+      - name: keys$binStart
+        type: UINT64
+      - name: keys$binCounter
+        type: UINT64
+      - name: keys$binEnd
+        type: UINT64
+    type: File
+    config:
+      file_path: probe-out.csv
+      output_format: CSV
+    parser_config: { }
+
+logical:
+  - name: stream
+    schema:
+      - name: id
+        type: UINT64
+      - name: value
+        type: UINT64
+      - name: timestamp
+        type: UINT64
+  - name: keys
+    schema:
+      - name: STATISTICID
+        type: UINT64
+      - name: STATISTICSTART
+        type: UINT64
+      - name: STATISTICEND
+        type: UINT64
+
+physical:
+  - logical: stream
+    host: gen-node:8080
+    parser_config:
+      type: CSV
+      fieldDelimiter: ","
+    type: File
+    source_config:
+      file_path: /workdir/tests/data/histogram-delta.csv
+  - logical: keys
+    host: resolver-node:8080
+    parser_config:
+      type: CSV
+      fieldDelimiter: ","
+    type: File
+    source_config:
+      file_path: /workdir/tests/data/histogram-delta-keys.csv
+
+workers:
+  - host: gen-node:8080
+    data_address: gen-node:9090
+    max_operators: 10000
+    downstream: [ resolver-node:8080 ]
+  - host: resolver-node:8080
+    data_address: resolver-node:9090
+    max_operators: 10000

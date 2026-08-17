@@ -22,6 +22,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <utility>
 #include <vector>
 #include <Aggregation/AggregationSlice.hpp>
@@ -141,6 +142,90 @@ void AggregationOperatorHandler::triggerSlices(
             tupleBuffer.getWatermark(),
             tupleBuffer.getSequenceNumber(),
             tupleBuffer.getOriginId());
+    }
+}
+
+namespace
+{
+/// Records the eviction threshold for `interval` (running max windowEnd). Caller must hold keyframeMutex.
+void recordIntervalEnd(std::map<uint64_t, uint64_t>& endMap, const uint64_t interval, const uint64_t windowEnd)
+{
+    auto& endTs = endMap[interval];
+    endTs = std::max(endTs, windowEnd);
+}
+}
+
+int8_t* AggregationOperatorHandler::zeroBaselineFor(const uint64_t stateSize)
+{
+    const std::lock_guard lock{keyframeMutex};
+    if (zeroBaseline.empty())
+    {
+        zeroBaseline.assign(stateSize, 0);
+    }
+    /// Sized once, by the first keyframe. The returned pointer is used by the caller AFTER keyframeMutex is
+    /// released, so re-assigning on a differing stateSize could reallocate the buffer under a concurrent reader
+    /// still holding a pointer from an earlier call. One handler serves one state size, so a mismatch is a bug
+    /// to surface rather than a case to accommodate.
+    INVARIANT(
+        zeroBaseline.size() == stateSize,
+        "Zero baseline was sized {} but a keyframe requested {}; one handler must serve a single state size",
+        zeroBaseline.size(),
+        stateSize);
+    return zeroBaseline.data();
+}
+
+int8_t* AggregationOperatorHandler::tryGetKeyframeBaseline(const uint64_t interval, const uint64_t windowEnd)
+{
+    const std::lock_guard lock{keyframeMutex};
+    /// Every window advances the interval's eviction threshold to the max windowEnd seen so far. This is safe
+    /// for onGarbageCollect despite being a running max: the contiguous probe watermark is held below the start
+    /// of any still-unprocessed window, so it cannot exceed the recorded max (>= a processed window's end > its
+    /// start). The max becomes the true interval end once the interval's last window has been processed.
+    recordIntervalEnd(keyframeIntervalEndTs, interval, windowEnd);
+    if (const auto it = keyframeReferences.find(interval); it != keyframeReferences.end())
+    {
+        /// Return a COPY in a thread-local scratch, so onGarbageCollect can evict concurrently without dangling
+        /// this reader.
+        thread_local std::vector<int8_t> baselineScratch;
+        baselineScratch.assign(it->second.begin(), it->second.end());
+        return baselineScratch.data();
+    }
+    return nullptr;
+}
+
+bool AggregationOperatorHandler::isKeyframeReady(const uint64_t interval) const
+{
+    const std::lock_guard lock{keyframeMutex};
+    return keyframeReferences.contains(interval);
+}
+
+void AggregationOperatorHandler::publishKeyframe(
+    const uint64_t interval, const int8_t* state, const uint64_t stateSize, const uint64_t windowEnd)
+{
+    const std::lock_guard lock{keyframeMutex};
+    recordIntervalEnd(keyframeIntervalEndTs, interval, windowEnd);
+    auto& reference = keyframeReferences[interval];
+    reference.assign(state, state + stateSize);
+}
+
+void AggregationOperatorHandler::onGarbageCollect(const Timestamp newGlobalWatermark) const
+{
+    /// An interval entirely below the probe's new global watermark has had all of its windows probed, so no
+    /// future delta can reference its keyframe. Riding the same watermark that deletes the slices and windows
+    /// is what makes that safe.
+    const std::lock_guard lock{keyframeMutex};
+    for (auto it = keyframeIntervalEndTs.begin(); it != keyframeIntervalEndTs.end();)
+    {
+        const auto [interval, intervalEndTs] = *it;
+        if (Timestamp(intervalEndTs) < newGlobalWatermark)
+        {
+            keyframeReferences.erase(interval);
+            it = keyframeIntervalEndTs.erase(it);
+        }
+        else
+        {
+            ++it;
+        }
     }
 }
 

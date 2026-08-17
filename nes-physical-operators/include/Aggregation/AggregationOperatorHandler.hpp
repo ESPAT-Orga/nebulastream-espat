@@ -19,6 +19,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <utility>
 #include <vector>
 #include <Identifiers/Identifiers.hpp>
@@ -71,12 +72,50 @@ public:
     /// shared_ptr as multiple slices need access to it
     std::shared_ptr<CreateNewHashMapSliceArgs::NautilusCleanupExec> cleanupStateNautilusFunction;
 
+    /// --- Keyframe reference cache for histogram delta compression ---
+    /// Delta compression groups windows into intervals of K consecutive window ordinals. Each interval's
+    /// keyframe (its `ordinal % K == 0` window) emits a full histogram and publishes its state here; the
+    /// interval's other windows are deltas against that one reference. See
+    /// DeltaCompressionAggregationProbePhysicalOperator for how a window learns which of the two it is.
+    ///
+    /// Handing the reference over is WAIT-FREE: a worker never blocks on a keyframe. The engine does not
+    /// process window-tasks in enqueue order, so a keyframe can be dequeued after its deltas; if deltas
+    /// blocked on it, all workers could end up blocked on an interval whose keyframe is still queued — a
+    /// thread-pool starvation deadlock. A delta that finds no reference reschedules its task instead.
+
+    /// Keyframe window: baseline is zero (=> emit the full histogram). Returns a shared zeroed buffer.
+    [[nodiscard]] int8_t* zeroBaselineFor(uint64_t stateSize);
+    /// Delta window: if `interval`'s keyframe reference is published, copy it into a thread-local scratch and
+    /// return it (the caller reconstructs and emits this delta now). Otherwise return nullptr — the caller
+    /// reschedules its task and retries. Also advances the interval's windowEnd eviction threshold.
+    [[nodiscard]] int8_t* tryGetKeyframeBaseline(uint64_t interval, uint64_t windowEnd);
+    /// Non-mutating readiness probe used to decide (BEFORE the expensive per-thread hash-map combine) whether a
+    /// delta window can proceed: true iff `interval`'s keyframe reference is already published. A delta whose
+    /// keyframe is not ready reschedules its task pre-combine, so the combine is never re-run on a retry.
+    [[nodiscard]] bool isKeyframeReady(uint64_t interval) const;
+    /// Keyframe window: publish its post-lower state as `interval`'s reference and record windowEnd for eviction.
+    void publishKeyframe(uint64_t interval, const int8_t* state, uint64_t stateSize, uint64_t windowEnd);
+
 protected:
     void triggerSlices(
         const std::map<WindowInfoAndSequenceNumber, std::vector<std::shared_ptr<Slice>>>& slicesAndWindowInfo,
         PipelineExecutionContext* pipelineCtx) override;
+    /// Evict keyframe references for intervals whose last window ended before the probe's new global
+    /// watermark — they can never be referenced again. Hooked into the engine's watermark-driven GC.
+    void onGarbageCollect(Timestamp newGlobalWatermark) const override;
     folly::Synchronized<RollingAverage<uint64_t>> rollingAverageNumberOfKeys;
     uint64_t maxNumberOfBuckets;
+
+private:
+    /// interval index -> keyframe window's reference state. Evicted by onGarbageCollect once the watermark
+    /// passes the interval (see keyframeIntervalEndTs); readers get a copy, so eviction cannot dangle them.
+    mutable std::map<uint64_t, std::vector<int8_t>> keyframeReferences;
+    /// interval index -> running max windowEnd over the interval's processed windows (the eviction threshold;
+    /// the true interval end once its last window has been processed). See onGarbageCollect.
+    mutable std::map<uint64_t, uint64_t> keyframeIntervalEndTs;
+    /// Shared read-only zero baseline handed to keyframe windows (sized once; histogram state size is fixed).
+    mutable std::vector<int8_t> zeroBaseline;
+    mutable std::mutex keyframeMutex;
 };
 
 }

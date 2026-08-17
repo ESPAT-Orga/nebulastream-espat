@@ -68,6 +68,9 @@ void WindowBasedOperatorHandler::garbageCollectSlicesAndWindows(const BufferMeta
         bufferMetaData.seqNumber,
         bufferMetaData.watermarkTs);
     sliceAndWindowStore->garbageCollectSlicesAndWindows(newGlobalWaterMarkProbe);
+
+    /// Let subclasses evict their own per-window state that the same watermark has made unreachable.
+    onGarbageCollect(newGlobalWaterMarkProbe);
 }
 
 void WindowBasedOperatorHandler::checkAndTriggerWindows(const BufferMetaData& bufferMetaData, PipelineExecutionContext* pipelineCtx)

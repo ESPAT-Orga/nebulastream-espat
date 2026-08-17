@@ -452,8 +452,11 @@ int main(int argc, char** argv)
             }
             return NES::QueryId::createDistributed(distributedQueryId);
         };
-        NES::StatisticRequestHandler statisticRequestHandler{
-            NES::StatisticCoordinator{std::make_unique<NES::DefaultStatisticQueryGenerator>(), submitQueryFn}};
+        /// `--optimizer enable_histogram_delta_compression=true`; both the embedded and the distributed REPL
+        /// load this configuration.
+        const bool enableHistogramDeltaCompression = queryOptimizerConfig.enableHistogramDeltaCompression.getValue();
+        NES::StatisticRequestHandler statisticRequestHandler{NES::StatisticCoordinator{
+            std::make_unique<NES::DefaultStatisticQueryGenerator>(enableHistogramDeltaCompression), submitQueryFn}};
         auto coordinatorAddr = statisticRequestHandler.startGrpcServer();
         NES_INFO("StatisticCoordinator gRPC server listening on {}", coordinatorAddr);
 
@@ -591,7 +594,9 @@ int main(int argc, char** argv)
             const auto companionField = program.get<std::string>("--companion-field");
             const auto companionHost = program.get<std::string>("--companion-host");
             const auto swapCoordinatorAddr = coordinatorAddr;
-            auto swapGenerator = std::make_shared<NES::DefaultStatisticQueryGenerator>();
+            /// Same flag the coordinator's generator uses: a default-constructed generator would silently
+            /// drop the delta split on every swap re-deploy even with the option enabled.
+            auto swapGenerator = std::make_shared<NES::DefaultStatisticQueryGenerator>(enableHistogramDeltaCompression);
 
             /// Prometheus-baseline: spawn the coordinator-side poll loop. It periodically queries the
             /// Prometheus server (PromQL histogram_quantile over the sink's scraped buckets) to detect

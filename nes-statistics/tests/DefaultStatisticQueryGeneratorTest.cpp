@@ -260,5 +260,46 @@ TEST_F(DefaultStatisticQueryGeneratorTest, GeneratePlanWithoutConditionHasNoSele
     assertGrpcSink(plan, "localhost", "9010");
 }
 
+/// `writer_host` pins the StatisticStoreWriter to a host, but the histogram delta split already pins the
+/// same operator to the sink (store-owner) node via PlacementHintTrait. Two hard pins on one operator
+/// make the placement ILP infeasible, so the combination must be rejected where it originates instead.
+TEST_F(DefaultStatisticQueryGeneratorTest, WriterHostIsRejectedWithHistogramDeltaSplit)
+{
+    const RequestStatisticBuildStatement request{
+        .domain = DataDomain{.logicalSourceName = "src", .fieldName = "field"},
+        .metric = Metric::MinVal, /// maps to Equi_Width_Histogram, the statistic type the delta split applies to
+        .windowSizeMs = 5000,
+        .windowAdvanceMs = {},
+        .eventTimeFieldName = "ts",
+        .conditionTrigger = {},
+        .options = {{"writer_host", "sink-node:8080"}}};
+
+    const DefaultStatisticQueryGenerator deltaGenerator{true};
+    ASSERT_EXCEPTION_ERRORCODE(
+        (void)deltaGenerator.generateQuery(request, Statistic::StatisticId{1}, "localhost:9011"), ErrorCode::InvalidConfigParameter);
+
+    /// Without the delta split the option stays valid: it is only the double pin that is impossible.
+    EXPECT_NO_THROW((void)generator.generateQuery(request, Statistic::StatisticId{1}, "localhost:9011"));
+}
+
+/// The delta split itself must still generate: GEN and RESOLVER StatisticBuilds feeding one writer.
+TEST_F(DefaultStatisticQueryGeneratorTest, HistogramDeltaSplitGeneratesGenAndResolverBuilds)
+{
+    const RequestStatisticBuildStatement request{
+        .domain = DataDomain{.logicalSourceName = "src", .fieldName = "field"},
+        .metric = Metric::MinVal,
+        .windowSizeMs = 5000,
+        .windowAdvanceMs = {},
+        .eventTimeFieldName = "ts",
+        .conditionTrigger = {},
+        .options = {}};
+
+    const DefaultStatisticQueryGenerator deltaGenerator{true};
+    const auto plan = deltaGenerator.generateQuery(request, Statistic::StatisticId{1}, "localhost:9012");
+
+    EXPECT_EQ(getOperatorByType<StatisticBuildLogicalOperator>(plan).size(), 2);
+    EXPECT_EQ(getOperatorByType<StatisticStoreWriterLogicalOperator>(plan).size(), 1);
+}
+
 }
 }

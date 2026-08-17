@@ -16,6 +16,8 @@
 
 #include <optional>
 #include <Operators/Statistic/LogicalStatisticFields.hpp>
+#include <Operators/Windows/Aggregations/Histogram/EquiWidthHistogramDeltaGenLogicalFunction.hpp>
+#include <Operators/Windows/Aggregations/Histogram/EquiWidthHistogramDeltaResolverLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/Histogram/EquiWidthHistogramLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/Sample/ReservoirSampleLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/Scalar/ScalarStatisticLogicalFunction.hpp>
@@ -39,6 +41,14 @@ inline std::optional<StatisticTarget> tryGetStatisticTarget(const WindowAggregat
     if (const auto histogram = aggregation.tryGetAs<EquiWidthHistogramLogicalFunction>())
     {
         return StatisticTarget{histogram->get().statisticId, Statistic::StatisticType::Equi_Width_Histogram};
+    }
+    if (const auto histogramDeltaGen = aggregation.tryGetAs<EquiWidthHistogramDeltaGenLogicalFunction>())
+    {
+        return StatisticTarget{histogramDeltaGen->get().statisticId, Statistic::StatisticType::Equi_Width_Histogram};
+    }
+    if (const auto histogramDeltaResolver = aggregation.tryGetAs<EquiWidthHistogramDeltaResolverLogicalFunction>())
+    {
+        return StatisticTarget{histogramDeltaResolver->get().statisticId, Statistic::StatisticType::Equi_Width_Histogram};
     }
     if (const auto sample = aggregation.tryGetAs<ReservoirSampleLogicalFunction>())
     {

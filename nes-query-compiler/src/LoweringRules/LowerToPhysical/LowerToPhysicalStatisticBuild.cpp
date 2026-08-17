@@ -25,6 +25,7 @@
 #include <Aggregation/AggregationOperatorHandler.hpp>
 #include <Aggregation/AggregationProbePhysicalOperator.hpp>
 #include <Aggregation/AggregationSlice.hpp>
+#include <Aggregation/DeltaCompressionAggregationProbePhysicalOperator.hpp>
 #include <Aggregation/Function/AggregationPhysicalFunction.hpp>
 #include <DataTypes/DataTypeProvider.hpp>
 #include <Functions/FieldAccessPhysicalFunction.hpp>
@@ -38,6 +39,8 @@
 #include <Nautilus/Interface/Record.hpp>
 #include <Operators/LogicalOperator.hpp>
 #include <Operators/Statistic/StatisticTargetUtil.hpp>
+#include <Operators/Windows/Aggregations/Histogram/EquiWidthHistogramDeltaGenLogicalFunction.hpp>
+#include <Operators/Windows/Aggregations/Histogram/EquiWidthHistogramDeltaResolverLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/Histogram/EquiWidthHistogramLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/Sample/ReservoirSampleLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/Sketch/CountMinSketchLogicalFunction.hpp>
@@ -160,10 +163,23 @@ std::vector<std::shared_ptr<AggregationPhysicalFunction>> getAggregationPhysical
         }
         else if (name.contains("EquiWidthHistogram"))
         {
-            const auto logicalEquiWidthHistogram = descriptor->tryGetAs<EquiWidthHistogramLogicalFunction>();
-            if (logicalEquiWidthHistogram.has_value())
+            /// Handles EquiWidthHistogram and its delta variants (DeltaGen / DeltaResolver); all produce an
+            /// EquiWidthHistogramConfig. The name (e.g. "EquiWidthHistogramDeltaGen") selects the physical function.
+            std::unique_ptr<StatisticConfig> config;
+            if (const auto plain = descriptor->tryGetAs<EquiWidthHistogramLogicalFunction>())
             {
-                auto config = logicalEquiWidthHistogram->get().calculateConfigs();
+                config = plain->get().calculateConfigs();
+            }
+            else if (const auto gen = descriptor->tryGetAs<EquiWidthHistogramDeltaGenLogicalFunction>())
+            {
+                config = gen->get().calculateConfigs();
+            }
+            else if (const auto resolver = descriptor->tryGetAs<EquiWidthHistogramDeltaResolverLogicalFunction>())
+            {
+                config = resolver->get().calculateConfigs();
+            }
+            if (config)
+            {
                 const auto& histogramConfig = dynamic_cast<const EquiWidthHistogramConfig&>(*config);
                 aggregationArguments.numberOfSeenTuplesFieldName = logicalOperator.getNumberOfSeenTuplesFieldName();
                 aggregationArguments.counterType = histogramConfig.counterType;
@@ -300,7 +316,6 @@ LoweringRuleResultSubgraph LowerToPhysicalStatisticBuild::apply(
         inputOriginIds | std::ranges::to<std::vector>(), outputOriginId, std::move(sliceAndWindowStore), conf.maxNumberOfBuckets);
     const AggregationBuildPhysicalOperator build{
         handlerId, std::move(timeFunction), std::move(sliceStoreRef), aggregationPhysicalFunctions, hashMapOptions};
-    const AggregationProbePhysicalOperator probe{hashMapOptions, aggregationPhysicalFunctions, handlerId, windowMetaData};
 
     auto buildWrapper = std::make_shared<PhysicalOperatorWrapper>(
         build,
@@ -312,16 +327,39 @@ LoweringRuleResultSubgraph LowerToPhysicalStatisticBuild::apply(
         handler,
         PhysicalOperatorWrapper::PipelineLocation::EMIT);
 
-    auto probeWrapper = std::make_shared<PhysicalOperatorWrapper>(
-        probe,
-        newInputSchema,
-        outputSchema,
-        memoryLayoutType,
-        memoryLayoutType,
-        handlerId,
-        handler,
-        PhysicalOperatorWrapper::PipelineLocation::SCAN,
-        std::vector{buildWrapper});
+    /// Histogram delta-compression aggregations (GEN/RESOLVER) inject a baseline at lower, so they need the
+    /// delta-aware probe operator; everything else uses the standard aggregation probe.
+    const bool isDeltaCompression = std::ranges::any_of(
+        aggregation->getWindowAggregation(),
+        [](const auto& descriptor) { return descriptor->getName().contains("EquiWidthHistogramDelta"); });
+    /// GEN vs RESOLVER side: the GEN derives the keyframe flag from its own window ordinal, the RESOLVER obeys
+    /// the flag the GEN stamped on the wire.
+    const bool isDeltaResolver = std::ranges::any_of(
+        aggregation->getWindowAggregation(),
+        [](const auto& descriptor) { return descriptor->getName().contains("EquiWidthHistogramDeltaResolver"); });
+
+    auto makeProbeWrapper = [&](auto probeOperator)
+    {
+        return std::make_shared<PhysicalOperatorWrapper>(
+            std::move(probeOperator),
+            newInputSchema,
+            outputSchema,
+            memoryLayoutType,
+            memoryLayoutType,
+            handlerId,
+            handler,
+            PhysicalOperatorWrapper::PipelineLocation::SCAN,
+            std::vector{buildWrapper});
+    };
+    auto probeWrapper = isDeltaCompression
+        ? makeProbeWrapper(DeltaCompressionAggregationProbePhysicalOperator{
+              hashMapOptions,
+              aggregationPhysicalFunctions,
+              handlerId,
+              windowMetaData,
+              conf.histogramDeltaKeyframeInterval.getValue(),
+              isDeltaResolver})
+        : makeProbeWrapper(AggregationProbePhysicalOperator{hashMapOptions, aggregationPhysicalFunctions, handlerId, windowMetaData});
 
     /// Creates a physical leaf for each logical leaf. Required, as this operator can have any number of sources.
     std::vector leaves(logicalOperator.getChildren().size(), buildWrapper);

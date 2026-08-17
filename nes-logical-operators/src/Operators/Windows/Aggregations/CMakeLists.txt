@@ -25,6 +25,8 @@ add_plugin(Sum AggregationLogicalFunction nes-logical-operators SumAggregationLo
 # Statistic Aggregation Functions
 add_plugin(ReservoirSample AggregationLogicalFunction nes-logical-operators Sample/ReservoirSampleLogicalFunction.cpp)
 add_plugin(EquiWidthHistogram AggregationLogicalFunction nes-logical-operators Histogram/EquiWidthHistogramLogicalFunction.cpp)
+add_plugin(EquiWidthHistogramDeltaGen AggregationLogicalFunction nes-logical-operators Histogram/EquiWidthHistogramDeltaGenLogicalFunction.cpp)
+add_plugin(EquiWidthHistogramDeltaResolver AggregationLogicalFunction nes-logical-operators Histogram/EquiWidthHistogramDeltaResolverLogicalFunction.cpp)
 add_plugin(CountMinSketch AggregationLogicalFunction nes-logical-operators Sketch/CountMinSketchLogicalFunction.cpp)
 add_plugin(ScalarStatistic AggregationLogicalFunction nes-logical-operators Scalar/ScalarStatisticLogicalFunction.cpp)
 

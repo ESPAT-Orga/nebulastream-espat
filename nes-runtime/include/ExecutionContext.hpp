@@ -13,6 +13,7 @@
 */
 
 #pragma once
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -102,7 +103,13 @@ struct ExecutionContext final
     void emitBuffer(const RecordBuffer& buffer) const;
 
     void setOpenReturnState(OpenReturnState openReturnState);
+    /// REPEAT with a backoff: the task is re-submitted only after `retryDelay` instead of going straight back
+    /// into the internal task queue. Use this whenever the condition being retried is resolved by work that is
+    /// not already queued ahead of this task — an immediate (0 ms) repeat recycles in the internal queue, which
+    /// `TaskQueue` drains in full before it ever reads the admission queue that carries source data.
+    void setOpenReturnState(OpenReturnState openReturnState, std::chrono::milliseconds retryDelay);
     [[nodiscard]] OpenReturnState getOpenReturnState() const;
+    [[nodiscard]] std::chrono::milliseconds getOpenReturnRetryDelay() const;
 
     const nautilus::val<PipelineExecutionContext*> pipelineContext;
     nautilus::val<WorkerThreadId> workerThreadId;
@@ -118,6 +125,7 @@ struct ExecutionContext final
 private:
     std::unordered_map<OperatorId, std::unique_ptr<OperatorState>> localStateMap;
     OpenReturnState openReturnState{OpenReturnState::CONTINUE};
+    std::chrono::milliseconds openReturnRetryDelay{0};
 };
 
 }

@@ -25,7 +25,7 @@ namespace NES
 /// Saves its bins like this: lower bound of bin n, counter of bin n, upper bound of bin n where n=0, ..., numberOfBins
 ///
 /// The metadata field has the numberOfBins
-class EquiWidthHistogramPhysicalFunction final : public AggregationPhysicalFunction
+class EquiWidthHistogramPhysicalFunction : public AggregationPhysicalFunction
 {
 public:
     EquiWidthHistogramPhysicalFunction(
@@ -52,7 +52,12 @@ public:
     [[nodiscard]] size_t getSizeOfStateInBytes() const override;
     ~EquiWidthHistogramPhysicalFunction() override;
 
-private:
+protected:
+    /// The bytes of the pure histogram state ([bins][numberOfSeenTuples]). `getSizeOfStateInBytes` returns
+    /// exactly this by default, but subclasses may allocate a LARGER state (the delta resolver appends two
+    /// bookkeeping words); serialization (`lower`) must always use this pure size, never the virtual one.
+    [[nodiscard]] size_t histogramStateBytes() const;
+
     std::string numberOfSeenTuplesFieldName;
     uint64_t numberOfBins;
     uint64_t minValue;

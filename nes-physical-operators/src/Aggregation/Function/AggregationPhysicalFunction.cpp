@@ -35,6 +35,16 @@ AggregationPhysicalFunction::AggregationPhysicalFunction(
 {
 }
 
+Record AggregationPhysicalFunction::lower(
+    nautilus::val<AggregationState*> aggregationState,
+    nautilus::val<AggregationState*> /*baselineState*/,
+    const nautilus::val<bool>& /*isKeyframe*/,
+    const nautilus::val<uint64_t>& /*intervalId*/,
+    PipelineMemoryProvider& pipelineMemoryProvider)
+{
+    return lower(aggregationState, pipelineMemoryProvider);
+}
+
 void AggregationPhysicalFunction::storeNull(const nautilus::val<AggregationState*>& aggregationState, const nautilus::val<bool>& isNull)
 {
     const auto memAreaNull = static_cast<nautilus::val<int8_t*>>(aggregationState);

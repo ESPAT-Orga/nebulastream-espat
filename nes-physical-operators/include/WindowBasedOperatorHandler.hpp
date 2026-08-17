@@ -85,6 +85,11 @@ public:
     getCreateNewSlicesFunction(const CreateNewSlicesArguments& newSlicesArguments) const = 0;
 
 protected:
+    /// Hook called at the end of garbageCollectSlicesAndWindows with the probe's new global watermark, so a
+    /// subclass can evict any per-window auxiliary state it keeps once the watermark has passed those windows
+    /// (e.g. the histogram-delta keyframe reference cache). Default: no-op.
+    virtual void onGarbageCollect(Timestamp /*newGlobalWatermark*/) const { }
+
     /// Gets called if slices should be triggered once a window is ready to be emitted.
     /// Each window operator can be specific about what to do if the given slices are ready to be emitted
     virtual void triggerSlices(

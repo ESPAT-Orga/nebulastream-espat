@@ -88,6 +88,18 @@ public:
 
     SliceCacheConfiguration sliceCacheConfiguration = {"slice_cache", "Configuration for the slice cache"};
 
+    /// Keyframe interval for histogram delta compression: every Nth window (by window ordinal) is a full
+    /// "keyframe" and the others are deltas against their interval's keyframe. 1 = every window full (no
+    /// compression); larger = better compression but references drift further. Both nodes of a distributed
+    /// build must be given the same value; a mismatch is not detected.
+    /// See docs/histogram-delta-wire-compression-plan.md.
+    UIntOption histogramDeltaKeyframeInterval
+        = {"histogram_delta_keyframe_interval",
+           std::to_string(10),
+           "Keyframe interval (in windows) for histogram delta compression: every Nth window is a full keyframe; "
+           "the rest are deltas against it. Enables multi-threaded delta compression.",
+           {std::make_shared<NumberValidation>()}};
+
 private:
     std::vector<BaseOption*> getOptions() override
     {
@@ -99,6 +111,7 @@ private:
             &numberOfRecordsPerKey,
             &maxNumberOfBuckets,
             &operatorBufferSize,
+            &histogramDeltaKeyframeInterval,
             &sliceCacheConfiguration};
     }
 };

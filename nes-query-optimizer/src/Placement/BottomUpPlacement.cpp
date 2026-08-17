@@ -39,6 +39,7 @@
 #include <Operators/Windows/Aggregations/Sketch/CountMinSketchProbeLogicalOperator.hpp>
 #include <Plans/LogicalPlan.hpp>
 #include <Traits/PinnedHostTrait.hpp>
+#include <Traits/PlacementHintTrait.hpp>
 #include <Traits/PlacementTrait.hpp>
 #include <Traits/TraitSet.hpp>
 #include <Util/Logger/Logger.hpp>
@@ -195,10 +196,46 @@ void validateConnectivity(const NetworkTopology& topology, const LogicalPlan& pl
 /// Shared state for the ILP placement model
 struct PlacementModel
 {
+    /// A hard pin applied to an operator, kept together with the pass that applied it so a later,
+    /// conflicting pin can name both culprits.
+    struct Pin
+    {
+        NetworkTopology::NodeId host;
+        std::string reason;
+    };
+
     void* highs;
     std::map<std::pair<OperatorId, NetworkTopology::NodeId>, int> operatorPlacementMatrix;
     std::vector<std::pair<OperatorId, NetworkTopology::NodeId>> reverseIndex;
+    std::unordered_map<OperatorId, Pin> pins;
 };
+
+/// Hard-pin `operatorId` to `host` (fix its placement column to 1) and remember which pass did it.
+/// Several passes may legitimately pin the same operator to the SAME node — e.g. a
+/// PlacementHintTrait(Sink) sitting on the root sink, which addSinkPlacementConstraint pins anyway.
+/// Two passes demanding DIFFERENT nodes, however, fix two columns of that operator's "exactly one
+/// node" row to 1, which the solver can only report as a generic infeasibility ("placement is not
+/// possible under the given capacity constraints"). Catch the conflict here and name both pins.
+void pinOperatorToHost(PlacementModel& model, const OperatorId operatorId, const NetworkTopology::NodeId& host, const std::string& reason)
+{
+    if (const auto existing = model.pins.find(operatorId); existing != model.pins.end())
+    {
+        if (existing->second.host != host)
+        {
+            throw PlacementFailure(
+                "Conflicting placement pins for operator {}: {} pins it to '{}', but {} pins it to '{}'",
+                operatorId,
+                existing->second.reason,
+                existing->second.host,
+                reason,
+                host);
+        }
+        return;
+    }
+    model.pins.emplace(operatorId, PlacementModel::Pin{.host = host, .reason = reason});
+    const auto var = model.operatorPlacementMatrix.at({operatorId, host});
+    checkError(Highs_changeColBounds(model.highs, static_cast<HighsInt>(var), 1.0, 1.0), model.highs);
+}
 
 /// Create HiGHS instance with solver options
 PlacementModel createPlacementModel()
@@ -209,7 +246,7 @@ PlacementModel createPlacementModel()
     checkError(Highs_setBoolOptionValue(highs, "log_to_console", 0), highs);
     checkError(Highs_setDoubleOptionValue(highs, "time_limit", 5.0), highs); /// NOLINT(readability-magic-numbers) 5 second time limit
     checkError(Highs_setDoubleOptionValue(highs, "mip_rel_gap", 0.01), highs); /// NOLINT(readability-magic-numbers) 1% optimality gap
-    return PlacementModel{.highs = highs, .operatorPlacementMatrix = {}, .reverseIndex = {}};
+    return PlacementModel{.highs = highs, .operatorPlacementMatrix = {}, .reverseIndex = {}, .pins = {}};
 }
 
 ///         x₁   x₂   x₃  ... (variables/columns)
@@ -310,8 +347,7 @@ void addSourcePlacementConstraints(PlacementModel& model, const LogicalPlan& log
         if (auto sourceOperator = op.tryGetAs<SourceDescriptorLogicalOperator>())
         {
             auto placement = sourceOperator->get().getSourceDescriptor().getHost();
-            const size_t var = model.operatorPlacementMatrix.at({op.getId(), placement});
-            checkError(Highs_changeColBounds(model.highs, static_cast<HighsInt>(var), 1.0, 1.0), model.highs);
+            pinOperatorToHost(model, op.getId(), placement, "the source descriptor's host");
         }
     }
 }
@@ -325,8 +361,7 @@ void addSinkPlacementConstraint(PlacementModel& model, const LogicalPlan& logica
     INVARIANT(sinkDescriptorOpt, "BUG: sink operator must have a sink descriptor");
     auto sinkPlacement = sinkDescriptorOpt->getHost();
 
-    const auto sinkVar = model.operatorPlacementMatrix.at({rootOperatorId, sinkPlacement});
-    checkError(Highs_changeColBounds(model.highs, sinkVar, 1.0, 1.0), model.highs);
+    pinOperatorToHost(model, rootOperatorId, sinkPlacement, "the sink descriptor's host");
 }
 
 /// Constraint: Parent-child placement must respect network connectivity
@@ -432,8 +467,51 @@ void addStatisticWriterPinningConstraints(PlacementModel& model, const LogicalPl
         {
             throw PlacementFailure("writer_host '{}' is not a worker in the topology", host);
         }
-        const auto var = model.operatorPlacementMatrix.at({op.getId(), host});
-        checkError(Highs_changeColBounds(model.highs, static_cast<HighsInt>(var), 1.0, 1.0), model.highs);
+        pinOperatorToHost(model, op.getId(), host, "the 'writer_host' option");
+    }
+}
+
+/// Constraint: hard-pin operators tagged with `PlacementHintTrait` to their anchor's node (see that trait).
+void addPlacementHintConstraints(PlacementModel& model, const LogicalPlan& logicalPlan)
+{
+    const auto sinkOperator = logicalPlan.getRootOperators().front().getAs<SinkLogicalOperator>().get();
+    const auto& sinkDescriptorOpt = sinkOperator.getSinkDescriptor();
+    INVARIANT(sinkDescriptorOpt, "BUG: sink operator must have a sink descriptor");
+    const auto sinkHost = sinkDescriptorOpt->getHost();
+
+    for (const LogicalOperator& op : BFSRange(logicalPlan.getRootOperators().front()))
+    {
+        const auto hint = op.getTraitSet().tryGet<PlacementHintTrait>();
+        if (not hint.has_value())
+        {
+            continue;
+        }
+
+        std::optional<NetworkTopology::NodeId> targetHost;
+        std::string anchorName;
+        switch (hint.value()->anchor)
+        {
+            case PlacementAnchor::Sink:
+                targetHost = sinkHost;
+                anchorName = "PlacementHintTrait(Sink)";
+                break;
+            case PlacementAnchor::Source:
+                /// Pin to the host of a source in this operator's own subtree; if several exist we pin
+                /// to the first reached.
+                for (const LogicalOperator& descendant : BFSRange(op))
+                {
+                    if (auto source = descendant.tryGetAs<SourceDescriptorLogicalOperator>())
+                    {
+                        targetHost = source->get().getSourceDescriptor().getHost();
+                        break;
+                    }
+                }
+                anchorName = "PlacementHintTrait(Source)";
+                break;
+        }
+
+        INVARIANT(targetHost.has_value(), "PlacementHintTrait(Source) on operator {} has no descendant source to pin to", op.getId());
+        pinOperatorToHost(model, op.getId(), *targetHost, anchorName);
     }
 }
 
@@ -511,6 +589,7 @@ std::optional<std::unordered_map<OperatorId, NetworkTopology::NodeId>> solvePlac
     addConnectivityConstraints(model, logicalPlan, topology);
     addStatisticColocationConstraints(model, logicalPlan, topology);
     addStatisticWriterPinningConstraints(model, logicalPlan, topology);
+    addPlacementHintConstraints(model, logicalPlan);
     addDistanceObjective(model, logicalPlan, topology);
     return extractPlacement(model);
 }

@@ -81,11 +81,14 @@ CompiledExecutablePipelineStage::compilePipeline() const
                     break;
                 }
                 case OpenReturnState::REPEAT: {
+                    /// The retry delay is fixed per operator, so it is a trace-time constant here.
+                    const nautilus::val<uint64_t> retryDelayInMs{static_cast<uint64_t>(ctx.getOpenReturnRetryDelay().count())};
                     nautilus::invoke(
-                        +[](PipelineExecutionContext* pec, const TupleBuffer* buffer)
-                        { pec->repeatTask(*buffer, std::chrono::milliseconds(0)); },
+                        +[](PipelineExecutionContext* pec, const TupleBuffer* buffer, const uint64_t delayInMs)
+                        { pec->repeatTask(*buffer, std::chrono::milliseconds(delayInMs)); },
                         pipelineExecutionContext,
-                        recordBufferRef);
+                        recordBufferRef,
+                        retryDelayInMs);
                     break;
                 }
             }

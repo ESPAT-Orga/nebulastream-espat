@@ -13,6 +13,7 @@
 */
 #include <ExecutionContext.hpp>
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -108,11 +109,23 @@ void ExecutionContext::emitBuffer(const RecordBuffer& buffer) const
 void ExecutionContext::setOpenReturnState(const OpenReturnState openReturnState)
 {
     this->openReturnState = openReturnState;
+    this->openReturnRetryDelay = std::chrono::milliseconds{0};
+}
+
+void ExecutionContext::setOpenReturnState(const OpenReturnState openReturnState, const std::chrono::milliseconds retryDelay)
+{
+    this->openReturnState = openReturnState;
+    this->openReturnRetryDelay = retryDelay;
 }
 
 OpenReturnState ExecutionContext::getOpenReturnState() const
 {
     return this->openReturnState;
+}
+
+std::chrono::milliseconds ExecutionContext::getOpenReturnRetryDelay() const
+{
+    return this->openReturnRetryDelay;
 }
 
 OperatorState* ExecutionContext::getLocalState(const OperatorId operatorId)

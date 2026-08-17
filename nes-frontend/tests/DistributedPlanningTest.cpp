@@ -38,6 +38,8 @@
 #include <Sinks/SinkCatalog.hpp>
 #include <Sources/SourceCatalog.hpp>
 #include <Statements/StatementHandler.hpp>
+#include <Traits/PlacementHintTrait.hpp>
+#include <Traits/TraitSet.hpp>
 #include <Util/Logger/LogLevel.hpp>
 #include <Util/Logger/Logger.hpp>
 #include <Util/Logger/impl/NesLogger.hpp>
@@ -1144,6 +1146,132 @@ workers:
     const auto sourcePlans = plan[Host("source-node:8080")];
     ASSERT_EQ(sourcePlans.size(), 4);
     EXPECT_EQ(flatten(source2Plans.front()).size(), 2);
+}
+
+/// Placement hints must force operators onto their anchored nodes even when the distance objective
+/// would otherwise collapse them onto the source node. Query has two stacked selections between the
+/// source and the sink; both nodes have ample capacity, so without hints the optimizer places both
+/// selections on the source node (minimising distance) and cuts the network channel just before the
+/// sink. We pin the inner (source-side) selection to Source and the outer (sink-side) selection to
+/// Sink, which must move the cut in between the two selections instead.
+TEST_F(DistributedPlanningTest, PlacementHintForcesSplit)
+{
+    auto [opt, boundPlan] = loadAndBind(R"(
+query: |
+  SELECT * FROM (SELECT * FROM mock_source WHERE a > b) WHERE b > a INTO mock_sink
+
+sinks:
+  - name: mock_sink
+    schema: [ mock_source$a, mock_source$b ]
+    host: "sink-node:8080"
+
+logical:
+  - name: mock_source
+    schema: [ a, b ]
+
+physical:
+  - logical: mock_source
+    host: "source-node:8080"
+
+workers:
+  - host: "sink-node:8080"
+    max_operators: 10
+  - host: "source-node:8080"
+    max_operators: 10
+    downstream:
+      - "sink-node:8080"
+)");
+
+    /// Stamp the hints. Both selections have the source as a descendant, so we tell them apart by
+    /// how many selections each one's own subtree contains: the outer (sink-side) selection contains
+    /// both, the inner (source-side) selection only itself.
+    const auto selections = getOperatorByType<SelectionLogicalOperator>(boundPlan);
+    ASSERT_EQ(selections.size(), 2);
+    const auto subtreeSelectionCount
+        = [](const LogicalOperator& op) { return getOperatorByType<SelectionLogicalOperator>(LogicalPlan{INVALID_QUERY_ID, {op}}).size(); };
+    const auto& sinkSideSel = subtreeSelectionCount(selections[0]) == 2 ? selections[0] : selections[1];
+    const auto& sourceSideSel = subtreeSelectionCount(selections[0]) == 2 ? selections[1] : selections[0];
+
+    const auto stamp = [](const LogicalOperator& op, PlacementAnchor anchor)
+    {
+        auto traitSet = op.getTraitSet();
+        tryInsert(traitSet, PlacementHintTrait{anchor});
+        return op.withTraitSet(traitSet);
+    };
+    /// Replace the shallower (sink-side) selection first: replaceOperator regenerates the ids of the
+    /// rebuilt ancestor chain, so stamping the deeper node first would invalidate the outer node's id.
+    auto hintedPlan = replaceOperator(boundPlan, sinkSideSel.getId(), stamp(sinkSideSel, PlacementAnchor::Sink));
+    ASSERT_TRUE(hintedPlan.has_value());
+    hintedPlan = replaceOperator(*hintedPlan, sourceSideSel.getId(), stamp(sourceSideSel, PlacementAnchor::Source));
+    ASSERT_TRUE(hintedPlan.has_value());
+
+    auto plan = opt->optimize(*hintedPlan);
+
+    /// Source node: File source + the source-anchored selection + a Network sink (the cut).
+    const auto sourceNodePlan = plan[Host("source-node:8080")].front();
+    EXPECT_EQ(getOperatorByType<SourceDescriptorLogicalOperator>(sourceNodePlan).size(), 1);
+    EXPECT_EQ(getOperatorByType<SourceDescriptorLogicalOperator>(sourceNodePlan)[0].get().getSourceDescriptor().getSourceType(), "File");
+    EXPECT_EQ(getOperatorByType<SelectionLogicalOperator>(sourceNodePlan).size(), 1);
+    EXPECT_EQ(getOperatorByType<SinkLogicalOperator>(sourceNodePlan).size(), 1);
+    EXPECT_EQ(getOperatorByType<SinkLogicalOperator>(sourceNodePlan)[0].get().getSinkDescriptor()->getSinkType(), "Network");
+
+    /// Sink node: Network source (the cut) + the sink-anchored selection + the Void sink.
+    const auto sinkNodePlan = plan[Host("sink-node:8080")].front();
+    EXPECT_EQ(getOperatorByType<SourceDescriptorLogicalOperator>(sinkNodePlan).size(), 1);
+    EXPECT_EQ(getOperatorByType<SourceDescriptorLogicalOperator>(sinkNodePlan)[0].get().getSourceDescriptor().getSourceType(), "Network");
+    EXPECT_EQ(getOperatorByType<SelectionLogicalOperator>(sinkNodePlan).size(), 1);
+    EXPECT_EQ(getOperatorByType<SinkLogicalOperator>(sinkNodePlan).size(), 1);
+    EXPECT_EQ(getOperatorByType<SinkLogicalOperator>(sinkNodePlan)[0].get().getSinkDescriptor()->getSinkType(), "Void");
+}
+
+/// Two passes pinning the SAME operator to different nodes fix two columns of its "exactly one node"
+/// row to 1, which the solver can only report as a generic infeasibility. Placement must name the two
+/// conflicting pins instead. Here the root sink — already pinned to its descriptor's host — additionally
+/// carries a Source-anchored hint.
+TEST_F(DistributedPlanningTest, ConflictingPlacementPinsAreReported)
+{
+    auto [opt, boundPlan] = loadAndBind(R"(
+query: |
+  SELECT * FROM mock_source WHERE a > b INTO mock_sink
+
+sinks:
+  - name: mock_sink
+    schema: [ mock_source$a, mock_source$b ]
+    host: "sink-node:8080"
+
+logical:
+  - name: mock_source
+    schema: [ a, b ]
+
+physical:
+  - logical: mock_source
+    host: "source-node:8080"
+
+workers:
+  - host: "sink-node:8080"
+    max_operators: 10
+  - host: "source-node:8080"
+    max_operators: 10
+    downstream:
+      - "sink-node:8080"
+)");
+
+    auto sink = boundPlan.getRootOperators().front();
+    auto traitSet = sink.getTraitSet();
+    tryInsert(traitSet, PlacementHintTrait{PlacementAnchor::Source});
+    const auto conflictingPlan = boundPlan.withRootOperators({sink.withTraitSet(traitSet)});
+
+    try
+    {
+        (void)opt->optimize(conflictingPlan);
+        FAIL() << "Expected conflicting placement pins to fail";
+    }
+    catch (const Exception& ex)
+    {
+        EXPECT_EQ(ex.code(), ErrorCode::PlacementFailure);
+        /// The message must name the conflict, not report a generic capacity failure.
+        EXPECT_NE(std::string{ex.what()}.find("Conflicting placement pins"), std::string::npos) << ex.what();
+    }
 }
 
 ///NOLINTEND(bugprone-unchecked-optional-access, readability-identifier-length)

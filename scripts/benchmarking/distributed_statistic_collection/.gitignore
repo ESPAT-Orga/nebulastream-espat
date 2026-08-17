@@ -1,0 +1,14 @@
+__pycache__/
+# In-image build tree (run_benchmark.sh defaults BUILD_DIR here; ~1 GB of binaries).
+build_dir/
+# Default OUTPUT_DIR when the module is run directly: logs + rendered query YAMLs.
+results/
+# plots/ is deliberately NOT ignored: the runner copies the result CSVs there and the generated
+# charts and notebooks live alongside them, as in the other benchmark suites. The root .gitignore
+# ignores *.png, *.csv and *.ipynb globally, so re-include them here rather than making every result
+# need `git add -f`. The CSVs matter as much as the charts: they are the numbers a figure was drawn
+# from, and the notebook is how the figures are reproduced.
+!plots/**/*.png
+!plots/**/*.csv
+!plots/**/*.ipynb
+!plots/*.ipynb

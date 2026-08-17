@@ -74,7 +74,7 @@ def start_single_node_worker(file_path_stdout, numberOfWorkerThreads, executionM
                              grpc_address="localhost:8080",
                              data_address="localhost:9090",
                              throughput_listener_interval_in_ms=throughputListenerInterval,
-                             use_systemd_run=True):
+                             use_systemd_run=True, extra_worker_args=""):
     """Start the single node worker with the given configuration.
 
     When *cli_log_file* is given (a writable file handle), the launching
@@ -101,6 +101,11 @@ def start_single_node_worker(file_path_stdout, numberOfWorkerThreads, executionM
                      f"--worker.latency_listener={enableLatency} "
                      f"--worker.statistic_store_type={statisticStoreType} "
                      f"--worker.throughput_listener_interval_in_ms={throughput_listener_interval_in_ms}")
+
+    # Optional extra worker CLI args (e.g. feature-specific knobs like
+    # --worker.default_query_execution.histogram_delta_keyframe_interval=<N>).
+    if extra_worker_args:
+        worker_config = f"{worker_config} {extra_worker_args}"
 
     if use_systemd_run:
         cmd = f"systemd-run --user --scope --quiet {single_node_executable} {worker_config}"
@@ -145,8 +150,11 @@ def submit_query(query_file, cli_log_file, retries=3, retry_delay=5):
     last_error = None
     for attempt in range(1, retries + 1):
         try:
+            # nes-cli `start` blocks through query deploy, which JIT-compiles every pipeline in
+            # COMPILER mode. The delta plan (GEN + re-window + RESOLVER + store writer) is compile-heavy
+            # and a cold compile under load can exceed a minute, so allow generous headroom.
             result = subprocess.run(cmd, check=True, stdout=subprocess.PIPE,
-                                    stderr=subprocess.PIPE, text=True, timeout=60)
+                                    stderr=subprocess.PIPE, text=True, timeout=240)
             query_ids = _extract_query_ids(result.stdout)
             cli_log_file.write(f"=== Submit query: {cmd} ===\n")
             cli_log_file.write(f"stdout: {result.stdout}\n")

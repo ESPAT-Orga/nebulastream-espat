@@ -18,13 +18,17 @@ Distributed statistic-collection benchmark.
 Sweeps a set of tree topologies (config.TOPOLOGIES, e.g. "1/2", "1/2/4", "1/4", "1/4/8"). For each
 topology it brings up one Docker container per worker on a shared bridge network, puts data sources on
 the leaves, and measures the INCOMING network bytes to the root (root container eth0 RX) over time for
-three variants:
+these variants:
 
   prometheus  source(leaf) -> Prometheus sink(root)         raw stream reaches root
   split       build(leaf)  -> StatisticStoreWriter(root)    full per-window synopsis reaches root
+  delta       GEN(leaf)    -> RESOLVER+Writer(root)         per-window DELTA reaches root
   local       build(leaf)  -> StatisticStoreWriter(leaf)    only 4 scalar fields per window reach root
+  *_zstd      as above, blob wrapped in ZstdCompress/Decompress around the network cut
 
-Data generators run over loopback inside each leaf's netns, so they don't appear on the root's eth0.
+By default the leaves replay the REAL Google-cluster-monitoring trace (config.DATASET); `synthetic`
+switches back to the uniform generator. Data generators run over loopback inside each leaf's netns, so
+they don't appear on the root's eth0.
 
 Run from the repository root:
   python3 -m scripts.benchmarking.distributed_statistic_collection.run_benchmark
@@ -32,6 +36,7 @@ Run from the repository root:
 
 import csv
 import os
+import re
 import shutil
 import subprocess
 import threading
@@ -53,6 +58,39 @@ from scripts.benchmarking.common.config import SINGLE_NODE_EXECUTABLE  # noqa: E
 from scripts.benchmarking.common.worker_lifecycle import stop_queries, submit_query  # noqa: E402
 
 SINGLE_NODE_BINARY = os.path.abspath(SINGLE_NODE_EXECUTABLE)
+
+
+### --- Dataset -------------------------------------------------------------
+
+def prepare_dataset():
+    """Resolve the host path of the trace the generators replay, fetching+projecting it on first use.
+
+    Returns None for `synthetic`, where the generator makes its own uniform data and no file is needed.
+    The projected CSV is the same artifact the single-node histogram-delta benchmark uses, and it is
+    cached, so the two suites share one download.
+    """
+    if config.DATASET == "synthetic":
+        printInfo("dataset: synthetic (uniform xorshift generator, timestamp = per-tuple counter)")
+        return None
+    if config.DATASET == "cluster_monitoring":
+        from scripts.benchmarking.histogram_delta.prepare_cluster_monitoring import prepare, replicate
+
+        os.makedirs(config.DATA_DIR, exist_ok=True)
+        path = prepare(os.path.join(config.DATA_DIR, "cluster_monitoring.csv"))
+        if config.DATASET_COPIES > 1:
+            path = replicate(
+                path,
+                os.path.join(config.DATA_DIR, f"cluster_monitoring_x{config.DATASET_COPIES}.csv"),
+                config.DATASET_COPIES,
+                config.STATISTIC_WINDOW_SIZE_MS,
+            )
+        printInfo(
+            f"dataset: cluster_monitoring -> {path} "
+            f"(value=taskId in [{config.HISTOGRAM_MIN},{config.HISTOGRAM_MAX}], "
+            f"timestamp=real event time, {config.STATISTIC_WINDOW_SIZE_MS} ms windows)"
+        )
+        return path
+    raise ValueError(f"unknown DATASET '{config.DATASET}'")
 
 
 ### --- Docker network -----------------------------------------------------
@@ -80,11 +118,15 @@ def _worker_args(worker):
         f"--worker.default_query_execution.page_size={config.PAGE_SIZE}",
         f"--worker.default_query_execution.operator_buffer_size={config.BUFFER_SIZE_BYTES}",
         "--worker.latency_listener=false",
-        "--worker.throughput_listener_interval_in_ms=200",
+        f"--worker.throughput_listener_interval_in_ms={config.THROUGHPUT_LISTENER_INTERVAL_MS}",
+        ### Given to every worker on purpose: the interval is consumed during lowering, independently on
+        ### each node, so the GEN and the RESOLVER must agree on it (see config.py). Harmless for the
+        ### variants that build no delta histogram.
+        f"--worker.default_query_execution.histogram_delta_keyframe_interval={config.HISTOGRAM_DELTA_KEYFRAME_INTERVAL}",
     ]
 
 
-def start_worker(worker, run_prometheus, num_prom_targets, log_stream):
+def start_worker(worker, run_prometheus, num_prom_targets, log_stream, data_file=None):
     name = worker["name"]
     subprocess.run(["docker", "rm", "-f", name], capture_output=True)
     cmd = [
@@ -95,6 +137,9 @@ def start_worker(worker, run_prometheus, num_prom_targets, log_stream):
         "-v", f"{SINGLE_NODE_BINARY}:/usr/bin/nes-single-node-worker:ro",
         "-p", f"{worker['host_port']}:{config.CONTAINER_GRPC_PORT}",
     ]
+    ### A Memory source reads the trace from inside the WORKER, not from a generator sidecar.
+    if config.SOURCE_TYPE == "memory" and data_file:
+        cmd += ["-v", f"{os.path.abspath(data_file)}:{WORKER_DATA_MOUNT}:ro"]
     ### The root needs NET_ADMIN to install the ingress bandwidth cap (contention mode); harmless otherwise.
     if worker["role"] == "root":
         cmd += ["--cap-add=NET_ADMIN"]
@@ -159,9 +204,16 @@ def apply_ingress_cap(root_name, kbit):
 
 ### --- Per-query TCP generators (one per source) --------------------------
 
-def start_generator(leaf_container, port, gen_name, log_path, rate=None):
+### Path the prepared trace is mounted at inside every generator container (SOURCE_TYPE=tcp) and inside
+### every worker container (SOURCE_TYPE=memory).
+GENERATOR_DATA_MOUNT = "/data/trace.csv"
+WORKER_DATA_MOUNT = "/data/trace.csv"
+
+
+def start_generator(leaf_container, port, gen_name, log_path, rate=None, data_file=None):
     """One rust-tcp-generator joined to the leaf's netns, bound to a single loopback port. `rate` is
-    tuples/sec (0 = full speed); defaults to config.GENERATOR_RATE."""
+    tuples/sec (0 = full speed); defaults to config.GENERATOR_RATE. `data_file` is a host path to a
+    prepared `value,timestamp` trace to replay instead of the synthetic lookup (see config.DATASET)."""
     if rate is None:
         rate = config.GENERATOR_RATE
     subprocess.run(["docker", "rm", "-f", gen_name], capture_output=True)
@@ -169,16 +221,25 @@ def start_generator(leaf_container, port, gen_name, log_path, rate=None):
         "docker", "run", "-d",
         "--name", gen_name,
         "--network", f"container:{leaf_container}",
+    ]
+    if data_file:
+        cmd += ["-v", f"{os.path.abspath(data_file)}:{GENERATOR_DATA_MOUNT}:ro"]
+    cmd += [
         config.TCP_GENERATOR_IMAGE,
         "--port-base", str(port),
         "--num-ports", "1",
         "--rate", str(rate),
     ]
+    if data_file:
+        cmd += ["--data-file", GENERATOR_DATA_MOUNT, "--max-rows", str(config.GENERATOR_MAX_ROWS)]
     subprocess.run(cmd, check=True, capture_output=True, text=True)
     log_stream = open(log_path, "w")
     logs_proc = subprocess.Popen(["docker", "logs", "-f", gen_name], stdout=log_stream, stderr=subprocess.STDOUT)
 
-    deadline = time.monotonic() + 30
+    ### READY is printed only after the trace is parsed into memory (hundreds of MB), so the deadline
+    ### has to cover the load, not just the port binds.
+    timeout = 180 if data_file else 30
+    deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         time.sleep(0.2)
         try:
@@ -191,7 +252,7 @@ def start_generator(leaf_container, port, gen_name, log_path, rate=None):
     logs_proc.wait()
     log_stream.close()
     subprocess.run(["docker", "rm", "-f", gen_name], capture_output=True)
-    raise RuntimeError(f"TCP generator {gen_name} did not report READY within 30s; see {log_path}")
+    raise RuntimeError(f"TCP generator {gen_name} did not report READY within {timeout}s; see {log_path}")
 
 
 def stop_generator(gen_name, logs_proc, log_stream):
@@ -267,6 +328,48 @@ class RootRxSampler:
         return total_bytes, peak_bps
 
 
+### --- Throughput (engine's own listener) ---------------------------------
+
+### `Throughput for queryId QueryId(local=<uuid>, distributed=<name>) in window <a>-<b> is 152.390 kTup/s`
+### emitted every --worker.throughput_listener_interval_in_ms by each running query.
+_THROUGHPUT_RE = re.compile(r"local=([0-9a-f-]+).*?is ([0-9.]+) ([kMG]?)Tup/s")
+_UNIT_SCALE = {"": 1.0, "k": 1e3, "M": 1e6, "G": 1e9}
+
+
+def parse_throughput(log_path):
+    """Mean and peak tuples/s for a variant, from the worker log's throughput listener.
+
+    Samples are grouped by the LOCAL query id and only the busiest stream is reported. A delta run has
+    two -- the GEN build reading the source at full tuple rate, and the RESOLVER consuming one blob per
+    window -- and averaging them together would mix a per-tuple rate with a per-window one and report a
+    number that is neither. The busiest stream is the ingest stream, which is the one comparable across
+    variants (`split` only has that one).
+
+    The mean is taken over the ACTIVE SPAN: from the first non-zero sample to the last one, interior
+    zeros included. Trimming the ends drops the deploy wait and the idle tail left when a finite trace
+    runs out, neither of which is the query running. Keeping the interior zeros is the important half:
+    this stream stalls mid-run, and dropping those samples would report the speed the engine reaches
+    between stalls rather than the throughput it actually sustains.
+    """
+    per_stream = {}
+    try:
+        with open(log_path, errors="replace") as f:
+            for line in f:
+                m = _THROUGHPUT_RE.search(line)
+                if m:
+                    per_stream.setdefault(m.group(1), []).append(float(m.group(2)) * _UNIT_SCALE[m.group(3)])
+    except OSError:
+        return 0.0, 0.0, 0
+    if not per_stream:
+        return 0.0, 0.0, 0
+    samples = max(per_stream.values(), key=sum)
+    nonzero = [i for i, r in enumerate(samples) if r > 0]
+    if not nonzero:
+        return 0.0, 0.0, 0
+    span = samples[nonzero[0]:nonzero[-1] + 1]
+    return sum(span) / len(span), max(span), len(span)
+
+
 ### --- Query rendering ----------------------------------------------------
 
 def _workers_block(workers):
@@ -280,8 +383,17 @@ def _workers_block(workers):
     return "\n".join(lines)
 
 
-def _source_block(source_name, leaf_host, tcp_port):
-    return f"""logical:
+def _source_block(source_name, leaf_host, tcp_port, force_tcp=False):
+    """Logical + physical source YAML.
+
+    Under SOURCE_TYPE=memory the schema drops `id`: the trace CSV is two columns (value,timestamp) and
+    the Memory source parses it against the LOGICAL schema, so a third field would not line up. No
+    statistic query reads `id` -- it exists only to give the TCP generator's third column a home -- so
+    dropping it costs nothing. `force_tcp` keeps the GP passthrough sources on the 3-field TCP schema
+    they project, whatever the statistic sources are doing.
+    """
+    if force_tcp or config.SOURCE_TYPE == "tcp":
+        return f"""logical:
   - name: {source_name}
     schema:
       - name: id
@@ -301,6 +413,21 @@ physical:
       socket_port: {tcp_port}
       flush_interval_ms: {config.FLUSH_INTERVAL_MS}
       connect_timeout_seconds: 10"""
+    return f"""logical:
+  - name: {source_name}
+    schema:
+      - name: value
+        type: UINT64
+      - name: timestamp
+        type: UINT64
+physical:
+  - logical: {source_name}
+    host: {leaf_host}
+    type: Memory
+    parser_config:
+      type: Native
+    source_config:
+      file_path: {WORKER_DATA_MOUNT}"""
 
 
 def render_prometheus_query(source_name, leaf_host, tcp_port, sink_port, root_host, workers):
@@ -322,18 +449,50 @@ def render_prometheus_query(source_name, leaf_host, tcp_port, sink_port, root_ho
     return f"query: {query}\n{sinks}\n{_source_block(source_name, leaf_host, tcp_port)}\n{_workers_block(workers)}\n"
 
 
+def _variant_flags(variant):
+    """Splits a variant name into its base and whether it zstd-compresses the blob across the cut.
+    `split_zstd` / `delta_zstd` are the compressed counterparts of `split` / `delta`."""
+    zstd = variant.endswith("_zstd")
+    return (variant.removesuffix("_zstd") if zstd else variant), zstd
+
+
+def _optimizer_block(variant):
+    """`delta` turns the GEN/RESOLVER split on. This is an optimizer option, not a worker one: it decides
+    the shape of the plan and is read by DefaultStatisticQueryGenerator in the frontend, so it travels in
+    the topology YAML rather than on a worker command line."""
+    if _variant_flags(variant)[0] != "delta":
+        return ""
+    return "optimizer:\n  enable_histogram_delta_compression: true\n"
+
+
 def render_statistic_query(variant, source_name, leaf_host, tcp_port, statistic_id, root_host, workers):
     """`split` pins the StatisticStoreWriter to the root via writer_host; `local` omits it so the writer
     stays on the leaf. Both use a void terminal sink pinned to the root (a plain worker cannot receive
-    Grpc statistic reports), so the writer's output crosses the network to the root either way."""
+    Grpc statistic reports), so the writer's output crosses the network to the root either way.
+
+    `delta` also lands the writer on the root, but through the split's own PlacementHintTrait pins rather
+    than writer_host -- which it must NOT set, because the generator rejects that combination (the pins
+    and the option would pin the same operator twice). The Sink-anchored half follows the terminal sink,
+    which report_host already puts on the root, so GEN runs on the leaf and RESOLVER + writer on the root
+    and only the per-window delta crosses."""
+    base, zstd = _variant_flags(variant)
     opts = [
         f"{statistic_id} AS statistic_id",
         f'"{root_host}" AS report_host',
         '"void" AS terminal_sink',
         f"{config.HISTOGRAM_MEMORY_BUDGET} AS memory_budget",
+        ### The bin range MUST be passed, or the delta ratios are meaningless (see
+        ### config.HISTOGRAM_MIN / HISTOGRAM_MAX). Backquoted because `min`/`max` are grammar keywords (MIN/MAX) and not in the nonReserved set;
+        ### backquoted identifiers are unquoted verbatim by bindIdentifier and lowercased by the binder.
+        f"{config.HISTOGRAM_MIN} AS `min`",
+        f"{config.HISTOGRAM_MAX} AS `max`",
     ]
-    if variant == "split":
+    if base == "split":
         opts.append(f'"{root_host}" AS writer_host')
+    if zstd:
+        ### Wraps the blob in ZstdCompress before the cut and ZstdDecompress after it, so the wire carries
+        ### compressed bytes. Combinable with the delta split (delta_zstd compresses the delta blob).
+        opts.append('"zstd" AS compress_statistic')
     set_clause = ", ".join(opts)
     ### Ingestion time (USE_EVENT_TIME=0) closes windows on wall-clock; event time windows on the
     ### generator's per-tuple counter (the default; the rate limiter makes the cadence predictable).
@@ -345,7 +504,10 @@ def render_statistic_query(variant, source_name, leaf_host, tcp_port, statistic_
     )
     ### sinks must be present (the YAML decoder reads the key unconditionally); the statistic terminal
     ### sink is added by the engine, so the user-facing list is empty.
-    return f"query: {query}\nsinks: []\n{_source_block(source_name, leaf_host, tcp_port)}\n{_workers_block(workers)}\n"
+    return (
+        f"query: {query}\nsinks: []\n{_optimizer_block(variant)}"
+        f"{_source_block(source_name, leaf_host, tcp_port)}\n{_workers_block(workers)}\n"
+    )
 
 
 def gp_sink_file(source_name):
@@ -376,7 +538,7 @@ def render_gp_query(source_name, leaf_host, tcp_port, root_host, workers):
       append: "false"
       output_format: CSV
     parser_config: {{}}"""
-    return f"query: {query}\n{sinks}\n{_source_block(source_name, leaf_host, tcp_port)}\n{_workers_block(workers)}\n"
+    return f"query: {query}\n{sinks}\n{_source_block(source_name, leaf_host, tcp_port, force_tcp=True)}\n{_workers_block(workers)}\n"
 
 
 def count_gp_rows(root_name):
@@ -404,7 +566,7 @@ def _sources(leaves):
             gidx += 1
 
 
-def run_variant(topology, variant, workers, out_dir):
+def run_variant(topology, variant, workers, out_dir, data_file=None):
     printInfo(f"=== topology {topology} | variant {variant} ===")
     root = next(w for w in workers if w["role"] == "root")
     leaves = [w for w in workers if w["role"] == "leaf"]
@@ -422,16 +584,20 @@ def run_variant(topology, variant, workers, out_dir):
         ensure_network()
         run_prometheus = variant == "prometheus"
         for w in workers:
-            started_workers.append((start_worker(w, run_prometheus, total_sources, worker_log), w))
+            started_workers.append((start_worker(w, run_prometheus, total_sources, worker_log, data_file=data_file), w))
         time.sleep(8)  ### let workers come up and register before submitting
 
-        ### One generator per query, in the owning leaf's netns.
-        for gidx, leaf, j, source_name in _sources(leaves):
-            port = config.TCP_PORT_BASE + j
-            gen_name = f"nes-dsc-gen-{variant}-{leaf['name']}-{j}"
-            gen_log = os.path.join(work_dir, f"gen_{leaf['name']}_{j}.log")
-            generators.append(start_generator(leaf["name"], port, gen_name, gen_log))
-        printSuccess(f"started {len(generators)} generators")
+        ### One generator per query, in the owning leaf's netns. A Memory source reads the trace inside
+        ### the worker, so it needs no sidecar at all.
+        if config.SOURCE_TYPE == "memory":
+            printInfo("SOURCE_TYPE=memory: no generators; each leaf's Memory source pre-parses the trace")
+        else:
+            for gidx, leaf, j, source_name in _sources(leaves):
+                port = config.TCP_PORT_BASE + j
+                gen_name = f"nes-dsc-gen-{variant}-{leaf['name']}-{j}"
+                gen_log = os.path.join(work_dir, f"gen_{leaf['name']}_{j}.log")
+                generators.append(start_generator(leaf["name"], port, gen_name, gen_log, data_file=data_file))
+            printSuccess(f"started {len(generators)} generators")
 
         sampler.start()
 
@@ -468,12 +634,26 @@ def run_variant(topology, variant, workers, out_dir):
 
     traffic_csv = os.path.join(out_dir, f"{variant}_traffic.csv")
     total_bytes, peak_bps = sampler.write_csv(traffic_csv)
-    printSuccess(f"[{topology}/{variant}] root RX bytes={total_bytes} peak_bps={peak_bps:.0f}  -> {traffic_csv}")
+    mean_tps, peak_tps, n_samples = parse_throughput(os.path.join(work_dir, "workers.log"))
+    printSuccess(
+        f"[{topology}/{variant}] root RX bytes={total_bytes} peak_bps={peak_bps:.0f} "
+        f"throughput={mean_tps / 1e6:.3f} MTup/s (peak {peak_tps / 1e6:.3f}, {n_samples} samples)"
+        f"  -> {traffic_csv}"
+    )
+    ### A rate-limited run reports GENERATOR_RATE back, not the engine's ceiling -- the throughput
+    ### columns only discriminate between variants when the sources run unthrottled.
+    if config.GENERATOR_RATE and mean_tps > 0.9 * config.GENERATOR_RATE:
+        printInfo(
+            f"note: throughput ~= GENERATOR_RATE ({config.GENERATOR_RATE}); this measures the rate "
+            f"limiter, not the variant. Re-run with GENERATOR_RATE=0 for a throughput comparison."
+        )
     return {
         "topology": topology,
         "variant": variant,
         "total_bytes": total_bytes,
         "peak_bps": peak_bps,
+        "mean_tps": mean_tps,
+        "peak_tps": peak_tps,
         "num_queries": len(query_ids),
         "num_leaves": len(leaves),
     }
@@ -488,7 +668,7 @@ def _gp_sources(leaves):
             gidx += 1
 
 
-def run_contention(topology, variant, workers, bandwidth_kbit, out_dir):
+def run_contention(topology, variant, workers, bandwidth_kbit, out_dir, data_file=None):
     """Run the statistic workload (set by `variant`) AND general-purpose passthrough queries together,
     under a capped root-ingress bandwidth, and measure the GP queries' throughput at the root."""
     bw_label = bandwidth_kbit if bandwidth_kbit > 0 else "inf"
@@ -511,7 +691,7 @@ def run_contention(topology, variant, workers, bandwidth_kbit, out_dir):
         run_prometheus = variant == "prometheus"
         for w in workers:
             log = root_log if w["role"] == "root" else other_log
-            started_workers.append((start_worker(w, run_prometheus, total_stat_sources, log), w))
+            started_workers.append((start_worker(w, run_prometheus, total_stat_sources, log, data_file=data_file), w))
         time.sleep(8)
 
         ### Generators: statistic sources (rate-limited) + GP sources (full speed, bandwidth-bound).
@@ -519,8 +699,10 @@ def run_contention(topology, variant, workers, bandwidth_kbit, out_dir):
             gen = f"nes-dsc-gen-{topology.replace('/', '-')}-{variant}-bw{bw_label}-stat-{leaf['name']}-{j}"
             generators.append(
                 start_generator(leaf["name"], config.TCP_PORT_BASE + j, gen,
-                                os.path.join(work_dir, f"gen_stat_{leaf['name']}_{j}.log"))
+                                os.path.join(work_dir, f"gen_stat_{leaf['name']}_{j}.log"), data_file=data_file)
             )
+        ### GP generators stay synthetic even on a real dataset: they are bandwidth filler running at full
+        ### speed, and a finite trace would be exhausted in seconds, ending the load mid-measurement.
         for _, leaf, k, _ in _gp_sources(leaves):
             gen = f"nes-dsc-gen-{topology.replace('/', '-')}-{variant}-bw{bw_label}-gp-{leaf['name']}-{k}"
             generators.append(
@@ -599,7 +781,7 @@ def run_contention(topology, variant, workers, bandwidth_kbit, out_dir):
     }
 
 
-def run_topology(topology, output_root, mode):
+def run_topology(topology, output_root, mode, data_file=None):
     workers = config.build_workers(topology)  ### raises ValueError unless exactly one root
     out_dir = os.path.join(output_root, config.topology_dir(topology))
     ### exist_ok (not wipe): both modes share the per-topology dir with distinct file/subdir names, so
@@ -608,11 +790,11 @@ def run_topology(topology, output_root, mode):
     printInfo(f"[{mode}] topology {topology}: {len(workers)} workers ({[w['name'] for w in workers]})")
     if mode == "contention":
         return [
-            run_contention(topology, v, workers, bw, out_dir)
+            run_contention(topology, v, workers, bw, out_dir, data_file=data_file)
             for v in config.VARIANTS
             for bw in config.BANDWIDTH_LIMITS_KBIT
         ]
-    return [run_variant(topology, v, workers, out_dir) for v in config.VARIANTS]
+    return [run_variant(topology, v, workers, out_dir, data_file=data_file) for v in config.VARIANTS]
 
 
 def write_summary(output_root, results, mode):
@@ -630,10 +812,13 @@ def write_summary(output_root, results, mode):
     path = os.path.join(output_root, "summary.csv")
     with open(path, "w", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow(["topology", "variant", "total_bytes", "peak_bps", "num_queries", "num_leaves"])
+        writer.writerow(
+            ["topology", "variant", "total_bytes", "peak_bps", "mean_tps", "peak_tps", "num_queries", "num_leaves"]
+        )
         for r in results:
             writer.writerow(
-                [r["topology"], r["variant"], r["total_bytes"], f"{r['peak_bps']:.1f}", r["num_queries"], r["num_leaves"]]
+                [r["topology"], r["variant"], r["total_bytes"], f"{r['peak_bps']:.1f}",
+                 f"{r['mean_tps']:.1f}", f"{r['peak_tps']:.1f}", r["num_queries"], r["num_leaves"]]
             )
     return path
 
@@ -671,10 +856,12 @@ def main():
         printError(f"worker binary not found: {SINGLE_NODE_BINARY} (set BUILD_DIR / build first)")
         raise SystemExit(1)
 
+    data_file = prepare_dataset()
+
     for mode in config.MODES:
         results = []
         for topology in config.TOPOLOGIES:
-            results += run_topology(topology, output_root, mode)
+            results += run_topology(topology, output_root, mode, data_file=data_file)
         summary_path = write_summary(output_root, results, mode)
         printSuccess(f"[{mode}] summary -> {summary_path}")
 

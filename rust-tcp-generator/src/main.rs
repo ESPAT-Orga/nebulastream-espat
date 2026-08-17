@@ -16,15 +16,30 @@
 //!
 //! Listens on a contiguous port range, accepts arbitrary number of clients per port,
 //! and on each accepted connection streams CSV lines `id,value,timestamp\n` as fast
-//! as the consumer can read. `id` and `value` are drawn from a precomputed lookup
-//! table (deterministic from --seed); `timestamp` is a per-connection monotonic
-//! counter starting at 0 and incremented by 1 per emitted tuple.
+//! as the consumer can read.
+//!
+//! Two data modes:
+//!
+//! * **synthetic** (default) — `id` and `value` are drawn from a precomputed lookup
+//!   table (deterministic from --seed); `timestamp` is a per-connection monotonic
+//!   counter starting at 0 and incremented by 1 per emitted tuple. An event-time
+//!   window of "N ms" is therefore really N *tuples*.
+//! * **replay** (`--data-file`) — `value` and `timestamp` are read from a real trace
+//!   (a headerless `value,timestamp` CSV, the projection
+//!   `scripts/benchmarking/histogram_delta/prepare_cluster_monitoring.py` writes), so
+//!   both the value distribution and the event-time cadence are the real ones. `id` is
+//!   still synthetic: no statistic query reads it, it only fills the schema's third
+//!   column. Rows are replayed in file order and NEVER looped — a wrapped timestamp
+//!   would move event time backwards and stall the watermark — so on exhaustion the
+//!   connection is held open and idle rather than closed, which keeps a fixed-duration
+//!   hold from being cut short.
 //!
 //! Designed to run as a sidecar to NebulaStream's combined-runtime container, joined
 //! to the worker's network namespace via `--network container:<worker>`, so the worker
 //! can dial 127.0.0.1:<port>.
 
 use std::io;
+use std::io::BufRead;
 use std::net::IpAddr;
 use std::sync::Arc;
 
@@ -65,6 +80,17 @@ struct Args {
     /// schedule (rate / window_size_in_tuples closes per second).
     #[arg(long, default_value_t = 0)]
     rate: u64,
+
+    /// Replay a real trace instead of the synthetic lookup: a headerless `value,timestamp` CSV
+    /// (one row per line, both UINT64). Every connection replays it from the start, in file order.
+    #[arg(long)]
+    data_file: Option<String>,
+
+    /// Cap on the rows loaded from --data-file (0 = the whole file). The table is held in memory and
+    /// shared by all connections, so this bounds the generator's footprint: a run only needs about
+    /// `rate * hold_seconds` rows.
+    #[arg(long, default_value_t = 0)]
+    max_rows: usize,
 }
 
 /// Xorshift64* — small, deterministic, plenty of statistical quality for benchmark data.
@@ -101,19 +127,63 @@ fn build_lookup(seed: u64, size: usize) -> Vec<(u64, u64)> {
     out
 }
 
+/// Load a headerless `value,timestamp` CSV into memory. Malformed lines are skipped rather than
+/// fatal: the projection scripts can leave a trailing partial line, and one bad row out of millions
+/// should not lose the run. `max_rows` of 0 means the whole file.
+fn load_trace(path: &str, max_rows: usize) -> io::Result<Vec<(u64, u64)>> {
+    let file = std::fs::File::open(path)?;
+    let reader = std::io::BufReader::with_capacity(1 << 20, file);
+    let mut out = Vec::new();
+    let mut skipped = 0usize;
+    for line in reader.lines() {
+        let line = line?;
+        match line.split_once(',') {
+            Some((v, t)) => match (v.trim().parse::<u64>(), t.trim().parse::<u64>()) {
+                (Ok(v), Ok(t)) => out.push((v, t)),
+                _ => skipped += 1,
+            },
+            None => skipped += 1,
+        }
+        if max_rows != 0 && out.len() >= max_rows {
+            break;
+        }
+    }
+    if skipped > 0 {
+        eprintln!("trace load: skipped {} malformed line(s)", skipped);
+    }
+    Ok(out)
+}
+
+/// What a connection emits per tuple. `id` is synthetic in both modes (nothing reads it); `value`
+/// and `timestamp` come from the trace when one is loaded, else from the lookup + tuple counter.
+struct Data {
+    /// (id, value) pairs, deterministic from --seed.
+    lookup: Vec<(u64, u64)>,
+    /// (value, timestamp) rows from --data-file; empty in synthetic mode.
+    trace: Vec<(u64, u64)>,
+}
+
 async fn handle_connection(
     sock: tokio::net::TcpStream,
     peer: std::net::SocketAddr,
     port: u16,
-    lookup: Arc<Vec<(u64, u64)>>,
+    data: Arc<Data>,
     rate: u64,
 ) {
-    eprintln!("accept port={} peer={} rate={}", port, peer, rate);
+    let replay = !data.trace.is_empty();
+    eprintln!(
+        "accept port={} peer={} rate={} mode={}",
+        port,
+        peer,
+        rate,
+        if replay { "replay" } else { "synthetic" }
+    );
     let _ = sock.set_nodelay(true);
     let mut writer = BufWriter::with_capacity(64 * 1024, sock);
 
     let mut ts: u64 = 0;
     let mut idx: usize = 0;
+    let lookup = &data.lookup;
     let lookup_len = lookup.len();
 
     // Pacing for rate>0: emit in batches of ~1ms worth of tuples, flush, then sleep until the next
@@ -128,7 +198,22 @@ async fn handle_connection(
     let mut ts_buf = itoa::Buffer::new();
 
     loop {
-        let (id, value) = lookup[idx % lookup_len];
+        let (id, value) = if replay {
+            if idx >= data.trace.len() {
+                // Out of trace (see the module docs on why we never loop). Flush what is buffered and
+                // hold the connection open+idle, so the caller's fixed-duration hold runs to completion
+                // instead of ending early.
+                let _ = writer.flush().await;
+                eprintln!("trace exhausted port={} peer={} tuples={}", port, peer, idx);
+                std::future::pending::<()>().await;
+                return;
+            }
+            let (value, event_ts) = data.trace[idx];
+            ts = event_ts;
+            (lookup[idx % lookup_len].0, value)
+        } else {
+            lookup[idx % lookup_len]
+        };
         let id_s = id_buf.format(id).as_bytes();
         let val_s = val_buf.format(value).as_bytes();
         let ts_s = ts_buf.format(ts).as_bytes();
@@ -152,7 +237,8 @@ async fn handle_connection(
                 io::ErrorKind::BrokenPipe
                 | io::ErrorKind::ConnectionReset
                 | io::ErrorKind::UnexpectedEof => {
-                    eprintln!("disconnect port={} peer={} tuples={}", port, peer, ts);
+                    // idx, not ts: in replay mode ts is the trace's event time, not a tuple count.
+                    eprintln!("disconnect port={} peer={} tuples={}", port, peer, idx);
                 }
                 _ => {
                     eprintln!(
@@ -167,7 +253,10 @@ async fn handle_connection(
             return;
         }
 
-        ts = ts.wrapping_add(1);
+        // In replay mode the timestamp comes from the trace, so only the synthetic counter advances.
+        if !replay {
+            ts = ts.wrapping_add(1);
+        }
         idx = idx.wrapping_add(1);
 
         if rate > 0 {
@@ -176,7 +265,8 @@ async fn handle_connection(
                 // Flush so the consumer sees this batch before we sleep (BufWriter would otherwise
                 // hold it), keeping the input cadence steady.
                 if writer.flush().await.is_err() {
-                    eprintln!("disconnect port={} peer={} tuples={}", port, peer, ts);
+                    // idx, not ts: in replay mode ts is the trace's event time, not a tuple count.
+                    eprintln!("disconnect port={} peer={} tuples={}", port, peer, idx);
                     return;
                 }
                 let target = std::time::Duration::from_secs_f64(emitted as f64 / rate as f64);
@@ -189,13 +279,13 @@ async fn handle_connection(
     }
 }
 
-async fn run_listener(listener: TcpListener, port: u16, lookup: Arc<Vec<(u64, u64)>>, rate: u64) {
+async fn run_listener(listener: TcpListener, port: u16, data: Arc<Data>, rate: u64) {
     loop {
         match listener.accept().await {
             Ok((sock, peer)) => {
-                let lookup = lookup.clone();
+                let data = data.clone();
                 tokio::spawn(async move {
-                    handle_connection(sock, peer, port, lookup, rate).await;
+                    handle_connection(sock, peer, port, data, rate).await;
                 });
             }
             Err(e) => {
@@ -209,12 +299,41 @@ async fn run_listener(listener: TcpListener, port: u16, lookup: Arc<Vec<(u64, u6
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> io::Result<()> {
     let args = Args::parse();
-    let lookup = Arc::new(build_lookup(args.seed, args.lookup_size));
+    let lookup = build_lookup(args.seed, args.lookup_size);
     eprintln!(
         "lookup built: size={} seed={} (id range [0,5000), value range [0,500000))",
         lookup.len(),
         args.seed
     );
+
+    // Loading happens before the READY handshake so the runner never submits queries against a
+    // generator that is still parsing a multi-hundred-MB trace.
+    let trace = match args.data_file.as_deref() {
+        None => Vec::new(),
+        Some(path) => {
+            let t0 = std::time::Instant::now();
+            let rows = load_trace(path, args.max_rows)?;
+            if rows.is_empty() {
+                eprintln!("data file {} yielded no usable rows", path);
+                return Err(io::Error::new(io::ErrorKind::InvalidData, "empty trace"));
+            }
+            let (v_min, v_max) = rows
+                .iter()
+                .fold((u64::MAX, 0), |(lo, hi), (v, _)| (lo.min(*v), hi.max(*v)));
+            eprintln!(
+                "trace loaded: rows={} file={} in {:.1}s (value range [{},{}], ts {}..{})",
+                rows.len(),
+                path,
+                t0.elapsed().as_secs_f64(),
+                v_min,
+                v_max,
+                rows.first().unwrap().1,
+                rows.last().unwrap().1
+            );
+            rows
+        }
+    };
+    let data = Arc::new(Data { lookup, trace });
 
     let mut listeners = Vec::with_capacity(args.num_ports as usize);
     for i in 0..args.num_ports {
@@ -239,9 +358,9 @@ async fn main() -> io::Result<()> {
     );
 
     for (port, listener) in listeners {
-        let lookup = lookup.clone();
+        let data = data.clone();
         let rate = args.rate;
-        tokio::spawn(async move { run_listener(listener, port, lookup, rate).await });
+        tokio::spawn(async move { run_listener(listener, port, data, rate).await });
     }
 
     // Wait for SIGINT (Ctrl-C) or SIGTERM (docker stop) and shut down.

@@ -55,6 +55,8 @@
 #include <Operators/Statistic/StatisticTargetUtil.hpp>
 #include <Operators/Windows/Aggregations/AvgAggregationLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/CountAggregationLogicalFunction.hpp>
+#include <Operators/Windows/Aggregations/Histogram/EquiWidthHistogramDeltaGenLogicalFunction.hpp>
+#include <Operators/Windows/Aggregations/Histogram/EquiWidthHistogramDeltaResolverLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/Histogram/EquiWidthHistogramLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/Histogram/EquiWidthHistogramProbeLogicalOperator.hpp>
 #include <Operators/Windows/Aggregations/MaxAggregationLogicalFunction.hpp>
@@ -76,6 +78,7 @@
 #include <WindowTypes/Measures/TimeCharacteristic.hpp>
 #include <WindowTypes/Measures/TimeMeasure.hpp>
 #include <WindowTypes/Types/SlidingWindow.hpp>
+#include <WindowTypes/Types/TimeBasedWindowType.hpp>
 #include <WindowTypes/Types/TumblingWindow.hpp>
 #include <fmt/format.h>
 #include <fmt/ranges.h>
@@ -502,7 +505,8 @@ void AntlrSQLQueryPlanCreator::exitPrimaryQuery(AntlrSQLParser::PrimaryQueryCont
         queryPlan = LogicalPlanBuilder::addProjection(helpers.top().preAggregationProjections, /*asterisk=*/true, queryPlan);
     }
 
-    auto statisticAggs = std::initializer_list<std::string>{"ReservoirSample", "EquiWidthHistogram", "CountMinSketch", "ScalarStatistic"};
+    auto statisticAggs = std::initializer_list<std::string>{
+        "ReservoirSample", "EquiWidthHistogram", "CountMinSketch", "ScalarStatistic", "EquiWidthHistogramDeltaGen"};
     if (helpers.top().windowType != nullptr && helpers.top().joinKeyRelationHelper.empty() and not helpers.top().windowAggs.empty()
         and std::ranges::find(statisticAggs, helpers.top().windowAggs.front().get()->getName()) != std::end(statisticAggs))
     {
@@ -512,9 +516,52 @@ void AntlrSQLQueryPlanCreator::exitPrimaryQuery(AntlrSQLParser::PrimaryQueryCont
         const bool omitStoreWriter = std::getenv("NES_STAT_OMIT_STORE_WRITER") != nullptr;
 
         /// This is actually a statistic operation, not an aggregation
-        auto logicalStatisticFields = std::make_shared<LogicalStatisticFields>();
-        queryPlan = LogicalPlanBuilder::addStatisticBuild(
-            queryPlan, helpers.top().windowType, helpers.top().windowAggs, helpers.top().groupByFields, logicalStatisticFields);
+        if (const auto genOpt = helpers.top().windowAggs.front()->tryGetAs<EquiWidthHistogramDeltaGenLogicalFunction>())
+        {
+            /// Histogram delta split (EQUIWIDTHHISTOGRAMDELTA): expand into GEN -> re-window on the GEN
+            /// window-start field -> RESOLVER -> StatisticStoreWriter -- the same chain
+            /// DefaultStatisticQueryGenerator::appendHistogramDeltaBuildChain emits, minus the placement
+            /// hints (those only force the 2-node wire cut; single-node systests co-locate both halves).
+            const auto& gen = genOpt->get();
+            const auto statisticId = gen.statisticId;
+            const auto genFields = std::make_shared<LogicalStatisticFields>();
+            queryPlan = LogicalPlanBuilder::addStatisticBuild(
+                queryPlan, helpers.top().windowType, helpers.top().windowAggs, helpers.top().groupByFields, genFields);
+
+            const FieldAccessLogicalFunction resolverOnField{statisticDataFieldName(statisticId)};
+            auto resolverAgg = std::make_shared<WindowAggregationLogicalFunction>(
+                EquiWidthHistogramDeltaResolverLogicalFunction{resolverOnField, gen.memoryBudget, gen.minValue, gen.maxValue, statisticId});
+            const auto genWindowSize = std::dynamic_pointer_cast<Windowing::TimeBasedWindowType>(helpers.top().windowType)->getSize();
+            const auto resolverTimeChar
+                = Windowing::TimeCharacteristic::createEventTime(FieldAccessLogicalFunction{genFields->statisticStartTsField.name});
+            const std::shared_ptr<Windowing::WindowType> resolverWindow
+                = std::make_shared<Windowing::TumblingWindow>(resolverTimeChar, genWindowSize);
+            const auto resolverFields = std::make_shared<LogicalStatisticFields>();
+            queryPlan = LogicalPlanBuilder::addStatisticBuild(queryPlan, resolverWindow, {resolverAgg}, {}, resolverFields);
+            if (not omitStoreWriter)
+            {
+                queryPlan = LogicalPlanBuilder::addStatisticStoreWriter(
+                    queryPlan, resolverFields, statisticId, Statistic::StatisticType::Equi_Width_Histogram);
+            }
+        }
+        else
+        {
+            auto logicalStatisticFields = std::make_shared<LogicalStatisticFields>();
+            queryPlan = LogicalPlanBuilder::addStatisticBuild(
+                queryPlan, helpers.top().windowType, helpers.top().windowAggs, helpers.top().groupByFields, logicalStatisticFields);
+            /// Chain one StatisticStoreWriter per synopsis. Each inserts its statistic and forwards the record, so the
+            /// next writer still sees every data field. Each aggregation carries its own (id, type).
+            if (not omitStoreWriter)
+            {
+                for (const auto& aggregation : helpers.top().windowAggs)
+                {
+                    const auto target = tryGetStatisticTarget(*aggregation);
+                    INVARIANT(target.has_value(), "Statistic query contains a non-statistic aggregation: {}", aggregation->getName());
+                    queryPlan = LogicalPlanBuilder::addStatisticStoreWriter(
+                        queryPlan, logicalStatisticFields, target->statisticId, target->statisticType);
+                }
+            }
+        }
         if (not helpers.top().statProbe.has_value())
         {
             if (not omitStoreWriter)
@@ -533,19 +580,6 @@ void AntlrSQLQueryPlanCreator::exitPrimaryQuery(AntlrSQLParser::PrimaryQueryCont
                 LogicalStatisticFields().statisticNumberOfSeenTuplesField.dataType,
                 LogicalStatisticFields().statisticNumberOfSeenTuplesField.name};
             helpers.top().addProjection({}, numTuples);
-        }
-
-        /// Chain one StatisticStoreWriter per synopsis. Each inserts its statistic and forwards the record, so the
-        /// next writer still sees every data field. Each aggregation carries its own (id, type).
-        if (not omitStoreWriter)
-        {
-            for (const auto& aggregation : helpers.top().windowAggs)
-            {
-                const auto target = tryGetStatisticTarget(*aggregation);
-                INVARIANT(target.has_value(), "Statistic query contains a non-statistic aggregation: {}", aggregation->getName());
-                queryPlan = LogicalPlanBuilder::addStatisticStoreWriter(
-                    queryPlan, logicalStatisticFields, target->statisticId, target->statisticType);
-            }
         }
     }
     else if (helpers.top().isInAggFunction())
@@ -1178,6 +1212,45 @@ void AntlrSQLQueryPlanCreator::exitFunctionCall(AntlrSQLParser::FunctionCallCont
                     LogicalStatisticFields().statisticDataField.dataType, LogicalStatisticFields().statisticDataField.name};
                 helpers.top().windowAggs.push_back(std::make_shared<WindowAggregationLogicalFunction>(
                     EquiWidthHistogramLogicalFunction{fieldName, asFieldIfNotOverwritten, memoryBudget, minValue, maxValue, statisticId}));
+                break;
+            }
+            else if (funcName == "EQUIWIDTHHISTOGRAMDELTA")
+            {
+                /// Delta-compressed equi-width histogram. Same arguments as EQUIWIDTHHISTOGRAM; the difference
+                /// is downstream: the statistic-build branch in exitPrimaryQuery expands the pushed GEN function
+                /// into the GEN -> re-window -> RESOLVER -> StatisticStoreWriter split (see
+                /// docs/histogram-delta-wire-compression-plan.md).
+                if (helpers.top().constantBuilder.empty())
+                {
+                    throw InvalidQuerySyntax(
+                        "Expected constant (statistic hash) as first argument of EQUIWIDTHHISTOGRAMDELTA function call, got nothing at {}",
+                        context->getText());
+                }
+                const Statistic::StatisticId statisticId{parseConstant(helpers.top().constantBuilder.front(), "statisticId")};
+                helpers.top().statisticId = statisticId;
+                if (helpers.top().functionBuilder.size() != 1
+                    || !helpers.top().functionBuilder.back().tryGetAs<FieldAccessLogicalFunction>().has_value())
+                {
+                    throw InvalidQuerySyntax("EQUIWIDTHHISTOGRAMDELTA requires the second argument to be a fieldname");
+                }
+                const auto fieldName = helpers.top().functionBuilder.back().tryGetAs<FieldAccessLogicalFunction>().value().get();
+                helpers.top().functionBuilder.pop_back();
+                if (helpers.top().constantBuilder.size() != 4)
+                {
+                    throw InvalidQuerySyntax(
+                        "EQUIWIDTHHISTOGRAMDELTA requires the arguments memoryBudget, minValue, maxValue to be constants");
+                }
+                const auto maxValue = parseConstant(helpers.top().constantBuilder.back(), "maxValue");
+                helpers.top().constantBuilder.pop_back();
+                const auto minValue = parseConstant(helpers.top().constantBuilder.back(), "minValue");
+                helpers.top().constantBuilder.pop_back();
+                const auto memoryBudget = parseConstant(helpers.top().constantBuilder.back(), "memoryBudget");
+                helpers.top().constantBuilder.pop_back();
+                /// statisticId was read from the front (above) but not yet removed; pop it so chained functions
+                /// in one query each see exactly their own 4 constants.
+                helpers.top().constantBuilder.pop_back();
+                helpers.top().windowAggs.push_back(std::make_shared<WindowAggregationLogicalFunction>(
+                    EquiWidthHistogramDeltaGenLogicalFunction{fieldName, memoryBudget, minValue, maxValue, statisticId}));
                 break;
             }
             else if (funcName == "EQUIWIDTHHISTOGRAM_PROBE")

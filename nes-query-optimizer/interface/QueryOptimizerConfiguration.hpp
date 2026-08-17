@@ -20,6 +20,7 @@
 #include <Configurations/BaseConfiguration.hpp>
 #include <Configurations/BaseOption.hpp>
 #include <Configurations/Enums/EnumOption.hpp>
+#include <Configurations/ScalarOption.hpp>
 #include <QueryOptimizerNetworkConfiguration.hpp>
 
 namespace NES
@@ -46,8 +47,15 @@ public:
 
     QueryOptimizerNetworkConfiguration network = {"network", "Network configuration overrides for query decomposition"};
 
+    /// An optimizer option, not a worker one: it decides the plan's shape and is read in the frontend before submission.
+    BoolOption enableHistogramDeltaCompression
+        = {"enable_histogram_delta_compression",
+           "false",
+           "Enable reset/lift-based histogram delta compression (PoC): build the histogram on the source node "
+           "and resolve+store it on the downstream node, sending only per-window deltas over the wire."};
+
 private:
-    std::vector<BaseOption*> getOptions() override { return {&joinStrategy, &network}; }
+    std::vector<BaseOption*> getOptions() override { return {&joinStrategy, &network, &enableHistogramDeltaCompression}; }
 };
 
 }

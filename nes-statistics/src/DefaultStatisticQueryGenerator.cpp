@@ -30,11 +30,15 @@
 #include <DataTypes/Schema.hpp>
 #include <Functions/FieldAccessLogicalFunction.hpp>
 #include <Functions/LogicalFunction.hpp>
+#include <Functions/ZstdCompressLogicalFunction.hpp>
+#include <Functions/ZstdDecompressLogicalFunction.hpp>
 #include <Identifiers/Identifiers.hpp>
 #include <Identifiers/SketchDimensions.hpp>
 #include <Operators/ProjectionLogicalOperator.hpp>
 #include <Operators/Sources/SourceNameLogicalOperator.hpp>
 #include <Operators/Statistic/LogicalStatisticFields.hpp>
+#include <Operators/Windows/Aggregations/Histogram/EquiWidthHistogramDeltaGenLogicalFunction.hpp>
+#include <Operators/Windows/Aggregations/Histogram/EquiWidthHistogramDeltaResolverLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/Histogram/EquiWidthHistogramLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/Histogram/EquiWidthHistogramProbeLogicalOperator.hpp>
 #include <Operators/Windows/Aggregations/Sample/ReservoirSampleLogicalFunction.hpp>
@@ -43,6 +47,7 @@
 #include <Plans/LogicalPlan.hpp>
 #include <Plans/LogicalPlanBuilder.hpp>
 #include <Traits/PinnedHostTrait.hpp>
+#include <Traits/PlacementHintTrait.hpp>
 #include <Traits/SpliceToRunningSourceTrait.hpp>
 #include <Traits/TraitSet.hpp>
 #include <WindowTypes/Measures/TimeCharacteristic.hpp>
@@ -132,11 +137,79 @@ LogicalPlan appendWorkloadGrpcSink(
 LogicalPlan
 appendWorkloadVoidSink(LogicalPlan plan, const std::string& sourceNameUpper, const std::unordered_map<std::string, std::string>& options);
 
+LogicalPlan stampPlacementHint(LogicalPlan plan, const PlacementAnchor anchor)
+{
+    auto root = plan.getRootOperators().front();
+    auto traitSet = root.getTraitSet();
+    [[maybe_unused]] const auto inserted = tryInsert(traitSet, PlacementHintTrait{anchor});
+    return plan.withRootOperators({root.withTraitSet(traitSet)});
+}
+
+bool wantsZstdCompression(const std::unordered_map<std::string, std::string>& options)
+{
+    const auto it = options.find("compress_statistic");
+    return it != options.end() and toLowerCase(it->second) == "zstd";
+}
+
+LogicalPlan appendZstdStage(LogicalPlan plan, const Statistic::StatisticId statisticId, const bool compress)
+{
+    const auto dataField = statisticDataFieldName(statisticId);
+    const FieldAccessLogicalFunction blob{dataField};
+    auto wrapped = compress ? LogicalFunction{ZstdCompressLogicalFunction{blob}} : LogicalFunction{ZstdDecompressLogicalFunction{blob}};
+    std::vector<ProjectionLogicalOperator::Projection> projections;
+    projections.emplace_back(FieldIdentifier{dataField}, std::move(wrapped));
+    plan = LogicalPlanBuilder::addProjection(std::move(projections), /*asterisk=*/true, plan);
+    if (not compress)
+    {
+        plan = stampPlacementHint(std::move(plan), PlacementAnchor::Sink);
+    }
+    return plan;
+}
+
+LogicalPlan appendHistogramDeltaBuildChain(
+    LogicalPlan plan,
+    const FieldAccessLogicalFunction& onField,
+    const std::shared_ptr<Windowing::WindowType>& genWindowType,
+    const uint64_t windowSizeMs,
+    const std::unordered_map<std::string, std::string>& options,
+    const Statistic::StatisticId statisticId)
+{
+    const auto memoryBudget = getOption(options, "memory_budget", 4096);
+    const auto minValue = getOption(options, "min", 0);
+    const auto maxValue = getOption(options, "max", 1000);
+
+    auto genAgg = std::make_shared<WindowAggregationLogicalFunction>(
+        EquiWidthHistogramDeltaGenLogicalFunction{onField, memoryBudget, minValue, maxValue, statisticId});
+    const auto genFields = std::make_shared<LogicalStatisticFields>();
+    plan = LogicalPlanBuilder::addStatisticBuild(std::move(plan), genWindowType, {genAgg}, {}, genFields);
+    plan = stampPlacementHint(std::move(plan), PlacementAnchor::Source);
+
+    if (wantsZstdCompression(options))
+    {
+        plan = appendZstdStage(std::move(plan), statisticId, /*compress=*/true);
+        plan = appendZstdStage(std::move(plan), statisticId, /*compress=*/false);
+    }
+
+    const FieldAccessLogicalFunction resolverOnField{statisticDataFieldName(statisticId)};
+    auto resolverAgg = std::make_shared<WindowAggregationLogicalFunction>(
+        EquiWidthHistogramDeltaResolverLogicalFunction{resolverOnField, memoryBudget, minValue, maxValue, statisticId});
+    const auto resolverTimeChar
+        = Windowing::TimeCharacteristic::createEventTime(FieldAccessLogicalFunction{genFields->statisticStartTsField.name});
+    const std::shared_ptr<Windowing::WindowType> resolverWindow
+        = std::make_shared<Windowing::TumblingWindow>(resolverTimeChar, Windowing::TimeMeasure{windowSizeMs});
+    const auto resolverFields = std::make_shared<LogicalStatisticFields>();
+    plan = LogicalPlanBuilder::addStatisticBuild(std::move(plan), resolverWindow, {resolverAgg}, {}, resolverFields);
+    plan = stampPlacementHint(std::move(plan), PlacementAnchor::Sink);
+    plan = LogicalPlanBuilder::addStatisticStoreWriter(plan, resolverFields, statisticId, Statistic::StatisticType::Equi_Width_Histogram);
+    return stampPlacementHint(std::move(plan), PlacementAnchor::Sink);
+}
+
 LogicalPlan generateForDataDomain(
     const DataDomain& domain,
     const RequestStatisticBuildStatement& request,
     const Statistic::StatisticId statisticId,
-    const std::string& coordinatorAddress)
+    const std::string& coordinatorAddress,
+    const bool enableHistogramDeltaCompression)
 {
     PRECONDITION(not coordinatorAddress.empty(), "Required to have a coordinator gRPC address!");
 
@@ -155,14 +228,29 @@ LogicalPlan generateForDataDomain(
     }
 
     const FieldAccessLogicalFunction onField{domain.fieldName};
-    auto agg = createAggregationFunction(onField, request.metric, statisticId, request.options);
 
-    /// The build and statistic store writer need to have a connection for the statistic fields, e.g., statisticDataField.
-    /// As the field names change during type inference
-    const auto logicalStatisticFields = std::make_shared<LogicalStatisticFields>();
     auto plan = LogicalPlanBuilder::createLogicalPlan(domain.logicalSourceName);
-    plan = LogicalPlanBuilder::addStatisticBuild(std::move(plan), windowType, {agg}, {}, logicalStatisticFields);
-    plan = LogicalPlanBuilder::addStatisticStoreWriter(plan, logicalStatisticFields, statisticId, toStatisticType(request.metric));
+
+    const bool useDeltaSplit
+        = enableHistogramDeltaCompression && toStatisticType(request.metric) == Statistic::StatisticType::Equi_Width_Histogram;
+    if (useDeltaSplit)
+    {
+        plan = appendHistogramDeltaBuildChain(std::move(plan), onField, windowType, request.windowSizeMs, request.options, statisticId);
+    }
+    else
+    {
+        auto agg = createAggregationFunction(onField, request.metric, statisticId, request.options);
+        /// The build and statistic store writer need to have a connection for the statistic fields, e.g., statisticDataField.
+        /// As the field names change during type inference
+        const auto logicalStatisticFields = std::make_shared<LogicalStatisticFields>();
+        plan = LogicalPlanBuilder::addStatisticBuild(std::move(plan), windowType, {agg}, {}, logicalStatisticFields);
+        if (wantsZstdCompression(request.options))
+        {
+            plan = appendZstdStage(std::move(plan), statisticId, /*compress=*/true);
+            plan = appendZstdStage(std::move(plan), statisticId, /*compress=*/false);
+        }
+        plan = LogicalPlanBuilder::addStatisticStoreWriter(plan, logicalStatisticFields, statisticId, toStatisticType(request.metric));
+    }
 
     /// Optional `writer_host` SET option: pin the StatisticStoreWriter to a specific worker. The build
     /// stays near the source (leaf) via the placement distance objective; only the writer is forced
@@ -171,6 +259,14 @@ LogicalPlan generateForDataDomain(
     /// crosses. Enforced by addStatisticWriterPinningConstraints in BottomUpPlacement.
     if (const auto writerHostIt = request.options.find("writer_host"); writerHostIt != request.options.end())
     {
+        /// A second hard pin on the writer the delta split already anchors to Sink; a differing host
+        /// would make the placement ILP infeasible, reported only as a generic capacity failure.
+        if (useDeltaSplit)
+        {
+            throw InvalidConfigParameter(
+                "'writer_host' cannot be combined with histogram delta compression: the reconstructed histogram is written on the sink "
+                "node, next to the RESOLVER that produces it. Use the 'host' option to choose that node.");
+        }
         auto writer = plan.getRootOperators().front();
         auto ts = writer.getTraitSet();
         [[maybe_unused]] const auto inserted = tryInsert(ts, PinnedHostTrait{Host{writerHostIt->second}});
@@ -207,8 +303,15 @@ LogicalPlan generateForDataDomain(
     /// deployments that only need the writer to run on a target node use the void terminal. Either way
     /// the terminal sink is placed on coordinatorAddress (root), so the projected report record crosses
     /// the network to it.
+    ///
+    /// An explicit `host` SET option wins over that default: the coordinator's gRPC address is not
+    /// necessarily a worker in the topology (in the embedded REPL it is an ephemeral port), and
+    /// placing the sink there fails validation with "placed on non-existing worker".
     auto sinkOptions = request.options;
-    sinkOptions["host"] = coordinatorAddress;
+    if (not sinkOptions.contains("host"))
+    {
+        sinkOptions["host"] = coordinatorAddress;
+    }
     if (const auto it = request.options.find("terminal_sink"); it != request.options.end() && it->second == "void")
     {
         return appendWorkloadVoidSink(std::move(plan), sourceNameUpper, sinkOptions);
@@ -225,7 +328,8 @@ LogicalPlan stackWorkloadBuildChainOnTop(
     LogicalPlan basePlan,
     const std::string& fieldNameUpper,
     const RequestStatisticBuildStatement& request,
-    const Statistic::StatisticId statisticId)
+    const Statistic::StatisticId statisticId,
+    const bool enableHistogramDeltaCompression)
 {
     auto timeChar = request.eventTimeFieldName.has_value()
         ? Windowing::TimeCharacteristic::createEventTime(FieldAccessLogicalFunction{*request.eventTimeFieldName})
@@ -242,14 +346,21 @@ LogicalPlan stackWorkloadBuildChainOnTop(
     }
 
     const FieldAccessLogicalFunction onField{fieldNameUpper};
-    auto agg = createAggregationFunction(onField, request.metric, statisticId, request.options);
-
-    /// The build and statistic store writer need to have a connection for the statistic fields, e.g., statisticDataField.
-    /// As the field names change during type inference
-    const auto logicalStatisticFields = std::make_shared<LogicalStatisticFields>();
     auto plan = std::move(basePlan);
-    plan = LogicalPlanBuilder::addStatisticBuild(std::move(plan), windowType, {agg}, {}, logicalStatisticFields);
-    plan = LogicalPlanBuilder::addStatisticStoreWriter(plan, logicalStatisticFields, statisticId, toStatisticType(request.metric));
+
+    if (enableHistogramDeltaCompression && toStatisticType(request.metric) == Statistic::StatisticType::Equi_Width_Histogram)
+    {
+        plan = appendHistogramDeltaBuildChain(std::move(plan), onField, windowType, request.windowSizeMs, request.options, statisticId);
+    }
+    else
+    {
+        auto agg = createAggregationFunction(onField, request.metric, statisticId, request.options);
+        /// The build and statistic store writer need to have a connection for the statistic fields, e.g., statisticDataField.
+        /// As the field names change during type inference
+        const auto logicalStatisticFields = std::make_shared<LogicalStatisticFields>();
+        plan = LogicalPlanBuilder::addStatisticBuild(std::move(plan), windowType, {agg}, {}, logicalStatisticFields);
+        plan = LogicalPlanBuilder::addStatisticStoreWriter(plan, logicalStatisticFields, statisticId, toStatisticType(request.metric));
+    }
     /// The trigger's `condition` is intentionally NOT applied here: in the workload-domain path
     /// it is a probe-pipeline predicate (binds against histogram bin fields BINSTART/BINEND/
     /// BINCOUNTER) and gets added downstream of the histogram probe, not on the build chain's
@@ -326,7 +437,7 @@ LogicalPlan DefaultStatisticQueryGenerator::generateQuery(
             using DomainType = std::decay_t<CollectionDomain>;
             if constexpr (std::is_same_v<DomainType, DataDomain>)
             {
-                return generateForDataDomain(domain, request, statisticId, coordinatorAddress);
+                return generateForDataDomain(domain, request, statisticId, coordinatorAddress, enableHistogramDeltaCompression);
             }
             else if constexpr (std::is_same_v<DomainType, WorkloadDomain>)
             {
@@ -389,7 +500,7 @@ LogicalPlan DefaultStatisticQueryGenerator::generateWorkloadBranch(
     LogicalPlan basePlan{INVALID_QUERY_ID, {taggedSource}};
     /// applyConditionSelection=false: the trigger's `condition` is a probe-pipeline predicate
     /// (binds against histogram bin fields), not a build-chain output filter.
-    auto plan = stackWorkloadBuildChainOnTop(std::move(basePlan), fieldNameUpper, request, statisticId);
+    auto plan = stackWorkloadBuildChainOnTop(std::move(basePlan), fieldNameUpper, request, statisticId, enableHistogramDeltaCompression);
 
     const auto predicate = request.conditionTrigger.has_value() ? request.conditionTrigger->condition : std::optional<LogicalFunction>{};
 

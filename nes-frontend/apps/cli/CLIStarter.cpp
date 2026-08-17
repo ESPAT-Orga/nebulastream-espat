@@ -448,8 +448,13 @@ std::string deriveRootAddress(const std::vector<NES::CLI::WorkerConfig>& workers
 /// builds, but submitted through the ordinary QueryStatement path. A unique `statistic_id` SET option
 /// is required (concurrent statistic queries must not collide in the per-worker store); `report_host`
 /// overrides the derived root as the coordinator address the terminal sink is placed on.
+/// `enableHistogramDeltaCompression` comes from the topology's `optimizer:` block and decides whether an
+/// EquiWidthHistogram request is generated as the GEN/RESOLVER split.
 NES::LogicalPlan buildSubmittablePlan(
-    const std::string& query, const std::shared_ptr<NES::SourceCatalog>& sourceCatalog, const std::vector<NES::CLI::WorkerConfig>& workers)
+    const std::string& query,
+    const std::shared_ptr<NES::SourceCatalog>& sourceCatalog,
+    const std::vector<NES::CLI::WorkerConfig>& workers,
+    const bool enableHistogramDeltaCompression)
 {
     auto trimmed = query;
     trimmed.erase(trimmed.begin(), std::ranges::find_if(trimmed, [](unsigned char c) { return std::isspace(c) == 0; }));
@@ -481,7 +486,7 @@ NES::LogicalPlan buildSubmittablePlan(
     const auto reportHostIt = request->options.find("report_host");
     const auto rootAddress = reportHostIt != request->options.end() ? reportHostIt->second : deriveRootAddress(workers);
 
-    return NES::DefaultStatisticQueryGenerator{}.generateQuery(*request, statisticId, rootAddress);
+    return NES::DefaultStatisticQueryGenerator{enableHistogramDeltaCompression}.generateQuery(*request, statisticId, rootAddress);
 }
 
 std::vector<NES::Statement> loadStatements(const NES::CLI::QueryConfig& topologyConfig)
@@ -664,7 +669,8 @@ void doQuerySubmission(const argparse::ArgumentParser& program, const argparse::
         NES::QueryStatementHandler queryStatementHandler{queryManager, queryOptimizer};
         for (const auto& query : queries)
         {
-            auto plan = buildSubmittablePlan(query, sourceCatalog, topologyConfig.workers);
+            auto plan = buildSubmittablePlan(
+                query, sourceCatalog, topologyConfig.workers, queryOptimizerConfiguration.enableHistogramDeltaCompression.getValue());
             plan.setPriority(topologyConfig.priority);
             if (auto result = queryStatementHandler(NES::QueryStatement{std::move(plan), {}}))
             {
@@ -684,8 +690,8 @@ void doQuerySubmission(const argparse::ArgumentParser& program, const argparse::
         NES::QueryStatementHandler queryStatementHandler{queryManager, queryOptimizer};
         for (const auto& query : queries)
         {
-            auto result
-                = queryStatementHandler(NES::ExplainQueryStatement(buildSubmittablePlan(query, sourceCatalog, topologyConfig.workers)));
+            auto result = queryStatementHandler(NES::ExplainQueryStatement(buildSubmittablePlan(
+                query, sourceCatalog, topologyConfig.workers, queryOptimizerConfiguration.enableHistogramDeltaCompression.getValue())));
             if (result)
             {
                 std::cout << result->explainString << "\n";

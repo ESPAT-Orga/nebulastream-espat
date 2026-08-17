@@ -116,7 +116,9 @@ EquiWidthHistogramPhysicalFunction::lower(nautilus::val<AggregationState*> aggre
     /// Need to acquire new memory, as the current memory for the bins will be deleted.
     constexpr auto loweredHeaderSize
         = StatisticProviderIteratorImpl::sizeOfMetaDataSize + StatisticProviderIteratorImpl::sizeOfTotalAreaSize;
-    const auto histogramMemorySize = getSizeOfStateInBytes() + loweredHeaderSize + loweredMetaDataSize;
+    /// Serialize the PURE histogram size, not getSizeOfStateInBytes(): a subclass (delta resolver) may allocate
+    /// a larger state with trailing bookkeeping words that must NOT end up in the stored blob.
+    const auto histogramMemorySize = histogramStateBytes() + loweredHeaderSize + loweredMetaDataSize;
     const auto histogramMemory = pipelineMemoryProvider.arena.allocateMemory(histogramMemorySize);
 
     /// Copying all bins to the newly acquired memory and adding the size of the variable sized data (histogram)
@@ -127,7 +129,7 @@ EquiWidthHistogramPhysicalFunction::lower(nautilus::val<AggregationState*> aggre
     nautilus::memcpy(
         histogramMemory + nautilus::val<uint64_t>{loweredHeaderSize} + nautilus::val<uint64_t>{loweredMetaDataSize},
         aggregationState,
-        getSizeOfStateInBytes());
+        histogramStateBytes());
 
     /// Reading the number of seen tuples
     const auto numberOfSeenTuplesRef
@@ -198,11 +200,16 @@ void EquiWidthHistogramPhysicalFunction::cleanup(nautilus::val<AggregationState*
 {
 }
 
-size_t EquiWidthHistogramPhysicalFunction::getSizeOfStateInBytes() const
+size_t EquiWidthHistogramPhysicalFunction::histogramStateBytes() const
 {
     /// Size of the histogram with each bin containing a counter and lower/upper bound. Also we need 64bit for the numberOfSeenTuples
     return numberOfBins * (dataTypeCounter.getSizeInBytesWithoutNull() + 2 * dataTypeLowerUpperBound.getSizeInBytesWithoutNull())
         + sizeof(uint64_t);
+}
+
+size_t EquiWidthHistogramPhysicalFunction::getSizeOfStateInBytes() const
+{
+    return histogramStateBytes();
 }
 
 EquiWidthHistogramPhysicalFunction::EquiWidthHistogramPhysicalFunction(

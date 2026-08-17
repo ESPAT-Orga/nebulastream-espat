@@ -60,6 +60,20 @@ public:
     /// It will NOT contain any other metadata fields, e.g., window start and end fields
     virtual Record lower(nautilus::val<AggregationState*> aggregationState, PipelineMemoryProvider& pipelineMemoryProvider) = 0;
 
+    /// Lower with access to a reference aggregation state ("baseline"), used by the delta-compression
+    /// aggregation functions: GEN emits (current - baseline), RESOLVER emits (state + baseline).
+    /// `isKeyframe` tells GEN whether this window is its interval's keyframe, so it can stamp that on the wire
+    /// (the delta blob) for RESOLVER to obey; RESOLVER ignores it (it already has the right baseline).
+    /// `intervalId` is this window's keyframe-interval id (window ordinal / K); GEN stamps it on the wire so the
+    /// RESOLVER groups deltas with their keyframe by GEN's grouping rather than recomputing it.
+    /// The default ignores all three and behaves like standard lower().
+    virtual Record lower(
+        nautilus::val<AggregationState*> aggregationState,
+        nautilus::val<AggregationState*> baselineState,
+        const nautilus::val<bool>& isKeyframe,
+        const nautilus::val<uint64_t>& intervalId,
+        PipelineMemoryProvider& pipelineMemoryProvider);
+
     /// Resets the aggregation state to its initial state. For a sum, this would be 0, for a min aggregation, this would be the maximum possible value, etc.
     virtual void reset(nautilus::val<AggregationState*> aggregationState, PipelineMemoryProvider& pipelineMemoryProvider) = 0;
 

@@ -1,0 +1,118 @@
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+
+#    https://www.apache.org/licenses/LICENSE-2.0
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Two-node topology for the histogram delta-compression wire test.
+# See docs/histogram-delta-wire-compression-plan.md.
+#
+# Topology:
+#
+#   ┌──────────────────────────────┐        ┌──────────────────────────────┐
+#   │ gen-node                     │ deltas │ resolver-node                │
+#   │ S: stream (File)             │───────▶│ RESOLVER -> StoreWriter      │
+#   │ WatermarkAssign -> GEN build │        │ -> Void terminal sink        │
+#   └──────────────────────────────┘        │ S: keys -> PROBE -> bins     │
+#                                           └──────────────────────────────┘
+#
+# The GEN/RESOLVER cut is produced by the feature's own mechanism, not by the test:
+# `optimizer.enable_histogram_delta_compression` makes DefaultStatisticQueryGenerator emit
+# the split chain and stamp PlacementHintTrait{Source} on the GEN and {Sink} on the RESOLVER
+# and StatisticStoreWriter, which BottomUpPlacement turns into hard pins. The `host` option
+# names the node the terminal sink -- and therefore the Sink-anchored half -- lands on.
+# `terminal_sink=void` is required because nes-cli runs no StatisticCoordinator: only
+# StatisticCoordinatorService can receive Grpc statistic reports, a plain worker cannot.
+#
+# Data: 18 tuples over three 5-second tumbling windows, 5 bins of width 5 over [0,25)
+# (memory_budget 128 => (128-8)/24 = 5 bins). Identical to the golden data in
+# nes-systests/operator/aggregation/statistics/WindowAggregationHistogramDelta.test, so the
+# expected bins are that (single-node) test's -- the point here is that they survive the trip
+# over a real network channel.
+#
+# `min`/`max` are backtick-quoted because MIN/MAX are reserved lexer tokens. MINVAL maps to
+# the Equi_Width_Histogram statistic type, which is what the delta split applies to.
+
+optimizer:
+  enable_histogram_delta_compression: true
+
+query: |
+  REQUEST STATISTIC DATA MINVAL ON stream(value) WINDOW TUMBLING(SIZE 5000 MS) EVENTTIME timestamp
+  SET ('resolver-node:8080' AS host, 71 AS statistic_id, 0 AS `min`, 25 AS `max`,
+       128 AS memory_budget, 'void' AS terminal_sink)
+
+sinks:
+  # The reconstructed bins, read back out of resolver-node's statistic store by the probe
+  # query the test submits separately (see distributed.bats).
+  - name: bins
+    host: resolver-node:8080
+    schema:
+      - name: keys$STATISTICSTART
+        type: UINT64
+      - name: keys$STATISTICEND
+        type: UINT64
+      - name: keys$binStart
+        type: UINT64
+      - name: keys$binCounter
+        type: UINT64
+      - name: keys$binEnd
+        type: UINT64
+    type: File
+    config:
+      file_path: probe-out.csv
+      output_format: CSV
+    parser_config: { }
+
+logical:
+  - name: stream
+    schema:
+      - name: id
+        type: UINT64
+      - name: value
+        type: UINT64
+      - name: timestamp
+        type: UINT64
+  # One row per window key the probe looks up in the node-local store.
+  - name: keys
+    schema:
+      - name: STATISTICID
+        type: UINT64
+      - name: STATISTICSTART
+        type: UINT64
+      - name: STATISTICEND
+        type: UINT64
+
+physical:
+  - logical: stream
+    host: gen-node:8080
+    parser_config:
+      type: CSV
+      fieldDelimiter: ","
+    type: File
+    source_config:
+      file_path: /workdir/tests/data/histogram-delta.csv
+  # Pinned to resolver-node: the statistic store is node-local, so the probe has to run on
+  # the node whose store the StatisticStoreWriter wrote to.
+  - logical: keys
+    host: resolver-node:8080
+    parser_config:
+      type: CSV
+      fieldDelimiter: ","
+    type: File
+    source_config:
+      file_path: /workdir/tests/data/histogram-delta-keys.csv
+
+workers:
+  - host: gen-node:8080
+    data_address: gen-node:9090
+    max_operators: 10000
+    downstream: [ resolver-node:8080 ]
+  - host: resolver-node:8080
+    data_address: resolver-node:9090
+    max_operators: 10000

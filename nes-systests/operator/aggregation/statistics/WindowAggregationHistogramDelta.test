@@ -1,0 +1,436 @@
+# name: window/synopsis/WindowAggregationHistogramDelta.test
+# description: Delta-compressed equi-width histogram (GEN/RESOLVER split), across four scenarios: the default
+# keyframe interval, a bin count above the static-unroll threshold, a keyframe interval spanned twice, and a
+# stream whose first window is not aligned to a keyframe index.
+# groups: [Synopsis, Aggregation, WindowOperators, HistogramDelta]
+
+# See docs/histogram-delta-wire-compression-plan.md for the keyframe scheme. EQUIWIDTHHISTOGRAMDELTA is a
+# drop-in for EQUIWIDTHHISTOGRAM: same arguments, same stored output, so every scenario below pairs the
+# delta query with a plain EQUIWIDTHHISTOGRAM over the same data and the same expected block.
+#
+# ORDERING IS LOAD-BEARING. GlobalConfiguration applies to every query BELOW it until the same key is
+# redeclared, and the keyframe interval IS the scenario for the last two sections. Sections are ordered by
+# interval (10, then 3, then 5); do not move a query across a GlobalConfiguration line. The interval is
+# declared explicitly even where it matches the default (10), so no section depends on a key being unset.
+#
+# All four sections pin 4 worker threads, which overrides the 1/2/4 sweep the Aggregation ctest matrix
+# applies (nes-systests/systest/CMakeLists.txt). The section named MultiThread is therefore not "the
+# multi-threaded one" -- what distinguishes it is that its windows span TWO keyframe intervals.
+#
+# Statistic IDs must stay disjoint across the whole file: queries are grouped into worker instances by their
+# configuration override (SystestExecutor.cpp), and one worker owns one statistic store, so a reused ID
+# cross-contaminates scenarios. In use here: 70-72, 90-92 (interval 10), 80-81 (interval 3), 82-83 (interval 5).
+GlobalConfiguration worker.query_engine.number_of_worker_threads: [4]
+GlobalConfiguration worker.default_query_execution.histogram_delta_keyframe_interval: [10]
+
+# ==================================================================================================
+# Baseline: default keyframe interval (10) and 3 windows, so window 0 is the interval's keyframe and
+# windows 1-2 are deltas against it.
+# ==================================================================================================
+
+CREATE LOGICAL SOURCE stream(id UINT64 NOT NULL, value UINT64 NOT NULL, timestamp UINT64 NOT NULL);
+CREATE PHYSICAL SOURCE FOR stream TYPE File;
+# Three 5-second windows over 5 bins of width 5 ([0,5),[5,10),[10,15),[15,20),[20,25)). Window 0 is the
+# baseline (one value per bin). Each later window carries the baseline plus one extra tuple into the next
+# bin, cumulatively, so every per-window GEN delta changes exactly ONE bin:
+#   W0 [0,5000)      bins [1,1,1,1,1]   (baseline)
+#   W1 [5000,10000)  bins [2,1,1,1,1]   (+1 in bin 0)
+#   W2 [10000,15000) bins [2,2,1,1,1]   (+1 in bin 5)
+ATTACH INLINE
+1,0,0
+1,5,1000
+1,10,2000
+1,15,3000
+1,20,4000
+1,0,5000
+1,5,6000
+1,10,7000
+1,15,8000
+1,20,9000
+1,0,5500
+1,0,10000
+1,5,11000
+1,10,12000
+1,15,13000
+1,20,14000
+1,0,10500
+1,5,11500
+
+CREATE SINK sinkBuild(stream.statisticId UINT64 NOT NULL, stream.statisticStart UINT64 NOT NULL, stream.statisticEnd UINT64 NOT NULL, stream.statisticNumberOfSeenTuples UINT64 NOT NULL) TYPE File;
+CREATE SINK sinkProbe(stream.statisticStart UINT64 NOT NULL, stream.statisticEnd UINT64 NOT NULL, stream.binStart UINT64 NOT NULL, stream.binCounter UINT64 NOT NULL, stream.binEnd UINT64 NOT NULL) TYPE File;
+
+# --- Build only: the reconstructed number of seen tuples per window.
+# arguments: statisticId, field, memoryBudget (=> (128-8)/24 = 5 bins), minValue, maxValue
+SELECT EQUIWIDTHHISTOGRAMDELTA(70, value, 128, 0, 25) FROM stream WINDOW TUMBLING(timestamp, size 5 sec) INTO sinkBuild;
+----
+70 0 5000 5
+70 5000 10000 6
+70 10000 15000 7
+
+# --- Build + probe: read every reconstructed bin back out of the store.
+SELECT statisticStart, statisticEnd, binStart, binCounter, binEnd FROM (
+    SELECT EQUIWIDTHHISTOGRAM_PROBE(71, uint64, uint64)
+    FROM (
+        SELECT EQUIWIDTHHISTOGRAMDELTA(71, value, 128, 0, 25) FROM stream WINDOW TUMBLING(timestamp, size 5 sec)
+    )
+) INTO sinkProbe;
+----
+0 5000 0 1 5
+0 5000 5 1 10
+0 5000 10 1 15
+0 5000 15 1 20
+0 5000 20 1 25
+5000 10000 0 2 5
+5000 10000 5 1 10
+5000 10000 10 1 15
+5000 10000 15 1 20
+5000 10000 20 1 25
+10000 15000 0 2 5
+10000 15000 5 2 10
+10000 15000 10 1 15
+10000 15000 15 1 20
+10000 15000 20 1 25
+
+# --- Equivalence: a plain EQUIWIDTHHISTOGRAM over the same data, same expected block.
+SELECT statisticStart, statisticEnd, binStart, binCounter, binEnd FROM (
+    SELECT EQUIWIDTHHISTOGRAM_PROBE(72, uint64, uint64)
+    FROM (
+        SELECT EQUIWIDTHHISTOGRAM(72, value, 128, 0, 25) FROM stream WINDOW TUMBLING(timestamp, size 5 sec)
+    )
+) INTO sinkProbe;
+----
+0 5000 0 1 5
+0 5000 5 1 10
+0 5000 10 1 15
+0 5000 15 1 20
+0 5000 20 1 25
+5000 10000 0 2 5
+5000 10000 5 1 10
+5000 10000 10 1 15
+5000 10000 15 1 20
+5000 10000 20 1 25
+10000 15000 0 2 5
+10000 15000 5 2 10
+10000 15000 10 1 15
+10000 15000 15 1 20
+10000 15000 20 1 25
+
+# ==================================================================================================
+# ManyBins: still the default keyframe interval (10), but ABOVE the static-unroll threshold (682 bins).
+#
+# 682 bins is above the kMaxStaticUnrollBins cut-off (224), so this is the only section asserting a bin
+# VALUE on the runtime per-bin loop path rather than the static_val<>-unrolled one.
+#
+# memoryBudget 16384 => (16384-8)/24 = 682 bins over [0,20009] => bin width 29, bin i = [i*29, (i+1)*29).
+# The values are placed in nine widely separated bins INCLUDING bin 681, the highest index in the histogram.
+# ==================================================================================================
+
+CREATE LOGICAL SOURCE streamManyBins(id UINT64 NOT NULL, value UINT64 NOT NULL, timestamp UINT64 NOT NULL);
+CREATE PHYSICAL SOURCE FOR streamManyBins TYPE File;
+# Two 5-second windows, so window 0 is the interval's keyframe and window 1 is a DELTA against it:
+#   W0 [0,5000)      one tuple in each of the nine bins
+#   W1 [5000,10000)  the same nine, plus +1 in bin 0 and +2 in bin 681
+# so W1's GEN delta changes exactly two bins.
+ATTACH INLINE
+1,0,0
+1,29,100
+1,2900,200
+1,5800,300
+1,8700,400
+1,11600,500
+1,14500,600
+1,17400,700
+1,19749,800
+1,0,5000
+1,29,5100
+1,2900,5200
+1,5800,5300
+1,8700,5400
+1,11600,5500
+1,14500,5600
+1,17400,5700
+1,19749,5800
+1,0,5900
+1,19749,6000
+1,19749,6100
+
+CREATE SINK sinkBuildManyBins(streamManyBins.statisticId UINT64 NOT NULL, streamManyBins.statisticStart UINT64 NOT NULL, streamManyBins.statisticEnd UINT64 NOT NULL, streamManyBins.statisticNumberOfSeenTuples UINT64 NOT NULL) TYPE File;
+CREATE SINK sinkProbeManyBins(streamManyBins.statisticStart UINT64 NOT NULL, streamManyBins.statisticEnd UINT64 NOT NULL, streamManyBins.binStart UINT64 NOT NULL, streamManyBins.binCounter UINT64 NOT NULL, streamManyBins.binEnd UINT64 NOT NULL) TYPE File;
+
+# --- Build only: 9 tuples in the first window, 12 in the second.
+SELECT EQUIWIDTHHISTOGRAMDELTA(90, value, 16384, 0, 20009) FROM streamManyBins WINDOW TUMBLING(timestamp, size 5 sec) INTO sinkBuildManyBins;
+----
+90 0 5000 9
+90 5000 10000 12
+
+# --- Build + probe, delta: read every reconstructed bin back out of the store, keeping the populated ones
+# (682 x 2 = 1364 rows otherwise; a stray counter still shows up as an EXTRA row).
+SELECT statisticStart, statisticEnd, binStart, binCounter, binEnd FROM (
+    SELECT EQUIWIDTHHISTOGRAM_PROBE(91, uint64, uint64)
+    FROM (
+        SELECT EQUIWIDTHHISTOGRAMDELTA(91, value, 16384, 0, 20009) FROM streamManyBins WINDOW TUMBLING(timestamp, size 5 sec)
+    )
+) WHERE binCounter > UINT64(0) INTO sinkProbeManyBins;
+----
+0 5000 0 1 29
+0 5000 29 1 58
+0 5000 2900 1 2929
+0 5000 5800 1 5829
+0 5000 8700 1 8729
+0 5000 11600 1 11629
+0 5000 14500 1 14529
+0 5000 17400 1 17429
+0 5000 19749 1 19778
+5000 10000 0 2 29
+5000 10000 29 1 58
+5000 10000 2900 1 2929
+5000 10000 5800 1 5829
+5000 10000 8700 1 8729
+5000 10000 11600 1 11629
+5000 10000 14500 1 14529
+5000 10000 17400 1 17429
+5000 10000 19749 3 19778
+
+# --- Equivalence: the plain EQUIWIDTHHISTOGRAM over the same data, same budget and range, same expected
+# block as above. The goldens are written from the documented layout rather than captured from a run, so
+# they hold independently of this comparison.
+SELECT statisticStart, statisticEnd, binStart, binCounter, binEnd FROM (
+    SELECT EQUIWIDTHHISTOGRAM_PROBE(92, uint64, uint64)
+    FROM (
+        SELECT EQUIWIDTHHISTOGRAM(92, value, 16384, 0, 20009) FROM streamManyBins WINDOW TUMBLING(timestamp, size 5 sec)
+    )
+) WHERE binCounter > UINT64(0) INTO sinkProbeManyBins;
+----
+0 5000 0 1 29
+0 5000 29 1 58
+0 5000 2900 1 2929
+0 5000 5800 1 5829
+0 5000 8700 1 8729
+0 5000 11600 1 11629
+0 5000 14500 1 14529
+0 5000 17400 1 17429
+0 5000 19749 1 19778
+5000 10000 0 2 29
+5000 10000 29 1 58
+5000 10000 2900 1 2929
+5000 10000 5800 1 5829
+5000 10000 8700 1 8729
+5000 10000 11600 1 11629
+5000 10000 14500 1 14529
+5000 10000 17400 1 17429
+5000 10000 19749 3 19778
+
+# ==================================================================================================
+# MultiThread: keyframe interval N=3 over 6 one-second windows, so windows 0 and 3 are keyframes and
+# 1,2,4,5 are deltas across TWO intervals. Interval 0 counts into bin 0 and interval 1 into bin 5, so a
+# reconstruction that leaked state across the interval boundary shows up as a wrong bin.
+# ==================================================================================================
+GlobalConfiguration worker.default_query_execution.histogram_delta_keyframe_interval: [3]
+
+CREATE LOGICAL SOURCE streamMultiThread(id UINT64 NOT NULL, value UINT64 NOT NULL, timestamp UINT64 NOT NULL);
+CREATE PHYSICAL SOURCE FOR streamMultiThread TYPE File;
+# 6 windows (1 s each), 5 bins of width 5 over [0,25). Windows 0-2 put 1,2,3 tuples into bin 0 (value 0);
+# windows 3-5 put 1,2,3 tuples into bin 5 (value 5). Keyframes (N=3): windows 0 and 3.
+ATTACH INLINE
+1,0,0
+1,0,1000
+1,0,1100
+1,0,2000
+1,0,2100
+1,0,2200
+1,5,3000
+1,5,4000
+1,5,4100
+1,5,5000
+1,5,5100
+1,5,5200
+
+CREATE SINK sinkProbeMultiThread(streamMultiThread.statisticStart UINT64 NOT NULL, streamMultiThread.statisticEnd UINT64 NOT NULL, streamMultiThread.binStart UINT64 NOT NULL, streamMultiThread.binCounter UINT64 NOT NULL, streamMultiThread.binEnd UINT64 NOT NULL) TYPE File;
+
+# Build + probe the delta-compressed histogram under 4 threads.
+SELECT statisticStart, statisticEnd, binStart, binCounter, binEnd FROM (
+    SELECT EQUIWIDTHHISTOGRAM_PROBE(80, uint64, uint64)
+    FROM (
+        SELECT EQUIWIDTHHISTOGRAMDELTA(80, value, 128, 0, 25) FROM streamMultiThread WINDOW TUMBLING(timestamp, size 1 sec)
+    )
+) INTO sinkProbeMultiThread;
+----
+0 1000 0 1 5
+0 1000 5 0 10
+0 1000 10 0 15
+0 1000 15 0 20
+0 1000 20 0 25
+1000 2000 0 2 5
+1000 2000 5 0 10
+1000 2000 10 0 15
+1000 2000 15 0 20
+1000 2000 20 0 25
+2000 3000 0 3 5
+2000 3000 5 0 10
+2000 3000 10 0 15
+2000 3000 15 0 20
+2000 3000 20 0 25
+3000 4000 0 0 5
+3000 4000 5 1 10
+3000 4000 10 0 15
+3000 4000 15 0 20
+3000 4000 20 0 25
+4000 5000 0 0 5
+4000 5000 5 2 10
+4000 5000 10 0 15
+4000 5000 15 0 20
+4000 5000 20 0 25
+5000 6000 0 0 5
+5000 6000 5 3 10
+5000 6000 10 0 15
+5000 6000 15 0 20
+5000 6000 20 0 25
+
+# Equivalence: a plain EQUIWIDTHHISTOGRAM over the same data, same expected block.
+SELECT statisticStart, statisticEnd, binStart, binCounter, binEnd FROM (
+    SELECT EQUIWIDTHHISTOGRAM_PROBE(81, uint64, uint64)
+    FROM (
+        SELECT EQUIWIDTHHISTOGRAM(81, value, 128, 0, 25) FROM streamMultiThread WINDOW TUMBLING(timestamp, size 1 sec)
+    )
+) INTO sinkProbeMultiThread;
+----
+0 1000 0 1 5
+0 1000 5 0 10
+0 1000 10 0 15
+0 1000 15 0 20
+0 1000 20 0 25
+1000 2000 0 2 5
+1000 2000 5 0 10
+1000 2000 10 0 15
+1000 2000 15 0 20
+1000 2000 20 0 25
+2000 3000 0 3 5
+2000 3000 5 0 10
+2000 3000 10 0 15
+2000 3000 15 0 20
+2000 3000 20 0 25
+3000 4000 0 0 5
+3000 4000 5 1 10
+3000 4000 10 0 15
+3000 4000 15 0 20
+3000 4000 20 0 25
+4000 5000 0 0 5
+4000 5000 5 2 10
+4000 5000 10 0 15
+4000 5000 15 0 20
+4000 5000 20 0 25
+5000 6000 0 0 5
+5000 6000 5 3 10
+5000 6000 10 0 15
+5000 6000 15 0 20
+5000 6000 20 0 25
+
+# ==================================================================================================
+# Unaligned: the stream's first window is NOT aligned to a keyframe index. Guards the property that a
+# keyframe is always a window that ACTUALLY OCCURS, keyed by window ORDINAL rather than absolute index.
+#
+# N=5, 6 one-second windows at absolute indices 2..7 => ordinals 0..5, so keyframes at ordinals 0 (window
+# 2000-3000) and 5 (window 7000-8000). Interval 0 therefore spans ordinals 0-4, i.e. BOTH data regimes: its
+# keyframe counts into bin 0 while three of its deltas count into bin 2, so reconstruction must handle one
+# bin dropping back to zero as another rises.
+# ==================================================================================================
+GlobalConfiguration worker.default_query_execution.histogram_delta_keyframe_interval: [5]
+
+CREATE LOGICAL SOURCE streamUnaligned(id UINT64 NOT NULL, value UINT64 NOT NULL, timestamp UINT64 NOT NULL);
+CREATE PHYSICAL SOURCE FOR streamUnaligned TYPE File;
+# 6 windows (1 s each) starting at absolute window index 2. 5 bins of width 5 over [0,25). The windows starting
+# 2000/3000/4000 put 1,2,3 tuples into bin 0 (value 0); those starting 5000/6000/7000 put 1,2,3 tuples into
+# bin 2 (value 10). The first absolute index is 2, which is not a multiple of N=5.
+ATTACH INLINE
+1,0,2000
+1,0,3000
+1,0,3100
+1,0,4000
+1,0,4100
+1,0,4200
+1,10,5000
+1,10,6000
+1,10,6100
+1,10,7000
+1,10,7100
+1,10,7200
+
+CREATE SINK sinkProbeUnaligned(streamUnaligned.statisticStart UINT64 NOT NULL, streamUnaligned.statisticEnd UINT64 NOT NULL, streamUnaligned.binStart UINT64 NOT NULL, streamUnaligned.binCounter UINT64 NOT NULL, streamUnaligned.binEnd UINT64 NOT NULL) TYPE File;
+
+# Build + probe the delta-compressed histogram under 4 threads.
+SELECT statisticStart, statisticEnd, binStart, binCounter, binEnd FROM (
+    SELECT EQUIWIDTHHISTOGRAM_PROBE(82, uint64, uint64)
+    FROM (
+        SELECT EQUIWIDTHHISTOGRAMDELTA(82, value, 128, 0, 25) FROM streamUnaligned WINDOW TUMBLING(timestamp, size 1 sec)
+    )
+) INTO sinkProbeUnaligned;
+----
+2000 3000 0 1 5
+2000 3000 5 0 10
+2000 3000 10 0 15
+2000 3000 15 0 20
+2000 3000 20 0 25
+3000 4000 0 2 5
+3000 4000 5 0 10
+3000 4000 10 0 15
+3000 4000 15 0 20
+3000 4000 20 0 25
+4000 5000 0 3 5
+4000 5000 5 0 10
+4000 5000 10 0 15
+4000 5000 15 0 20
+4000 5000 20 0 25
+5000 6000 0 0 5
+5000 6000 5 0 10
+5000 6000 10 1 15
+5000 6000 15 0 20
+5000 6000 20 0 25
+6000 7000 0 0 5
+6000 7000 5 0 10
+6000 7000 10 2 15
+6000 7000 15 0 20
+6000 7000 20 0 25
+7000 8000 0 0 5
+7000 8000 5 0 10
+7000 8000 10 3 15
+7000 8000 15 0 20
+7000 8000 20 0 25
+
+# Equivalence: a plain EQUIWIDTHHISTOGRAM over the same data, same expected block.
+SELECT statisticStart, statisticEnd, binStart, binCounter, binEnd FROM (
+    SELECT EQUIWIDTHHISTOGRAM_PROBE(83, uint64, uint64)
+    FROM (
+        SELECT EQUIWIDTHHISTOGRAM(83, value, 128, 0, 25) FROM streamUnaligned WINDOW TUMBLING(timestamp, size 1 sec)
+    )
+) INTO sinkProbeUnaligned;
+----
+2000 3000 0 1 5
+2000 3000 5 0 10
+2000 3000 10 0 15
+2000 3000 15 0 20
+2000 3000 20 0 25
+3000 4000 0 2 5
+3000 4000 5 0 10
+3000 4000 10 0 15
+3000 4000 15 0 20
+3000 4000 20 0 25
+4000 5000 0 3 5
+4000 5000 5 0 10
+4000 5000 10 0 15
+4000 5000 15 0 20
+4000 5000 20 0 25
+5000 6000 0 0 5
+5000 6000 5 0 10
+5000 6000 10 1 15
+5000 6000 15 0 20
+5000 6000 20 0 25
+6000 7000 0 0 5
+6000 7000 5 0 10
+6000 7000 10 2 15
+6000 7000 15 0 20
+6000 7000 20 0 25
+7000 8000 0 0 5
+7000 8000 5 0 10
+7000 8000 10 3 15
+7000 8000 15 0 20
+7000 8000 20 0 25

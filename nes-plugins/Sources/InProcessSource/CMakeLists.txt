@@ -10,10 +10,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-add_source_files(nes-single-node-worker
-        SingleNodeWorker.cpp
-        GrpcService.cpp
-        GoogleEventTracePrinter.cpp
-        CompositeStatisticListener.cpp
-        TaskStatisticListener.cpp
-)
+include(${PROJECT_SOURCE_DIR}/cmake/RuntimeRegistrationUtil.cmake)
+
+# One implementation library serving all registries this plugin participates in.
+add_library(inprocess_source_plugin_library STATIC InProcessSource.cpp)
+target_link_libraries(inprocess_source_plugin_library PRIVATE nes-sources)
+target_include_directories(inprocess_source_plugin_library PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/)
+
+link_plugin_library(nes-sources inprocess_source_plugin_library)
+add_registry_entry(Source InProcess)
+add_registry_entry(SourceValidation InProcess)

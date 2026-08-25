@@ -19,7 +19,7 @@
 #     creationTS event time). The driver auto-downloads + projects it on first run (see
 #     prepare_cluster_monitoring.py); pass --synthetic to fall back to the uniform-random generator.
 #   - Single-node: measures the delta machinery's CPU/throughput overhead and its multi-thread scaling,
-#     NOT network byte savings. Those come from scripts/benchmarking/distributed_statistic_collection.
+#     NOT network byte savings. Those come from the distributed/ sub-suite.
 #
 # Run from the repo root. Set NES_BUILD_DIR if the build is not ./build_dir (e.g. cmake-build-debug).
 set -euo pipefail

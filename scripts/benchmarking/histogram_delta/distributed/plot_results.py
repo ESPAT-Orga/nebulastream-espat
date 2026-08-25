@@ -44,7 +44,7 @@ line is named in the legend, and the table this script prints carries every numb
 
 Needs matplotlib + pandas, which the sibling suite's venv already has:
   scripts/benchmarking/histogram_delta/.venv/bin/python \\
-      scripts/benchmarking/distributed_statistic_collection/plot_results.py <results-dir>
+      scripts/benchmarking/histogram_delta/distributed/plot_results.py <results-dir>
 """
 
 import argparse

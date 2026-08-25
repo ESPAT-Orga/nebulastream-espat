@@ -19,54 +19,11 @@ are spread as evenly as possible across parents (1/2/4 -> 2 leaves per intermedi
 must be exactly one root (else ValueError). The last level holds the data sources; middle levels relay.
 One Docker container per worker on a shared bridge network.
 
-We measure the INCOMING network bytes to the root (root container eth0 RX) over time. Six variants:
+We measure the INCOMING network bytes to the root (root container eth0 RX) over time. Three variants:
 
   prometheus  source(leaf) -> Prometheus sink(root)              raw stream reaches root
   split       build(leaf)  -> StatisticStoreWriter(root)         per-window synopsis reaches root
-  split_zstd  as split, blob zstd'd across the cut               compressed synopsis reaches root
-  delta       GEN(leaf)    -> RESOLVER+Writer(root)              per-window DELTA reaches root
-  delta_zstd  as delta, blob zstd'd across the cut               compressed delta reaches root
   local       build(leaf)  -> StatisticStoreWriter(leaf)         4 scalar fields reach root
-
-`delta` is `split` with histogram delta compression on, so the two are the directly comparable
-pair: identical topology, identical windows, identical synopsis size -- only the payload
-representation differs. Per window `split` produces a full synopsis (8 + bins*24 bytes) while
-`delta` produces a sparse blob (24 + changedBins*16), except on keyframe windows (every
-HISTOGRAM_DELTA_KEYFRAME_INTERVAL-th) which carry every bin.
-
-MEASURED on the REAL trace (DATASET=cluster_monitoring, 682 bins over taskId's true [0,20009] range,
-60 s event-time windows, N=10, topology 1/1, 60 s hold, buffer 8192). All six variants ingested
-11.96-12.00 M tuples (spread 0.31 %) over ~2950 windows, so the byte counts are directly comparable:
-
-  variant      root RX     B/window   vs split
-  prometheus   115.28 MB          -   2.1x MORE   (the raw stream: cost tracks tuples, not windows)
-  split         55.03 MB     18,619   1.00x       (16,376 B synopsis + record + framing)
-  split_zstd    27.91 MB      9,442   1.97x
-  delta         12.99 MB      4,395   4.24x       (~200 of 682 bins change per window)
-  delta_zstd     6.74 MB      2,281   8.16x       (the two compose: delta then zstd)
-  local          0.71 MB        240   77.4x       (no variable-sized field crosses at all)
-
-Two results worth keeping. Delta beats generic compression of the same synopsis by 2.1x at this bin
-count, as predicted (delta is O(changed bins), compression O(bins)). And the two COMPOSE, with
-delta_zstd the best statistic variant measured: compression is half the win for none of the delta
-machinery, and it still pays on top -- ~4 kB of structured binIndex/counter pairs compresses ~1.9x.
-
-GOTCHA: the query MUST pass `min`/`max`. The request generator defaults the histogram range to
-[0,1000] and EquiWidthHistogramPhysicalFunction clamps out-of-range values into the UPPERMOST bin, so
-a range that does not cover the data puts nearly every tuple in one bin. The synopsis stays full size
-while the delta collapses to a single changed bin, and the run reports a spectacular ratio that
-measures only the misconfiguration. See HISTOGRAM_MIN/HISTOGRAM_MAX below.
-
-SYMPTOM to watch for at high bin counts: if a run reports near-zero bytes for delta, check that the
-leaf's generator logged an `accept` line. Near-zero means the leaf never started, usually because the
-query did not finish compiling inside the hold.
-
-Reading the traffic-over-time CSVs on real data: the curve is NOT flat, and that is the trace, not
-the engine. Statistic traffic is proportional to windows CLOSED per second = ingest rate / rows per
-window, and the trace's density varies (~1000 rows per 60 s window early, ~3250 late), so the
-statistic variants dip in the middle of the run and recover. `prometheus`, whose cost tracks tuples
-rather than windows, stays flat across the same stretch -- which is a good check that the dip is the
-data and not a stall.
 
 Most knobs are env-overridable for smoke tests, e.g.:
   TOPOLOGIES=1/2 SOURCES_PER_LEAF=1 RUN_DURATION_SECONDS=15 VARIANTS=local \
@@ -86,13 +43,7 @@ TCP_GENERATOR_IMAGE = os.environ.get("TCP_GENERATOR_IMAGE", "nes-bench-tcp-gen:l
 DOCKER_NETWORK = os.environ.get("DOCKER_NETWORK", "nes-bench")
 
 ### Variants to run (one full topology run each). Override comma-separated.
-VARIANTS = [v.strip() for v in os.environ.get("VARIANTS", "prometheus,split,delta,local").split(",") if v.strip()]
-
-### Keyframe interval for the `delta` variant: every Nth window ships a full synopsis so the RESOLVER has
-### a baseline, the rest ship sparse deltas against it. Passed to EVERY worker, which matters: the option
-### is consumed during lowering and resolved per worker, so GEN and RESOLVER must be given the same value
-### or they group windows into different intervals. 1 = every window full (no compression).
-HISTOGRAM_DELTA_KEYFRAME_INTERVAL = int(os.environ.get("HISTOGRAM_DELTA_KEYFRAME_INTERVAL", 10))
+VARIANTS = [v.strip() for v in os.environ.get("VARIANTS", "prometheus,split,local").split(",") if v.strip()]
 
 ### Topologies to sweep, each "level0/level1/.../leafLevel" counts from the root. Override comma-separated,
 ### e.g. TOPOLOGIES="1/2,1/4". Level 0 must be exactly one root. Default is the single 1-root/2-leaf tree
@@ -202,71 +153,6 @@ def topology_dir(topology):
     """Filesystem-safe name for a topology spec (1/2/4 -> 1-2-4)."""
     return topology.replace("/", "-")
 
-### --- Dataset ------------------------------------------------------------------------------------
-### Which data the leaf generators emit. `cluster_monitoring` (the default) replays the REAL 1 GB
-### Google-cluster-monitoring trace -- the same `ENABLE_LARGE_TESTS` dataset the systests and the
-### single-node histogram-delta throughput benchmark use, so the wire numbers here and the throughput
-### numbers there describe the same workload. `synthetic` is the original uniform generator, kept as a
-### control: it is the distribution the delta compression looks best on (uniform draws touch every bin
-### evenly), so a real-trace number that holds up is the meaningful one.
-###
-### The trace is projected to `value,timestamp` by histogram_delta/prepare_cluster_monitoring.py:
-###   value     = taskId     (range 0..20009; the raw userId is anonymised to a constant and would
-###                           collapse the histogram to one bucket)
-###   timestamp = creationTS (the real event time in ms, raw epoch, ~4.3 days over 18.65 M rows)
-### The generator replays it in file order and never loops (a wrapped timestamp would move event time
-### backwards); `id` stays synthetic since no statistic query reads it.
-DATASET = os.environ.get("DATASET", "cluster_monitoring")
-
-### Per-dataset defaults. `value_min`/`value_max` MUST bracket the actual value range: an equi-width
-### histogram spreads its bins over exactly this interval, so leaving the synthetic [0,1000000) on a
-### trace whose values stop at 20009 would park all the data in the first 2 % of the bins and flatter
-### the delta (almost no bin ever changes). `window_ms` is the tumbling window: real ms for the trace,
-### but a TUPLE COUNT for the synthetic generator, whose `timestamp` is a per-tuple counter.
-DATASET_DEFAULTS = {
-    "synthetic": {"value_min": 0, "value_max": 1_000_000, "window_ms": 100_000},
-    ### 60 s windows hold ~3.0 k tuples each (18.65 M rows over ~6.2 k windows); the 1 s windows of
-    ### this trace are far sparser (~29 k of them empty).
-    "cluster_monitoring": {"value_min": 0, "value_max": 20_009, "window_ms": 60_000},
-}
-if DATASET not in DATASET_DEFAULTS:
-    raise ValueError(f"unknown DATASET '{DATASET}'; known: {sorted(DATASET_DEFAULTS)}")
-_DS = DATASET_DEFAULTS[DATASET]
-
-### How the statistic sources get their data:
-###   tcp    (default) a rust-tcp-generator sidecar in the leaf's netns streams CSV over loopback, so
-###          every tuple is transported and parsed from text on the query's hot path.
-###   memory the worker's own Memory source: MemorySource::setup() runs parseCsvFileIntoBuffers() over
-###          the same CSV BEFORE the query starts and then hands out native TupleBuffers zero-copy, so
-###          transport and parsing leave the measurement entirely.
-###
-### `memory` is for THROUGHPUT runs only, and forces one: the source has no rate limiter (GENERATOR_RATE
-### is ignored), so it cannot equalise ingest across variants the way the wire-bytes run needs. It also
-### holds the whole parsed dataset in the buffer pool at once -- ~24 B/tuple for the 3-field schema, so
-### ~450 MB for the full trace -- and parses it during deploy, which makes query submission slow.
-### GP contention sources stay on TCP regardless: they must run unbounded, and a Memory source ends at EOS.
-SOURCE_TYPE = os.environ.get("SOURCE_TYPE", "tcp")
-if SOURCE_TYPE not in {"tcp", "memory"}:
-    raise ValueError(f"unknown SOURCE_TYPE '{SOURCE_TYPE}'; known: memory, tcp")
-
-### Where the prepared trace is cached on the HOST. Bind-mounted read-only into each generator container
-### (SOURCE_TYPE=tcp) or into each worker container (SOURCE_TYPE=memory).
-### Downloaded + projected on first use, then reused; ~1.5 GB raw + 342 MB projected.
-DATA_DIR = os.environ.get(
-    "NES_BENCH_DATA_DIR", os.path.join(os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache")), "nes-bench-data")
-)
-### Rows each generator loads from the trace (0 = all 18.65 M, ~300 MB resident). A run only consumes
-### GENERATOR_RATE x hold seconds, so cap this when running many sources on one host.
-GENERATOR_MAX_ROWS = int(os.environ.get("GENERATOR_MAX_ROWS", 0))
-
-### Replay the trace this many times back-to-back, each copy shifted forward by a whole number of
-### windows covering the trace's own span (see prepare_cluster_monitoring.replicate). 1 = the raw trace.
-### This exists for SOURCE_TYPE=memory throughput runs: the Memory source drains 18.65 M rows in ~3.5 s,
-### so the measured span is short enough that warm-up is a large share of it. N copies multiply the span
-### by N without inventing data or altering any window's contents. Costs N x the parse time at deploy and
-### N x ~300 MB of parsed buffers, so raise NUMBER_OF_BUFFERS to match.
-DATASET_COPIES = int(os.environ.get("DATASET_COPIES", 1))
-
 ### TCP source ports. Each leaf runs its sources in its own netns, so ports may repeat across leaves;
 ### the per-query generator binds exactly one port. The worker dials 127.0.0.1:<port> over loopback.
 TCP_PORT_BASE = int(os.environ.get("TCP_PORT_BASE", 9100))
@@ -275,18 +161,6 @@ FLUSH_INTERVAL_MS = int(os.environ.get("FLUSH_INTERVAL_MS", 10))
 ### A finite rate (vs the generator's default full speed) decouples window-close cadence from raw
 ### throughput so event-time windows close on a predictable schedule (GENERATOR_RATE / window-in-tuples
 ### closes per second) instead of flooding/stalling. 0 = unlimited.
-###
-### This knob decides WHICH of the two measurements a run produces, and they cannot be taken together:
-###   rate-limited (default) -> WIRE BYTES. Every variant ingests the same tuples, so the byte counts
-###                             are comparable. The mean_tps column just reports the limiter back.
-###   GENERATOR_RATE=0       -> THROUGHPUT. Each variant runs at its own ceiling, so mean_tps
-###                             discriminates -- but they now ingest different amounts and the byte
-###                             counts are NOT comparable across variants. Plot with
-###                             `plot_results.py --charts throughput`.
-### Caveat on the absolute figure: sources are TCP + CSV (one loopback socket per source, parsed from
-### text), so mean_tps is a whole-pipeline number that includes transport and parsing, not the cost of
-### the statistic build alone. That overhead is identical across variants, so it compresses the
-### relative differences rather than biasing any one variant.
 GENERATOR_RATE = int(os.environ.get("GENERATOR_RATE", 200_000))
 
 ### Prometheus (only for the `prometheus` variant; runs in the root container, scrapes the root's
@@ -299,13 +173,11 @@ PROM_UI_PORT = 9090
 ### large, so the `split` traffic (synopsis crosses) is clearly bigger than `local` (4 scalars cross).
 ### memory_budget drives the histogram size; bump it to widen the split-vs-local gap.
 STATISTIC_METRIC = os.environ.get("STATISTIC_METRIC", "MAXVAL")
-### Window size, defaulted per dataset (see DATASET_DEFAULTS). On the REAL trace this is real event
-### time: 60 s windows hold ~3.0 k tuples, so at GENERATOR_RATE=200k windows close ~66x/sec. On the
-### synthetic generator, whose `timestamp` is a per-tuple counter, "N ms" is really N TUPLES: at
-### GENERATOR_RATE=200k and 100k-tuple windows, windows close ~2x/sec. Either way each window
-### summarizes many raw tuples into one synopsis, so the synopsis must be set smaller than the raw
-### window (see HISTOGRAM_MEMORY_BUDGET) for the gradient prometheus(raw) > split(synopsis) > local(scalars).
-STATISTIC_WINDOW_SIZE_MS = int(os.environ.get("STATISTIC_WINDOW_SIZE_MS", _DS["window_ms"]))
+### Window size. Under event time on the generator's per-tuple counter this is effectively a count of
+### TUPLES, so at GENERATOR_RATE=200k and 100k-tuple windows, windows close ~2x/sec. Each window
+### summarizes ~100k raw tuples (~1.2 MB) into one synopsis, so the synopsis must be set smaller than
+### that (see HISTOGRAM_MEMORY_BUDGET) for the gradient prometheus(raw) > split(synopsis) > local(scalars).
+STATISTIC_WINDOW_SIZE_MS = int(os.environ.get("STATISTIC_WINDOW_SIZE_MS", 100_000))
 ### Windowing mode. The rust-tcp-generator emits `timestamp` as a per-tuple counter (0,1,2,...) at full
 ### speed, so an EVENT-TIME window of "N ms" is really N *tuples*. Ingestion time (wall-clock windows)
 ### would be the natural fit for a traffic-over-time plot, but the ingestion-time statistic-build path
@@ -321,30 +193,15 @@ USE_EVENT_TIME = os.environ.get("USE_EVENT_TIME", "1") == "1"
 ### (GENERATOR_RATE / window_tuples) x HISTOGRAM_MEMORY_BUDGET. At 1 KiB that's ~0.13 Mbit/s (was 2.1 at
 ### 16 KB), so WEAVE now fits — and wins — under caps down to a few hundred kbit.
 HISTOGRAM_MEMORY_BUDGET = int(os.environ.get("HISTOGRAM_MEMORY_BUDGET", 1024))
-### Bin range, defaulting to the dataset's value range (see DATASET_DEFAULTS) and passed into the
-### query's SET clause. Getting this wrong silently invalidates every delta number: the request
-### generator defaults the range to [0,1000] and EquiWidthHistogramPhysicalFunction clamps anything
-### above maxValue into the UPPERMOST bin, so a workload whose values run past the range piles nearly
-### every tuple into one bin. The synopsis stays full size (it always carries all bins) while the delta
-### shrinks to a single changed bin -- a ratio that measures the misconfiguration, not the compression.
-HISTOGRAM_MIN = int(os.environ.get("HISTOGRAM_MIN", _DS["value_min"]))
-HISTOGRAM_MAX = int(os.environ.get("HISTOGRAM_MAX", _DS["value_max"]))
+HISTOGRAM_MIN = int(os.environ.get("HISTOGRAM_MIN", 0))
+HISTOGRAM_MAX = int(os.environ.get("HISTOGRAM_MAX", 1_000_000))
 PROM_HISTOGRAM_NUM_BUCKETS = int(os.environ.get("PROM_HISTOGRAM_NUM_BUCKETS", 100))
-
-### Throughput-listener sampling period. mean_tps is the mean over the samples between the first and
-### last non-zero one, so this sets the resolution of the active span: a run that only sustains a few
-### seconds (a Memory source drains the trace in ~4 s) gets very few 200 ms samples, and one sample of
-### span error is then several percent -- more than the differences between variants. Drop it to 50 ms
-### for short throughput runs. It does not change the system under test, only how finely it is watched.
-THROUGHPUT_LISTENER_INTERVAL_MS = int(os.environ.get("THROUGHPUT_LISTENER_INTERVAL_MS", 200))
 
 ### Worker engine config (mirrors the single-node experiment).
 EXECUTION_MODE = "COMPILER"
 JOIN_STRATEGY = "HASH_JOIN"
 PAGE_SIZE = 8192
-### Operator buffer size. Env-overridable so a run can sweep buffer geometry independently of
-### HISTOGRAM_MEMORY_BUDGET.
-BUFFER_SIZE_BYTES = int(os.environ.get("BUFFER_SIZE_BYTES", 8192))
+BUFFER_SIZE_BYTES = 8192
 NUMBER_OF_BUFFERS = int(os.environ.get("NUMBER_OF_BUFFERS", 200_000))
 
 ### Traffic sampling: read the ROOT container's eth0 RX (received) bytes every interval and difference,

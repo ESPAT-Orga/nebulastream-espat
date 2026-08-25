@@ -28,7 +28,7 @@
 # equalising it is what makes the throughput meaningful. Hence two experiments.
 #
 # Usage, from the repository root:
-#   bash scripts/benchmarking/distributed_statistic_collection/run_histogram_delta_compression.sh
+#   bash scripts/benchmarking/histogram_delta/distributed/run_histogram_delta_compression.sh
 #
 # Knobs (all optional):
 #   OUT_ROOT=<dir>   where results land (default: ./benchmark_run_dsc_histogram_delta_<timestamp>)
@@ -111,7 +111,7 @@ echo "Done. Results in $OUT_ROOT"
 echo
 echo "Plot them with plots/HistogramDeltaCompression.ipynb, which reads exactly this layout:"
 echo "  export RESULTS_DIR=$OUT_ROOT"
-echo "  jupyter lab scripts/benchmarking/distributed_statistic_collection/plots/HistogramDeltaCompression.ipynb"
+echo "  jupyter lab scripts/benchmarking/histogram_delta/distributed/plots/HistogramDeltaCompression.ipynb"
 echo
 echo "The notebook needs matplotlib + pandas; the sibling suite's venv already has them"
 echo "(scripts/benchmarking/histogram_delta/.venv), though not jupyter itself. Either register"

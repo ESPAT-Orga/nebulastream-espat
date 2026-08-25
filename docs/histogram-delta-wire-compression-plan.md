@@ -263,7 +263,7 @@ Two things this settles:
 2. **Delta and compression COMPOSE.** `delta_zstd` is the best variant measured (8.16×), 1.9× below the
    raw delta. Generic compression is half the win for none of the keyframe machinery, and it stacks.
 
-Charts: `scripts/benchmarking/distributed_statistic_collection/plots/cluster_monitoring/`.
+Charts: `scripts/benchmarking/histogram_delta/distributed/plots/cluster_monitoring/`.
 
 ### Throughput, single-node
 

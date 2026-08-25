@@ -18,7 +18,7 @@ Compares the throughput of a plain EquiWidthHistogram build against the
 delta-compressed GEN/RESOLVER split (``EQUIWIDTHHISTOGRAMDELTA``), sweeping
 **worker threads** and the **keyframe interval N**. Single-node: this measures
 the CPU/throughput cost of the delta machinery and its multi-thread scaling,
-NOT the network byte savings (those come from scripts/benchmarking/distributed_statistic_collection).
+NOT the network byte savings (those come from the distributed/ sub-suite).
 
 Metric: input rows divided by the source-to-sink duration parsed from the worker
 log (see parse_query_durations_ms). Compile time is excluded, because the source

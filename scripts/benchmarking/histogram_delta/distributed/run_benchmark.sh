@@ -18,7 +18,7 @@
 #
 # Quick smoke:
 #   SOURCES_PER_LEAF=1 RUN_DURATION_SECONDS=15 VARIANTS=local \
-#       bash scripts/benchmarking/distributed_statistic_collection/run_benchmark.sh
+#       bash scripts/benchmarking/histogram_delta/distributed/run_benchmark.sh
 
 set -euo pipefail
 
@@ -87,9 +87,10 @@ export OUTPUT_DIR
 echo "BUILD_DIR:          ${BUILD_DIR:-<default ./build_dir>}"
 echo "MODES:              ${MODES:-${MODE:-<default traffic,contention>}}"
 echo "TOPOLOGIES:         ${TOPOLOGIES:-<default 1/2>}"
-echo "VARIANTS:           ${VARIANTS:-<default prometheus,split,local>}"
+echo "VARIANTS:           ${VARIANTS:-<default prometheus,split,delta,local>}"
+echo "DATASET:            ${DATASET:-<default cluster_monitoring>}"
 echo "SOURCES_PER_LEAF:   ${SOURCES_PER_LEAF:-<default 4>}"
-echo "RUN_DURATION_SECONDS: ${RUN_DURATION_SECONDS:-<default 60>}"
+echo "RUN_DURATION_SECONDS: ${RUN_DURATION_SECONDS:-<default 30>}"
 
 # The combined worker+Prometheus image FROMs nes-runtime-base:test (not on Docker Hub); build it.
 RUNTIME_BASE_IMAGE="nes-runtime-base:test"
@@ -115,5 +116,5 @@ python3 -m venv myenv
 source myenv/bin/activate
 trap 'deactivate 2>/dev/null || true; rm -rf myenv' EXIT
 
-myenv/bin/python3 -m scripts.benchmarking.distributed_statistic_collection.run_benchmark 2>&1 \
+myenv/bin/python3 -m scripts.benchmarking.histogram_delta.distributed.run_benchmark 2>&1 \
     | tee "$OUTPUT_DIR/run.log"

@@ -20,9 +20,23 @@ delta-compressed GEN/RESOLVER split (``EQUIWIDTHHISTOGRAMDELTA``), sweeping
 the CPU/throughput cost of the delta machinery and its multi-thread scaling,
 NOT the network byte savings (those come from the distributed/ sub-suite).
 
-Metric: input rows divided by the source-to-sink duration parsed from the worker
-log (see parse_query_durations_ms). Compile time is excluded, because the source
-only starts once the pipeline is compiled.
+Two throughput metrics are recorded per run, because they measure different things:
+
+``tuples_per_second`` (primary) is the engine's own throughput listener, the same
+source the other suites here use. It is emitted on **stdout** by
+``SingleNodeWorker.cpp`` -- not through the NES logger -- so unlike the wall-clock
+metric below it survives any ``NES_LOG_LEVEL``. It reports the emit rate of the
+first pipeline after the source (``ThroughputListener.cpp``: ``taskEmit.firstPipeline``),
+i.e. INGEST rate. Downstream cost -- notably the delta RESOLVER, which lives in a
+later pipeline -- reaches it only as backpressure on the source.
+
+``tuples_per_second_walltime`` is input rows divided by the source-to-sink duration
+(see parse_query_durations_ms): end-to-end, covering every pipeline through to EOS,
+but dependent on two log lines a build can compile out. Compile time is excluded from
+both, since the source only starts once the pipeline is compiled.
+
+Keep an eye on the two disagreeing: that is the signature of the RESOLVER costing
+something the ingest-side listener cannot see on its own.
 
 Run from the repo root (inside the benchmark venv):
     myenv/bin/python3 -m scripts.benchmarking.histogram_delta.run_histogram_delta_throughput \
@@ -36,8 +50,9 @@ import statistics
 import subprocess
 import time
 
-from scripts.benchmarking.common.config import BUILD_DIR, WORKING_DIR
+from scripts.benchmarking.common.config import BUILD_DIR, SINGLE_NODE_EXECUTABLE, WORKING_DIR
 from scripts.benchmarking.common.worker_lifecycle import (
+    parse_average_throughput_from_throughput_listener,
     start_single_node_worker,
     submit_query,
     wait_for_query_to_finish,
@@ -70,8 +85,11 @@ def parse_query_durations_ms(log_path):
     Duration = "Starting source with originId" -> "Void Sink completed" (source-to-sink), which measures
     the actual streaming time and EXCLUDES query compile time (the source only starts after the pipeline
     is compiled). Queries run sequentially on the worker, so the i-th source-start pairs with the i-th
-    sink-complete. This wall-clock metric is far more reliable than the 100 ms throughput listener, which
-    captures too few windows on fast (sub-second) runs.
+    sink-complete.
+
+    Recorded as a cross-check alongside the throughput listener, not instead of it: this covers the whole
+    chain through to EOS (the listener only sees the first pipeline after the source), but it depends on
+    two log lines that a build with NES_LOG_LEVEL above DEBUG compiles out -- see diagnose_empty_parse.
     """
     starts, ends = [], []
     try:
@@ -89,6 +107,44 @@ def parse_query_durations_ms(log_path):
     except FileNotFoundError:
         return []
     return [e - s for s, e in zip(starts, ends)]
+
+
+def diagnose_empty_parse(log_path):
+    """Explain a zero-duration parse, which otherwise looks identical to a failed benchmark.
+
+    The usual cause is the BUILD, not the run: both markers are compiled out unless the build's
+    NES_LOG_LEVEL admits them ("Starting source with originId" is NES_DEBUG, "Void Sink completed" is
+    NES_INFO). NES_LOG_LEVEL is a COMPILE-time flag -- SingleNodeWorkerStarter hardcodes the runtime
+    level to LOG_DEBUG, so there is nothing to pass at launch. A Release (defaults to ERROR) or
+    Benchmark (LEVEL_NONE) build parses as zero here even though every query ran perfectly.
+    """
+    try:
+        with open(log_path, "r") as f:
+            log = _ANSI_RE.sub("", f.read())
+    except FileNotFoundError:
+        return f"no worker log at {log_path} -- the worker never started."
+    if not log.strip():
+        return f"worker log {log_path} is empty -- the worker never started."
+    if "[D]" not in log:
+        return (f"worker log {log_path} contains no DEBUG lines, so the build at BUILD_DIR was compiled "
+                f"with NES_LOG_LEVEL above DEBUG and both marker lines are absent from the binary. "
+                f"Reconfigure that build with -DNES_LOG_LEVEL:STRING=DEBUG, or point NES_BUILD_DIR at a "
+                f"build that already has it.")
+    if "Starting source with originId" not in log:
+        return f"worker log {log_path} has DEBUG lines but no source start -- the query never began streaming."
+    return f"worker log {log_path} has source starts but no 'Void Sink completed' -- queries did not reach EOS."
+
+
+def hms(seconds):
+    """Compact duration: 2h05m / 7m12s / 43s."""
+    seconds = int(max(0, seconds))
+    h, rem = divmod(seconds, 3600)
+    m, sec = divmod(rem, 60)
+    if h:
+        return f"{h}h{m:02d}m"
+    if m:
+        return f"{m}m{sec:02d}s"
+    return f"{sec}s"
 
 
 def render_query(variant, run_dir, statistic_id, data_path, memory_budget, window_size, min_value, max_value):
@@ -120,6 +176,7 @@ def run_config(variant, threads, keyframe_interval, *, run_dir, log_dir, cli_log
     worker_log = os.path.join(log_dir, f"worker_{tag}.log")
     total = warmup + runs
     worker_process = None
+    run_qids = []  # per-run query ids, used to attribute listener samples to the right run
     try:
         with open(worker_log, "w") as wlog:
             worker_process = start_single_node_worker(
@@ -133,28 +190,64 @@ def run_config(variant, threads, keyframe_interval, *, run_dir, log_dir, cli_log
                 qfile = render_query(variant, run_dir, sid, data_path, memory_budget,
                                      window_size, min_value, max_value)
                 qids = submit_query(qfile, cli_log)
+                run_qids.append(qids)
                 ok, reason = wait_for_query_to_finish(qids, qfile, max_wait=300,
                                                       worker_process=worker_process)
                 if not ok:
                     print(f"    [{tag}] run {r}: query did not finish ({reason})")
                 time.sleep(0.3)  # let the sink-complete line flush
     finally:
-        if worker_process is not None:
-            terminate_process_if_exists(worker_process)
-        kill_stray_workers()
+        # Cleanup has to survive a Ctrl-C landing INSIDE it. terminate_process_if_exists() blocks in
+        # process.wait(), so an interrupt there would otherwise skip kill_stray_workers() and leave a
+        # worker holding 8080/9090 -- which makes the NEXT run fail at startup with a misleading
+        # "Worker process exited immediately with code 1".
+        try:
+            if worker_process is not None:
+                terminate_process_if_exists(worker_process)
+        finally:
+            kill_stray_workers()
 
-    # The i-th query on this worker maps to the i-th (source-start -> sink-complete) pair in the log.
+    # Primary metric: the engine's throughput listener, attributed per run by query id (queries run
+    # sequentially, but matching on the id avoids relying on that). -1 means "nothing parsed".
+    listener = [parse_average_throughput_from_throughput_listener(worker_log, qids) for qids in run_qids]
+    # Cross-check: end-to-end wall clock. The i-th query maps to the i-th (source-start -> sink-complete)
+    # pair, since queries run sequentially on this worker.
     durations = parse_query_durations_ms(worker_log)
+
     results = []
-    for r, dur in enumerate(durations[:total]):
-        tps = rows / (dur / 1000.0)
+    for r in range(total):
+        lis = listener[r] if r < len(listener) and listener[r] > 0 else None
+        wall = rows / (durations[r] / 1000.0) if r < len(durations) else None
+        if lis is None and wall is None:
+            continue
         is_warmup = r < warmup
-        print(f"    [{tag}] run {r}{' (warmup)' if is_warmup else ''}: {dur} ms => {tps/1e6:.3f} M/s")
+        shown = " ".join(filter(None, [
+            f"listener {lis/1e6:.3f} M/s" if lis else None,
+            f"walltime {wall/1e6:.3f} M/s ({durations[r]} ms)" if wall else None]))
+        print(f"    [{tag}] run {r}{' (warmup)' if is_warmup else ''}: {shown}")
         if not is_warmup:
-            results.append(tps)
+            results.append((lis if lis else wall, wall))
+
     if len(durations) < total:
-        print(f"    [{tag}] WARNING: only {len(durations)}/{total} query durations parsed")
+        # Not fatal any more: the listener is on stdout and survives any NES_LOG_LEVEL, so the run is
+        # still measured. Only the end-to-end cross-check column is lost.
+        print(f"    [{tag}] NOTE: only {len(durations)}/{total} wall-clock durations parsed")
+        if not durations:
+            print(f"    [{tag}] cause: {diagnose_empty_parse(worker_log)}")
+    if not any(t > 0 for t in listener):
+        print(f"    [{tag}] WARNING: no throughput-listener samples for any run -- falling back to wall clock")
     return results
+
+
+def _report_progress(done, total, started):
+    """One line per finished config: how far in, how long so far, roughly how long left."""
+    elapsed = time.monotonic() - started
+    if done >= total:
+        print(f"   [{done}/{total}] done, {hms(elapsed)} elapsed")
+        return
+    eta = elapsed / done * (total - done)
+    print(f"   [{done}/{total}] {hms(elapsed)} elapsed, ~{hms(eta)} left "
+          f"({hms(elapsed / done)}/config)")
 
 
 def main():
@@ -178,14 +271,30 @@ def main():
     # Default matches the real taskId range [0, 20009]; override for other fields/datasets.
     ap.add_argument("--max-value", type=int, default=20009)
     ap.add_argument("--smoke", action="store_true",
-                    help="tiny sweep for validation (threads=[4], N=[2,10], 1 run, truncated data)")
+                    help="shape-check sweep: threads=[1,4,16], N=[2,10,50], 1 run, no warmup. Every "
+                         "figure gets a real multi-point shape from 12 queries instead of 120 -- for "
+                         "checking the pipeline works and the plots look right, NOT for results")
     args = ap.parse_args()
 
     if args.smoke:
-        args.threads = [4]
-        args.keyframe_intervals = [2, 10]
+        # Three thread counts and three N values on purpose: with a single thread count the
+        # throughput-vs-threads and overhead-vs-threads figures degenerate to one point, which tells
+        # you nothing about whether the plots are right. 12 queries instead of the full sweep's 120.
+        args.threads = [1, 4, 16]
+        args.keyframe_intervals = [2, 10, 50]
         args.runs = 1
         args.warmup = 0
+
+    # Preflight the binary. Without this every config fails identically with "Worker process exited
+    # immediately with code 1", which reads like an engine bug rather than a missing build -- and the
+    # default BUILD_DIR (./build_dir) sits inside the rsync-synced source tree, where an IDE sync can
+    # wipe it between runs. Cheap check, saves a full sweep of identical failures.
+    if not os.path.isfile(SINGLE_NODE_EXECUTABLE):
+        raise SystemExit(
+            f"No worker binary at {os.path.abspath(SINGLE_NODE_EXECUTABLE)}.\n"
+            f"Build it, or point NES_BUILD_DIR at a build that has one -- note it must be configured "
+            f"with -DNES_LOG_LEVEL:STRING=DEBUG only if you also want the wall-clock cross-check column; "
+            f"the throughput listener works at any log level.")
 
     os.makedirs(args.output_dir, exist_ok=True)
     log_dir = os.path.join(args.output_dir, "worker_logs")
@@ -214,13 +323,25 @@ def main():
 
     with open(os.path.join(args.output_dir, "cli_commands.log"), "w") as cli_log, \
          open(csv_path, "w") as csv_f:
-        csv_f.write("variant,threads,keyframe_interval,run,tuples_per_second\n")
+        csv_f.write("variant,threads,keyframe_interval,run,tuples_per_second,tuples_per_second_walltime\n")
         csv_f.flush()
         # plain: keyframe interval is irrelevant -> a single sentinel value.
         plan = [("plain", t, 0) for t in args.threads] + \
                [("delta", t, n) for t in args.threads for n in args.keyframe_intervals]
-        for variant, threads, N in plan:
-            print(f"== {variant} threads={threads} N={N} ==")
+        # Progress + ETA. The sweep is long (each config boots a worker, JIT-compiles, then runs
+        # warmup+runs queries over the whole trace), so print where we are and roughly how much is
+        # left. The estimate is a running mean over completed configs: it is rough early on, because
+        # a 1-thread config takes several times longer than a 16-thread one and the plan interleaves
+        # them, but it converges quickly and is far better than no signal at all.
+        started = time.monotonic()
+        total_configs = len(plan)
+        total_queries = total_configs * (args.warmup + args.runs)
+        print(f"\nSweep: {total_configs} configs x {args.warmup + args.runs} queries "
+              f"({args.warmup} warmup + {args.runs} measured) = {total_queries} queries over "
+              f"{rows} rows each.\n")
+
+        for idx, (variant, threads, N) in enumerate(plan, start=1):
+            print(f"== [{idx}/{total_configs}] {variant} threads={threads} N={N} ==")
             try:
                 tps_list = run_config(
                     variant, threads, N, run_dir=args.output_dir, log_dir=log_dir, cli_log=cli_log,
@@ -230,14 +351,19 @@ def main():
             except Exception as exc:  # one bad config (e.g. a slow compile) must not abort the whole sweep
                 print(f"   !! {variant} t{threads} N{N} FAILED: {exc}")
                 kill_stray_workers()
+                _report_progress(idx, total_configs, started)
                 continue
-            for i, tps in enumerate(tps_list):
-                csv_f.write(f"{variant},{threads},{N},{i},{tps:.1f}\n")
+            for i, (tps, wall) in enumerate(tps_list):
+                wall_col = f"{wall:.1f}" if wall else ""
+                csv_f.write(f"{variant},{threads},{N},{i},{tps:.1f},{wall_col}\n")
             csv_f.flush()
             if tps_list:
-                print(f"   -> median {statistics.median(tps_list)/1e6:.3f} MTup/s over {len(tps_list)} runs")
+                # tps_list holds (primary, walltime) pairs; summarise the primary metric.
+                median = statistics.median(t for t, _ in tps_list)
+                print(f"   -> median {median/1e6:.3f} MTup/s over {len(tps_list)} runs")
+            _report_progress(idx, total_configs, started)
 
-    print(f"\nResults written to {csv_path}")
+    print(f"\nResults written to {csv_path} (total {hms(time.monotonic() - started)})")
 
 
 if __name__ == "__main__":

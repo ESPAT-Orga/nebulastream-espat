@@ -1,7 +1,0 @@
-topology,variant,total_bytes,peak_bps,num_queries,num_leaves
-1/1,prometheus,115278416,2023965.4,1,1
-1/1,split,55034202,3627096.5,1,1
-1/1,split_zstd,27910358,1848046.3,1,1
-1/1,delta,12991091,913633.6,1,1
-1/1,delta_zstd,6743405,431415.6,1,1
-1/1,local,711135,48849.3,1,1

@@ -32,7 +32,7 @@ The figures carry NO title or subtitle: they are meant to sit under a paper capt
 the run parameters belong. What stays on the canvas is what a caption cannot replace -- axis labels,
 category labels, per-bar values, and the legend.
 
-Styling follows scripts/benchmarking/histogram_delta/plot_results.py: Okabe-Ito colorblind-safe
+Styling: Okabe-Ito colorblind-safe
 palette in a fixed order, one y-axis, thin lines, recessive grid.
 
 Palette check (adjacent-pair list, which is the one bars and lines use), computed not eyeballed --
@@ -42,9 +42,8 @@ floor 15.0), contrast WARN for the lightest marks. The WARN is discharged by nev
 in color alone: every bar carries its category as a tick label and its value as a direct label, every
 line is named in the legend, and the table this script prints carries every number.
 
-Needs matplotlib + pandas, which the sibling suite's venv already has:
-  scripts/benchmarking/histogram_delta/.venv/bin/python \\
-      scripts/benchmarking/histogram_delta/distributed/plot_results.py <results-dir>
+Needs matplotlib + pandas, from any environment that has them:
+  python3 scripts/benchmarking/histogram_delta/distributed/plot_results.py <results-dir>
 """
 
 import argparse

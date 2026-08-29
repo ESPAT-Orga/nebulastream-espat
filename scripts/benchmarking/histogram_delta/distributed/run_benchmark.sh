@@ -33,32 +33,28 @@ fi
 export BUILD_DIR
 WORKER_BIN="$BUILD_DIR/nes-single-node-worker/nes-single-node-worker"
 
-if [[ ! -x "$WORKER_BIN" && "${SKIP_BUILD:-0}" != "1" ]]; then
+# Always build: the image (docker layer cache makes an unchanged rebuild cheap) and then NES inside it
+# (cmake --build is incremental against the persisted BUILD_DIR). Gating this on "$WORKER_BIN missing"
+# meant a stale binary from an earlier commit was silently reused. SKIP_BUILD=1 opts out.
+if [[ "${SKIP_BUILD:-0}" != "1" ]]; then
     DEV_IMAGE="${NES_DEV_IMAGE:-nebulastream/nes-development:local}"
-    INSTALL_ARGS="${NES_INSTALL_ARGS:--y --libstdcxx --no-sanitizer}"
-    # Obtain the dev image (toolchain + prebuilt deps) instead of compiling deps, and make sure it
-    # matches the CURRENT dependency hash — a present-but-stale :local (older dep set) would fail the
-    # in-image build (e.g. missing nlohmann_json). We track the hash the dev image was built for in a
-    # sentinel; on a mismatch (or missing image) we re-run the installer: it downloads the published
-    # dependency image by hash, or, if that hash isn't published, falls back to -l (builds locally,
-    # still pulling prebuilt vcpkg binaries from the public cache). Override std lib / sanitizer via
-    # NES_INSTALL_ARGS; set NES_SKIP_DEV_IMAGE_CHECK=1 to trust an existing :local as-is.
-    DEP_HASH="$(docker/dependency/hash_dependencies.sh 2>/dev/null || echo unknown)"
-    SENTINEL="${XDG_CACHE_HOME:-$HOME/.cache}/nes-dsc/dev_image_hash"
-    need_install=0
-    docker image inspect "$DEV_IMAGE" >/dev/null 2>&1 || need_install=1
-    { [[ -f "$SENTINEL" ]] && [[ "$(cat "$SENTINEL")" == "$DEP_HASH" ]]; } || need_install=1
-    if [[ "${NES_SKIP_DEV_IMAGE_CHECK:-0}" == "1" ]]; then need_install=0; fi
-    if [[ "$need_install" == 1 ]]; then
-        echo "Obtaining $DEV_IMAGE for dependency hash $DEP_HASH via install-local-docker-environment.sh ..."
-        # shellcheck disable=SC2086
-        scripts/install-local-docker-environment.sh $INSTALL_ARGS \
-            || { echo "Dependency hash not downloadable; building images locally (-l)..."; \
-                 scripts/install-local-docker-environment.sh $INSTALL_ARGS -l; }
-        mkdir -p "$(dirname "$SENTINEL")"
-        echo "$DEP_HASH" > "$SENTINEL"
+    # -l builds the dependency + development images locally rather than pulling a published hash, so
+    # the image ALWAYS matches the current dependency set. --libstdcxx keeps the in-image build on the
+    # same standard library as the native half (USE_LIBCXX_IF_AVAILABLE=OFF below and in the sibling
+    # run.sh); --no-sanitizer is what yields the x64-linux-none triplet (there is no "--none" flag).
+    INSTALL_ARGS="${NES_INSTALL_ARGS:--y --libstdcxx --no-sanitizer -l}"
+    # Rebuild the dev image every time, on purpose. The previous version consulted a dependency-hash
+    # sentinel and skipped the install when it matched -- but the hash silently degrades to the literal
+    # "unknown" when hash_dependencies.sh fails, and once "unknown" is written to the sentinel it
+    # matches forever. A stale :local then fails the in-image configure with a missing dependency
+    # (e.g. nlohmann_json), which reads like a source error rather than a stale image.
+    # Set NES_SKIP_DEV_IMAGE_BUILD=1 to reuse the existing image when you know it is current.
+    if [[ "${NES_SKIP_DEV_IMAGE_BUILD:-0}" == "1" ]]; then
+        echo "NES_SKIP_DEV_IMAGE_BUILD=1: reusing existing $DEV_IMAGE without rebuilding"
     else
-        echo "Dev image $DEV_IMAGE already matches dependency hash $DEP_HASH"
+        echo "Building $DEV_IMAGE via install-local-docker-environment.sh $INSTALL_ARGS ..."
+        # shellcheck disable=SC2086
+        scripts/install-local-docker-environment.sh $INSTALL_ARGS
     fi
 
     # The in-image build mounts the repo at its host path, so BUILD_DIR must live inside the repo.

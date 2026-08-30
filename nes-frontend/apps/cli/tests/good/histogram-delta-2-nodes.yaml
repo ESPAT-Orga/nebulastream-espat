@@ -27,8 +27,8 @@
 # the split chain and stamp PlacementHintTrait{Source} on the GEN and {Sink} on the RESOLVER
 # and StatisticStoreWriter, which BottomUpPlacement turns into hard pins. The `host` option
 # names the node the terminal sink -- and therefore the Sink-anchored half -- lands on.
-# `terminal_sink=void` is required because nes-cli runs no StatisticCoordinator: only
-# StatisticCoordinatorService can receive Grpc statistic reports, a plain worker cannot.
+# `terminal_sink=void` is required because nes-cli runs no StatisticManager: only
+# StatisticManagerService can receive Grpc statistic reports, a plain worker cannot.
 #
 # Data: 18 tuples over three 5-second tumbling windows, 5 bins of width 5 over [0,25)
 # (memory_budget 128 => (128-8)/24 = 5 bins). Identical to the golden data in

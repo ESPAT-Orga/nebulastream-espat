@@ -1,0 +1,71 @@
+/*
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
+
+        https://www.apache.org/licenses/LICENSE-2.0
+
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
+*/
+
+#pragma once
+
+#include <Statistic/StatisticProvider.hpp>
+
+namespace NES
+{
+
+struct CountMinSketchProviderArguments final : StatisticProviderArguments
+{
+    DataType counterDataType;
+    std::string rowFieldName;
+    std::string columnFieldName;
+    std::string counterFieldName;
+
+    explicit CountMinSketchProviderArguments(
+        DataType counterDataType, std::string rowFieldName, std::string columnFieldName, std::string counterFieldName)
+        : counterDataType(std::move(counterDataType))
+        , rowFieldName(std::move(rowFieldName))
+        , columnFieldName(std::move(columnFieldName))
+        , counterFieldName(std::move(counterFieldName))
+    {
+    }
+
+    ~CountMinSketchProviderArguments() override = default;
+
+    std::unique_ptr<StatisticProviderArguments> clone() override { return std::make_unique<CountMinSketchProviderArguments>(*this); }
+};
+
+/// |       ------ Meta-Data ------        |       --- Statistics Area ---       |
+/// | No. Columns (64bit) No. Rows (64it)  |    Count Min 2-D Array[rows][col]   |
+class CountMinSketchIteratorImpl final : public StatisticProviderIteratorImpl
+{
+public:
+    explicit CountMinSketchIteratorImpl(
+        const nautilus::val<int8_t*>& statisticMemArea, CountMinSketchProviderArguments countMinProviderArguments);
+    ~CountMinSketchIteratorImpl() override = default;
+    Record operator*() override;
+    StatisticProviderIteratorImpl& operator++() override;
+    nautilus::val<bool> operator==(const StatisticProviderIteratorImpl& other) const override;
+
+protected:
+    void advanceToBegin() override;
+    void advanceToEnd() override;
+
+private:
+    /// Provided via the constructor
+    CountMinSketchProviderArguments countMinProviderArgs;
+
+    /// Set by each statistic
+    nautilus::val<uint64_t> numberOfColumns;
+    nautilus::val<uint64_t> numberOfRows;
+    nautilus::val<uint64_t> counterCol;
+    nautilus::val<uint64_t> counterRow;
+    nautilus::val<int8_t*> curCounter;
+};
+
+}

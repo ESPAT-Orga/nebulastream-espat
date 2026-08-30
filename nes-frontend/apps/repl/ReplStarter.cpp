@@ -55,11 +55,13 @@
 #include <fmt/ranges.h>
 #include <magic_enum/magic_enum.hpp>
 #include <rfl/json/write.hpp>
+#include <DefaultStatisticQueryGenerator.hpp>
 #include <ErrorHandling.hpp>
 #include <ModelCatalog.hpp>
 #include <QueryOptimizer.hpp>
 #include <QueryOptimizerConfiguration.hpp>
 #include <Repl.hpp>
+#include <StatisticManager.hpp>
 #include <Thread.hpp>
 #include <Version.hpp>
 #include <WorkerCatalog.hpp>
@@ -296,6 +298,23 @@ int main(int argc, char** argv)
         auto queryOptimizer
             = std::make_shared<NES::QueryOptimizer>(queryOptimizerConfig, sourceCatalog, sinkCatalog, workerCatalog, modelCatalog);
         auto queryStatementHandler = std::make_shared<NES::QueryStatementHandler>(queryManager, queryOptimizer);
+
+        auto submitQueryFn = [queryManager, queryOptimizer](NES::LogicalPlan plan) -> std::expected<NES::QueryId, NES::Exception>
+        {
+            auto distributedPlan = queryOptimizer->optimize(std::move(plan));
+            auto startResult = queryManager->start(distributedPlan);
+            if (!startResult.has_value())
+            {
+                return std::unexpected(startResult.error().front());
+            }
+            return NES::QueryId::createDistributed(startResult.value());
+        };
+
+        NES::StatisticRequestHandler statisticRequestHandler{
+            NES::StatisticManager{std::make_unique<NES::DefaultStatisticQueryGenerator>(false), submitQueryFn}};
+        [[maybe_unused]] auto coordinatorAddr = statisticRequestHandler.startGrpcServer();
+        NES_INFO("StatisticManager gRPC server listening on {}", coordinatorAddr);
+
         NES::Repl replClient(
             std::move(sourceStatementHandler),
             std::move(sinkStatementHandler),

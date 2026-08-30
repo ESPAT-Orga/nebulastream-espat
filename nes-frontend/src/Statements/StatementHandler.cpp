@@ -531,4 +531,44 @@ std::expected<ShowQueriesStatementResult, Exception> QueryStatementHandler::oper
     }
     return std::unexpected(QueryStatusFailed("Could not retrieve query status for some queries: ", fmt::join(statusOpt.error(), "\n")));
 }
+
+StatisticRequestHandler::StatisticRequestHandler(StatisticManager statisticCoordinator)
+    : statisticCoordinator(std::make_unique<StatisticManager>(std::move(statisticCoordinator)))
+{
+}
+
+std::expected<RequestStatisticBuildStatementResult, Exception>
+StatisticRequestHandler::operator()(const RequestStatisticBuildStatement& statement)
+{
+    return statisticCoordinator->collectNewStatistic(statement).transform(
+        [](auto result)
+        {
+            return RequestStatisticBuildStatementResult{
+                .queryId = result.queryId, .statisticId = result.statisticId, .alreadyExisted = result.alreadyExisted};
+        });
+}
+
+std::expected<CollectStatisticResult, Exception>
+StatisticRequestHandler::collectNewStatistic(const RequestStatisticBuildStatement& statement)
+{
+    return statisticCoordinator->collectNewStatistic(statement);
+}
+
+std::expected<CollectStatisticResult, Exception> StatisticRequestHandler::collectWorkloadStatistic(
+    const RequestStatisticBuildStatement& statement,
+    const LogicalPlan& dataQueryPlan,
+    const std::function<std::expected<QueryId, Exception>(LogicalPlan)>& submitPlan)
+{
+    return statisticCoordinator->collectWorkloadStatistic(statement, dataQueryPlan, submitPlan);
+}
+
+std::string StatisticRequestHandler::startGrpcServer()
+{
+    return statisticCoordinator->startGrpcServer();
+}
+
+const std::string& StatisticRequestHandler::getCoordinatorAddress() const
+{
+    return statisticCoordinator->getCoordinatorAddress();
+}
 }

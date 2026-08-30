@@ -1,0 +1,46 @@
+/*
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
+
+        https://www.apache.org/licenses/LICENSE-2.0
+
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
+*/
+
+#pragma once
+
+#include <unordered_map>
+
+#include <StatisticStore/AbstractStatisticStore.hpp>
+#include <WindowTypes/Measures/TimeMeasure.hpp>
+#include <folly/Synchronized.h>
+
+namespace NES
+{
+
+/// Has multiple sub stores (std::unordered_map keyed by statisticId) per expected no. concurrent access.
+/// The main idea is that the thread id hashes to distribute the access to the sub stores,
+/// and within each sub store the statisticId indexes directly to the relevant bucket.
+class SubStoresStatisticStore final : public AbstractStatisticStore
+{
+    uint64_t numberOfExpectedConcurrentAccess;
+    std::vector<folly::Synchronized<std::unordered_map<StatisticTuple::StatisticId, std::vector<StatisticTuple>>>> allSubStores;
+
+public:
+    explicit SubStoresStatisticStore(uint64_t numberOfExpectedConcurrentAccess);
+    bool insertStatistic(const StatisticTuple::StatisticId& statisticId, StatisticTuple statistic) override;
+    bool deleteStatistics(
+        const StatisticTuple::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs) override;
+    std::vector<StatisticTuple> getStatistics(
+        const StatisticTuple::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs) override;
+    std::optional<StatisticTuple> getSingleStatistic(
+        const StatisticTuple::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs) override;
+    std::vector<IdStatisticPair> getAllStatistics() override;
+};
+
+}

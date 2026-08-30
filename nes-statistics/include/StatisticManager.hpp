@@ -1,0 +1,162 @@
+/*
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
+
+        https://www.apache.org/licenses/LICENSE-2.0
+
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
+*/
+
+#pragma once
+
+#include <atomic>
+#include <cstdint>
+#include <expected>
+#include <functional>
+#include <future>
+#include <memory>
+#include <optional>
+#include <string>
+#include <unordered_map>
+#include <vector>
+#include <Identifiers/Identifiers.hpp>
+#include <Plans/LogicalPlan.hpp>
+#include <WindowTypes/Measures/TimeMeasure.hpp>
+#include <folly/Synchronized.h>
+#include <ConditionTrigger.hpp>
+#include <ErrorHandling.hpp>
+#include <RequestStatisticStatement.hpp>
+#include <StatisticTuple.hpp>
+#include <StatisticQueryGenerator.hpp>
+#include <StatisticRegistry.hpp>
+
+namespace grpc
+{
+class Server;
+}
+
+namespace NES
+{
+
+/// Result of a collectNewStatistic() call.
+struct CollectStatisticResult
+{
+    QueryId queryId;
+    StatisticTuple::StatisticId statisticId;
+    bool alreadyExisted;
+};
+
+/// Central coordinator for statistic requests. Owns the StatisticRegistry and generates
+/// unique StatisticIds via an atomic counter. This component can be reused by different
+/// requesters (e.g., the REPL frontend, the query optimizer).
+///
+/// Also runs a gRPC server (StatisticManagerService) that receives results from gRPC sinks.
+class StatisticManager
+{
+public:
+    /// Callback that takes a LogicalPlan (already generated) and submits it.
+    /// Returns the QueryId on success or an Exception on failure.
+    using SubmitQueryFn = std::function<std::expected<QueryId, Exception>(LogicalPlan)>;
+
+    StatisticManager(std::unique_ptr<StatisticQueryGenerator> queryGenerator, SubmitQueryFn submitQuery);
+    StatisticManager(StatisticManager&& other) noexcept;
+    StatisticManager& operator=(StatisticManager&& other) noexcept;
+    ~StatisticManager();
+
+    /// Requests collection of a new statistic. If an identical request is already active (same metric,
+    /// collection domain, window size), returns the existing entry (and appends the trigger if provided).
+    /// Otherwise generates a unique StatisticId, creates the collection query, submits it, and registers the entry.
+    [[nodiscard]] std::expected<CollectStatisticResult, Exception> collectNewStatistic(const RequestStatisticBuildStatement& statement);
+
+    /// Workload-domain orchestration: splice the build branch into the running data query's plan
+    /// and submit the merged plan as the new data query. The condition trigger fires inline with
+    /// the build chain on every window-close. The caller is responsible for stopping the running
+    /// data query before the merged plan is submitted.
+    [[nodiscard]] std::expected<CollectStatisticResult, Exception> collectWorkloadStatistic(
+        const RequestStatisticBuildStatement& statement,
+        const LogicalPlan& dataQueryPlan,
+        const std::function<std::expected<QueryId, Exception>(LogicalPlan)>& submitPlan);
+
+    /// Adds a condition trigger to an existing statistic entry.
+    /// Returns false if the key is not found in the registry.
+    bool addConditionTrigger(const StatisticRegistry::Key& key, ConditionTrigger trigger);
+
+    /// Type of the callback invoked when a probe-specific statisticId is reported by gRPC.
+    /// Distinct from the registry's per-key triggers: routed directly by the probe report's
+    /// statisticId, so each gated probe pipeline (with its own regime id and Selection predicate)
+    /// can deliver to a dedicated callback without interfering with other probes' routes.
+    using ProbeCallback = std::function<void(StatisticTuple::StatisticId, Windowing::TimeMeasure, Windowing::TimeMeasure)>;
+
+    /// Register a callback under a probe-specific statisticId. Multiple registrations under the
+    /// same id append to the list; all callbacks fire when a report arrives. Used by
+    /// collectWorkloadStatistic: each selectivity-gated probe gets a unique regime id and a
+    /// callback that knows which workload variant the regime implies.
+    void addProbeCallback(StatisticTuple::StatisticId probeStatisticId, ProbeCallback callback);
+
+    /// Removes the entry for this key. Returns true if an entry was removed.
+    bool deregisterStatistic(const StatisticRegistry::Key& key);
+
+    /// Starts the gRPC server on a dynamic port. Returns the "host:port" string.
+    std::string startGrpcServer();
+
+    /// Stops the gRPC server.
+    void stopGrpcServer();
+
+    /// Returns the coordinator's gRPC address ("host:port").
+    [[nodiscard]] const std::string& getCoordinatorAddress() const { return coordinatorAddress; }
+
+    /// Submits a probe query and waits for the result.
+    /// @param keys The statistic registry keys to probe.
+    /// @param startTs Start of the time range.
+    /// @param endTs End of the time range.
+    /// @param probeQueryWithoutSource A logical plan containing probe operators but no source or sink.
+    /// @return The aggregated probe result, or std::nullopt if no result was received in time.
+    std::optional<double> getStatistics(
+        const std::vector<StatisticRegistry::Key>& keys,
+        Windowing::TimeMeasure startTs,
+        Windowing::TimeMeasure endTs,
+        LogicalPlan& probeQueryWithoutSource);
+
+    /// Called by the gRPC service handler when a StatisticReport arrives.
+    /// Routes to pending probes or condition triggers.
+    void onStatisticReport(StatisticTuple::StatisticId statisticId, Windowing::TimeMeasure startTs, Windowing::TimeMeasure endTs, double value);
+
+private:
+    std::atomic<uint64_t> nextStatisticId{1};
+    StatisticRegistry registry;
+    std::unique_ptr<StatisticQueryGenerator> queryGenerator;
+    SubmitQueryFn submitQuery;
+
+    /// gRPC server for receiving results from sinks.
+    std::unique_ptr<grpc::Server> grpcServer;
+    std::string coordinatorAddress;
+
+    /// Pending probe queries waiting for results. Keyed by raw statisticId value.
+    struct PendingProbe
+    {
+        std::promise<double> promise;
+    };
+
+    folly::Synchronized<std::unordered_map<StatisticTuple::StatisticId, PendingProbe>> pendingProbes;
+
+    /// Direct-route callbacks for probe-specific statisticIds. Looked up by onStatisticReport
+    /// before the registry scan; if a regime id matches, fires the registered callbacks and
+    /// returns (the registry scan would not match anyway because regime ids are separate from
+    /// build-branch ids).
+    folly::Synchronized<std::unordered_map<StatisticTuple::StatisticId, std::vector<ProbeCallback>>> probeCallbacks;
+
+    /// Cache of data-query deployments keyed by logical source name (we use logical source name
+    /// as a proxy for "same data query"). Lets a second collectWorkloadStatistic call for a
+    /// DIFFERENT field of the same source reuse the data query deployed by the first call,
+    /// instead of submitting a duplicate. Without this, multi-field workload monitoring deploys
+    /// N redundant data queries (one per registry-key-distinct call), which would actually run
+    /// the user's SELECT N times.
+    folly::Synchronized<std::unordered_map<std::string, QueryId>> deployedDataQueriesBySource;
+};
+
+}

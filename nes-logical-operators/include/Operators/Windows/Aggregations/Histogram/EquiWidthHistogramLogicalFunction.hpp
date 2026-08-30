@@ -1,0 +1,122 @@
+/*
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
+
+        https://www.apache.org/licenses/LICENSE-2.0
+
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
+*/
+
+#pragma once
+
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <string_view>
+#include <DataTypes/DataType.hpp>
+#include <DataTypes/Schema.hpp>
+#include <Functions/FieldAccessLogicalFunction.hpp>
+#include <Operators/Windows/Aggregations/StatisticLogicalFunction.hpp>
+#include <Operators/Windows/Aggregations/WindowAggregationLogicalFunction.hpp>
+#include <Util/Reflection.hpp>
+#include <StatisticTuple.hpp>
+
+namespace NES
+{
+
+/// The EquiWidthHistogram counts values of `asField` in the range [`minValue`, `maxValue`].
+/// The number of equi-width buckets is derived from `memoryBudget` during lowering.
+class EquiWidthHistogramLogicalFunction : public StatisticLogicalFunction
+{
+public:
+    /// `asField` used when the histogram should be renamed in the query
+    /// `memoryBudget` budget in bytes used to derive the bucket count during lowering
+    /// `minValue` start value of the histogram
+    /// `maxValue` end value of the histogram
+    /// `statisticId` the number that identifies this synopsis in the statistic store to later retrieve it
+    EquiWidthHistogramLogicalFunction(
+        const FieldAccessLogicalFunction& onField,
+        uint64_t memoryBudget,
+        uint64_t minValue,
+        uint64_t maxValue,
+        StatisticTuple::StatisticId statisticId);
+    EquiWidthHistogramLogicalFunction(
+        const FieldAccessLogicalFunction& onField,
+        const FieldAccessLogicalFunction& asField,
+        uint64_t memoryBudget,
+        uint64_t minValue,
+        uint64_t maxValue,
+        StatisticTuple::StatisticId statisticId);
+
+    ~EquiWidthHistogramLogicalFunction() override = default;
+
+    [[nodiscard]] std::string_view getName() const noexcept;
+    [[nodiscard]] std::string toString() const;
+    [[nodiscard]] Reflected reflect() const;
+    [[nodiscard]] DataType getInputStamp() const;
+    [[nodiscard]] DataType getPartialAggregateStamp() const;
+    [[nodiscard]] DataType getFinalAggregateStamp() const;
+    [[nodiscard]] FieldAccessLogicalFunction getOnField() const;
+    [[nodiscard]] FieldAccessLogicalFunction getAsField() const;
+
+    [[nodiscard]] EquiWidthHistogramLogicalFunction withInferredStamp(const Schema& schema) const;
+    [[nodiscard]] EquiWidthHistogramLogicalFunction withInputStamp(DataType inputStamp) const;
+    [[nodiscard]] EquiWidthHistogramLogicalFunction withPartialAggregateStamp(DataType partialAggregateStamp) const;
+    [[nodiscard]] EquiWidthHistogramLogicalFunction withFinalAggregateStamp(DataType finalAggregateStamp) const;
+    [[nodiscard]] EquiWidthHistogramLogicalFunction withOnField(FieldAccessLogicalFunction onField) const;
+    [[nodiscard]] EquiWidthHistogramLogicalFunction withAsField(FieldAccessLogicalFunction asField) const;
+
+    [[nodiscard]] static bool shallIncludeNullValues() noexcept;
+
+    [[nodiscard]] bool operator==(const EquiWidthHistogramLogicalFunction& rhs) const;
+
+    [[nodiscard]] std::unique_ptr<StatisticConfig> calculateConfigs() const override;
+
+    uint64_t minValue;
+    uint64_t maxValue;
+
+    StatisticTuple::StatisticId statisticId;
+
+private:
+    static constexpr std::string_view NAME = "EquiWidthHistogram";
+
+    DataType inputStamp;
+    DataType partialAggregateStamp;
+    DataType finalAggregateStamp;
+    FieldAccessLogicalFunction onField;
+    FieldAccessLogicalFunction asField;
+};
+
+static_assert(WindowAggregationFunctionConcept<EquiWidthHistogramLogicalFunction>);
+
+template <>
+struct Reflector<EquiWidthHistogramLogicalFunction>
+{
+    Reflected operator()(const EquiWidthHistogramLogicalFunction& function) const;
+};
+
+template <>
+struct Unreflector<EquiWidthHistogramLogicalFunction>
+{
+    EquiWidthHistogramLogicalFunction operator()(const Reflected& reflected) const;
+};
+
+}
+
+namespace NES::detail
+{
+struct ReflectedEquiWidthHistogramLogicalFunction
+{
+    FieldAccessLogicalFunction onField;
+    FieldAccessLogicalFunction asField;
+    uint64_t memoryBudget;
+    uint64_t minValue;
+    uint64_t maxValue;
+    StatisticTuple::StatisticId::Underlying statisticId;
+};
+}

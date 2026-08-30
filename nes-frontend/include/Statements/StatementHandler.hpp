@@ -39,6 +39,9 @@
 #include <ErrorHandling.hpp>
 #include <ModelCatalog.hpp>
 #include <QueryOptimizer.hpp>
+#include <RequestStatisticStatement.hpp>
+#include <StatisticManager.hpp>
+#include <StatisticTuple.hpp>
 #include <Version.hpp>
 #include <WorkerCatalog.hpp>
 
@@ -262,6 +265,29 @@ public:
     std::expected<CreateModelStatementResult, Exception> operator()(const CreateModelStatement& statement);
     std::expected<ShowModelsStatementResult, Exception> operator()(const ShowModelsStatement& statement) const;
     std::expected<DropModelStatementResult, Exception> operator()(const DropModelStatement& statement);
+};
+
+struct RequestStatisticBuildStatementResult
+{
+    QueryId queryId;
+    StatisticTuple::StatisticId statisticId;
+    bool alreadyExisted;
+};
+
+class StatisticRequestHandler final : public StatementHandler<StatisticRequestHandler>
+{
+    std::unique_ptr<StatisticManager> statisticCoordinator;
+
+public:
+    explicit StatisticRequestHandler(StatisticManager statisticCoordinator);
+    std::expected<RequestStatisticBuildStatementResult, Exception> operator()(const RequestStatisticBuildStatement& statement);
+    [[nodiscard]] std::expected<CollectStatisticResult, Exception> collectNewStatistic(const RequestStatisticBuildStatement& statement);
+    [[nodiscard]] std::expected<CollectStatisticResult, Exception> collectWorkloadStatistic(
+        const RequestStatisticBuildStatement& statement,
+        const LogicalPlan& dataQueryPlan,
+        const std::function<std::expected<QueryId, Exception>(LogicalPlan)>& submitPlan);
+    std::string startGrpcServer();
+    [[nodiscard]] const std::string& getCoordinatorAddress() const;
 };
 
 class TopologyStatementHandler final : public StatementHandler<TopologyStatementHandler>

@@ -1,0 +1,18 @@
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+
+#    https://www.apache.org/licenses/LICENSE-2.0
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+add_plugin(ReservoirSample AggregationPhysicalFunction nes-physical-operators Sample/ReservoirSamplePhysicalFunction.cpp)
+add_plugin(EquiWidthHistogram AggregationPhysicalFunction nes-physical-operators Histogram/EquiWidthHistogramPhysicalFunction.cpp)
+add_plugin(EquiWidthHistogramDeltaGen AggregationPhysicalFunction nes-physical-operators Histogram/EquiWidthHistogramDeltaGenPhysicalFunction.cpp)
+add_plugin(EquiWidthHistogramDeltaResolver AggregationPhysicalFunction nes-physical-operators Histogram/EquiWidthHistogramDeltaResolverPhysicalFunction.cpp)
+add_plugin(CountMinSketch AggregationPhysicalFunction nes-physical-operators Sketch/CountMinSketchPhysicalFunction.cpp)
+add_plugin(ScalarStatistic AggregationPhysicalFunction nes-physical-operators Scalar/ScalarStatisticPhysicalFunction.cpp)

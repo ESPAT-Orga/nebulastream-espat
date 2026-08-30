@@ -29,7 +29,7 @@
 #include <Time/Timestamp.hpp>
 #include <WindowTypes/Measures/TimeMeasure.hpp>
 #include <ExecutionContext.hpp>
-#include <Statistic.hpp>
+#include <StatisticTuple.hpp>
 #include <function.hpp>
 #include <val_arith.hpp>
 
@@ -48,19 +48,19 @@ constexpr uint64_t LATEST_WINDOW_END_SENTINEL = std::numeric_limits<uint64_t>::m
 
 /// Thread-local cache populated by loadStatisticsProxy. Holds the statistics matching a single execute() call.
 /// Safe to use as TLS because each worker thread executes operator pipelines without re-entrant calls to execute().
-thread_local static std::vector<Statistic> tProbeStatistics;
+thread_local static std::vector<StatisticTuple> tProbeStatistics;
 
 namespace
 {
 /// Pick the statistic with the highest endTs from a range of stored entries. Returns nullopt if
 /// the range is empty. Used by the LATEST_WINDOW_END_SENTINEL fallback path.
-std::optional<Statistic> pickLatest(const std::vector<Statistic>& statistics)
+std::optional<StatisticTuple> pickLatest(const std::vector<StatisticTuple>& statistics)
 {
     if (statistics.empty())
     {
         return std::nullopt;
     }
-    return *std::ranges::max_element(statistics, {}, [](const Statistic& s) { return s.getEndTs().getTime(); });
+    return *std::ranges::max_element(statistics, {}, [](const StatisticTuple& s) { return s.getEndTs().getTime(); });
 }
 }
 
@@ -69,9 +69,9 @@ std::optional<Statistic> pickLatest(const std::vector<Statistic>& statistics)
 /// would reinterpret the stored bytes (a FLOAT64 average read as a UINT64 sum) or read past the payload (an 8-byte read
 /// of a 4-byte sum). Fail loudly instead. expectedPayloadSizeInBytes == 0 means variable-width, so size is unchecked.
 static void validateAgainstProbe(
-    const std::vector<Statistic>& statistics,
-    const Statistic::StatisticId statisticId,
-    const Statistic::StatisticType expectedType,
+    const std::vector<StatisticTuple>& statistics,
+    const StatisticTuple::StatisticId statisticId,
+    const StatisticTuple::StatisticType expectedType,
     const uint64_t expectedPayloadSizeInBytes)
 {
     for (const auto& statistic : statistics)
@@ -79,7 +79,7 @@ static void validateAgainstProbe(
         if (statistic.getStatisticType() != expectedType)
         {
             throw CannotProbeStatistic(
-                "Statistic {} was built as {} but is probed as {}",
+                "StatisticTuple {} was built as {} but is probed as {}",
                 statisticId,
                 magic_enum::enum_name(statistic.getStatisticType()),
                 magic_enum::enum_name(expectedType));
@@ -87,7 +87,7 @@ static void validateAgainstProbe(
         if (expectedPayloadSizeInBytes != 0 and statistic.getStatisticDataSize() != expectedPayloadSizeInBytes)
         {
             throw CannotProbeStatistic(
-                "Statistic {} persisted a {}-byte payload but is probed as a {}-byte type",
+                "StatisticTuple {} persisted a {}-byte payload but is probed as a {}-byte type",
                 statisticId,
                 statistic.getStatisticDataSize(),
                 expectedPayloadSizeInBytes);
@@ -97,10 +97,10 @@ static void validateAgainstProbe(
 
 static uint64_t loadStatisticsProxy(
     OperatorHandler* ptrOpHandler,
-    const Statistic::StatisticId statisticId,
+    const StatisticTuple::StatisticId statisticId,
     const Timestamp startTs,
     const Timestamp endTs,
-    const Statistic::StatisticType expectedType,
+    const StatisticTuple::StatisticType expectedType,
     const uint64_t expectedPayloadSizeInBytes)
 {
     PRECONDITION(ptrOpHandler != nullptr, "opHandler should not be null!");
@@ -170,14 +170,14 @@ void StatisticStoreReader::execute(ExecutionContext& executionCtx, Record& recor
 {
     /// Read statistics and call the child with the generated tuples
     auto operatorHandlerMemRef = executionCtx.getGlobalOperatorHandler(operatorHandlerId);
-    const nautilus::val<Statistic::StatisticId> statisticId{
-        record.read(statisticIdFieldName).getRawValueAs<nautilus::val<Statistic::StatisticId::Underlying>>()};
+    const nautilus::val<StatisticTuple::StatisticId> statisticId{
+        record.read(statisticIdFieldName).getRawValueAs<nautilus::val<StatisticTuple::StatisticId::Underlying>>()};
     const nautilus::val<Timestamp> startTs{record.read(statisticStartTsFieldName).getRawValueAs<nautilus::val<Timestamp::Underlying>>()};
     const nautilus::val<Timestamp> endTs{record.read(statisticEndTsFieldName).getRawValueAs<nautilus::val<Timestamp::Underlying>>()};
 
     /// Load all build-window statistics covering [startTs, endTs] into the TLS cache and get their count. The expected
     /// type and payload width let the proxy reject a statistic this probe was not built to read.
-    const nautilus::val<Statistic::StatisticType> expectedType{statisticProvider.getStatisticType()};
+    const nautilus::val<StatisticTuple::StatisticType> expectedType{statisticProvider.getStatisticType()};
     const nautilus::val<uint64_t> expectedPayloadSize{expectedPayloadSizeInBytes};
     const auto statisticCount
         = invoke(loadStatisticsProxy, operatorHandlerMemRef, statisticId, startTs, endTs, expectedType, expectedPayloadSize);

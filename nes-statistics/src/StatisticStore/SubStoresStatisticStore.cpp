@@ -16,7 +16,7 @@
 
 #include <StatisticStore/AbstractStatisticStore.hpp>
 #include <WindowTypes/Measures/TimeMeasure.hpp>
-#include <Statistic.hpp>
+#include <StatisticTuple.hpp>
 
 #include <algorithm>
 #include <cstdint>
@@ -48,11 +48,11 @@ SubStoresStatisticStore::SubStoresStatisticStore(const uint64_t numberOfExpected
     allSubStores.reserve(numberOfExpectedConcurrentAccess);
     for (uint64_t i = 0; i < numberOfExpectedConcurrentAccess; ++i)
     {
-        allSubStores.emplace_back(folly::Synchronized<std::unordered_map<Statistic::StatisticId, std::vector<Statistic>>>{});
+        allSubStores.emplace_back(folly::Synchronized<std::unordered_map<StatisticTuple::StatisticId, std::vector<StatisticTuple>>>{});
     }
 }
 
-bool SubStoresStatisticStore::insertStatistic(const Statistic::StatisticId& statisticId, Statistic statistic)
+bool SubStoresStatisticStore::insertStatistic(const StatisticTuple::StatisticId& statisticId, StatisticTuple statistic)
 {
     const auto pos = getPos(numberOfExpectedConcurrentAccess);
     const auto lockedStatisticStore = allSubStores[pos].wlock();
@@ -61,7 +61,7 @@ bool SubStoresStatisticStore::insertStatistic(const Statistic::StatisticId& stat
 }
 
 bool SubStoresStatisticStore::deleteStatistics(
-    const Statistic::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs)
+    const StatisticTuple::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs)
 {
     bool foundAnyStatistic = false;
     for (auto& statisticStore : allSubStores)
@@ -75,7 +75,7 @@ bool SubStoresStatisticStore::deleteStatistics(
         auto& bucket = bucketIt->second;
         const auto removed = std::ranges::remove_if(
             bucket,
-            [startTs, endTs](const Statistic& statistic) { return statistic.getStartTs() >= startTs and statistic.getEndTs() <= endTs; });
+            [startTs, endTs](const StatisticTuple& statistic) { return statistic.getStartTs() >= startTs and statistic.getEndTs() <= endTs; });
         if (removed.begin() != bucket.end())
         {
             bucket.erase(removed.begin(), removed.end());
@@ -85,10 +85,10 @@ bool SubStoresStatisticStore::deleteStatistics(
     return foundAnyStatistic;
 }
 
-std::vector<Statistic> SubStoresStatisticStore::getStatistics(
-    const Statistic::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs)
+std::vector<StatisticTuple> SubStoresStatisticStore::getStatistics(
+    const StatisticTuple::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs)
 {
-    std::vector<Statistic> foundStatistics;
+    std::vector<StatisticTuple> foundStatistics;
     for (const auto& statisticStore : allSubStores)
     {
         const auto lockedStatisticStore = statisticStore.rlock();
@@ -100,13 +100,13 @@ std::vector<Statistic> SubStoresStatisticStore::getStatistics(
         std::ranges::copy_if(
             bucketIt->second,
             std::back_inserter(foundStatistics),
-            [startTs, endTs](const Statistic& statistic) { return statistic.getStartTs() >= startTs and statistic.getEndTs() <= endTs; });
+            [startTs, endTs](const StatisticTuple& statistic) { return statistic.getStartTs() >= startTs and statistic.getEndTs() <= endTs; });
     }
     return foundStatistics;
 }
 
-std::optional<Statistic> SubStoresStatisticStore::getSingleStatistic(
-    const Statistic::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs)
+std::optional<StatisticTuple> SubStoresStatisticStore::getSingleStatistic(
+    const StatisticTuple::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs)
 {
     for (const auto& statisticStore : allSubStores)
     {
@@ -118,7 +118,7 @@ std::optional<Statistic> SubStoresStatisticStore::getSingleStatistic(
         }
         const auto foundStatistic = std::ranges::find_if(
             bucketIt->second,
-            [startTs, endTs](const Statistic& statistic) { return statistic.getStartTs() == startTs and statistic.getEndTs() == endTs; });
+            [startTs, endTs](const StatisticTuple& statistic) { return statistic.getStartTs() == startTs and statistic.getEndTs() == endTs; });
         if (foundStatistic != bucketIt->second.end())
         {
             return *foundStatistic;

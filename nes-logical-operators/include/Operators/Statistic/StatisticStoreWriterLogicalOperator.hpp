@@ -19,7 +19,7 @@
 #include <Operators/LogicalOperator.hpp>
 #include <Operators/Statistic/LogicalStatisticFields.hpp>
 #include <Util/Reflection.hpp>
-#include <Statistic.hpp>
+#include <StatisticTuple.hpp>
 
 namespace NES
 {
@@ -35,8 +35,8 @@ public:
     /// downstream writers in the chain still see every data field.
     StatisticStoreWriterLogicalOperator(
         std::shared_ptr<LogicalStatisticFields> inputLogicalStatisticFields,
-        Statistic::StatisticId statisticId,
-        Statistic::StatisticType statisticType);
+        StatisticTuple::StatisticId statisticId,
+        StatisticTuple::StatisticType statisticType);
     [[nodiscard]] std::string explain(ExplainVerbosity verbosity, OperatorId id) const;
     [[nodiscard]] std::vector<LogicalOperator> getChildren() const;
     [[nodiscard]] StatisticStoreWriterLogicalOperator withChildren(std::vector<LogicalOperator>) const;
@@ -47,8 +47,8 @@ public:
     [[nodiscard]] std::vector<Schema> getInputSchemas() const;
     [[nodiscard]] Schema getOutputSchema() const;
     [[nodiscard]] StatisticStoreWriterLogicalOperator withInferredSchema(std::vector<Schema> inputSchemas) const;
-    [[nodiscard]] Statistic::StatisticId getStatisticId() const;
-    [[nodiscard]] Statistic::StatisticType getStatisticType() const;
+    [[nodiscard]] StatisticTuple::StatisticId getStatisticId() const;
+    [[nodiscard]] StatisticTuple::StatisticType getStatisticType() const;
     [[nodiscard]] static LogicalStatisticFields getOutputStatisticFields(const std::string_view qualifierName);
 
     /// Needs to be shared so that the window aggregation build can set the field names
@@ -57,8 +57,8 @@ public:
 private:
     static constexpr std::string_view NAME = "StatisticStoreWriter";
 
-    Statistic::StatisticId statisticId;
-    Statistic::StatisticType statisticType;
+    StatisticTuple::StatisticId statisticId;
+    StatisticTuple::StatisticType statisticType;
     std::vector<LogicalOperator> children;
     TraitSet traitSet;
     Schema inputSchema, outputSchema;
@@ -86,8 +86,8 @@ struct ReflectedStatisticStoreWriterLogicalOperator
 {
     /// The data field name is NOT serialized -- it is re-derived from the id (statisticDataFieldName), so it
     /// cannot drift across (de)serialization.
-    Statistic::StatisticId::Underlying statisticId;
-    Statistic::StatisticType statisticType;
+    StatisticTuple::StatisticId::Underlying statisticId;
+    StatisticTuple::StatisticType statisticType;
 };
 }
 

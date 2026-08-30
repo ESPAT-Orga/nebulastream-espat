@@ -59,7 +59,7 @@
 #include <ErrorHandling.hpp>
 #include <Metric.hpp>
 #include <RequestStatisticStatement.hpp>
-#include <Statistic.hpp>
+#include <StatisticTuple.hpp>
 
 namespace NES
 {
@@ -76,20 +76,20 @@ uint64_t getOption(const std::unordered_map<std::string, std::string>& options, 
     return defaultValue;
 }
 
-Statistic::StatisticType toStatisticType(const Metric& metric)
+StatisticTuple::StatisticType toStatisticType(const Metric& metric)
 {
     /// For now, we perform a simple mapping of metric to statistic type.
     switch (metric)
     {
         case Metric::Cardinality:
         case Metric::Rate:
-            return Statistic::StatisticType::Count_Min_Sketch;
+            return StatisticTuple::StatisticType::Count_Min_Sketch;
         case Metric::MinVal:
         case Metric::MaxVal:
         case Metric::Selectivity:
-            return Statistic::StatisticType::Equi_Width_Histogram;
+            return StatisticTuple::StatisticType::Equi_Width_Histogram;
         case Metric::Average:
-            return Statistic::StatisticType::Reservoir_Sample;
+            return StatisticTuple::StatisticType::Reservoir_Sample;
     }
     std::unreachable();
 }
@@ -97,30 +97,30 @@ Statistic::StatisticType toStatisticType(const Metric& metric)
 std::shared_ptr<WindowAggregationLogicalFunction> createAggregationFunction(
     const FieldAccessLogicalFunction& onField,
     const Metric metric,
-    const Statistic::StatisticId statisticId,
+    const StatisticTuple::StatisticId statisticId,
     const std::unordered_map<std::string, std::string>& options)
 {
     switch (toStatisticType(metric))
     {
-        case Statistic::StatisticType::Equi_Width_Histogram: {
+        case StatisticTuple::StatisticType::Equi_Width_Histogram: {
             const auto memoryBudget = getOption(options, "memory_budget", 4096);
             const auto minValue = getOption(options, "min", 0);
             const auto maxValue = getOption(options, "max", 1000);
             return std::make_shared<WindowAggregationLogicalFunction>(
                 EquiWidthHistogramLogicalFunction{onField, memoryBudget, minValue, maxValue, statisticId});
         }
-        case Statistic::StatisticType::Reservoir_Sample: {
+        case StatisticTuple::StatisticType::Reservoir_Sample: {
             const auto memoryBudget = getOption(options, "memory_budget", 8192);
             return std::make_shared<WindowAggregationLogicalFunction>(
                 ReservoirSampleLogicalFunction{onField, std::vector{onField}, memoryBudget, statisticId});
         }
-        case Statistic::StatisticType::Count_Min_Sketch: {
+        case StatisticTuple::StatisticType::Count_Min_Sketch: {
             const auto memoryBudget = getOption(options, "memory_budget", 8192);
             return std::make_shared<WindowAggregationLogicalFunction>(CountMinSketchLogicalFunction{onField, memoryBudget, statisticId});
         }
-        case Statistic::StatisticType::Count:
-        case Statistic::StatisticType::Sum:
-        case Statistic::StatisticType::Avg:
+        case StatisticTuple::StatisticType::Count:
+        case StatisticTuple::StatisticType::Sum:
+        case StatisticTuple::StatisticType::Avg:
             throw NotImplemented("Scalar statistics (Count/Sum/Avg) are not produced by the metric-based query generator");
     }
     std::unreachable();
@@ -151,7 +151,7 @@ bool wantsZstdCompression(const std::unordered_map<std::string, std::string>& op
     return it != options.end() and toLowerCase(it->second) == "zstd";
 }
 
-LogicalPlan appendZstdStage(LogicalPlan plan, const Statistic::StatisticId statisticId, const bool compress)
+LogicalPlan appendZstdStage(LogicalPlan plan, const StatisticTuple::StatisticId statisticId, const bool compress)
 {
     const auto dataField = statisticDataFieldName(statisticId);
     const FieldAccessLogicalFunction blob{dataField};
@@ -172,7 +172,7 @@ LogicalPlan appendHistogramDeltaBuildChain(
     const std::shared_ptr<Windowing::WindowType>& genWindowType,
     const uint64_t windowSizeMs,
     const std::unordered_map<std::string, std::string>& options,
-    const Statistic::StatisticId statisticId)
+    const StatisticTuple::StatisticId statisticId)
 {
     const auto memoryBudget = getOption(options, "memory_budget", 4096);
     const auto minValue = getOption(options, "min", 0);
@@ -200,14 +200,14 @@ LogicalPlan appendHistogramDeltaBuildChain(
     const auto resolverFields = std::make_shared<LogicalStatisticFields>();
     plan = LogicalPlanBuilder::addStatisticBuild(std::move(plan), resolverWindow, {resolverAgg}, {}, resolverFields);
     plan = stampPlacementHint(std::move(plan), PlacementAnchor::Sink);
-    plan = LogicalPlanBuilder::addStatisticStoreWriter(plan, resolverFields, statisticId, Statistic::StatisticType::Equi_Width_Histogram);
+    plan = LogicalPlanBuilder::addStatisticStoreWriter(plan, resolverFields, statisticId, StatisticTuple::StatisticType::Equi_Width_Histogram);
     return stampPlacementHint(std::move(plan), PlacementAnchor::Sink);
 }
 
 LogicalPlan generateForDataDomain(
     const DataDomain& domain,
     const RequestStatisticBuildStatement& request,
-    const Statistic::StatisticId statisticId,
+    const StatisticTuple::StatisticId statisticId,
     const std::string& coordinatorAddress,
     const bool enableHistogramDeltaCompression)
 {
@@ -232,7 +232,7 @@ LogicalPlan generateForDataDomain(
     auto plan = LogicalPlanBuilder::createLogicalPlan(domain.logicalSourceName);
 
     const bool useDeltaSplit
-        = enableHistogramDeltaCompression && toStatisticType(request.metric) == Statistic::StatisticType::Equi_Width_Histogram;
+        = enableHistogramDeltaCompression && toStatisticType(request.metric) == StatisticTuple::StatisticType::Equi_Width_Histogram;
     if (useDeltaSplit)
     {
         plan = appendHistogramDeltaBuildChain(std::move(plan), onField, windowType, request.windowSizeMs, request.options, statisticId);
@@ -297,9 +297,9 @@ LogicalPlan generateForDataDomain(
         LogicalFunction{FieldAccessLogicalFunction{"STATISTICNUMBEROFSEENTUPLES"}});
     plan = LogicalPlanBuilder::addProjection(std::move(projections), /*asterisk=*/false, plan);
 
-    /// Terminate the plan. Default "grpc" reports the statistic to a StatisticCoordinator listening at
+    /// Terminate the plan. Default "grpc" reports the statistic to a StatisticManager listening at
     /// coordinatorAddress (the REPL path). "void" pins a discarding sink on coordinatorAddress instead:
-    /// a plain worker cannot receive Grpc reports (only StatisticCoordinatorService can), so distributed
+    /// a plain worker cannot receive Grpc reports (only StatisticManagerService can), so distributed
     /// deployments that only need the writer to run on a target node use the void terminal. Either way
     /// the terminal sink is placed on coordinatorAddress (root), so the projected report record crosses
     /// the network to it.
@@ -328,7 +328,7 @@ LogicalPlan stackWorkloadBuildChainOnTop(
     LogicalPlan basePlan,
     const std::string& fieldNameUpper,
     const RequestStatisticBuildStatement& request,
-    const Statistic::StatisticId statisticId,
+    const StatisticTuple::StatisticId statisticId,
     const bool enableHistogramDeltaCompression)
 {
     auto timeChar = request.eventTimeFieldName.has_value()
@@ -348,7 +348,7 @@ LogicalPlan stackWorkloadBuildChainOnTop(
     const FieldAccessLogicalFunction onField{fieldNameUpper};
     auto plan = std::move(basePlan);
 
-    if (enableHistogramDeltaCompression && toStatisticType(request.metric) == Statistic::StatisticType::Equi_Width_Histogram)
+    if (enableHistogramDeltaCompression && toStatisticType(request.metric) == StatisticTuple::StatisticType::Equi_Width_Histogram)
     {
         plan = appendHistogramDeltaBuildChain(std::move(plan), onField, windowType, request.windowSizeMs, request.options, statisticId);
     }
@@ -429,7 +429,7 @@ std::string toUpper(std::string s)
 }
 
 LogicalPlan DefaultStatisticQueryGenerator::generateQuery(
-    const RequestStatisticBuildStatement& request, const Statistic::StatisticId statisticId, const std::string& coordinatorAddress) const
+    const RequestStatisticBuildStatement& request, const StatisticTuple::StatisticId statisticId, const std::string& coordinatorAddress) const
 {
     return std::visit(
         [&]<typename CollectionDomain>(const CollectionDomain& domain) -> LogicalPlan
@@ -466,7 +466,7 @@ LogicalPlan DefaultStatisticQueryGenerator::generateQuery(
 LogicalPlan DefaultStatisticQueryGenerator::generateWorkloadBranch(
     const WorkloadDomain& domain,
     const RequestStatisticBuildStatement& request,
-    const Statistic::StatisticId statisticId,
+    const StatisticTuple::StatisticId statisticId,
     const std::string& coordinatorAddress,
     const LogicalOperator& spliceLeaf) const
 {

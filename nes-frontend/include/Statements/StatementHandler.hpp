@@ -35,8 +35,8 @@
 #include <DistributedQuery.hpp>
 #include <ErrorHandling.hpp>
 #include <QueryOptimizer.hpp>
-#include <Statistic.hpp>
-#include <StatisticCoordinator.hpp>
+#include <StatisticTuple.hpp>
+#include <StatisticManager.hpp>
 #include <StatisticQueryGenerator.hpp>
 #include <WorkerCatalog.hpp>
 
@@ -127,7 +127,7 @@ struct ExplainQueryStatementResult
 struct RequestStatisticBuildStatementResult
 {
     QueryId queryId;
-    Statistic::StatisticId statisticId;
+    StatisticTuple::StatisticId statisticId;
     bool alreadyExisted;
 };
 
@@ -250,12 +250,12 @@ public:
 
 class StatisticRequestHandler final : public StatementHandler<StatisticRequestHandler>
 {
-    /// StatisticCoordinatorServiceImpl holds a reference to the coordinator; the Object itself must not move
+    /// StatisticManagerServiceImpl holds a reference to the coordinator; the Object itself must not move
     /// after startGrpcServer() is called.
-    std::unique_ptr<StatisticCoordinator> statisticCoordinator;
+    std::unique_ptr<StatisticManager> statisticCoordinator;
 
 public:
-    explicit StatisticRequestHandler(StatisticCoordinator statisticCoordinator);
+    explicit StatisticRequestHandler(StatisticManager statisticCoordinator);
     std::expected<RequestStatisticBuildStatementResult, Exception> operator()(const RequestStatisticBuildStatement& statement);
 
     /// Directly deploys a statistic collection query without going through the SQL parser.
@@ -264,7 +264,7 @@ public:
 
     /// Workload-domain variant: splices the build branch into the data query's plan and submits
     /// the merged plan via `submitPlan`. The probe runs inline with the build chain and fires its
-    /// condition trigger on every window-close. See StatisticCoordinator::collectWorkloadStatistic.
+    /// condition trigger on every window-close. See StatisticManager::collectWorkloadStatistic.
     [[nodiscard]] std::expected<CollectStatisticResult, Exception> collectWorkloadStatistic(
         const RequestStatisticBuildStatement& statement,
         const LogicalPlan& dataQueryPlan,

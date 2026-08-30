@@ -14,7 +14,7 @@
 #include <StatisticStore/WindowStatisticStore.hpp>
 
 #include <StatisticStore/AbstractStatisticStore.hpp>
-#include <Statistic.hpp>
+#include <StatisticTuple.hpp>
 
 #include <algorithm>
 #include <cstdint>
@@ -27,12 +27,12 @@ namespace NES
 
 namespace
 {
-uint64_t getPos(const Statistic::StatisticId& statisticId, const uint64_t numberOfExpectedConcurrentAccess)
+uint64_t getPos(const StatisticTuple::StatisticId& statisticId, const uint64_t numberOfExpectedConcurrentAccess)
 {
     /// Shard the outer map by StatisticId only: all windows for a given id live in the same sub-store,
     /// so range queries acquire a single rlock and walk a compact per-id inner map.
     /// We can not use a worker thread id or etc, as this function is not only called from the execution.
-    return std::hash<Statistic::StatisticId>{}(statisticId) % numberOfExpectedConcurrentAccess;
+    return std::hash<StatisticTuple::StatisticId>{}(statisticId) % numberOfExpectedConcurrentAccess;
 }
 }
 
@@ -46,7 +46,7 @@ WindowStatisticStore::WindowStatisticStore(const uint64_t numberOfExpectedConcur
     }
 }
 
-bool WindowStatisticStore::insertStatistic(const Statistic::StatisticId& statisticId, Statistic statistic)
+bool WindowStatisticStore::insertStatistic(const StatisticTuple::StatisticId& statisticId, StatisticTuple statistic)
 {
     const auto startTs = statistic.getStartTs();
     const auto pos = getPos(statisticId, numberOfExpectedConcurrentAccess);
@@ -56,7 +56,7 @@ bool WindowStatisticStore::insertStatistic(const Statistic::StatisticId& statist
 }
 
 bool WindowStatisticStore::deleteStatistics(
-    const Statistic::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs)
+    const StatisticTuple::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs)
 {
     bool foundAnyStatistic = false;
 
@@ -76,7 +76,7 @@ bool WindowStatisticStore::deleteStatistics(
     for (auto it = windowMap.lower_bound(startTs); it != hi;)
     {
         auto& window = it->second;
-        auto newEnd = std::ranges::remove_if(window, [&endTs](const Statistic& curStatistic) { return curStatistic.getEndTs() <= endTs; });
+        auto newEnd = std::ranges::remove_if(window, [&endTs](const StatisticTuple& curStatistic) { return curStatistic.getEndTs() <= endTs; });
 
         if (newEnd.begin() != window.end())
         {
@@ -96,10 +96,10 @@ bool WindowStatisticStore::deleteStatistics(
     return foundAnyStatistic;
 }
 
-std::vector<Statistic> WindowStatisticStore::getStatistics(
-    const Statistic::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs)
+std::vector<StatisticTuple> WindowStatisticStore::getStatistics(
+    const StatisticTuple::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs)
 {
-    std::vector<Statistic> foundStatistics;
+    std::vector<StatisticTuple> foundStatistics;
 
     const auto pos = getPos(statisticId, numberOfExpectedConcurrentAccess);
     const auto lockedStatisticStore = allStatistics[pos].rlock();
@@ -117,13 +117,13 @@ std::vector<Statistic> WindowStatisticStore::getStatistics(
         std::ranges::copy_if(
             it->second,
             std::back_inserter(foundStatistics),
-            [&endTs](const Statistic& curStatistic) { return curStatistic.getEndTs() <= endTs; });
+            [&endTs](const StatisticTuple& curStatistic) { return curStatistic.getEndTs() <= endTs; });
     }
     return foundStatistics;
 }
 
-std::optional<Statistic> WindowStatisticStore::getSingleStatistic(
-    const Statistic::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs)
+std::optional<StatisticTuple> WindowStatisticStore::getSingleStatistic(
+    const StatisticTuple::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs)
 {
     const auto pos = getPos(statisticId, numberOfExpectedConcurrentAccess);
     const auto lockedStatisticStore = allStatistics[pos].rlock();
@@ -141,7 +141,7 @@ std::optional<Statistic> WindowStatisticStore::getSingleStatistic(
     const auto& window = wsIt->second;
     const auto foundStatistic = std::ranges::find_if(
         window,
-        [startTs, endTs](const Statistic& curStatistic)
+        [startTs, endTs](const StatisticTuple& curStatistic)
         { return curStatistic.getStartTs() == startTs and curStatistic.getEndTs() == endTs; });
     if (foundStatistic != window.end())
     {

@@ -12,7 +12,7 @@
     limitations under the License.
 */
 
-#include <StatisticCoordinator.hpp>
+#include <StatisticManager.hpp>
 
 #include <chrono>
 #include <cstdint>
@@ -45,7 +45,7 @@
 #include <ConditionTrigger.hpp>
 #include <ErrorHandling.hpp>
 #include <RequestStatisticStatement.hpp>
-#include <Statistic.hpp>
+#include <StatisticTuple.hpp>
 #include <StatisticQueryGenerator.hpp>
 #include <StatisticService.grpc.pb.h>
 #include <StatisticService.pb.h>
@@ -54,16 +54,16 @@ namespace NES
 {
 const auto* const addressAndPort = "0.0.0.0:0";
 
-/// gRPC service implementation that routes incoming reports to the StatisticCoordinator.
-class StatisticCoordinatorServiceImpl final : public StatisticCoordinatorService::Service
+/// gRPC service implementation that routes incoming reports to the StatisticManager.
+class StatisticManagerServiceImpl final : public StatisticManagerService::Service
 {
 public:
-    explicit StatisticCoordinatorServiceImpl(StatisticCoordinator& coordinator) : coordinator(coordinator) { }
+    explicit StatisticManagerServiceImpl(StatisticManager& coordinator) : coordinator(coordinator) { }
 
     grpc::Status ReportStatistic(grpc::ServerContext*, const StatisticReport* report, google::protobuf::Empty*) override
     {
         coordinator.onStatisticReport(
-            Statistic::StatisticId{report->statistic_id()},
+            StatisticTuple::StatisticId{report->statistic_id()},
             Windowing::TimeMeasure{report->start_ts()},
             Windowing::TimeMeasure{report->end_ts()},
             report->value());
@@ -71,15 +71,15 @@ public:
     }
 
 private:
-    StatisticCoordinator& coordinator;
+    StatisticManager& coordinator;
 };
 
-StatisticCoordinator::StatisticCoordinator(std::unique_ptr<StatisticQueryGenerator> queryGenerator, SubmitQueryFn submitQuery)
+StatisticManager::StatisticManager(std::unique_ptr<StatisticQueryGenerator> queryGenerator, SubmitQueryFn submitQuery)
     : queryGenerator(std::move(queryGenerator)), submitQuery(std::move(submitQuery))
 {
 }
 
-StatisticCoordinator::StatisticCoordinator(StatisticCoordinator&& other) noexcept
+StatisticManager::StatisticManager(StatisticManager&& other) noexcept
     : nextStatisticId(other.nextStatisticId.load())
     , registry(std::move(other.registry))
     , queryGenerator(std::move(other.queryGenerator))
@@ -89,7 +89,7 @@ StatisticCoordinator::StatisticCoordinator(StatisticCoordinator&& other) noexcep
 {
 }
 
-StatisticCoordinator& StatisticCoordinator::operator=(StatisticCoordinator&& other) noexcept
+StatisticManager& StatisticManager::operator=(StatisticManager&& other) noexcept
 {
     nextStatisticId.store(other.nextStatisticId.load());
     registry = std::move(other.registry);
@@ -100,12 +100,12 @@ StatisticCoordinator& StatisticCoordinator::operator=(StatisticCoordinator&& oth
     return *this;
 }
 
-StatisticCoordinator::~StatisticCoordinator()
+StatisticManager::~StatisticManager()
 {
     stopGrpcServer();
 }
 
-std::expected<CollectStatisticResult, Exception> StatisticCoordinator::collectNewStatistic(const RequestStatisticBuildStatement& statement)
+std::expected<CollectStatisticResult, Exception> StatisticManager::collectNewStatistic(const RequestStatisticBuildStatement& statement)
 {
     const StatisticRegistry::Key key{
         .metric = statement.metric, .collectionDomain = statement.domain, .windowSize = Windowing::TimeMeasure{statement.windowSizeMs}};
@@ -119,7 +119,7 @@ std::expected<CollectStatisticResult, Exception> StatisticCoordinator::collectNe
         return CollectStatisticResult{.queryId = existing->queryId, .statisticId = existing->statisticId, .alreadyExisted = true};
     }
 
-    const auto statisticId = Statistic::StatisticId{nextStatisticId.fetch_add(1)};
+    const auto statisticId = StatisticTuple::StatisticId{nextStatisticId.fetch_add(1)};
     auto plan = queryGenerator->generateQuery(statement, statisticId, coordinatorAddress);
 
     return submitQuery(std::move(plan))
@@ -136,7 +136,7 @@ std::expected<CollectStatisticResult, Exception> StatisticCoordinator::collectNe
             });
 }
 
-std::expected<CollectStatisticResult, Exception> StatisticCoordinator::collectWorkloadStatistic(
+std::expected<CollectStatisticResult, Exception> StatisticManager::collectWorkloadStatistic(
     const RequestStatisticBuildStatement& statement,
     const LogicalPlan& dataQueryPlan,
     const std::function<std::expected<QueryId, Exception>(LogicalPlan)>& submitPlan)
@@ -186,7 +186,7 @@ std::expected<CollectStatisticResult, Exception> StatisticCoordinator::collectWo
         return CollectStatisticResult{.queryId = existing->queryId, .statisticId = existing->statisticId, .alreadyExisted = true};
     }
 
-    const auto statisticId = Statistic::StatisticId{nextStatisticId.fetch_add(1)};
+    const auto statisticId = StatisticTuple::StatisticId{nextStatisticId.fetch_add(1)};
 
     /// Stamp DeferSourceStartTrait on the data plan's source so the runtime creates the
     /// RunningSource but doesn't begin emission until ALL expected splices have wired in.
@@ -290,19 +290,19 @@ std::expected<CollectStatisticResult, Exception> StatisticCoordinator::collectWo
     return CollectStatisticResult{.queryId = mergedQueryId, .statisticId = statisticId, .alreadyExisted = false};
 }
 
-bool StatisticCoordinator::addConditionTrigger(const StatisticRegistry::Key& key, ConditionTrigger trigger)
+bool StatisticManager::addConditionTrigger(const StatisticRegistry::Key& key, ConditionTrigger trigger)
 {
     return registry.addTrigger(key, std::move(trigger));
 }
 
-bool StatisticCoordinator::deregisterStatistic(const StatisticRegistry::Key& key)
+bool StatisticManager::deregisterStatistic(const StatisticRegistry::Key& key)
 {
     return registry.deregisterStatistic(key);
 }
 
-std::string StatisticCoordinator::startGrpcServer()
+std::string StatisticManager::startGrpcServer()
 {
-    auto service = std::make_unique<StatisticCoordinatorServiceImpl>(*this);
+    auto service = std::make_unique<StatisticManagerServiceImpl>(*this);
     grpc::ServerBuilder builder;
     int selectedPort = 0;
     builder.AddListeningPort(addressAndPort, grpc::InsecureServerCredentials(), &selectedPort);
@@ -310,38 +310,38 @@ std::string StatisticCoordinator::startGrpcServer()
     grpcServer = builder.BuildAndStart();
     if (not grpcServer)
     {
-        throw GRPCError("StatisticCoordinator: Failed to start gRPC server");
+        throw GRPCError("StatisticManager: Failed to start gRPC server");
     }
     service.release(); /// NOLINT(bugprone-unused-return-value)
     coordinatorAddress = "localhost:" + std::to_string(selectedPort);
-    NES_INFO("StatisticCoordinator gRPC server listening on {}", coordinatorAddress);
+    NES_INFO("StatisticManager gRPC server listening on {}", coordinatorAddress);
     return coordinatorAddress;
 }
 
-void StatisticCoordinator::stopGrpcServer()
+void StatisticManager::stopGrpcServer()
 {
     if (grpcServer)
     {
         grpcServer->Shutdown();
         grpcServer.reset();
-        NES_DEBUG("StatisticCoordinator gRPC server stopped.");
+        NES_DEBUG("StatisticManager gRPC server stopped.");
     }
 }
 
-std::optional<double> StatisticCoordinator::getStatistics(
+std::optional<double> StatisticManager::getStatistics(
     const std::vector<StatisticRegistry::Key>& keys,
     Windowing::TimeMeasure startTs,
     Windowing::TimeMeasure endTs,
     LogicalPlan& probeQueryWithoutSource)
 {
     /// Look up statisticIds for all keys.
-    std::vector<Statistic::StatisticId> statisticIds;
+    std::vector<StatisticTuple::StatisticId> statisticIds;
     for (const auto& key : keys)
     {
         auto entry = registry.find(key);
         if (not entry.has_value())
         {
-            throw QueryNotFound("StatisticCoordinator::getStatistics: key not found in registry");
+            throw QueryNotFound("StatisticManager::getStatistics: key not found in registry");
         }
         statisticIds.push_back(entry->statisticId);
     }
@@ -388,20 +388,20 @@ std::optional<double> StatisticCoordinator::getStatistics(
         {
             probeQueryId = queryIdResult.value();
             NES_DEBUG(
-                "StatisticCoordinator::getStatistics: probe query submitted as queryId={} with gRPC source port {}",
+                "StatisticManager::getStatistics: probe query submitted as queryId={} with gRPC source port {}",
                 probeQueryId,
                 grpcSourcePort);
             break;
         }
 
         NES_WARNING(
-            "StatisticCoordinator::getStatistics: failed to submit probe query on port {}: {}",
+            "StatisticManager::getStatistics: failed to submit probe query on port {}: {}",
             grpcSourcePort,
             queryIdResult.error().what());
 
         if (attempt == maxRetries - 1)
         {
-            throw QueryStartFailed("StatisticCoordinator::getStatistics: failed to submit probe query after {} attempts", maxRetries);
+            throw QueryStartFailed("StatisticManager::getStatistics: failed to submit probe query after {} attempts", maxRetries);
         }
     }
 
@@ -438,7 +438,7 @@ std::optional<double> StatisticCoordinator::getStatistics(
         if (not status.ok())
         {
             NES_WARNING(
-                "StatisticCoordinator::getStatistics: RequestStatistic failed for statisticId={}: {}", statId, status.error_message());
+                "StatisticManager::getStatistics: RequestStatistic failed for statisticId={}: {}", statId, status.error_message());
         }
     }
 
@@ -454,7 +454,7 @@ std::optional<double> StatisticCoordinator::getStatistics(
         }
         else
         {
-            NES_WARNING("StatisticCoordinator::getStatistics: timeout waiting for probe result");
+            NES_WARNING("StatisticManager::getStatistics: timeout waiting for probe result");
             allReceived = false;
         }
     }
@@ -472,8 +472,8 @@ std::optional<double> StatisticCoordinator::getStatistics(
     return result;
 }
 
-void StatisticCoordinator::onStatisticReport(
-    const Statistic::StatisticId statisticId, const Windowing::TimeMeasure startTs, const Windowing::TimeMeasure endTs, const double value)
+void StatisticManager::onStatisticReport(
+    const StatisticTuple::StatisticId statisticId, const Windowing::TimeMeasure startTs, const Windowing::TimeMeasure endTs, const double value)
 {
     /// Check if this is a response to a pending probe query.
     {
@@ -524,7 +524,7 @@ void StatisticCoordinator::onStatisticReport(
         });
 }
 
-void StatisticCoordinator::addProbeCallback(Statistic::StatisticId probeStatisticId, ProbeCallback callback)
+void StatisticManager::addProbeCallback(StatisticTuple::StatisticId probeStatisticId, ProbeCallback callback)
 {
     auto callbacks = probeCallbacks.wlock();
     (*callbacks)[probeStatisticId].push_back(std::move(callback));

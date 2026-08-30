@@ -70,7 +70,7 @@
 #include <Repl.hpp>
 #include <SingleNodeWorkerRPCService.grpc.pb.h>
 #include <SingleNodeWorkerRPCService.pb.h>
-#include <StatisticCoordinator.hpp>
+#include <StatisticManager.hpp>
 #include <Thread.hpp>
 #include <WorkerCatalog.hpp>
 #include <utils.hpp>
@@ -455,10 +455,10 @@ int main(int argc, char** argv)
         /// `--optimizer enable_histogram_delta_compression=true`; both the embedded and the distributed REPL
         /// load this configuration.
         const bool enableHistogramDeltaCompression = queryOptimizerConfig.enableHistogramDeltaCompression.getValue();
-        NES::StatisticRequestHandler statisticRequestHandler{NES::StatisticCoordinator{
+        NES::StatisticRequestHandler statisticRequestHandler{NES::StatisticManager{
             std::make_unique<NES::DefaultStatisticQueryGenerator>(enableHistogramDeltaCompression), submitQueryFn}};
         auto coordinatorAddr = statisticRequestHandler.startGrpcServer();
-        NES_INFO("StatisticCoordinator gRPC server listening on {}", coordinatorAddr);
+        NES_INFO("StatisticManager gRPC server listening on {}", coordinatorAddr);
 
         auto parseConditionExpression = [](const std::string& conditionStr) -> std::optional<NES::LogicalFunction>
         {
@@ -513,7 +513,7 @@ int main(int argc, char** argv)
         /// companion-setup block where it is started and remains joinable across replClient.run();
         /// it is stop-requested after run() returns. std::jthread joins on destruction.
         std::jthread baselinePollThread;
-        std::optional<std::function<void(NES::DistributedQueryId, const std::string&, NES::Statistic::StatisticId)>>
+        std::optional<std::function<void(NES::DistributedQueryId, const std::string&, NES::StatisticTuple::StatisticId)>>
             onCompanionAssociatedWithQuery = std::nullopt;
         if (program.get<bool>("--companion-statistic"))
         {
@@ -550,7 +550,7 @@ int main(int argc, char** argv)
                 /// The swap callback reuses this id so a single registry entry remains valid across
                 /// all re-deployments — the build branch on every spliced plan reports under the same
                 /// statisticId and therefore matches the same trigger entry.
-                std::optional<NES::Statistic::StatisticId> statisticId;
+                std::optional<NES::StatisticTuple::StatisticId> statisticId;
                 /// Workload-switch mode: current gate value. The callback flips this between 0 and 1
                 /// on each fire instead of redeploying. Updated under `mutex`.
                 int64_t currentSwitchValue = 0;
@@ -703,7 +703,7 @@ int main(int argc, char** argv)
                          switchName,
                          switchClient,
                          targetSwitchValue](
-                            NES::Statistic::StatisticId statId,
+                            NES::StatisticTuple::StatisticId statId,
                             NES::Windowing::TimeMeasure startTs,
                             NES::Windowing::TimeMeasure endTs)
                     {
@@ -777,7 +777,7 @@ int main(int argc, char** argv)
                             /// Re-splice the workload build branch into the new query's plan so the
                             /// merged plan keeps reporting under the original statisticId — the existing
                             /// registry entry continues firing this very callback on each window close.
-                            std::optional<NES::Statistic::StatisticId> originalStatisticId;
+                            std::optional<NES::StatisticTuple::StatisticId> originalStatisticId;
                             {
                                 std::lock_guard lock(swapState->mutex);
                                 originalStatisticId = swapState->statisticId;
@@ -867,7 +867,7 @@ int main(int argc, char** argv)
                 req.options["expected_splice_count"] = std::to_string(companionStatisticRequests.size());
             }
             onCompanionAssociatedWithQuery
-                = [swapState](NES::DistributedQueryId id, const std::string& sql, NES::Statistic::StatisticId statId)
+                = [swapState](NES::DistributedQueryId id, const std::string& sql, NES::StatisticTuple::StatisticId statId)
             {
                 std::lock_guard lock(swapState->mutex);
                 swapState->currentQueryId = std::move(id);

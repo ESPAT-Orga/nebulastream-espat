@@ -22,7 +22,7 @@
 #include <Functions/FieldAccessLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/WindowAggregationLogicalFunction.hpp>
 #include <Util/Reflection.hpp>
-#include <Statistic.hpp>
+#include <StatisticTuple.hpp>
 
 namespace NES
 {
@@ -40,8 +40,8 @@ public:
     ScalarStatisticLogicalFunction(
         const FieldAccessLogicalFunction& onField,
         const FieldAccessLogicalFunction& asField,
-        Statistic::StatisticId statisticId,
-        Statistic::StatisticType op);
+        StatisticTuple::StatisticId statisticId,
+        StatisticTuple::StatisticType op);
     ~ScalarStatisticLogicalFunction() = default;
 
     [[nodiscard]] std::string_view getName() const noexcept;
@@ -64,8 +64,8 @@ public:
 
     [[nodiscard]] bool operator==(const ScalarStatisticLogicalFunction& rhs) const;
 
-    Statistic::StatisticId statisticId;
-    Statistic::StatisticType op;
+    StatisticTuple::StatisticId statisticId;
+    StatisticTuple::StatisticType op;
 
 private:
     static constexpr std::string_view NAME = "ScalarStatistic";
@@ -97,7 +97,7 @@ namespace NES::detail
 {
 struct ReflectedScalarStatisticLogicalFunction
 {
-    Statistic::StatisticId::Underlying statisticId;
+    StatisticTuple::StatisticId::Underlying statisticId;
     uint64_t op;
     FieldAccessLogicalFunction onField;
     FieldAccessLogicalFunction asField;

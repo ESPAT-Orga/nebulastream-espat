@@ -18,15 +18,15 @@
 #include <utility>
 #include <fmt/format.h>
 #include <LogicalOperatorRegistry.hpp>
-#include <Statistic.hpp>
+#include <StatisticTuple.hpp>
 
 namespace NES
 {
 
 StatisticStoreWriterLogicalOperator::StatisticStoreWriterLogicalOperator(
     std::shared_ptr<LogicalStatisticFields> inputLogicalStatisticFields,
-    const Statistic::StatisticId statisticId,
-    const Statistic::StatisticType statisticType)
+    const StatisticTuple::StatisticId statisticId,
+    const StatisticTuple::StatisticType statisticType)
     : inputLogicalStatisticFields(std::move(inputLogicalStatisticFields)), statisticId(statisticId), statisticType(statisticType)
 {
 }
@@ -135,12 +135,12 @@ LogicalStatisticFields StatisticStoreWriterLogicalOperator::getOutputStatisticFi
     return LogicalStatisticFields().addQualifierName(qualifierName);
 }
 
-Statistic::StatisticId StatisticStoreWriterLogicalOperator::getStatisticId() const
+StatisticTuple::StatisticId StatisticStoreWriterLogicalOperator::getStatisticId() const
 {
     return statisticId;
 }
 
-Statistic::StatisticType StatisticStoreWriterLogicalOperator::getStatisticType() const
+StatisticTuple::StatisticType StatisticStoreWriterLogicalOperator::getStatisticType() const
 {
     return statisticType;
 }
@@ -156,7 +156,7 @@ StatisticStoreWriterLogicalOperator Unreflector<StatisticStoreWriterLogicalOpera
     auto [statisticId, statisticType] = unreflect<detail::ReflectedStatisticStoreWriterLogicalOperator>(reflected);
     /// The data field name is re-derived from the id, so a fresh (metadata-only) LogicalStatisticFields is enough.
     return StatisticStoreWriterLogicalOperator{
-        std::make_shared<LogicalStatisticFields>(), Statistic::StatisticId{statisticId}, statisticType};
+        std::make_shared<LogicalStatisticFields>(), StatisticTuple::StatisticId{statisticId}, statisticType};
 }
 
 LogicalOperatorRegistryReturnType

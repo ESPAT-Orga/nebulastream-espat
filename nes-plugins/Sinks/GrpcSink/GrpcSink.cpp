@@ -53,7 +53,7 @@ void GrpcSink::start(PipelineExecutionContext&)
 {
     NES_DEBUG("GrpcSink::start: Connecting to {}:{}.", grpcHost, grpcPort);
     auto channel = grpc::CreateChannel(grpcHost + ":" + std::to_string(grpcPort), grpc::InsecureChannelCredentials());
-    stub = StatisticCoordinatorService::NewStub(channel);
+    stub = StatisticManagerService::NewStub(channel);
     if (not stub)
     {
         throw CannotOpenSink("GrpcSink: Failed to create gRPC stub for {}:{}", grpcHost, grpcPort);

@@ -31,7 +31,7 @@
 #include <fmt/format.h>
 #include <AggregationLogicalFunctionRegistry.hpp>
 #include <ErrorHandling.hpp>
-#include <Statistic.hpp>
+#include <StatisticTuple.hpp>
 
 namespace NES
 {
@@ -49,7 +49,7 @@ EquiWidthHistogramLogicalFunction::EquiWidthHistogramLogicalFunction(
     const uint64_t memoryBudget,
     const uint64_t minValue,
     const uint64_t maxValue,
-    const Statistic::StatisticId statisticId)
+    const StatisticTuple::StatisticId statisticId)
     : StatisticLogicalFunction(memoryBudget)
     , minValue(minValue)
     , maxValue(maxValue)
@@ -68,7 +68,7 @@ EquiWidthHistogramLogicalFunction::EquiWidthHistogramLogicalFunction(
     const uint64_t memoryBudget,
     const uint64_t minValue,
     const uint64_t maxValue,
-    const Statistic::StatisticId statisticId)
+    const StatisticTuple::StatisticId statisticId)
     : StatisticLogicalFunction(memoryBudget)
     , minValue(minValue)
     , maxValue(maxValue)
@@ -117,7 +117,7 @@ EquiWidthHistogramLogicalFunction Unreflector<EquiWidthHistogramLogicalFunction>
 {
     auto data = unreflect<detail::ReflectedEquiWidthHistogramLogicalFunction>(reflected);
     return EquiWidthHistogramLogicalFunction{
-        data.onField, data.asField, data.memoryBudget, data.minValue, data.maxValue, Statistic::StatisticId{data.statisticId}};
+        data.onField, data.asField, data.memoryBudget, data.minValue, data.maxValue, StatisticTuple::StatisticId{data.statisticId}};
 }
 
 EquiWidthHistogramLogicalFunction EquiWidthHistogramLogicalFunction::withInferredStamp(const Schema& schema) const

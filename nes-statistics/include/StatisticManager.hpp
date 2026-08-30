@@ -31,7 +31,7 @@
 #include <ConditionTrigger.hpp>
 #include <ErrorHandling.hpp>
 #include <RequestStatisticStatement.hpp>
-#include <Statistic.hpp>
+#include <StatisticTuple.hpp>
 #include <StatisticQueryGenerator.hpp>
 #include <StatisticRegistry.hpp>
 
@@ -47,7 +47,7 @@ namespace NES
 struct CollectStatisticResult
 {
     QueryId queryId;
-    Statistic::StatisticId statisticId;
+    StatisticTuple::StatisticId statisticId;
     bool alreadyExisted;
 };
 
@@ -55,18 +55,18 @@ struct CollectStatisticResult
 /// unique StatisticIds via an atomic counter. This component can be reused by different
 /// requesters (e.g., the REPL frontend, the query optimizer).
 ///
-/// Also runs a gRPC server (StatisticCoordinatorService) that receives results from gRPC sinks.
-class StatisticCoordinator
+/// Also runs a gRPC server (StatisticManagerService) that receives results from gRPC sinks.
+class StatisticManager
 {
 public:
     /// Callback that takes a LogicalPlan (already generated) and submits it.
     /// Returns the QueryId on success or an Exception on failure.
     using SubmitQueryFn = std::function<std::expected<QueryId, Exception>(LogicalPlan)>;
 
-    StatisticCoordinator(std::unique_ptr<StatisticQueryGenerator> queryGenerator, SubmitQueryFn submitQuery);
-    StatisticCoordinator(StatisticCoordinator&& other) noexcept;
-    StatisticCoordinator& operator=(StatisticCoordinator&& other) noexcept;
-    ~StatisticCoordinator();
+    StatisticManager(std::unique_ptr<StatisticQueryGenerator> queryGenerator, SubmitQueryFn submitQuery);
+    StatisticManager(StatisticManager&& other) noexcept;
+    StatisticManager& operator=(StatisticManager&& other) noexcept;
+    ~StatisticManager();
 
     /// Requests collection of a new statistic. If an identical request is already active (same metric,
     /// collection domain, window size), returns the existing entry (and appends the trigger if provided).
@@ -90,13 +90,13 @@ public:
     /// Distinct from the registry's per-key triggers: routed directly by the probe report's
     /// statisticId, so each gated probe pipeline (with its own regime id and Selection predicate)
     /// can deliver to a dedicated callback without interfering with other probes' routes.
-    using ProbeCallback = std::function<void(Statistic::StatisticId, Windowing::TimeMeasure, Windowing::TimeMeasure)>;
+    using ProbeCallback = std::function<void(StatisticTuple::StatisticId, Windowing::TimeMeasure, Windowing::TimeMeasure)>;
 
     /// Register a callback under a probe-specific statisticId. Multiple registrations under the
     /// same id append to the list; all callbacks fire when a report arrives. Used by
     /// collectWorkloadStatistic: each selectivity-gated probe gets a unique regime id and a
     /// callback that knows which workload variant the regime implies.
-    void addProbeCallback(Statistic::StatisticId probeStatisticId, ProbeCallback callback);
+    void addProbeCallback(StatisticTuple::StatisticId probeStatisticId, ProbeCallback callback);
 
     /// Removes the entry for this key. Returns true if an entry was removed.
     bool deregisterStatistic(const StatisticRegistry::Key& key);
@@ -124,7 +124,7 @@ public:
 
     /// Called by the gRPC service handler when a StatisticReport arrives.
     /// Routes to pending probes or condition triggers.
-    void onStatisticReport(Statistic::StatisticId statisticId, Windowing::TimeMeasure startTs, Windowing::TimeMeasure endTs, double value);
+    void onStatisticReport(StatisticTuple::StatisticId statisticId, Windowing::TimeMeasure startTs, Windowing::TimeMeasure endTs, double value);
 
 private:
     std::atomic<uint64_t> nextStatisticId{1};
@@ -142,13 +142,13 @@ private:
         std::promise<double> promise;
     };
 
-    folly::Synchronized<std::unordered_map<Statistic::StatisticId, PendingProbe>> pendingProbes;
+    folly::Synchronized<std::unordered_map<StatisticTuple::StatisticId, PendingProbe>> pendingProbes;
 
     /// Direct-route callbacks for probe-specific statisticIds. Looked up by onStatisticReport
     /// before the registry scan; if a regime id matches, fires the registered callbacks and
     /// returns (the registry scan would not match anyway because regime ids are separate from
     /// build-branch ids).
-    folly::Synchronized<std::unordered_map<Statistic::StatisticId, std::vector<ProbeCallback>>> probeCallbacks;
+    folly::Synchronized<std::unordered_map<StatisticTuple::StatisticId, std::vector<ProbeCallback>>> probeCallbacks;
 
     /// Cache of data-query deployments keyed by logical source name (we use logical source name
     /// as a proxy for "same data query"). Lets a second collectWorkloadStatistic call for a

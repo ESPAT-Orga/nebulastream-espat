@@ -31,7 +31,7 @@
 #include <fmt/format.h>
 #include <AggregationLogicalFunctionRegistry.hpp>
 #include <ErrorHandling.hpp>
-#include <Statistic.hpp>
+#include <StatisticTuple.hpp>
 
 namespace NES
 {
@@ -47,7 +47,7 @@ EquiWidthHistogramDeltaResolverLogicalFunction::EquiWidthHistogramDeltaResolverL
     const uint64_t memoryBudget,
     const uint64_t minValue,
     const uint64_t maxValue,
-    const Statistic::StatisticId statisticId)
+    const StatisticTuple::StatisticId statisticId)
     : StatisticLogicalFunction(memoryBudget)
     , minValue(minValue)
     , maxValue(maxValue)
@@ -66,7 +66,7 @@ EquiWidthHistogramDeltaResolverLogicalFunction::EquiWidthHistogramDeltaResolverL
     const uint64_t memoryBudget,
     const uint64_t minValue,
     const uint64_t maxValue,
-    const Statistic::StatisticId statisticId)
+    const StatisticTuple::StatisticId statisticId)
     : StatisticLogicalFunction(memoryBudget)
     , minValue(minValue)
     , maxValue(maxValue)
@@ -117,7 +117,7 @@ Unreflector<EquiWidthHistogramDeltaResolverLogicalFunction>::operator()(const Re
 {
     auto data = unreflect<detail::ReflectedEquiWidthHistogramDeltaResolverLogicalFunction>(reflected);
     return EquiWidthHistogramDeltaResolverLogicalFunction{
-        data.onField, data.asField, data.memoryBudget, data.minValue, data.maxValue, Statistic::StatisticId{data.statisticId}};
+        data.onField, data.asField, data.memoryBudget, data.minValue, data.maxValue, StatisticTuple::StatisticId{data.statisticId}};
 }
 
 EquiWidthHistogramDeltaResolverLogicalFunction EquiWidthHistogramDeltaResolverLogicalFunction::withInferredStamp(const Schema& schema) const

@@ -12,7 +12,7 @@
 
 add_source_files(nes-statistics
         Metric.cpp
-        StatisticCoordinator.cpp
+        StatisticManager.cpp
         StatisticRegistry.cpp
         DefaultStatisticQueryGenerator.cpp
 )

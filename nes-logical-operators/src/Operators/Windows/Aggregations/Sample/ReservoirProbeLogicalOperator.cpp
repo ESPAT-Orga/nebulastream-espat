@@ -29,18 +29,18 @@
 #include <fmt/format.h>
 #include <ErrorHandling.hpp>
 #include <LogicalOperatorRegistry.hpp>
-#include <Statistic.hpp>
+#include <StatisticTuple.hpp>
 
 namespace NES
 {
 
-ReservoirProbeLogicalOperator::ReservoirProbeLogicalOperator(const Statistic::StatisticId statisticId, const Schema& sampleSchema)
+ReservoirProbeLogicalOperator::ReservoirProbeLogicalOperator(const StatisticTuple::StatisticId statisticId, const Schema& sampleSchema)
     : statisticId(statisticId), sampleSchema(sampleSchema)
 {
 }
 
 ReservoirProbeLogicalOperator::ReservoirProbeLogicalOperator(
-    Statistic::StatisticId stashHash, const Schema& sampleSchema, LogicalStatisticFields logicalStatisticFields)
+    StatisticTuple::StatisticId stashHash, const Schema& sampleSchema, LogicalStatisticFields logicalStatisticFields)
     : LogicalStatisticFields(std::move(logicalStatisticFields)), statisticId(stashHash), sampleSchema(sampleSchema)
 {
 }
@@ -175,7 +175,7 @@ ReservoirProbeLogicalOperator Unreflector<ReservoirProbeLogicalOperator>::operat
         sampleSchema.addField(
             field.name, DataTypeProvider::provideDataType(static_cast<DataType::Type>(field.dataType), DataType::NULLABLE::NOT_NULLABLE));
     }
-    return ReservoirProbeLogicalOperator{Statistic::StatisticId{statisticId}, sampleSchema};
+    return ReservoirProbeLogicalOperator{StatisticTuple::StatisticId{statisticId}, sampleSchema};
 }
 
 LogicalOperatorRegistryReturnType

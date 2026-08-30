@@ -41,7 +41,7 @@
 #include <ErrorHandling.hpp>
 #include <QueryOptimizer.hpp>
 #include <SingleNodeWorkerConfiguration.hpp>
-#include <StatisticCoordinator.hpp>
+#include <StatisticManager.hpp>
 #include <StatisticQueryGenerator.hpp>
 #include <WorkerCatalog.hpp>
 #include <WorkerConfig.hpp>
@@ -460,8 +460,8 @@ std::expected<ShowQueriesStatementResult, Exception> QueryStatementHandler::oper
     return std::unexpected(QueryStatusFailed("Could not retrieve query status for some queries: ", fmt::join(statusOpt.error(), "\n")));
 }
 
-StatisticRequestHandler::StatisticRequestHandler(StatisticCoordinator statisticCoordinator)
-    : statisticCoordinator(std::make_unique<StatisticCoordinator>(std::move(statisticCoordinator)))
+StatisticRequestHandler::StatisticRequestHandler(StatisticManager statisticCoordinator)
+    : statisticCoordinator(std::make_unique<StatisticManager>(std::move(statisticCoordinator)))
 {
 }
 

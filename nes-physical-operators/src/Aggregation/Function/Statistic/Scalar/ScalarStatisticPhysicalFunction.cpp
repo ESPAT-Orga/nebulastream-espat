@@ -27,7 +27,7 @@
 #include <AggregationPhysicalFunctionRegistry.hpp>
 #include <ErrorHandling.hpp>
 #include <ExecutionContext.hpp>
-#include <Statistic.hpp>
+#include <StatisticTuple.hpp>
 
 namespace NES
 {
@@ -138,7 +138,7 @@ AggregationPhysicalFunctionGeneratedRegistrar::RegisterScalarStatisticAggregatio
 
     switch (arguments.scalarOp.value())
     {
-        case Statistic::StatisticType::Count:
+        case StatisticTuple::StatisticType::Count:
             return std::make_shared<CountStatisticPhysicalFunction>(
                 std::move(arguments.inputType),
                 std::move(arguments.resultType),
@@ -146,7 +146,7 @@ AggregationPhysicalFunctionGeneratedRegistrar::RegisterScalarStatisticAggregatio
                 arguments.resultFieldIdentifier,
                 arguments.includeNullValues,
                 arguments.numberOfSeenTuplesFieldName.value());
-        case Statistic::StatisticType::Sum:
+        case StatisticTuple::StatisticType::Sum:
             return std::make_shared<SumStatisticPhysicalFunction>(
                 std::move(arguments.inputType),
                 std::move(arguments.resultType),
@@ -154,7 +154,7 @@ AggregationPhysicalFunctionGeneratedRegistrar::RegisterScalarStatisticAggregatio
                 arguments.resultFieldIdentifier,
                 arguments.includeNullValues,
                 arguments.numberOfSeenTuplesFieldName.value());
-        case Statistic::StatisticType::Avg:
+        case StatisticTuple::StatisticType::Avg:
             return std::make_shared<AvgStatisticPhysicalFunction>(
                 std::move(arguments.inputType),
                 std::move(arguments.resultType),

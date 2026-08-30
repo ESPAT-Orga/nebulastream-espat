@@ -24,7 +24,7 @@
 #include <Statements/StatementHandler.hpp>
 #include <QueryId.hpp>
 #include <RequestStatisticStatement.hpp>
-#include <Statistic.hpp>
+#include <StatisticTuple.hpp>
 
 namespace NES
 {
@@ -54,7 +54,7 @@ public:
         bool interactiveMode,
         std::stop_token stopToken,
         std::vector<RequestStatisticBuildStatement> companionStatisticRequests = {},
-        std::optional<std::function<void(DistributedQueryId, const std::string&, Statistic::StatisticId)>> onCompanionAssociatedWithQuery
+        std::optional<std::function<void(DistributedQueryId, const std::string&, StatisticTuple::StatisticId)>> onCompanionAssociatedWithQuery
         = std::nullopt);
     void run();
     ~Repl();

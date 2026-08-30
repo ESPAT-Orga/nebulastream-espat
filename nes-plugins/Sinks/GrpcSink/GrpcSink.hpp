@@ -50,7 +50,7 @@ struct ConfigParametersGrpcSink
         = DescriptorConfig::createConfigParameterContainerMap(SinkDescriptor::parameterMap, HOST, PORT);
 };
 
-/// A sink that sends tuple data to a remote StatisticCoordinatorService via gRPC.
+/// A sink that sends tuple data to a remote StatisticManagerService via gRPC.
 /// Each tuple buffer is read for statisticId, startTs, endTs, and value fields,
 /// and a StatisticReport message is sent for each tuple.
 class GrpcSink final : public Sink
@@ -73,7 +73,7 @@ private:
     std::string grpcHost;
     uint32_t grpcPort;
     std::shared_ptr<const Schema> schema;
-    std::unique_ptr<StatisticCoordinatorService::Stub> stub;
+    std::unique_ptr<StatisticManagerService::Stub> stub;
 };
 
 }

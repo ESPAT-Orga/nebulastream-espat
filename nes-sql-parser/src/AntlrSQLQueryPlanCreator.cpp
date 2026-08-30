@@ -85,7 +85,7 @@
 #include <CommonParserFunctions.hpp>
 #include <ErrorHandling.hpp>
 #include <ParserUtil.hpp>
-#include <Statistic.hpp>
+#include <StatisticTuple.hpp>
 
 namespace NES::Parsers
 {
@@ -541,7 +541,7 @@ void AntlrSQLQueryPlanCreator::exitPrimaryQuery(AntlrSQLParser::PrimaryQueryCont
             if (not omitStoreWriter)
             {
                 queryPlan = LogicalPlanBuilder::addStatisticStoreWriter(
-                    queryPlan, resolverFields, statisticId, Statistic::StatisticType::Equi_Width_Histogram);
+                    queryPlan, resolverFields, statisticId, StatisticTuple::StatisticType::Equi_Width_Histogram);
             }
         }
         else
@@ -556,7 +556,7 @@ void AntlrSQLQueryPlanCreator::exitPrimaryQuery(AntlrSQLParser::PrimaryQueryCont
                 for (const auto& aggregation : helpers.top().windowAggs)
                 {
                     const auto target = tryGetStatisticTarget(*aggregation);
-                    INVARIANT(target.has_value(), "Statistic query contains a non-statistic aggregation: {}", aggregation->getName());
+                    INVARIANT(target.has_value(), "StatisticTuple query contains a non-statistic aggregation: {}", aggregation->getName());
                     queryPlan = LogicalPlanBuilder::addStatisticStoreWriter(
                         queryPlan, logicalStatisticFields, target->statisticId, target->statisticType);
                 }
@@ -992,7 +992,7 @@ static uint64_t parseConstant(std::string constant, const char* fieldName)
 /// the datatype how to interpret its payload, since schema inference runs long before the store is consulted. Antlr
 /// parses the datatype as a field access, so it must be lowercase and name a DataType. Everything here is user input, so
 /// every failure is InvalidQuerySyntax rather than an INVARIANT.
-static std::pair<Statistic::StatisticId, DataType>
+static std::pair<StatisticTuple::StatisticId, DataType>
 parseProbeIdAndDatatype(AntlrSQLHelper& helper, const std::string& funcName, const std::string& text)
 {
     if (helper.constantBuilder.empty())
@@ -1000,7 +1000,7 @@ parseProbeIdAndDatatype(AntlrSQLHelper& helper, const std::string& funcName, con
         throw InvalidQuerySyntax(
             "Expected constant (statisticId) as first argument of {} function call, got nothing at {}", funcName, text);
     }
-    const Statistic::StatisticId statisticId{parseConstant(helper.constantBuilder.back(), "statisticId")};
+    const StatisticTuple::StatisticId statisticId{parseConstant(helper.constantBuilder.back(), "statisticId")};
     helper.constantBuilder.pop_back();
 
     if (helper.functionBuilder.empty())
@@ -1113,7 +1113,7 @@ void AntlrSQLQueryPlanCreator::exitFunctionCall(AntlrSQLParser::FunctionCallCont
                         "Expected constant (sample hash) as first argument of Reservoir_Probe function call, got nothing at {}",
                         context->getText());
                 }
-                const Statistic::StatisticId statisticId{parseConstant(helpers.top().constantBuilder.front(), "statisticId")};
+                const StatisticTuple::StatisticId statisticId{parseConstant(helpers.top().constantBuilder.front(), "statisticId")};
                 helpers.top().statisticId = statisticId;
                 if (helpers.top().functionBuilder.empty())
                 {
@@ -1152,7 +1152,7 @@ void AntlrSQLQueryPlanCreator::exitFunctionCall(AntlrSQLParser::FunctionCallCont
                         "Expected constant (sample hash) as first argument of Reservoir_Probe function call, got nothing at {}",
                         context->getText());
                 }
-                const Statistic::StatisticId statisticId{parseConstant(helpers.top().constantBuilder.back(), "statisticId")};
+                const StatisticTuple::StatisticId statisticId{parseConstant(helpers.top().constantBuilder.back(), "statisticId")};
                 helpers.top().constantBuilder.pop_back();
                 if (helpers.top().functionBuilder.empty())
                 {
@@ -1186,7 +1186,7 @@ void AntlrSQLQueryPlanCreator::exitFunctionCall(AntlrSQLParser::FunctionCallCont
                         "Expected constant (statistic hash) as first argument of EQUIWIDTHHISTOGRAM function call, got nothing at {}",
                         context->getText());
                 }
-                const Statistic::StatisticId statisticId{parseConstant(helpers.top().constantBuilder.front(), "statisticId")};
+                const StatisticTuple::StatisticId statisticId{parseConstant(helpers.top().constantBuilder.front(), "statisticId")};
                 helpers.top().statisticId = statisticId;
                 if (helpers.top().functionBuilder.size() != 1
                     || !helpers.top().functionBuilder.back().tryGetAs<FieldAccessLogicalFunction>().has_value())
@@ -1226,7 +1226,7 @@ void AntlrSQLQueryPlanCreator::exitFunctionCall(AntlrSQLParser::FunctionCallCont
                         "Expected constant (statistic hash) as first argument of EQUIWIDTHHISTOGRAMDELTA function call, got nothing at {}",
                         context->getText());
                 }
-                const Statistic::StatisticId statisticId{parseConstant(helpers.top().constantBuilder.front(), "statisticId")};
+                const StatisticTuple::StatisticId statisticId{parseConstant(helpers.top().constantBuilder.front(), "statisticId")};
                 helpers.top().statisticId = statisticId;
                 if (helpers.top().functionBuilder.size() != 1
                     || !helpers.top().functionBuilder.back().tryGetAs<FieldAccessLogicalFunction>().has_value())
@@ -1261,7 +1261,7 @@ void AntlrSQLQueryPlanCreator::exitFunctionCall(AntlrSQLParser::FunctionCallCont
                         "Expected constant (sample hash) as first argument of EQUIWIDTH_PROBE function call, got nothing at {}",
                         context->getText());
                 }
-                const Statistic::StatisticId statisticId{parseConstant(helpers.top().constantBuilder.back(), "statisticId")};
+                const StatisticTuple::StatisticId statisticId{parseConstant(helpers.top().constantBuilder.back(), "statisticId")};
                 helpers.top().constantBuilder.pop_back();
                 if (helpers.top().functionBuilder.empty())
                 {
@@ -1310,7 +1310,7 @@ void AntlrSQLQueryPlanCreator::exitFunctionCall(AntlrSQLParser::FunctionCallCont
                 }
                 const auto memoryBudget = parseConstant(helpers.top().constantBuilder.back(), "memoryBudget");
                 helpers.top().constantBuilder.pop_back();
-                const Statistic::StatisticId statisticId{parseConstant(helpers.top().constantBuilder.back(), "statisticId")};
+                const StatisticTuple::StatisticId statisticId{parseConstant(helpers.top().constantBuilder.back(), "statisticId")};
                 helpers.top().constantBuilder.pop_back();
                 helpers.top().statisticId = statisticId;
                 const auto asFieldIfNotOverwritten = FieldAccessLogicalFunction{
@@ -1341,12 +1341,12 @@ void AntlrSQLQueryPlanCreator::exitFunctionCall(AntlrSQLParser::FunctionCallCont
                 {
                     throw InvalidQuerySyntax("{} requires exactly the statisticId as a constant", funcName);
                 }
-                const Statistic::StatisticId statisticId{parseConstant(helpers.top().constantBuilder.back(), "statisticId")};
+                const StatisticTuple::StatisticId statisticId{parseConstant(helpers.top().constantBuilder.back(), "statisticId")};
                 helpers.top().constantBuilder.pop_back();
                 helpers.top().statisticId = statisticId;
-                const auto op = funcName == "SUMSTATISTIC" ? Statistic::StatisticType::Sum
-                    : funcName == "COUNTSTATISTIC"         ? Statistic::StatisticType::Count
-                                                           : Statistic::StatisticType::Avg;
+                const auto op = funcName == "SUMSTATISTIC" ? StatisticTuple::StatisticType::Sum
+                    : funcName == "COUNTSTATISTIC"         ? StatisticTuple::StatisticType::Count
+                                                           : StatisticTuple::StatisticType::Avg;
                 const auto asFieldIfNotOverwritten = FieldAccessLogicalFunction{
                     LogicalStatisticFields().statisticDataField.dataType, LogicalStatisticFields().statisticDataField.name};
                 helpers.top().windowAggs.push_back(std::make_shared<WindowAggregationLogicalFunction>(
@@ -1359,9 +1359,9 @@ void AntlrSQLQueryPlanCreator::exitFunctionCall(AntlrSQLParser::FunctionCallCont
                 /// must be given because nothing links the probe back to the build's on-field, and schema inference runs
                 /// long before the store is consulted (same reason COUNTMIN_PROBE takes a counter datatype).
                 const auto [statisticId, valueDatatype] = parseProbeIdAndDatatype(helpers.top(), funcName, context->getText());
-                const auto op = funcName == "SUMSTATISTIC_PROBE" ? Statistic::StatisticType::Sum
-                    : funcName == "COUNTSTATISTIC_PROBE"         ? Statistic::StatisticType::Count
-                                                                 : Statistic::StatisticType::Avg;
+                const auto op = funcName == "SUMSTATISTIC_PROBE" ? StatisticTuple::StatisticType::Sum
+                    : funcName == "COUNTSTATISTIC_PROBE"         ? StatisticTuple::StatisticType::Count
+                                                                 : StatisticTuple::StatisticType::Avg;
                 helpers.top().statProbe = ScalarStatisticProbeLogicalOperator{statisticId, op, valueDatatype};
                 break;
             }

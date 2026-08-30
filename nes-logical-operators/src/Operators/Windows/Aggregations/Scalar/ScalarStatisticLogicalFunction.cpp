@@ -31,7 +31,7 @@
 #include <magic_enum/magic_enum.hpp>
 #include <AggregationLogicalFunctionRegistry.hpp>
 #include <ErrorHandling.hpp>
-#include <Statistic.hpp>
+#include <StatisticTuple.hpp>
 
 namespace NES
 {
@@ -39,8 +39,8 @@ namespace NES
 ScalarStatisticLogicalFunction::ScalarStatisticLogicalFunction(
     const FieldAccessLogicalFunction& onField,
     const FieldAccessLogicalFunction& asField,
-    const Statistic::StatisticId statisticId,
-    const Statistic::StatisticType op)
+    const StatisticTuple::StatisticId statisticId,
+    const StatisticTuple::StatisticType op)
     : statisticId(statisticId)
     , op(op)
     , inputStamp(onField.getDataType())
@@ -79,7 +79,7 @@ ScalarStatisticLogicalFunction Unreflector<ScalarStatisticLogicalFunction>::oper
 {
     auto data = unreflect<detail::ReflectedScalarStatisticLogicalFunction>(reflected);
     return ScalarStatisticLogicalFunction{
-        data.onField, data.asField, Statistic::StatisticId{data.statisticId}, static_cast<Statistic::StatisticType>(data.op)};
+        data.onField, data.asField, StatisticTuple::StatisticId{data.statisticId}, static_cast<StatisticTuple::StatisticType>(data.op)};
 }
 
 ScalarStatisticLogicalFunction ScalarStatisticLogicalFunction::withInferredStamp(const Schema& schema) const
@@ -89,7 +89,7 @@ ScalarStatisticLogicalFunction ScalarStatisticLogicalFunction::withInferredStamp
     {
         throw CannotDeserialize("scalar statistics on non numeric fields is not supported, but got {}", newOnField.getDataType());
     }
-    /// A scalar statistic persists the bare aggregate, and Statistic carries no null channel to persist a NULL one in
+    /// A scalar statistic persists the bare aggregate, and StatisticTuple carries no null channel to persist a NULL one in
     /// (see makeScalarStatisticRecord). Accepting a nullable field would mean either silently storing a NULL sum as its
     /// raw bytes, or diverging from SUM/AVG, which NULL-poison. Reject it instead of guessing.
     if (newOnField.getDataType().nullable)
@@ -121,19 +121,19 @@ ScalarStatisticLogicalFunction ScalarStatisticLogicalFunction::withInferredStamp
     DataType newFinalAggregateStamp;
     switch (op)
     {
-        case Statistic::StatisticType::Count: {
+        case StatisticTuple::StatisticType::Count: {
             const auto inferred = CountAggregationLogicalFunction{newOnField}.withInferredStamp(schema);
             newInputStamp = inferred.getInputStamp();
             newFinalAggregateStamp = inferred.getFinalAggregateStamp();
             break;
         }
-        case Statistic::StatisticType::Sum: {
+        case StatisticTuple::StatisticType::Sum: {
             const auto inferred = SumAggregationLogicalFunction{newOnField}.withInferredStamp(schema);
             newInputStamp = inferred.getInputStamp();
             newFinalAggregateStamp = inferred.getFinalAggregateStamp();
             break;
         }
-        case Statistic::StatisticType::Avg: {
+        case StatisticTuple::StatisticType::Avg: {
             const auto inferred = AvgAggregationLogicalFunction{newOnField}.withInferredStamp(schema);
             newInputStamp = inferred.getInputStamp();
             newFinalAggregateStamp = inferred.getFinalAggregateStamp();

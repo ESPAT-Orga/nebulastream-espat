@@ -27,7 +27,7 @@
 #include <CollectionDomain.hpp>
 #include <ConditionTrigger.hpp>
 #include <Metric.hpp>
-#include <Statistic.hpp>
+#include <StatisticTuple.hpp>
 
 namespace NES
 {
@@ -67,7 +67,7 @@ public:
     struct Entry
     {
         QueryId queryId;
-        Statistic::StatisticId statisticId;
+        StatisticTuple::StatisticId statisticId;
         std::vector<ConditionTrigger> triggers;
     };
 
@@ -77,7 +77,7 @@ public:
     [[nodiscard]] std::optional<Entry> find(const Key& key) const;
 
     /// Registers a new statistic tracking entry, optionally with initial triggers.
-    void registerStatistic(const Key& key, QueryId queryId, Statistic::StatisticId statisticId, std::vector<ConditionTrigger> triggers);
+    void registerStatistic(const Key& key, QueryId queryId, StatisticTuple::StatisticId statisticId, std::vector<ConditionTrigger> triggers);
 
     /// Appends a condition trigger to an existing entry. Returns false if the key is not found.
     bool addTrigger(const Key& key, ConditionTrigger trigger);

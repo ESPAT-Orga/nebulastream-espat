@@ -26,7 +26,7 @@
 #include <Operators/Statistic/LogicalStatisticFields.hpp>
 #include <Traits/Trait.hpp>
 #include <Util/PlanRenderer.hpp>
-#include <Statistic.hpp>
+#include <StatisticTuple.hpp>
 
 namespace NES
 {
@@ -39,10 +39,10 @@ class SerializableOperator;
 class ScalarStatisticProbeLogicalOperator final : public LogicalStatisticFields, public OriginIdAssigner
 {
 public:
-    explicit ScalarStatisticProbeLogicalOperator(Statistic::StatisticId statisticId, Statistic::StatisticType op, DataType valueType);
+    explicit ScalarStatisticProbeLogicalOperator(StatisticTuple::StatisticId statisticId, StatisticTuple::StatisticType op, DataType valueType);
     explicit ScalarStatisticProbeLogicalOperator(
-        Statistic::StatisticId statisticId,
-        Statistic::StatisticType op,
+        StatisticTuple::StatisticId statisticId,
+        StatisticTuple::StatisticType op,
         DataType valueType,
         std::string valueFieldName,
         LogicalStatisticFields logicalStatisticFields);
@@ -64,8 +64,8 @@ public:
 
     [[nodiscard]] ScalarStatisticProbeLogicalOperator withInferredSchema(const std::vector<Schema>& inputSchemas) const;
 
-    Statistic::StatisticId statisticId;
-    Statistic::StatisticType op;
+    StatisticTuple::StatisticId statisticId;
+    StatisticTuple::StatisticType op;
     DataType valueType;
 
     std::string valueFieldName = VALUE_FIELD_NAME_DEFAULT;
@@ -100,7 +100,7 @@ namespace detail
 {
 struct ReflectedScalarStatisticProbeLogicalOperator
 {
-    Statistic::StatisticId::Underlying statisticId;
+    StatisticTuple::StatisticId::Underlying statisticId;
     uint64_t op;
     DataType valueType;
     std::string valueFieldName;

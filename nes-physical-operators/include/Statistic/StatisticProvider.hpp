@@ -16,7 +16,7 @@
 
 #include <Nautilus/Interface/Record.hpp>
 #include <ExecutionContext.hpp>
-#include <Statistic.hpp>
+#include <StatisticTuple.hpp>
 #include <val.hpp>
 
 namespace NES
@@ -61,7 +61,7 @@ public:
         void advanceToEnd() const;
     };
 
-    StatisticProvider(const Statistic::StatisticType statisticType, std::unique_ptr<StatisticProviderArguments> statisticProviderArguments);
+    StatisticProvider(const StatisticTuple::StatisticType statisticType, std::unique_ptr<StatisticProviderArguments> statisticProviderArguments);
     StatisticProvider(StatisticProvider&& other) noexcept;
     StatisticProvider& operator=(StatisticProvider&& other) noexcept;
     StatisticProvider(const StatisticProvider& other) noexcept;
@@ -72,14 +72,14 @@ public:
     [[nodiscard]] StatisticProviderIterator begin(const nautilus::val<int8_t*>& statisticMemArea) const;
     [[nodiscard]] StatisticProviderIterator end(const nautilus::val<int8_t*>& statisticMemArea) const;
 
-    [[nodiscard]] Statistic::StatisticType getStatisticType() const;
+    [[nodiscard]] StatisticTuple::StatisticType getStatisticType() const;
 
 private:
     /// The per-type iterator this provider reads with. begin()/end() differ only in where they position it, so they
     /// share this rather than each repeating the dispatch.
     [[nodiscard]] std::unique_ptr<StatisticProviderIteratorImpl> makeIteratorImpl(const nautilus::val<int8_t*>& statisticMemArea) const;
 
-    Statistic::StatisticType statisticType;
+    StatisticTuple::StatisticType statisticType;
     std::unique_ptr<StatisticProviderArguments> statisticProviderArguments;
 };
 

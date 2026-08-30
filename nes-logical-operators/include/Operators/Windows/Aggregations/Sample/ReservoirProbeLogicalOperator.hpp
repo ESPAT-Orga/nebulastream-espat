@@ -28,7 +28,7 @@
 #include <Traits/Trait.hpp>
 #include <Util/PlanRenderer.hpp>
 #include <Util/Reflection.hpp>
-#include <Statistic.hpp>
+#include <StatisticTuple.hpp>
 
 namespace NES
 {
@@ -37,9 +37,9 @@ namespace NES
 class ReservoirProbeLogicalOperator final : public LogicalStatisticFields, public OriginIdAssigner
 {
 public:
-    explicit ReservoirProbeLogicalOperator(Statistic::StatisticId statisticId, const Schema& sampleSchema);
+    explicit ReservoirProbeLogicalOperator(StatisticTuple::StatisticId statisticId, const Schema& sampleSchema);
     explicit ReservoirProbeLogicalOperator(
-        Statistic::StatisticId statisticId, const Schema& sampleSchema, LogicalStatisticFields logicalStatisticFields);
+        StatisticTuple::StatisticId statisticId, const Schema& sampleSchema, LogicalStatisticFields logicalStatisticFields);
 
     [[nodiscard]] bool operator==(const ReservoirProbeLogicalOperator& rhs) const;
 
@@ -74,7 +74,7 @@ public:
     };
 
     /// Name of the field the sample is in.
-    Statistic::StatisticId statisticId;
+    StatisticTuple::StatisticId statisticId;
     Schema sampleSchema;
 
 private:
@@ -111,7 +111,7 @@ struct ReflectedSchemaField
 
 struct ReflectedReservoirProbeLogicalOperator
 {
-    Statistic::StatisticId::Underlying statisticId;
+    StatisticTuple::StatisticId::Underlying statisticId;
     std::vector<ReflectedSchemaField> sampleFields;
 };
 }

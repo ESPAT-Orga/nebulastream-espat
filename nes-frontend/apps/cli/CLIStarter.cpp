@@ -69,7 +69,7 @@
 #include <QueryOptimizerConfiguration.hpp>
 #include <QueryStateBackend.hpp>
 #include <RequestStatisticStatement.hpp>
-#include <Statistic.hpp>
+#include <StatisticTuple.hpp>
 #include <WorkerCatalog.hpp>
 
 namespace
@@ -481,7 +481,7 @@ NES::LogicalPlan buildSubmittablePlan(
     {
         throw NES::InvalidConfigParameter("REQUEST STATISTIC DATA requires a unique 'statistic_id' in the SET clause");
     }
-    const auto statisticId = NES::Statistic::StatisticId{static_cast<uint64_t>(std::stoull(statisticIdIt->second))};
+    const auto statisticId = NES::StatisticTuple::StatisticId{static_cast<uint64_t>(std::stoull(statisticIdIt->second))};
 
     const auto reportHostIt = request->options.find("report_host");
     const auto rootAddress = reportHostIt != request->options.end() ? reportHostIt->second : deriveRootAddress(workers);

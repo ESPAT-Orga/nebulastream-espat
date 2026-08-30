@@ -22,21 +22,21 @@
 #include <gtest/gtest.h>
 #include <magic_enum/magic_enum.hpp>
 #include <BaseUnitTest.hpp>
-#include <Statistic.hpp>
+#include <StatisticTuple.hpp>
 
 namespace NES
 {
 namespace
 {
 
-Statistic createDummyStatistic(const Statistic::StatisticId statisticId, Windowing::TimeMeasure startTs, Windowing::TimeMeasure endTs)
+StatisticTuple createDummyStatistic(const StatisticTuple::StatisticId statisticId, Windowing::TimeMeasure startTs, Windowing::TimeMeasure endTs)
 {
     std::random_device rd;
     std::mt19937 gen(rd());
 
     /// Picking a random statistic type value
-    constexpr auto statisticTypes = magic_enum::enum_values<Statistic::StatisticType>();
-    std::uniform_int_distribution<> enumDistribution{0, magic_enum::enum_count<Statistic::StatisticType>() - 1};
+    constexpr auto statisticTypes = magic_enum::enum_values<StatisticTuple::StatisticType>();
+    std::uniform_int_distribution<> enumDistribution{0, magic_enum::enum_count<StatisticTuple::StatisticType>() - 1};
     const auto randomStatisticType = statisticTypes[enumDistribution(gen)];
 
     /// Generating random statistic data of size 1 to 100 KiB
@@ -88,10 +88,10 @@ public:
         }
     }
 
-    static std::pair<Windowing::TimeMeasure, std::vector<Statistic>>
+    static std::pair<Windowing::TimeMeasure, std::vector<StatisticTuple>>
     createData(const int numberOfStatisticIds, const int numberOfStatisticPerId, const uint64_t windowSize)
     {
-        std::vector<Statistic> statistics;
+        std::vector<StatisticTuple> statistics;
         uint64_t maxEndTs = 0;
 
         for (uint64_t statisticId = 0; statisticId < static_cast<uint64_t>(numberOfStatisticIds); ++statisticId)
@@ -105,7 +105,7 @@ public:
                 const Windowing::TimeMeasure startTs{curStartTs};
                 const Windowing::TimeMeasure endTs{curEndTs};
 
-                statistics.emplace_back(createDummyStatistic(Statistic::StatisticId{statisticId}, startTs, endTs));
+                statistics.emplace_back(createDummyStatistic(StatisticTuple::StatisticId{statisticId}, startTs, endTs));
                 curStartTs += windowSize;
                 curEndTs += windowSize;
                 maxEndTs = std::max(maxEndTs, curEndTs);

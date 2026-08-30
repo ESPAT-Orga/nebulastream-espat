@@ -29,19 +29,19 @@
 #include <fmt/format.h>
 #include <ErrorHandling.hpp>
 #include <LogicalOperatorRegistry.hpp>
-#include <Statistic.hpp>
+#include <StatisticTuple.hpp>
 
 namespace NES
 {
 
 EquiWidthHistogramProbeLogicalOperator::EquiWidthHistogramProbeLogicalOperator(
-    const Statistic::StatisticId statisticId, DataType counterType, DataType startEndType)
+    const StatisticTuple::StatisticId statisticId, DataType counterType, DataType startEndType)
     : statisticId(statisticId), counterType(counterType), startEndType(startEndType)
 {
 }
 
 EquiWidthHistogramProbeLogicalOperator::EquiWidthHistogramProbeLogicalOperator(
-    Statistic::StatisticId stashHash,
+    StatisticTuple::StatisticId stashHash,
     DataType counterType,
     DataType startEndType,
     std::string binStartFieldName,
@@ -189,7 +189,7 @@ EquiWidthHistogramProbeLogicalOperator Unreflector<EquiWidthHistogramProbeLogica
 {
     auto data = unreflect<detail::ReflectedEquiWidthHistogramProbeLogicalOperator>(reflected);
     return EquiWidthHistogramProbeLogicalOperator{
-        Statistic::StatisticId{data.statisticId},
+        StatisticTuple::StatisticId{data.statisticId},
         data.counterTypeValue,
         data.startEndTypeValue,
         std::move(data.binStartFieldName),

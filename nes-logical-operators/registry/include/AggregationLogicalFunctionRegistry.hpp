@@ -22,7 +22,7 @@
 #include <Operators/Windows/Aggregations/WindowAggregationLogicalFunction.hpp>
 #include <Util/Reflection.hpp>
 #include <Util/Registry.hpp>
-#include <Statistic.hpp>
+#include <StatisticTuple.hpp>
 
 namespace NES
 {
@@ -33,7 +33,7 @@ struct AggregationLogicalFunctionRegistryArguments
 {
     std::vector<FieldAccessLogicalFunction> fields;
     /// Additional arguments for statistics
-    std::optional<Statistic::StatisticId> statisticId;
+    std::optional<StatisticTuple::StatisticId> statisticId;
     /// Memory budget in bytes for synopsis-based statistics (Reservoir, EquiWidthHistogram, CountMinSketch)
     std::optional<uint64_t> memoryBudget;
     /// Equi Width Histogram value range:

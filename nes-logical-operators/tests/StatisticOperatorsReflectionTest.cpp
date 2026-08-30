@@ -33,7 +33,7 @@
 #include <WindowTypes/Measures/TimeMeasure.hpp>
 #include <WindowTypes/Types/TumblingWindow.hpp>
 #include <WindowTypes/Types/WindowType.hpp>
-#include <Statistic.hpp>
+#include <StatisticTuple.hpp>
 
 namespace NES
 {
@@ -51,20 +51,20 @@ protected:
     static std::shared_ptr<WindowAggregationLogicalFunction> countMin(const std::string& field, const uint64_t id)
     {
         return std::make_shared<WindowAggregationLogicalFunction>(
-            CountMinSketchLogicalFunction{FieldAccessLogicalFunction(field), MemoryBudget, Statistic::StatisticId{id}});
+            CountMinSketchLogicalFunction{FieldAccessLogicalFunction(field), MemoryBudget, StatisticTuple::StatisticId{id}});
     }
 
     static std::shared_ptr<WindowAggregationLogicalFunction> histogram(const std::string& field, const uint64_t id)
     {
         return std::make_shared<WindowAggregationLogicalFunction>(EquiWidthHistogramLogicalFunction{
-            FieldAccessLogicalFunction(field), MemoryBudget, /*minValue*/ 0, /*maxValue*/ 1000, Statistic::StatisticId{id}});
+            FieldAccessLogicalFunction(field), MemoryBudget, /*minValue*/ 0, /*maxValue*/ 1000, StatisticTuple::StatisticId{id}});
     }
 
     static std::shared_ptr<WindowAggregationLogicalFunction>
-    scalar(const std::string& field, const uint64_t id, const Statistic::StatisticType op)
+    scalar(const std::string& field, const uint64_t id, const StatisticTuple::StatisticType op)
     {
         return std::make_shared<WindowAggregationLogicalFunction>(ScalarStatisticLogicalFunction{
-            FieldAccessLogicalFunction(field), FieldAccessLogicalFunction(field), Statistic::StatisticId{id}, op});
+            FieldAccessLogicalFunction(field), FieldAccessLogicalFunction(field), StatisticTuple::StatisticId{id}, op});
     }
 
     static std::shared_ptr<Windowing::WindowType> tumblingWindow()
@@ -89,15 +89,15 @@ TEST_F(StatisticOperatorsReflectionTest, MultiCountMinStatisticBuildSurvivesRefl
     const auto aggregations = roundTripped.getWindowAggregation();
     ASSERT_EQ(aggregations.size(), ids.size());
 
-    std::unordered_set<Statistic::StatisticId::Underlying> seenIds;
+    std::unordered_set<StatisticTuple::StatisticId::Underlying> seenIds;
     for (size_t i = 0; i < aggregations.size(); ++i)
     {
         const auto target = tryGetStatisticTarget(*aggregations[i]);
         ASSERT_TRUE(target.has_value());
-        EXPECT_EQ(target->statisticId, Statistic::StatisticId{ids[i]});
-        EXPECT_EQ(target->statisticType, Statistic::StatisticType::Count_Min_Sketch);
+        EXPECT_EQ(target->statisticId, StatisticTuple::StatisticId{ids[i]});
+        EXPECT_EQ(target->statisticType, StatisticTuple::StatisticType::Count_Min_Sketch);
         /// The data-field name is re-derived from the id, so it must match the original id's name.
-        EXPECT_EQ(statisticDataFieldName(target->statisticId), statisticDataFieldName(Statistic::StatisticId{ids[i]}));
+        EXPECT_EQ(statisticDataFieldName(target->statisticId), statisticDataFieldName(StatisticTuple::StatisticId{ids[i]}));
         seenIds.insert(target->statisticId.getRawValue());
     }
     EXPECT_EQ(seenIds.size(), ids.size()) << "statisticIds must stay distinct after the round trip";
@@ -117,16 +117,16 @@ TEST_F(StatisticOperatorsReflectionTest, MixedSynopsisStatisticBuildSurvivesRefl
     const auto aggregations = roundTripped.getWindowAggregation();
     ASSERT_EQ(aggregations.size(), 3u);
 
-    const std::vector<std::pair<uint64_t, Statistic::StatisticType>> expected = {
-        {101, Statistic::StatisticType::Count_Min_Sketch},
-        {202, Statistic::StatisticType::Equi_Width_Histogram},
-        {303, Statistic::StatisticType::Count_Min_Sketch},
+    const std::vector<std::pair<uint64_t, StatisticTuple::StatisticType>> expected = {
+        {101, StatisticTuple::StatisticType::Count_Min_Sketch},
+        {202, StatisticTuple::StatisticType::Equi_Width_Histogram},
+        {303, StatisticTuple::StatisticType::Count_Min_Sketch},
     };
     for (size_t i = 0; i < aggregations.size(); ++i)
     {
         const auto target = tryGetStatisticTarget(*aggregations[i]);
         ASSERT_TRUE(target.has_value());
-        EXPECT_EQ(target->statisticId, Statistic::StatisticId{expected[i].first});
+        EXPECT_EQ(target->statisticId, StatisticTuple::StatisticId{expected[i].first});
         EXPECT_EQ(target->statisticType, expected[i].second);
     }
 }
@@ -135,10 +135,10 @@ TEST_F(StatisticOperatorsReflectionTest, MixedSynopsisStatisticBuildSurvivesRefl
 /// selects the StatisticType and must survive the reflect -> unreflect round trip alongside the statisticId.
 TEST_F(StatisticOperatorsReflectionTest, ScalarStatisticBuildSurvivesReflectionRoundTrip)
 {
-    const std::vector<std::pair<uint64_t, Statistic::StatisticType>> expected = {
-        {601, Statistic::StatisticType::Count},
-        {602, Statistic::StatisticType::Sum},
-        {603, Statistic::StatisticType::Avg},
+    const std::vector<std::pair<uint64_t, StatisticTuple::StatisticType>> expected = {
+        {601, StatisticTuple::StatisticType::Count},
+        {602, StatisticTuple::StatisticType::Sum},
+        {603, StatisticTuple::StatisticType::Avg},
     };
     const StatisticBuildLogicalOperator op(
         {scalar("stream.a", expected[0].first, expected[0].second),
@@ -155,7 +155,7 @@ TEST_F(StatisticOperatorsReflectionTest, ScalarStatisticBuildSurvivesReflectionR
     {
         const auto target = tryGetStatisticTarget(*aggregations[i]);
         ASSERT_TRUE(target.has_value());
-        EXPECT_EQ(target->statisticId, Statistic::StatisticId{expected[i].first});
+        EXPECT_EQ(target->statisticId, StatisticTuple::StatisticId{expected[i].first});
         EXPECT_EQ(target->statisticType, expected[i].second);
     }
 }
@@ -165,9 +165,9 @@ TEST_F(StatisticOperatorsReflectionTest, ScalarStatisticBuildSurvivesReflectionR
 TEST_F(StatisticOperatorsReflectionTest, ChainedStatisticStoreWritersSurviveReflectionRoundTrip)
 {
     const std::vector<StatisticTarget> targets = {
-        {Statistic::StatisticId{11}, Statistic::StatisticType::Count_Min_Sketch},
-        {Statistic::StatisticId{22}, Statistic::StatisticType::Equi_Width_Histogram},
-        {Statistic::StatisticId{33}, Statistic::StatisticType::Reservoir_Sample},
+        {StatisticTuple::StatisticId{11}, StatisticTuple::StatisticType::Count_Min_Sketch},
+        {StatisticTuple::StatisticId{22}, StatisticTuple::StatisticType::Equi_Width_Histogram},
+        {StatisticTuple::StatisticId{33}, StatisticTuple::StatisticType::Reservoir_Sample},
     };
 
     for (const auto& target : targets)

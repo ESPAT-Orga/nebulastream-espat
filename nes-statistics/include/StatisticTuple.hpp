@@ -31,10 +31,10 @@ namespace NES
 
 /// @brief A statistic represents particular information of a component, stream or etc. over a period of time.
 /// As we build and probe these statistics via a query compiler, this class stores the statistic data as a shared byte array.
-class Statistic
+class StatisticTuple
 {
 public:
-    /// Uniquely identifies a statistic. Assigned by the StatisticCoordinator via an atomic counter.
+    /// Uniquely identifies a statistic. Assigned by the StatisticManager via an atomic counter.
     using StatisticId = NESStrongType<uint64_t, struct StatisticId_, 0, 1>;
 
     /// Defines what statistic type is for the underlying statistic memory area
@@ -50,7 +50,7 @@ public:
         Avg
     };
 
-    Statistic(
+    StatisticTuple(
         const StatisticId statisticId,
         const StatisticType statisticType,
         const Windowing::TimeMeasure& startTs,
@@ -68,10 +68,10 @@ public:
     {
     }
 
-    Statistic(const Statistic&) = default;
-    Statistic& operator=(const Statistic&) = default;
-    Statistic(Statistic&&) = default;
-    Statistic& operator=(Statistic&&) = default;
+    StatisticTuple(const StatisticTuple&) = default;
+    StatisticTuple& operator=(const StatisticTuple&) = default;
+    StatisticTuple(StatisticTuple&&) = default;
+    StatisticTuple& operator=(StatisticTuple&&) = default;
 
     [[nodiscard]] StatisticType getStatisticType() const { return statisticType; }
 
@@ -87,14 +87,14 @@ public:
 
     [[nodiscard]] StatisticId getStatisticId() const { return statisticId; }
 
-    bool operator==(const Statistic& other) const
+    bool operator==(const StatisticTuple& other) const
     {
         return statisticId == other.statisticId and statisticType == other.statisticType and startTs == other.startTs
             and endTs == other.endTs and numberOfSeenTuples == other.numberOfSeenTuples and statisticDataSize == other.statisticDataSize
             and std::equal(statisticData.get(), statisticData.get() + statisticDataSize, other.statisticData.get());
     }
 
-    friend std::ostream& operator<<(std::ostream& os, const Statistic& statistic);
+    friend std::ostream& operator<<(std::ostream& os, const StatisticTuple& statistic);
 
 private:
     StatisticId statisticId;
@@ -107,11 +107,11 @@ private:
 };
 
 /// Overload modulo operator for StatisticId as it is commonly used to index into hash maps.
-inline size_t operator%(const Statistic::StatisticId id, const size_t containerSize)
+inline size_t operator%(const StatisticTuple::StatisticId id, const size_t containerSize)
 {
     return id.getRawValue() % containerSize;
 }
 
 }
 
-FMT_OSTREAM(NES::Statistic);
+FMT_OSTREAM(NES::StatisticTuple);

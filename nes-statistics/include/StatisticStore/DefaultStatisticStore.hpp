@@ -18,7 +18,7 @@
 #include <StatisticStore/AbstractStatisticStore.hpp>
 #include <WindowTypes/Measures/TimeMeasure.hpp>
 #include <folly/Synchronized.h>
-#include <Statistic.hpp>
+#include <StatisticTuple.hpp>
 
 namespace NES
 {
@@ -26,17 +26,17 @@ namespace NES
 class DefaultStatisticStore final : public AbstractStatisticStore
 {
 public:
-    bool insertStatistic(const Statistic::StatisticId& statisticId, Statistic statistic) override;
+    bool insertStatistic(const StatisticTuple::StatisticId& statisticId, StatisticTuple statistic) override;
     bool deleteStatistics(
-        const Statistic::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs) override;
-    std::vector<Statistic> getStatistics(
-        const Statistic::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs) override;
-    std::optional<Statistic> getSingleStatistic(
-        const Statistic::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs) override;
+        const StatisticTuple::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs) override;
+    std::vector<StatisticTuple> getStatistics(
+        const StatisticTuple::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs) override;
+    std::optional<StatisticTuple> getSingleStatistic(
+        const StatisticTuple::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs) override;
     std::vector<IdStatisticPair> getAllStatistics() override;
 
 private:
-    folly::Synchronized<std::unordered_map<Statistic::StatisticId, std::vector<Statistic>>> statistics;
+    folly::Synchronized<std::unordered_map<StatisticTuple::StatisticId, std::vector<StatisticTuple>>> statistics;
 };
 
 }

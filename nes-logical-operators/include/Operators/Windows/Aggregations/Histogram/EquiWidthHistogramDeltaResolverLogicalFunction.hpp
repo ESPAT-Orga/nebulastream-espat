@@ -24,7 +24,7 @@
 #include <Operators/Windows/Aggregations/StatisticLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/WindowAggregationLogicalFunction.hpp>
 #include <Util/Reflection.hpp>
-#include <Statistic.hpp>
+#include <StatisticTuple.hpp>
 
 namespace NES
 {
@@ -41,14 +41,14 @@ public:
         uint64_t memoryBudget,
         uint64_t minValue,
         uint64_t maxValue,
-        Statistic::StatisticId statisticId);
+        StatisticTuple::StatisticId statisticId);
     EquiWidthHistogramDeltaResolverLogicalFunction(
         const FieldAccessLogicalFunction& onField,
         const FieldAccessLogicalFunction& asField,
         uint64_t memoryBudget,
         uint64_t minValue,
         uint64_t maxValue,
-        Statistic::StatisticId statisticId);
+        StatisticTuple::StatisticId statisticId);
 
     ~EquiWidthHistogramDeltaResolverLogicalFunction() override = default;
 
@@ -77,7 +77,7 @@ public:
     uint64_t minValue;
     uint64_t maxValue;
 
-    Statistic::StatisticId statisticId;
+    StatisticTuple::StatisticId statisticId;
 
 private:
     static constexpr std::string_view NAME = "EquiWidthHistogramDeltaResolver";
@@ -114,6 +114,6 @@ struct ReflectedEquiWidthHistogramDeltaResolverLogicalFunction
     uint64_t memoryBudget;
     uint64_t minValue;
     uint64_t maxValue;
-    Statistic::StatisticId::Underlying statisticId;
+    StatisticTuple::StatisticId::Underlying statisticId;
 };
 }

@@ -29,7 +29,7 @@
 #include <WindowTypes/Measures/TimeMeasure.hpp>
 #include <magic_enum/magic_enum.hpp>
 #include <ErrorHandling.hpp>
-#include <Statistic.hpp>
+#include <StatisticTuple.hpp>
 
 namespace NES
 {
@@ -55,7 +55,7 @@ struct InsertParams
 {
     static inline const std::vector<StatisticStoreType> storeTypes{
         StatisticStoreType::DEFAULT, StatisticStoreType::WINDOW, StatisticStoreType::SUB_STORES};
-    /// Total number of statistics (see Statistic.hpp) inserted
+    /// Total number of statistics (see StatisticTuple.hpp) inserted
     static inline const std::vector<uint64_t> numStatisticsVals{10'000'000};
     /// Number of statistic queries that are inserting
     static inline const std::vector<uint64_t> numStatisticIdsValsInsert{1, 10, 100, 1'000, 10'000};
@@ -102,7 +102,7 @@ struct GetParams
         StatisticStoreType::DEFAULT, StatisticStoreType::SUB_STORES, StatisticStoreType::WINDOW};
     /// static inline const std::vector<uint64_t> windowSizes{1'000, 10'000, 60'000};
     static inline const std::vector<uint64_t> windowSizes{1'000};
-    /// Total number of statistics (see Statistic.hpp) to retrieve
+    /// Total number of statistics (see StatisticTuple.hpp) to retrieve
     static inline const std::vector<uint64_t> numStatisticsVals{1, 100'000};
 
     /// Pairs of (numStatisticIdsInsert, numStatisticIdsGet) to benchmark as-is.
@@ -203,8 +203,8 @@ struct MixedParams
 
 struct PreparedStatistic
 {
-    Statistic statistic;
-    Statistic::StatisticId statisticId;
+    StatisticTuple statistic;
+    StatisticTuple::StatisticId statisticId;
 };
 
 struct StatisticData
@@ -213,15 +213,15 @@ struct StatisticData
     uint64_t size;
 };
 
-Statistic createDummyStatistic(
-    const Statistic::StatisticId statisticId,
+StatisticTuple createDummyStatistic(
+    const StatisticTuple::StatisticId statisticId,
     Windowing::TimeMeasure startTs,
     Windowing::TimeMeasure endTs,
     std::shared_ptr<std::byte[]> statisticData,
     const int statisticSize)
 {
     /// Picking always the first statistic type, as we do not care about the type
-    constexpr auto statisticTypes = magic_enum::enum_values<Statistic::StatisticType>();
+    constexpr auto statisticTypes = magic_enum::enum_values<StatisticTuple::StatisticType>();
     constexpr auto randomStatisticType = statisticTypes[0];
 
     /// We do not care about the number of seen tuples
@@ -302,7 +302,7 @@ static ChunkedPreparedStatistics createStats(
                 uint64_t curTimestamp = start * windowSize;
                 for (uint64_t i = start; i < end; ++i)
                 {
-                    const Statistic::StatisticId statisticId{idDist(rng)};
+                    const StatisticTuple::StatisticId statisticId{idDist(rng)};
                     const Windowing::TimeMeasure startTs{curTimestamp};
                     const Windowing::TimeMeasure endTs{curTimestamp + windowSize};
                     auto statistic = createDummyStatistic(statisticId, startTs, endTs, statisticData.data, statisticData.size);
@@ -540,14 +540,14 @@ void runGetStatisticsBenchmark(std::ofstream& csv, ProgressTracker& progress, Be
                             const uint64_t existingPoolSize = std::min(numStatisticIdsGet, numStatisticIdsInsert);
 
                             /// Non-existing IDs: a fixed small set beyond the inserted range.
-                            std::vector<Statistic::StatisticId> nonExistingIds;
+                            std::vector<StatisticTuple::StatisticId> nonExistingIds;
                             for (uint64_t id = numStatisticIdsInsert; id < numStatisticIdsInsert + 10; ++id)
                             {
-                                nonExistingIds.emplace_back(Statistic::StatisticId{id});
+                                nonExistingIds.emplace_back(StatisticTuple::StatisticId{id});
                             }
 
                             /// Build the lookup sequence: pctAccessExisting% existing, rest non-existing
-                            std::vector<Statistic::StatisticId> lookupIds;
+                            std::vector<StatisticTuple::StatisticId> lookupIds;
                             lookupIds.reserve(numStatistics);
                             std::uniform_int_distribution<uint64_t> existingDist{0, existingPoolSize - 1};
                             std::uniform_int_distribution<> nonExistingDist{0, static_cast<int>(nonExistingIds.size()) - 1};
@@ -556,7 +556,7 @@ void runGetStatisticsBenchmark(std::ofstream& csv, ProgressTracker& progress, Be
                             {
                                 if (percentDist(gen) < pctAccessExisting)
                                 {
-                                    lookupIds.emplace_back(Statistic::StatisticId{existingDist(gen)});
+                                    lookupIds.emplace_back(StatisticTuple::StatisticId{existingDist(gen)});
                                 }
                                 else
                                 {
@@ -692,7 +692,7 @@ void runInsertAndGetBenchmark(std::ofstream& csv, ProgressTracker& progress, Ben
                         uint64_t curTs = maxTs;
                         for (uint64_t i = 0; i < numStatistics; ++i)
                         {
-                            const Statistic::StatisticId statisticId{insertIdDist(rng)};
+                            const StatisticTuple::StatisticId statisticId{insertIdDist(rng)};
                             const Windowing::TimeMeasure startTs{curTs};
                             const Windowing::TimeMeasure endTs{curTs + windowSize};
                             auto statistic = createDummyStatistic(
@@ -704,11 +704,11 @@ void runInsertAndGetBenchmark(std::ofstream& csv, ProgressTracker& progress, Ben
                         /// Lookups during the workload draw IDs from [0, numStatisticIdsGet).
                         /// IDs in [0, min(insert, get)) hit the pre-populated range; IDs in [insert, get) miss.
                         std::uniform_int_distribution<uint64_t> getIdDist{0, numStatisticIdsGet - 1};
-                        std::vector<Statistic::StatisticId> lookupIds;
+                        std::vector<StatisticTuple::StatisticId> lookupIds;
                         lookupIds.reserve(numStatistics);
                         for (uint64_t i = 0; i < numStatistics; ++i)
                         {
-                            lookupIds.emplace_back(Statistic::StatisticId{getIdDist(rng)});
+                            lookupIds.emplace_back(StatisticTuple::StatisticId{getIdDist(rng)});
                         }
 
                         forEachParam(

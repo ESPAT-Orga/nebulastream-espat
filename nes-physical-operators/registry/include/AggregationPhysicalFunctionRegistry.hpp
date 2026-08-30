@@ -24,7 +24,7 @@
 #include <Nautilus/Interface/BufferRef/TupleBufferRef.hpp>
 #include <Nautilus/Interface/Record.hpp>
 #include <Util/Registry.hpp>
-#include <Statistic.hpp>
+#include <StatisticTuple.hpp>
 
 namespace NES
 {
@@ -41,7 +41,7 @@ struct AggregationPhysicalFunctionRegistryArguments
     bool includeNullValues;
     std::optional<std::string> numberOfSeenTuplesFieldName{};
     /// ScalarStatistic: selects which of the Count/Sum/Avg physical functions the registrar returns
-    std::optional<Statistic::StatisticType> scalarOp{};
+    std::optional<StatisticTuple::StatisticType> scalarOp{};
     /// ReservoirSample and CountMinSketch:
     std::optional<uint64_t> seed{};
     /// ReservoirSample:

@@ -31,7 +31,7 @@
 #include <fmt/format.h>
 #include <AggregationLogicalFunctionRegistry.hpp>
 #include <ErrorHandling.hpp>
-#include <Statistic.hpp>
+#include <StatisticTuple.hpp>
 
 namespace NES
 {
@@ -45,7 +45,7 @@ ReservoirSampleLogicalFunction::ReservoirSampleLogicalFunction(
     const FieldAccessLogicalFunction& onField,
     std::vector<FieldAccessLogicalFunction> sampleFields,
     const uint64_t memoryBudget,
-    const Statistic::StatisticId statisticId)
+    const StatisticTuple::StatisticId statisticId)
     : StatisticLogicalFunction(memoryBudget)
     , sampleFields(std::move(sampleFields))
     , statisticId(statisticId)
@@ -62,7 +62,7 @@ ReservoirSampleLogicalFunction::ReservoirSampleLogicalFunction(
     const FieldAccessLogicalFunction& asField,
     std::vector<FieldAccessLogicalFunction> sampleFields,
     const uint64_t memoryBudget,
-    const Statistic::StatisticId statisticId)
+    const StatisticTuple::StatisticId statisticId)
     : StatisticLogicalFunction(memoryBudget)
     , sampleFields(std::move(sampleFields))
     , statisticId(statisticId)
@@ -103,7 +103,7 @@ ReservoirSampleLogicalFunction Unreflector<ReservoirSampleLogicalFunction>::oper
 {
     auto data = unreflect<detail::ReflectedReservoirSampleLogicalFunction>(reflected);
     return ReservoirSampleLogicalFunction{
-        data.onField, data.asField, data.sampleFields, data.memoryBudget, Statistic::StatisticId{data.statisticId}};
+        data.onField, data.asField, data.sampleFields, data.memoryBudget, StatisticTuple::StatisticId{data.statisticId}};
 }
 
 ReservoirSampleLogicalFunction ReservoirSampleLogicalFunction::withInferredStamp(const Schema& schema) const

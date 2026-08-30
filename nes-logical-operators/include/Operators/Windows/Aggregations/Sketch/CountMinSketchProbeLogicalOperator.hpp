@@ -28,7 +28,7 @@
 #include <Operators/Statistic/LogicalStatisticFields.hpp>
 #include <Traits/Trait.hpp>
 #include <Util/PlanRenderer.hpp>
-#include <Statistic.hpp>
+#include <StatisticTuple.hpp>
 
 namespace NES
 {
@@ -38,9 +38,9 @@ class SerializableOperator;
 class CountMinSketchProbeLogicalOperator final : public LogicalStatisticFields, public OriginIdAssigner
 {
 public:
-    explicit CountMinSketchProbeLogicalOperator(Statistic::StatisticId statisticId, DataType counterType);
+    explicit CountMinSketchProbeLogicalOperator(StatisticTuple::StatisticId statisticId, DataType counterType);
     explicit CountMinSketchProbeLogicalOperator(
-        Statistic::StatisticId statisticId,
+        StatisticTuple::StatisticId statisticId,
         DataType counterType,
         std::string rowIndexFieldName,
         std::string columnIndexFieldName,
@@ -64,7 +64,7 @@ public:
 
     [[nodiscard]] CountMinSketchProbeLogicalOperator withInferredSchema(const std::vector<Schema>& inputSchemas) const;
 
-    Statistic::StatisticId statisticId;
+    StatisticTuple::StatisticId statisticId;
     DataType counterType;
 
     std::string rowIndexFieldName = ROW_INDEX_FIELD_NAME_DEFAULT;
@@ -105,7 +105,7 @@ namespace detail
 {
 struct ReflectedCountMinSketchProbeLogicalOperator
 {
-    Statistic::StatisticId::Underlying statisticId;
+    StatisticTuple::StatisticId::Underlying statisticId;
     DataType counterType;
     std::string rowIndexFieldName;
     std::string columnIndexFieldName;

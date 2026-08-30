@@ -24,7 +24,7 @@
 #include <Operators/Windows/Aggregations/StatisticLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/WindowAggregationLogicalFunction.hpp>
 #include <Util/Reflection.hpp>
-#include <Statistic.hpp>
+#include <StatisticTuple.hpp>
 
 namespace NES
 {
@@ -44,14 +44,14 @@ public:
         uint64_t memoryBudget,
         uint64_t minValue,
         uint64_t maxValue,
-        Statistic::StatisticId statisticId);
+        StatisticTuple::StatisticId statisticId);
     EquiWidthHistogramLogicalFunction(
         const FieldAccessLogicalFunction& onField,
         const FieldAccessLogicalFunction& asField,
         uint64_t memoryBudget,
         uint64_t minValue,
         uint64_t maxValue,
-        Statistic::StatisticId statisticId);
+        StatisticTuple::StatisticId statisticId);
 
     ~EquiWidthHistogramLogicalFunction() override = default;
 
@@ -80,7 +80,7 @@ public:
     uint64_t minValue;
     uint64_t maxValue;
 
-    Statistic::StatisticId statisticId;
+    StatisticTuple::StatisticId statisticId;
 
 private:
     static constexpr std::string_view NAME = "EquiWidthHistogram";
@@ -117,6 +117,6 @@ struct ReflectedEquiWidthHistogramLogicalFunction
     uint64_t memoryBudget;
     uint64_t minValue;
     uint64_t maxValue;
-    Statistic::StatisticId::Underlying statisticId;
+    StatisticTuple::StatisticId::Underlying statisticId;
 };
 }

@@ -50,7 +50,7 @@
 #include <WindowTypes/Types/TimeBasedWindowType.hpp>
 #include <WindowTypes/Types/WindowType.hpp>
 #include <ErrorHandling.hpp>
-#include <Statistic.hpp>
+#include <StatisticTuple.hpp>
 
 namespace NES
 {
@@ -166,8 +166,8 @@ LogicalPlan LogicalPlanBuilder::addWindowAggregation(
 LogicalPlan LogicalPlanBuilder::addStatisticStoreWriter(
     const LogicalPlan& queryPlan,
     const std::shared_ptr<LogicalStatisticFields>& inputLogicalStatisticFields,
-    const Statistic::StatisticId statisticId,
-    const Statistic::StatisticType statisticType)
+    const StatisticTuple::StatisticId statisticId,
+    const StatisticTuple::StatisticType statisticType)
 {
     return promoteOperatorToRoot(queryPlan, StatisticStoreWriterLogicalOperator{inputLogicalStatisticFields, statisticId, statisticType});
 }

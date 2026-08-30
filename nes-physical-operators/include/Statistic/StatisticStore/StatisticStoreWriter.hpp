@@ -18,7 +18,7 @@
 #include <vector>
 #include <Operators/Statistic/LogicalStatisticFields.hpp>
 #include <PhysicalOperator.hpp>
-#include <Statistic.hpp>
+#include <StatisticTuple.hpp>
 
 namespace NES
 {
@@ -30,8 +30,8 @@ public:
     /// operator forwards its input record (adding only STATISTICID), so chaining N of these persists N synopses.
     explicit StatisticStoreWriter(
         const OperatorHandlerId operatorHandlerId,
-        Statistic::StatisticId statisticId,
-        const Statistic::StatisticType statisticType,
+        StatisticTuple::StatisticId statisticId,
+        const StatisticTuple::StatisticType statisticType,
         std::string dataFieldName,
         const LogicalStatisticFields& inputLogicalStatisticFields,
         const LogicalStatisticFields& outputLogicalStatisticFields);
@@ -45,8 +45,8 @@ public:
 private:
     std::optional<PhysicalOperator> child;
     OperatorHandlerId operatorHandlerId;
-    Statistic::StatisticId statisticId;
-    Statistic::StatisticType statisticType;
+    StatisticTuple::StatisticId statisticId;
+    StatisticTuple::StatisticType statisticType;
     std::string inputStatisticDataFieldName;
     std::string inputStatisticStartTsFieldName;
     std::string inputStatisticEndTsFieldName;

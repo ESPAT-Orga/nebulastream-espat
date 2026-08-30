@@ -36,7 +36,7 @@ StatisticProvider getStatisticProvider(
 {
     auto statisticProviderArguments = std::make_unique<EquiWidthHistogramProviderArguments>(
         binStartFieldName, binEndFieldName, binCounterFieldName, counterType, startEndType);
-    return {Statistic::StatisticType::Equi_Width_Histogram, std::move(statisticProviderArguments)};
+    return {StatisticTuple::StatisticType::Equi_Width_Histogram, std::move(statisticProviderArguments)};
 }
 }
 

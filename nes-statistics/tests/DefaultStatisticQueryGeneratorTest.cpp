@@ -36,7 +36,7 @@
 #include <ErrorHandling.hpp>
 #include <Metric.hpp>
 #include <RequestStatisticStatement.hpp>
-#include <Statistic.hpp>
+#include <StatisticTuple.hpp>
 
 namespace NES
 {
@@ -74,14 +74,14 @@ TEST_F(DefaultStatisticQueryGeneratorTest, GenerateCardinalityPlan)
         .conditionTrigger = {},
         .options = {}};
 
-    const auto plan = generator.generateQuery(request, Statistic::StatisticId{1}, "localhost:9001");
+    const auto plan = generator.generateQuery(request, StatisticTuple::StatisticId{1}, "localhost:9001");
 
     const auto statisticBuilds = getOperatorByType<StatisticBuildLogicalOperator>(plan);
     ASSERT_EQ(statisticBuilds.size(), 1);
 
     const auto statisticWriters = getOperatorByType<StatisticStoreWriterLogicalOperator>(plan);
     ASSERT_EQ(statisticWriters.size(), 1);
-    EXPECT_EQ(statisticWriters[0]->getStatisticType(), Statistic::StatisticType::Count_Min_Sketch);
+    EXPECT_EQ(statisticWriters[0]->getStatisticType(), StatisticTuple::StatisticType::Count_Min_Sketch);
 
     assertGrpcSink(plan, "localhost", "9001");
 }
@@ -97,11 +97,11 @@ TEST_F(DefaultStatisticQueryGeneratorTest, GenerateMinValPlan)
         .conditionTrigger = {},
         .options = {}};
 
-    const auto plan = generator.generateQuery(request, Statistic::StatisticId{1}, "localhost:9002");
+    const auto plan = generator.generateQuery(request, StatisticTuple::StatisticId{1}, "localhost:9002");
 
     const auto statisticWriters = getOperatorByType<StatisticStoreWriterLogicalOperator>(plan);
     ASSERT_EQ(statisticWriters.size(), 1);
-    EXPECT_EQ(statisticWriters[0]->getStatisticType(), Statistic::StatisticType::Equi_Width_Histogram);
+    EXPECT_EQ(statisticWriters[0]->getStatisticType(), StatisticTuple::StatisticType::Equi_Width_Histogram);
 
     assertGrpcSink(plan, "localhost", "9002");
 }
@@ -117,11 +117,11 @@ TEST_F(DefaultStatisticQueryGeneratorTest, GenerateAveragePlan)
         .conditionTrigger = {},
         .options = {}};
 
-    const auto plan = generator.generateQuery(request, Statistic::StatisticId{1}, "localhost:9003");
+    const auto plan = generator.generateQuery(request, StatisticTuple::StatisticId{1}, "localhost:9003");
 
     const auto statisticWriters = getOperatorByType<StatisticStoreWriterLogicalOperator>(plan);
     ASSERT_EQ(statisticWriters.size(), 1);
-    EXPECT_EQ(statisticWriters[0]->getStatisticType(), Statistic::StatisticType::Reservoir_Sample);
+    EXPECT_EQ(statisticWriters[0]->getStatisticType(), StatisticTuple::StatisticType::Reservoir_Sample);
 
     assertGrpcSink(plan, "localhost", "9003");
 }
@@ -137,7 +137,7 @@ TEST_F(DefaultStatisticQueryGeneratorTest, OptionsOverrideDefaults)
         .conditionTrigger = {},
         .options = {{"memory_budget", "2048"}, {"min", "0"}, {"max", "500"}}};
 
-    const auto plan = generator.generateQuery(request, Statistic::StatisticId{1}, "localhost:9004");
+    const auto plan = generator.generateQuery(request, StatisticTuple::StatisticId{1}, "localhost:9004");
 
     const auto statisticBuilds = getOperatorByType<StatisticBuildLogicalOperator>(plan);
     ASSERT_EQ(statisticBuilds.size(), 1);
@@ -156,7 +156,7 @@ TEST_F(DefaultStatisticQueryGeneratorTest, IngestionTimeIsDefaultWhenNoEventTime
         .conditionTrigger = {},
         .options = {}};
 
-    const auto plan = generator.generateQuery(request, Statistic::StatisticId{1}, "localhost:9005");
+    const auto plan = generator.generateQuery(request, StatisticTuple::StatisticId{1}, "localhost:9005");
 
     const auto ingestionWatermarks = getOperatorByType<IngestionTimeWatermarkAssignerLogicalOperator>(plan);
     EXPECT_EQ(ingestionWatermarks.size(), 1);
@@ -177,7 +177,7 @@ TEST_F(DefaultStatisticQueryGeneratorTest, EventTimeUsedWhenFieldSpecified)
         .conditionTrigger = {},
         .options = {}};
 
-    const auto plan = generator.generateQuery(request, Statistic::StatisticId{1}, "localhost:9006");
+    const auto plan = generator.generateQuery(request, StatisticTuple::StatisticId{1}, "localhost:9006");
 
     const auto eventWatermarks = getOperatorByType<EventTimeWatermarkAssignerLogicalOperator>(plan);
     EXPECT_EQ(eventWatermarks.size(), 1);
@@ -200,7 +200,7 @@ TEST_F(DefaultStatisticQueryGeneratorTest, WorkloadDomainThrowsNotYetImplemented
         .options = {}};
 
     ASSERT_EXCEPTION_ERRORCODE(
-        (void)generator.generateQuery(request, Statistic::StatisticId{1}, "localhost:9007"), ErrorCode::NotImplemented);
+        (void)generator.generateQuery(request, StatisticTuple::StatisticId{1}, "localhost:9007"), ErrorCode::NotImplemented);
 }
 
 TEST_F(DefaultStatisticQueryGeneratorTest, InfrastructureDomainThrowsNotYetImplemented)
@@ -215,7 +215,7 @@ TEST_F(DefaultStatisticQueryGeneratorTest, InfrastructureDomainThrowsNotYetImple
         .options = {}};
 
     ASSERT_EXCEPTION_ERRORCODE(
-        (void)generator.generateQuery(request, Statistic::StatisticId{1}, "localhost:9008"), ErrorCode::NotImplemented);
+        (void)generator.generateQuery(request, StatisticTuple::StatisticId{1}, "localhost:9008"), ErrorCode::NotImplemented);
 }
 
 TEST_F(DefaultStatisticQueryGeneratorTest, GeneratePlanWithCondition)
@@ -227,10 +227,10 @@ TEST_F(DefaultStatisticQueryGeneratorTest, GeneratePlanWithCondition)
             .windowSizeMs = 5000,
             .windowAdvanceMs = {},
             .eventTimeFieldName = {},
-            .conditionTrigger = ConditionTrigger{.condition = LogicalFunction{GreaterLogicalFunction{FieldAccessLogicalFunction{"value"}, ConstantValueLogicalFunction{DataTypeProvider::provideDataType(DataType::Type::INT64, DataType::NULLABLE::NOT_NULLABLE), "100"}}}, .callback = [](Statistic::StatisticId, Windowing::TimeMeasure, Windowing::TimeMeasure) { }},
+            .conditionTrigger = ConditionTrigger{.condition = LogicalFunction{GreaterLogicalFunction{FieldAccessLogicalFunction{"value"}, ConstantValueLogicalFunction{DataTypeProvider::provideDataType(DataType::Type::INT64, DataType::NULLABLE::NOT_NULLABLE), "100"}}}, .callback = [](StatisticTuple::StatisticId, Windowing::TimeMeasure, Windowing::TimeMeasure) { }},
             .options = {}};
 
-    const auto plan = generator.generateQuery(request, Statistic::StatisticId{1}, "localhost:9009");
+    const auto plan = generator.generateQuery(request, StatisticTuple::StatisticId{1}, "localhost:9009");
 
     const auto selections = getOperatorByType<SelectionLogicalOperator>(plan);
     ASSERT_EQ(selections.size(), 1);
@@ -252,7 +252,7 @@ TEST_F(DefaultStatisticQueryGeneratorTest, GeneratePlanWithoutConditionHasNoSele
         .conditionTrigger = {},
         .options = {}};
 
-    const auto plan = generator.generateQuery(request, Statistic::StatisticId{1}, "localhost:9010");
+    const auto plan = generator.generateQuery(request, StatisticTuple::StatisticId{1}, "localhost:9010");
 
     const auto selections = getOperatorByType<SelectionLogicalOperator>(plan);
     EXPECT_EQ(selections.size(), 0);
@@ -276,10 +276,10 @@ TEST_F(DefaultStatisticQueryGeneratorTest, WriterHostIsRejectedWithHistogramDelt
 
     const DefaultStatisticQueryGenerator deltaGenerator{true};
     ASSERT_EXCEPTION_ERRORCODE(
-        (void)deltaGenerator.generateQuery(request, Statistic::StatisticId{1}, "localhost:9011"), ErrorCode::InvalidConfigParameter);
+        (void)deltaGenerator.generateQuery(request, StatisticTuple::StatisticId{1}, "localhost:9011"), ErrorCode::InvalidConfigParameter);
 
     /// Without the delta split the option stays valid: it is only the double pin that is impossible.
-    EXPECT_NO_THROW((void)generator.generateQuery(request, Statistic::StatisticId{1}, "localhost:9011"));
+    EXPECT_NO_THROW((void)generator.generateQuery(request, StatisticTuple::StatisticId{1}, "localhost:9011"));
 }
 
 /// The delta split itself must still generate: GEN and RESOLVER StatisticBuilds feeding one writer.
@@ -295,7 +295,7 @@ TEST_F(DefaultStatisticQueryGeneratorTest, HistogramDeltaSplitGeneratesGenAndRes
         .options = {}};
 
     const DefaultStatisticQueryGenerator deltaGenerator{true};
-    const auto plan = deltaGenerator.generateQuery(request, Statistic::StatisticId{1}, "localhost:9012");
+    const auto plan = deltaGenerator.generateQuery(request, StatisticTuple::StatisticId{1}, "localhost:9012");
 
     EXPECT_EQ(getOperatorByType<StatisticBuildLogicalOperator>(plan).size(), 2);
     EXPECT_EQ(getOperatorByType<StatisticStoreWriterLogicalOperator>(plan).size(), 1);

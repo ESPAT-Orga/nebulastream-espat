@@ -29,20 +29,20 @@
 #include <ErrorHandling.hpp>
 #include <LogicalOperatorRegistry.hpp>
 #include <SerializableVariantDescriptor.pb.h>
-#include <Statistic.hpp>
+#include <StatisticTuple.hpp>
 
 namespace NES
 {
 
 ScalarStatisticProbeLogicalOperator::ScalarStatisticProbeLogicalOperator(
-    const Statistic::StatisticId statisticId, const Statistic::StatisticType op, DataType valueType)
+    const StatisticTuple::StatisticId statisticId, const StatisticTuple::StatisticType op, DataType valueType)
     : statisticId(statisticId), op(op), valueType(std::move(valueType))
 {
 }
 
 ScalarStatisticProbeLogicalOperator::ScalarStatisticProbeLogicalOperator(
-    const Statistic::StatisticId statisticId,
-    const Statistic::StatisticType op,
+    const StatisticTuple::StatisticId statisticId,
+    const StatisticTuple::StatisticType op,
     DataType valueType,
     std::string valueFieldName,
     LogicalStatisticFields logicalStatisticFields)
@@ -168,8 +168,8 @@ ScalarStatisticProbeLogicalOperator Unreflector<ScalarStatisticProbeLogicalOpera
 {
     auto data = unreflect<detail::ReflectedScalarStatisticProbeLogicalOperator>(reflected);
     return ScalarStatisticProbeLogicalOperator{
-        Statistic::StatisticId{data.statisticId},
-        static_cast<Statistic::StatisticType>(data.op),
+        StatisticTuple::StatisticId{data.statisticId},
+        static_cast<StatisticTuple::StatisticType>(data.op),
         data.valueType,
         std::move(data.valueFieldName),
         LogicalStatisticFields{}};

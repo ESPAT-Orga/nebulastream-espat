@@ -23,7 +23,7 @@
 #include <Operators/Windows/Aggregations/Scalar/ScalarStatisticLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/Sketch/CountMinSketchLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/WindowAggregationLogicalFunction.hpp>
-#include <Statistic.hpp>
+#include <StatisticTuple.hpp>
 
 namespace NES
 {
@@ -36,23 +36,23 @@ inline std::optional<StatisticTarget> tryGetStatisticTarget(const WindowAggregat
 {
     if (const auto countMin = aggregation.tryGetAs<CountMinSketchLogicalFunction>())
     {
-        return StatisticTarget{countMin->get().statisticId, Statistic::StatisticType::Count_Min_Sketch};
+        return StatisticTarget{countMin->get().statisticId, StatisticTuple::StatisticType::Count_Min_Sketch};
     }
     if (const auto histogram = aggregation.tryGetAs<EquiWidthHistogramLogicalFunction>())
     {
-        return StatisticTarget{histogram->get().statisticId, Statistic::StatisticType::Equi_Width_Histogram};
+        return StatisticTarget{histogram->get().statisticId, StatisticTuple::StatisticType::Equi_Width_Histogram};
     }
     if (const auto histogramDeltaGen = aggregation.tryGetAs<EquiWidthHistogramDeltaGenLogicalFunction>())
     {
-        return StatisticTarget{histogramDeltaGen->get().statisticId, Statistic::StatisticType::Equi_Width_Histogram};
+        return StatisticTarget{histogramDeltaGen->get().statisticId, StatisticTuple::StatisticType::Equi_Width_Histogram};
     }
     if (const auto histogramDeltaResolver = aggregation.tryGetAs<EquiWidthHistogramDeltaResolverLogicalFunction>())
     {
-        return StatisticTarget{histogramDeltaResolver->get().statisticId, Statistic::StatisticType::Equi_Width_Histogram};
+        return StatisticTarget{histogramDeltaResolver->get().statisticId, StatisticTuple::StatisticType::Equi_Width_Histogram};
     }
     if (const auto sample = aggregation.tryGetAs<ReservoirSampleLogicalFunction>())
     {
-        return StatisticTarget{sample->get().statisticId, Statistic::StatisticType::Reservoir_Sample};
+        return StatisticTarget{sample->get().statisticId, StatisticTuple::StatisticType::Reservoir_Sample};
     }
     if (const auto scalar = aggregation.tryGetAs<ScalarStatisticLogicalFunction>())
     {

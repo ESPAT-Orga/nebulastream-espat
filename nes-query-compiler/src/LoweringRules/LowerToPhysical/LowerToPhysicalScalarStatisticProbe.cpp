@@ -27,7 +27,7 @@ namespace NES
 
 namespace
 {
-StatisticProvider getStatisticProvider(const Statistic::StatisticType op, const DataType valueType, std::string valueFieldName)
+StatisticProvider getStatisticProvider(const StatisticTuple::StatisticType op, const DataType valueType, std::string valueFieldName)
 {
     auto statisticProviderArguments = std::make_unique<ScalarStatisticProviderArguments>(valueType, std::move(valueFieldName));
     return {op, std::move(statisticProviderArguments)};

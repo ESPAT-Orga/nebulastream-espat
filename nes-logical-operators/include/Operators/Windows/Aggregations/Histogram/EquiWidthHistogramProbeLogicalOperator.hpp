@@ -30,7 +30,7 @@
 #include <Traits/Trait.hpp>
 #include <Util/PlanRenderer.hpp>
 #include <Util/Reflection.hpp>
-#include <Statistic.hpp>
+#include <StatisticTuple.hpp>
 
 namespace NES
 {
@@ -39,9 +39,9 @@ namespace NES
 class EquiWidthHistogramProbeLogicalOperator final : public LogicalStatisticFields, public OriginIdAssigner
 {
 public:
-    explicit EquiWidthHistogramProbeLogicalOperator(Statistic::StatisticId statisticId, DataType counterType, DataType startEndType);
+    explicit EquiWidthHistogramProbeLogicalOperator(StatisticTuple::StatisticId statisticId, DataType counterType, DataType startEndType);
     explicit EquiWidthHistogramProbeLogicalOperator(
-        Statistic::StatisticId statisticId,
+        StatisticTuple::StatisticId statisticId,
         DataType counterType,
         DataType startEndType,
         std::string binStartFieldName,
@@ -65,7 +65,7 @@ public:
 
     [[nodiscard]] EquiWidthHistogramProbeLogicalOperator withInferredSchema(const std::vector<Schema>& inputSchemas) const;
 
-    Statistic::StatisticId statisticId;
+    StatisticTuple::StatisticId statisticId;
     DataType counterType;
     DataType startEndType;
 
@@ -105,7 +105,7 @@ namespace detail
 {
 struct ReflectedEquiWidthHistogramProbeLogicalOperator
 {
-    Statistic::StatisticId::Underlying statisticId;
+    StatisticTuple::StatisticId::Underlying statisticId;
     DataType counterTypeValue;
     DataType startEndTypeValue;
     std::string binStartFieldName;

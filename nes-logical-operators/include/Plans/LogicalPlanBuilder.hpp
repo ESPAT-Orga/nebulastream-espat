@@ -28,7 +28,7 @@
 #include <Operators/Windows/JoinLogicalOperator.hpp>
 #include <Plans/LogicalPlan.hpp>
 #include <WindowTypes/Types/WindowType.hpp>
-#include <Statistic.hpp>
+#include <StatisticTuple.hpp>
 
 namespace NES
 {
@@ -77,8 +77,8 @@ public:
     static LogicalPlan addStatisticStoreWriter(
         const LogicalPlan& queryPlan,
         const std::shared_ptr<LogicalStatisticFields>& inputLogicalStatisticFields,
-        Statistic::StatisticId statisticId,
-        Statistic::StatisticType statisticType);
+        StatisticTuple::StatisticId statisticId,
+        StatisticTuple::StatisticType statisticType);
 
     /// @brief UnionOperator to combine two query plans
     /// @param leftLogicalPlan the left query plan to combine by the union

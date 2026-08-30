@@ -40,7 +40,7 @@ StatisticProvider getStatisticProvider(const Schema& sampleSchema)
         currentOffset += field.dataType.getSizeInBytesWithoutNull();
     }
     auto statisticProviderArguments = std::make_unique<ReservoirSampleProviderArguments>(std::move(sampleFields));
-    return {Statistic::StatisticType::Reservoir_Sample, std::move(statisticProviderArguments)};
+    return {StatisticTuple::StatisticType::Reservoir_Sample, std::move(statisticProviderArguments)};
 }
 }
 

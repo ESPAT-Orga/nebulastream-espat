@@ -32,7 +32,7 @@
 #include <fmt/format.h>
 #include <AggregationLogicalFunctionRegistry.hpp>
 #include <ErrorHandling.hpp>
-#include <Statistic.hpp>
+#include <StatisticTuple.hpp>
 
 namespace NES
 {
@@ -44,7 +44,7 @@ constexpr uint64_t kCountMinRows = 3;
 }
 
 CountMinSketchLogicalFunction::CountMinSketchLogicalFunction(
-    const FieldAccessLogicalFunction& onField, const uint64_t memoryBudget, const Statistic::StatisticId statisticId)
+    const FieldAccessLogicalFunction& onField, const uint64_t memoryBudget, const StatisticTuple::StatisticId statisticId)
     : StatisticLogicalFunction(memoryBudget)
     , statisticId(statisticId)
     , inputStamp(onField.getDataType())
@@ -59,7 +59,7 @@ CountMinSketchLogicalFunction::CountMinSketchLogicalFunction(
     const FieldAccessLogicalFunction& onField,
     const FieldAccessLogicalFunction& asField,
     const uint64_t memoryBudget,
-    const Statistic::StatisticId statisticId)
+    const StatisticTuple::StatisticId statisticId)
     : StatisticLogicalFunction(memoryBudget)
     , statisticId(statisticId)
     , inputStamp(onField.getDataType())
@@ -97,7 +97,7 @@ Reflected Reflector<CountMinSketchLogicalFunction>::operator()(const CountMinSke
 CountMinSketchLogicalFunction Unreflector<CountMinSketchLogicalFunction>::operator()(const Reflected& reflected) const
 {
     auto data = unreflect<detail::ReflectedCountMinSketchLogicalFunction>(reflected);
-    return CountMinSketchLogicalFunction{data.onField, data.asField, data.memoryBudget, Statistic::StatisticId{data.statisticId}};
+    return CountMinSketchLogicalFunction{data.onField, data.asField, data.memoryBudget, StatisticTuple::StatisticId{data.statisticId}};
 }
 
 CountMinSketchLogicalFunction CountMinSketchLogicalFunction::withInferredStamp(const Schema& schema) const

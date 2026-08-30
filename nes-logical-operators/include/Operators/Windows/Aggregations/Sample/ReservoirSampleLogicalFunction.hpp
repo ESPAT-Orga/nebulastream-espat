@@ -25,7 +25,7 @@
 #include <Operators/Windows/Aggregations/StatisticLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/WindowAggregationLogicalFunction.hpp>
 #include <Util/Reflection.hpp>
-#include <Statistic.hpp>
+#include <StatisticTuple.hpp>
 
 namespace NES
 {
@@ -42,13 +42,13 @@ public:
         const FieldAccessLogicalFunction& onField,
         std::vector<FieldAccessLogicalFunction> sampleFields,
         uint64_t memoryBudget,
-        Statistic::StatisticId statisticId);
+        StatisticTuple::StatisticId statisticId);
     ReservoirSampleLogicalFunction(
         const FieldAccessLogicalFunction& onField,
         const FieldAccessLogicalFunction& asField,
         std::vector<FieldAccessLogicalFunction> sampleFields,
         uint64_t memoryBudget,
-        Statistic::StatisticId statisticId);
+        StatisticTuple::StatisticId statisticId);
 
     ~ReservoirSampleLogicalFunction() override = default;
 
@@ -77,7 +77,7 @@ public:
     /// Selects which fields get projected into the sample.
     std::vector<FieldAccessLogicalFunction> sampleFields;
     /// Identifies the sample in the StatStore
-    Statistic::StatisticId statisticId;
+    StatisticTuple::StatisticId statisticId;
 
 private:
     static constexpr std::string_view NAME = "ReservoirSample";
@@ -113,6 +113,6 @@ struct ReflectedReservoirSampleLogicalFunction
     FieldAccessLogicalFunction asField;
     std::vector<FieldAccessLogicalFunction> sampleFields;
     uint64_t memoryBudget;
-    Statistic::StatisticId::Underlying statisticId;
+    StatisticTuple::StatisticId::Underlying statisticId;
 };
 }

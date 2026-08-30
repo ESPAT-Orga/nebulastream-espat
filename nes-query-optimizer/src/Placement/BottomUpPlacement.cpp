@@ -50,7 +50,7 @@
 #include <util/HighsInt.h>
 #include <ErrorHandling.hpp>
 #include <NetworkTopology.hpp>
-#include <Statistic.hpp>
+#include <StatisticTuple.hpp>
 #include <WorkerConfig.hpp>
 #include <scope_guard.hpp>
 
@@ -396,7 +396,7 @@ void addConnectivityConstraints(PlacementModel& model, const LogicalPlan& logica
 /// statisticId and pin them to the same node via `x[probe, n] - x[writer, n] == 0` for every node.
 void addStatisticColocationConstraints(PlacementModel& model, const LogicalPlan& logicalPlan, const NetworkTopology& topology)
 {
-    std::unordered_map<Statistic::StatisticId, OperatorId> writerByStatId;
+    std::unordered_map<StatisticTuple::StatisticId, OperatorId> writerByStatId;
     for (const LogicalOperator& op : BFSRange(logicalPlan.getRootOperators().front()))
     {
         if (auto writer = op.tryGetAs<StatisticStoreWriterLogicalOperator>())
@@ -407,7 +407,7 @@ void addStatisticColocationConstraints(PlacementModel& model, const LogicalPlan&
 
     for (const LogicalOperator& op : BFSRange(logicalPlan.getRootOperators().front()))
     {
-        std::optional<Statistic::StatisticId> statisticId;
+        std::optional<StatisticTuple::StatisticId> statisticId;
         if (auto probe = op.tryGetAs<CountMinSketchProbeLogicalOperator>())
         {
             statisticId = probe->get().statisticId;

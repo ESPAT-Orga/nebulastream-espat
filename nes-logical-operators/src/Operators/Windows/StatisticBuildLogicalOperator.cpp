@@ -151,7 +151,7 @@ StatisticBuildLogicalOperator StatisticBuildLogicalOperator::withInferredSchema(
     {
         throw CannotInferSchema("A StatisticBuild operator requires at least one statistic aggregation");
     }
-    std::unordered_set<Statistic::StatisticId::Underlying> seenStatisticIds;
+    std::unordered_set<StatisticTuple::StatisticId::Underlying> seenStatisticIds;
     const auto dataFieldType = DataTypeProvider::provideDataType(DataType::Type::VARSIZED, DataType::NULLABLE::NOT_NULLABLE);
     for (const auto& aggregation : copy.aggregationFunctions)
     {

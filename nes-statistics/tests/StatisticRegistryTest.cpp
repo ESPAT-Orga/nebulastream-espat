@@ -32,7 +32,7 @@
 #include <CollectionDomain.hpp>
 #include <ConditionTrigger.hpp>
 #include <Metric.hpp>
-#include <Statistic.hpp>
+#include <StatisticTuple.hpp>
 #include <StatisticRegistry.hpp>
 
 namespace NES
@@ -61,7 +61,7 @@ public:
             FieldAccessLogicalFunction{fieldName},
             ConstantValueLogicalFunction{
                 DataTypeProvider::provideDataType(DataType::Type::INT64, DataType::NULLABLE::NOT_NULLABLE), threshold}}};
-        return {.condition = condition, .callback = [](Statistic::StatisticId, Windowing::TimeMeasure, Windowing::TimeMeasure) { }};
+        return {.condition = condition, .callback = [](StatisticTuple::StatisticId, Windowing::TimeMeasure, Windowing::TimeMeasure) { }};
     }
 
     static std::vector<ConditionTrigger> makeTriggers(size_t count)
@@ -81,12 +81,12 @@ TEST_F(StatisticRegistryTest, RegisterAndFind)
     const auto key = makeKey(Metric::Cardinality, "src", "field", 5000);
     const auto queryId = QueryId::createDistributed(DistributedQueryId{"100"});
 
-    registry.registerStatistic(key, queryId, Statistic::StatisticId{42}, makeTriggers(2));
+    registry.registerStatistic(key, queryId, StatisticTuple::StatisticId{42}, makeTriggers(2));
     auto result = registry.find(key);
 
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(result->queryId, queryId);
-    EXPECT_EQ(result->statisticId, Statistic::StatisticId{42});
+    EXPECT_EQ(result->statisticId, StatisticTuple::StatisticId{42});
     EXPECT_EQ(result->triggers.size(), 2);
 }
 
@@ -99,7 +99,7 @@ TEST_F(StatisticRegistryTest, FindReturnsNulloptForUnknownKey)
 TEST_F(StatisticRegistryTest, FindReturnsNulloptForDifferentWindowSize)
 {
     const auto key = makeKey(Metric::Cardinality, "src", "field", 5000);
-    registry.registerStatistic(key, QueryId::createDistributed(DistributedQueryId{"100"}), Statistic::StatisticId{42}, makeTriggers(0));
+    registry.registerStatistic(key, QueryId::createDistributed(DistributedQueryId{"100"}), StatisticTuple::StatisticId{42}, makeTriggers(0));
 
     auto differentWindow = makeKey(Metric::Cardinality, "src", "field", 10000);
     EXPECT_FALSE(registry.find(differentWindow).has_value());
@@ -111,9 +111,9 @@ TEST_F(StatisticRegistryTest, DifferentMetricsSameFieldAreSeparateEntries)
     const auto keyMinVal = makeKey(Metric::MinVal, "src", "field", 5000);
 
     registry.registerStatistic(
-        keyCardinality, QueryId::createDistributed(DistributedQueryId{"1"}), Statistic::StatisticId{100}, makeTriggers(1));
+        keyCardinality, QueryId::createDistributed(DistributedQueryId{"1"}), StatisticTuple::StatisticId{100}, makeTriggers(1));
     registry.registerStatistic(
-        keyMinVal, QueryId::createDistributed(DistributedQueryId{"2"}), Statistic::StatisticId{200}, makeTriggers(3));
+        keyMinVal, QueryId::createDistributed(DistributedQueryId{"2"}), StatisticTuple::StatisticId{200}, makeTriggers(3));
 
     auto resultCardinality = registry.find(keyCardinality);
     auto resultMinVal = registry.find(keyMinVal);
@@ -127,7 +127,7 @@ TEST_F(StatisticRegistryTest, DifferentMetricsSameFieldAreSeparateEntries)
 TEST_F(StatisticRegistryTest, DeregisterRemovesEntry)
 {
     const auto key = makeKey(Metric::Cardinality, "src", "field", 5000);
-    registry.registerStatistic(key, QueryId::createDistributed(DistributedQueryId{"100"}), Statistic::StatisticId{42}, makeTriggers(4));
+    registry.registerStatistic(key, QueryId::createDistributed(DistributedQueryId{"100"}), StatisticTuple::StatisticId{42}, makeTriggers(4));
     EXPECT_TRUE(registry.find(key).has_value());
 
     EXPECT_TRUE(registry.deregisterStatistic(key));
@@ -148,11 +148,11 @@ TEST_F(StatisticRegistryTest, RegisterWithTriggers)
     bool callbackInvoked = false;
     ConditionTrigger trigger{
         .condition = condition,
-        .callback = [&](Statistic::StatisticId, Windowing::TimeMeasure, Windowing::TimeMeasure) { callbackInvoked = true; }};
+        .callback = [&](StatisticTuple::StatisticId, Windowing::TimeMeasure, Windowing::TimeMeasure) { callbackInvoked = true; }};
 
     std::vector<ConditionTrigger> triggers;
     triggers.push_back(std::move(trigger));
-    registry.registerStatistic(key, QueryId::createDistributed(DistributedQueryId{"100"}), Statistic::StatisticId{42}, std::move(triggers));
+    registry.registerStatistic(key, QueryId::createDistributed(DistributedQueryId{"100"}), StatisticTuple::StatisticId{42}, std::move(triggers));
 
     auto result = registry.find(key);
     ASSERT_TRUE(result.has_value());
@@ -162,7 +162,7 @@ TEST_F(StatisticRegistryTest, RegisterWithTriggers)
 TEST_F(StatisticRegistryTest, AddTriggerToExistingEntry)
 {
     const auto key = makeKey(Metric::Cardinality, "src", "field", 5000);
-    registry.registerStatistic(key, QueryId::createDistributed(DistributedQueryId{"100"}), Statistic::StatisticId{42}, makeTriggers(0));
+    registry.registerStatistic(key, QueryId::createDistributed(DistributedQueryId{"100"}), StatisticTuple::StatisticId{42}, makeTriggers(0));
 
     auto resultBefore = registry.find(key);
     ASSERT_TRUE(resultBefore.has_value());
@@ -172,7 +172,7 @@ TEST_F(StatisticRegistryTest, AddTriggerToExistingEntry)
         FieldAccessLogicalFunction{"value"},
         ConstantValueLogicalFunction{DataTypeProvider::provideDataType(DataType::Type::INT64, DataType::NULLABLE::NOT_NULLABLE), "50"}}};
     ConditionTrigger trigger{
-        .condition = condition, .callback = [](Statistic::StatisticId, Windowing::TimeMeasure, Windowing::TimeMeasure) { }};
+        .condition = condition, .callback = [](StatisticTuple::StatisticId, Windowing::TimeMeasure, Windowing::TimeMeasure) { }};
     EXPECT_TRUE(registry.addTrigger(key, std::move(trigger)));
 
     auto resultAfter = registry.find(key);
@@ -186,7 +186,7 @@ TEST_F(StatisticRegistryTest, AddTriggerToNonExistentKeyReturnsFalse)
         FieldAccessLogicalFunction{"value"},
         ConstantValueLogicalFunction{DataTypeProvider::provideDataType(DataType::Type::INT64, DataType::NULLABLE::NOT_NULLABLE), "50"}}};
     ConditionTrigger trigger{
-        .condition = condition, .callback = [](Statistic::StatisticId, Windowing::TimeMeasure, Windowing::TimeMeasure) { }};
+        .condition = condition, .callback = [](StatisticTuple::StatisticId, Windowing::TimeMeasure, Windowing::TimeMeasure) { }};
     EXPECT_FALSE(registry.addTrigger(makeKey(Metric::Rate, "unknown", "field", 5000), std::move(trigger)));
 }
 

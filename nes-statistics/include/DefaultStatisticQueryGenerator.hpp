@@ -19,7 +19,7 @@
 #include <Plans/LogicalPlan.hpp>
 #include <CollectionDomain.hpp>
 #include <RequestStatisticStatement.hpp>
-#include <Statistic.hpp>
+#include <StatisticTuple.hpp>
 #include <StatisticQueryGenerator.hpp>
 
 namespace NES
@@ -39,7 +39,7 @@ public:
 
     [[nodiscard]] LogicalPlan generateQuery(
         const RequestStatisticBuildStatement& request,
-        Statistic::StatisticId statisticId,
+        StatisticTuple::StatisticId statisticId,
         const std::string& coordinatorAddress) const override;
 
     /// Builds the "build branch" sub-plan for a WorkloadDomain statistic: a chain rooted at the
@@ -51,7 +51,7 @@ public:
     [[nodiscard]] LogicalPlan generateWorkloadBranch(
         const WorkloadDomain& domain,
         const RequestStatisticBuildStatement& request,
-        Statistic::StatisticId statisticId,
+        StatisticTuple::StatisticId statisticId,
         const std::string& coordinatorAddress,
         const LogicalOperator& spliceLeaf) const override;
 

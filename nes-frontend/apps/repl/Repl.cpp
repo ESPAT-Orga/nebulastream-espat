@@ -60,7 +60,7 @@ struct Repl::Impl
     StatementBinder binder;
     std::stop_token stopToken;
     std::vector<RequestStatisticBuildStatement> companionStatisticRequests;
-    std::optional<std::function<void(DistributedQueryId, const std::string&, Statistic::StatisticId)>> onCompanionAssociatedWithQuery;
+    std::optional<std::function<void(DistributedQueryId, const std::string&, StatisticTuple::StatisticId)>> onCompanionAssociatedWithQuery;
 
     std::unique_ptr<replxx::Replxx> rx;
     std::vector<std::string> history;
@@ -89,7 +89,7 @@ struct Repl::Impl
         const bool interactiveMode,
         std::stop_token stopToken,
         std::vector<RequestStatisticBuildStatement> companionStatisticRequests,
-        std::optional<std::function<void(DistributedQueryId, const std::string&, Statistic::StatisticId)>> onCompanionAssociatedWithQuery)
+        std::optional<std::function<void(DistributedQueryId, const std::string&, StatisticTuple::StatisticId)>> onCompanionAssociatedWithQuery)
         : sourceStatementHandler(std::move(sourceStatementHandler))
         , sinkStatementHandler(std::move(sinkStatementHandler))
         , topologyStatementHandler(std::move(topologyStatementHandler))
@@ -686,7 +686,7 @@ Repl::Repl(
     bool interactiveMode,
     std::stop_token stopToken,
     std::vector<RequestStatisticBuildStatement> companionStatisticRequests,
-    std::optional<std::function<void(DistributedQueryId, const std::string&, Statistic::StatisticId)>> onCompanionAssociatedWithQuery)
+    std::optional<std::function<void(DistributedQueryId, const std::string&, StatisticTuple::StatisticId)>> onCompanionAssociatedWithQuery)
     : impl(std::make_unique<Impl>(
           std::move(sourceStatementHandler),
           std::move(sinkStatementHandler),

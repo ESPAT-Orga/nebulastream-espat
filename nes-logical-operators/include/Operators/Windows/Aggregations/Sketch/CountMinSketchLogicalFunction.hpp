@@ -24,7 +24,7 @@
 #include <Operators/Windows/Aggregations/StatisticLogicalFunction.hpp>
 #include <Operators/Windows/Aggregations/WindowAggregationLogicalFunction.hpp>
 #include <Util/Reflection.hpp>
-#include <Statistic.hpp>
+#include <StatisticTuple.hpp>
 
 namespace NES
 {
@@ -38,12 +38,12 @@ public:
     /// `onField` the field for which the sketch should be created
     /// `asField` used when the sketch should be renamed in the query
     /// `memoryBudget` budget in bytes used to derive rows / columns during lowering
-    CountMinSketchLogicalFunction(const FieldAccessLogicalFunction& onField, uint64_t memoryBudget, Statistic::StatisticId statisticId);
+    CountMinSketchLogicalFunction(const FieldAccessLogicalFunction& onField, uint64_t memoryBudget, StatisticTuple::StatisticId statisticId);
     CountMinSketchLogicalFunction(
         const FieldAccessLogicalFunction& onField,
         const FieldAccessLogicalFunction& asField,
         uint64_t memoryBudget,
-        Statistic::StatisticId statisticId);
+        StatisticTuple::StatisticId statisticId);
 
     ~CountMinSketchLogicalFunction() override = default;
 
@@ -69,7 +69,7 @@ public:
 
     [[nodiscard]] std::unique_ptr<StatisticConfig> calculateConfigs() const override;
 
-    Statistic::StatisticId statisticId;
+    StatisticTuple::StatisticId statisticId;
 
 private:
     static constexpr std::string_view NAME = "CountMinSketch";
@@ -101,7 +101,7 @@ namespace NES::detail
 {
 struct ReflectedCountMinSketchLogicalFunction
 {
-    Statistic::StatisticId::Underlying statisticId;
+    StatisticTuple::StatisticId::Underlying statisticId;
     FieldAccessLogicalFunction onField;
     FieldAccessLogicalFunction asField;
     uint64_t memoryBudget;

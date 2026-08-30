@@ -18,7 +18,7 @@
 #include <Operators/Statistic/LogicalStatisticFields.hpp>
 #include <Statistic/StatisticStore/StatisticStoreOperatorHandler.hpp>
 #include <ExecutionContext.hpp>
-#include <Statistic.hpp>
+#include <StatisticTuple.hpp>
 #include <val_enum.hpp>
 
 namespace NES
@@ -26,8 +26,8 @@ namespace NES
 
 void insertStatisticIntoStoreProxy(
     OperatorHandler* ptrOpHandler,
-    const Statistic::StatisticId hash,
-    const Statistic::StatisticType type,
+    const StatisticTuple::StatisticId hash,
+    const StatisticTuple::StatisticType type,
     const Timestamp startTs,
     const Timestamp endTs,
     const uint64_t numberOfSeenTuples,
@@ -44,7 +44,7 @@ void insertStatisticIntoStoreProxy(
     std::memcpy(statisticData.get(), data, statisticDataSize);
 
 
-    const Statistic statistic{
+    const StatisticTuple statistic{
         hash,
         type,
         Windowing::TimeMeasure(startTs.getRawValue()),
@@ -59,8 +59,8 @@ void insertStatisticIntoStoreProxy(
 
 StatisticStoreWriter::StatisticStoreWriter(
     const OperatorHandlerId operatorHandlerId,
-    const Statistic::StatisticId statisticId,
-    const Statistic::StatisticType statisticType,
+    const StatisticTuple::StatisticId statisticId,
+    const StatisticTuple::StatisticType statisticType,
     std::string dataFieldName,
     const LogicalStatisticFields& inputLogicalStatisticFields,
     const LogicalStatisticFields& outputLogicalStatisticFields)
@@ -81,8 +81,8 @@ StatisticStoreWriter::StatisticStoreWriter(
 void StatisticStoreWriter::execute(ExecutionContext& executionCtx, Record& record) const
 {
     auto operatorHandlerMemRef = executionCtx.getGlobalOperatorHandler(operatorHandlerId);
-    const nautilus::val<Statistic::StatisticId> statisticIdVal{statisticId};
-    const nautilus::val<Statistic::StatisticType> statisticTypeVal{statisticType};
+    const nautilus::val<StatisticTuple::StatisticId> statisticIdVal{statisticId};
+    const nautilus::val<StatisticTuple::StatisticType> statisticTypeVal{statisticType};
     const nautilus::val<Timestamp> startTs{
         record.read(inputStatisticStartTsFieldName).getRawValueAs<nautilus::val<Timestamp::Underlying>>()};
     const nautilus::val<Timestamp> endTs{record.read(inputStatisticEndTsFieldName).getRawValueAs<nautilus::val<Timestamp::Underlying>>()};

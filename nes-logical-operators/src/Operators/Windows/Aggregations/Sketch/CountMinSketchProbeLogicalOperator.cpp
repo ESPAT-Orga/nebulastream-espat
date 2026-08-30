@@ -36,18 +36,18 @@
 #include <ErrorHandling.hpp>
 #include <LogicalOperatorRegistry.hpp>
 #include <SerializableVariantDescriptor.pb.h>
-#include <Statistic.hpp>
+#include <StatisticTuple.hpp>
 
 namespace NES
 {
 
-CountMinSketchProbeLogicalOperator::CountMinSketchProbeLogicalOperator(const Statistic::StatisticId statisticId, DataType counterType)
+CountMinSketchProbeLogicalOperator::CountMinSketchProbeLogicalOperator(const StatisticTuple::StatisticId statisticId, DataType counterType)
     : statisticId(statisticId), counterType(counterType)
 {
 }
 
 CountMinSketchProbeLogicalOperator::CountMinSketchProbeLogicalOperator(
-    Statistic::StatisticId statisticId,
+    StatisticTuple::StatisticId statisticId,
     DataType counterType,
     std::string rowIndexFieldName,
     std::string columnIndexFieldName,
@@ -184,7 +184,7 @@ CountMinSketchProbeLogicalOperator Unreflector<CountMinSketchProbeLogicalOperato
 {
     auto data = unreflect<detail::ReflectedCountMinSketchProbeLogicalOperator>(reflected);
     return CountMinSketchProbeLogicalOperator{
-        Statistic::StatisticId{data.statisticId},
+        StatisticTuple::StatisticId{data.statisticId},
         data.counterType,
         std::move(data.rowIndexFieldName),
         std::move(data.columnIndexFieldName),

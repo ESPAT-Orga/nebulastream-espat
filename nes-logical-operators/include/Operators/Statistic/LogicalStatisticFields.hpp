@@ -19,7 +19,7 @@
 #include <DataTypes/DataTypeProvider.hpp>
 #include <DataTypes/Schema.hpp>
 #include <fmt/format.h>
-#include <Statistic.hpp>
+#include <StatisticTuple.hpp>
 
 namespace NES
 {
@@ -29,14 +29,14 @@ namespace NES
 /// always agree on it -- even after plan (de)serialization, where only the id round-trips.
 struct StatisticTarget
 {
-    Statistic::StatisticId statisticId;
-    Statistic::StatisticType statisticType;
+    StatisticTuple::StatisticId statisticId;
+    StatisticTuple::StatisticType statisticType;
     bool operator==(const StatisticTarget&) const = default;
 };
 
 /// Per-synopsis VARSIZED data-field name, derived purely from the statisticId so producers and consumers
 /// never drift. Upper case, since the SLT sink field-name parsing requires it.
-inline std::string statisticDataFieldName(const Statistic::StatisticId statisticId)
+inline std::string statisticDataFieldName(const StatisticTuple::StatisticId statisticId)
 {
     return fmt::format("STATISTICDATA_{}", statisticId.getRawValue());
 }

@@ -31,6 +31,7 @@ class DefaultStatisticQueryGenerator : public StatisticQueryGenerator
 {
 public:
     DefaultStatisticQueryGenerator() = default;
+    explicit DefaultStatisticQueryGenerator(bool /*enableHistogramDeltaCompression*/) { }
 
     [[nodiscard]] LogicalPlan generateQuery(
         const RequestStatisticBuildStatement& request,

@@ -24,6 +24,7 @@
 #include <Interface/PagedVector/PagedVectorRef.hpp>
 #include <Interface/Record.hpp>
 #include <Util/RuntimeRegistry.hpp>
+#include <StatisticTuple.hpp>
 
 namespace NES
 {
@@ -38,6 +39,14 @@ struct AggregationPhysicalFunctionRegistryArguments
     Record::RecordFieldIdentifier resultFieldIdentifier;
     std::optional<std::shared_ptr<PagedVectorTupleLayout>> tupleLayout;
     bool includeNullValues;
+
+    /// Statistic aggregations only. A statistic emits two fields -- the payload and the number of tuples it was
+    /// built from -- so it needs the name of that second field, which the plain aggregations have no notion of.
+    std::optional<Record::RecordFieldIdentifier> numberOfSeenTuplesFieldName{};
+
+    /// ScalarStatistic only: selects which of the Count/Sum/Avg statistic functions the factory returns. They
+    /// share one registry entry because they differ only in how lower() re-wraps the aggregate.
+    std::optional<StatisticTuple::StatisticType> scalarOp{};
 };
 
 using AggregationPhysicalFunctionFn

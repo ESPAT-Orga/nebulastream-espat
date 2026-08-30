@@ -35,7 +35,3 @@ add_registry_entry(LoweringRule Source KEY SourceDescriptor)
 add_registry_entry(LoweringRule IngestionTimeWatermarkAssigner)
 add_registry_entry(LoweringRule EventTimeWatermarkAssigner)
 add_registry_entry(LoweringRule InferModel)
-
-add_plugin(ScalarStatisticProbe LoweringRule nes-query-compiler LowerToPhysicalScalarStatisticProbe.cpp)
-add_plugin(StatisticStoreWriter LoweringRule nes-query-compiler LowerToPhysicalStatisticStoreWriter.cpp)
-add_plugin(StatisticBuild LoweringRule nes-query-compiler LowerToPhysicalStatisticBuild.cpp)

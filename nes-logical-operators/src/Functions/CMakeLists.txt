@@ -30,6 +30,8 @@ add_source_files(nes-logical-operators
         CastFromUnixTimestampLogicalFunction.cpp
         VarSizedToNumericLogicalFunction.cpp
         ExtractFromTimestampLogicalFunction.cpp
+        ZstdCompressLogicalFunction.cpp
+        ZstdDecompressLogicalFunction.cpp
 )
 
 
@@ -63,3 +65,7 @@ add_registry_entry(LogicalFunction OctetLength KEY OCTET_LENGTH)
 add_registry_entry(LogicalFunction ToBase64 KEY TO_BASE64)
 add_registry_entry(LogicalFunction UnboundFieldAccess)
 add_registry_entry(LogicalFunction VarSizedToNumeric)
+add_unreflection_entry(LogicalFunction ZstdCompress)
+add_unreflection_entry(LogicalFunction ZstdDecompress)
+add_registry_entry(LogicalFunction ZstdCompress)
+add_registry_entry(LogicalFunction ZstdDecompress)

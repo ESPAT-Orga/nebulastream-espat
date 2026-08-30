@@ -13,26 +13,14 @@
 */
 
 #pragma once
-
-#include <Runtime/Execution/OperatorHandler.hpp>
-#include <StatisticStore/AbstractStatisticStore.hpp>
+#include <Identifiers/NESStrongType.hpp>
 
 namespace NES
 {
 
-class StatisticStoreOperatorHandler final : public OperatorHandler
-{
-public:
-    explicit StatisticStoreOperatorHandler(std::shared_ptr<AbstractStatisticStore> statisticStore);
-
-    void start(PipelineExecutionContext&, uint32_t) override { }
-
-    void stop(QueryTerminationType, PipelineExecutionContext&) override { }
-
-    [[nodiscard]] std::shared_ptr<AbstractStatisticStore> getStatisticStore() const;
-
-private:
-    std::shared_ptr<AbstractStatisticStore> statisticStore;
-};
+/// Strong types for count-min sketch dimensions to prevent accidentally swapping rows and columns.
+/// Rows correspond to the number of hash functions (depth), columns to the number of buckets (width).
+using NumberOfRows = NESStrongType<uint64_t, struct NumberOfRows_, 0, 1>;
+using NumberOfCols = NESStrongType<uint64_t, struct NumberOfCols_, 0, 1>;
 
 }

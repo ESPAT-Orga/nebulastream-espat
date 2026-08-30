@@ -113,6 +113,11 @@ void CountAggregationPhysicalFunction::cleanup(nautilus::val<AggregationState*>)
 {
 }
 
+VarVal CountAggregationPhysicalFunction::readCount(const nautilus::val<AggregationState*>& aggregationState) const
+{
+    return VarVal::readNonNullableVarValFromMemory(static_cast<nautilus::val<int8_t*>>(aggregationState), resultType);
+}
+
 size_t CountAggregationPhysicalFunction::getSizeOfStateInBytes() const
 {
     return resultType.getSizeInBytesWithoutNull();

@@ -204,6 +204,36 @@ void AvgAggregationPhysicalFunction::cleanup(nautilus::val<AggregationState*>)
 {
 }
 
+nautilus::val<int8_t*> AvgAggregationPhysicalFunction::sumMemArea(const nautilus::val<AggregationState*>& aggregationState) const
+{
+    /// The isNull byte, when present, precedes the sum. Spelled exactly as the inline call sites above, so the
+    /// two cannot drift.
+    if (inputType.nullable)
+    {
+        return static_cast<nautilus::val<int8_t*>>(aggregationState + nautilus::val<uint64_t>{1});
+    }
+    return static_cast<nautilus::val<int8_t*>>(aggregationState);
+}
+
+nautilus::val<int8_t*> AvgAggregationPhysicalFunction::countMemArea(const nautilus::val<AggregationState*>& aggregationState) const
+{
+    return sumMemArea(aggregationState) + nautilus::val<uint64_t>(resultType.getSizeInBytesWithoutNull());
+}
+
+VarVal AvgAggregationPhysicalFunction::readSum(const nautilus::val<AggregationState*>& aggregationState) const
+{
+    if (inputType.nullable)
+    {
+        return VarVal::readVarValFromMemory(sumMemArea(aggregationState), resultType, nautilus::val<bool>(false));
+    }
+    return VarVal::readNonNullableVarValFromMemory(sumMemArea(aggregationState), resultType);
+}
+
+VarVal AvgAggregationPhysicalFunction::readCount(const nautilus::val<AggregationState*>& aggregationState) const
+{
+    return VarVal::readNonNullableVarValFromMemory(countMemArea(aggregationState), countType);
+}
+
 size_t AvgAggregationPhysicalFunction::getSizeOfStateInBytes() const
 {
     /// Size of isNull + size of the sum value (accumulated in resultType) + size of the count value

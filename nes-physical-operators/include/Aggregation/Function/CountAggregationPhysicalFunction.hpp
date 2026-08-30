@@ -63,7 +63,12 @@ public:
 
     static AggregationPhysicalFunctionRegistryReturnType create(AggregationPhysicalFunctionRegistryArguments arguments);
 
-private:
+protected:
+    /// The state is a bare [count : resultType] at offset 0. This reads it so that subclasses reusing the state
+    /// -- the scalar Count statistic, which persists the count as a statistic synopsis -- do not have to repeat
+    /// the layout assumption.
+    [[nodiscard]] VarVal readCount(const nautilus::val<AggregationState*>& aggregationState) const;
+
     bool includeNullValues;
 };
 

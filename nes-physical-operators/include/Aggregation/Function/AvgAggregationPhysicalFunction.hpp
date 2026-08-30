@@ -59,7 +59,19 @@ public:
 
     static AggregationPhysicalFunctionRegistryReturnType create(AggregationPhysicalFunctionRegistryArguments arguments);
 
-private:
+protected:
+    /// The state is [optional isNull byte][sum : resultType][count : countType]. These locate and read the two
+    /// halves so that subclasses reusing this state -- the scalar statistics, which persist a sum or an average
+    /// as a statistic synopsis -- do not have to repeat the offset math.
+    [[nodiscard]] nautilus::val<int8_t*> sumMemArea(const nautilus::val<AggregationState*>& aggregationState) const;
+    [[nodiscard]] nautilus::val<int8_t*> countMemArea(const nautilus::val<AggregationState*>& aggregationState) const;
+
+    /// Reads the accumulated sum. Note the isNull byte records "no non-null input has been seen yet", not the
+    /// nullness of the sum itself, so the sum is always read as non-null; callers short-circuit to NULL on the
+    /// flag, the way lower() does.
+    [[nodiscard]] VarVal readSum(const nautilus::val<AggregationState*>& aggregationState) const;
+    [[nodiscard]] VarVal readCount(const nautilus::val<AggregationState*>& aggregationState) const;
+
     DataType countType{DataType::Type::UINT64, DataType::NULLABLE::NOT_NULLABLE};
 };
 

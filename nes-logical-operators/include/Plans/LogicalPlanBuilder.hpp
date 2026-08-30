@@ -97,6 +97,10 @@ public:
 
     static LogicalPlan addInferModel(Identifier modelName, const LogicalPlan& childPlan);
 
+    /// Splices `probe` on top of `queryPlan` as its new root. Used by the statistic probe operators, which sit
+    /// above an arbitrary sub-plan rather than above a fixed operator shape.
+    static LogicalPlan addStatProbeOp(const LogicalOperator& probe, const LogicalPlan& queryPlan);
+
     static LogicalPlan addSink(Identifier sinkName, const LogicalPlan& queryPlan);
     static LogicalPlan addAnonymousSink(
         Identifier type,

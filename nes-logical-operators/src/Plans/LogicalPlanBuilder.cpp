@@ -94,6 +94,11 @@ LogicalPlan LogicalPlanBuilder::addProjection(
         queryPlan, ProjectionLogicalOperator::create(std::move(projections), ProjectionLogicalOperator::Asterisk(asterisk)));
 }
 
+LogicalPlan LogicalPlanBuilder::addStatProbeOp(const LogicalOperator& probe, const LogicalPlan& queryPlan)
+{
+    return promoteOperatorToRoot(queryPlan, probe);
+}
+
 LogicalPlan LogicalPlanBuilder::addSelection(LogicalFunction selectionFunction, const LogicalPlan& queryPlan)
 {
     NES_TRACE("LogicalPlanBuilder: add selection operator to query plan");

@@ -21,8 +21,9 @@
 #include <optional>
 #include <string>
 #include <utility>
+#include <ranges>
 #include <vector>
-#include <DataTypes/Schema.hpp>
+#include <Schema/Schema.hpp>
 #include <Identifiers/Identifiers.hpp>
 #include <Operators/Sources/SourceNameLogicalOperator.hpp>
 #include <Operators/Statistic/LogicalStatisticFields.hpp>
@@ -214,11 +215,31 @@ std::expected<CollectStatisticResult, Exception> StatisticManager::collectWorklo
             auto ts = taggedSource.getTraitSet();
             [[maybe_unused]] const auto inserted = tryInsert(ts, DeferSourceStartTrait{.expectedSpliceCount = expectedSpliceCount});
             taggedSource = taggedSource.withTraitSet(ts);
-            auto replaced = replaceOperator(dataPlanWithDeferTrait, dataSources.front().getId(), taggedSource);
-            if (replaced.has_value())
+            /// statistic-renaming calls PlanRewriteUtils::replaceOperator here, which upstream does not have, so
+            /// we walk the plan ourselves and swap the one operator by id.
+            const auto targetId = dataSources.front().getId();
+            const std::function<LogicalOperator(const LogicalOperator&)> replaceInTree
+                = [&](const LogicalOperator& op) -> LogicalOperator
             {
-                dataPlanWithDeferTrait = std::move(*replaced);
+                if (op.getId() == targetId)
+                {
+                    return taggedSource;
+                }
+                auto children = op.getChildren();
+                std::vector<LogicalOperator> newChildren;
+                newChildren.reserve(children.size());
+                for (const auto& child : children)
+                {
+                    newChildren.push_back(replaceInTree(child));
+                }
+                return op.withChildrenUnsafe(std::move(newChildren));
+            };
+            std::vector<LogicalOperator> newRoots;
+            for (const auto& root : dataPlanWithDeferTrait.getRootOperators())
+            {
+                newRoots.push_back(replaceInTree(root));
             }
+            dataPlanWithDeferTrait = dataPlanWithDeferTrait.withRootOperators(newRoots);
         }
     }
 
@@ -230,7 +251,7 @@ std::expected<CollectStatisticResult, Exception> StatisticManager::collectWorklo
     std::optional<QueryId> mergedQueryIdOpt;
     {
         auto cache = deployedDataQueriesBySource.wlock();
-        if (const auto it = cache->find(sourceNameUpper); it != cache->end())
+        if (const auto it = cache->find(sourceNameUpper.asCanonicalString()); it != cache->end())
         {
             mergedQueryIdOpt = it->second;
         }
@@ -242,7 +263,7 @@ std::expected<CollectStatisticResult, Exception> StatisticManager::collectWorklo
                 return std::unexpected(submittedData.error());
             }
             mergedQueryIdOpt = std::move(submittedData.value());
-            cache->emplace(sourceNameUpper, *mergedQueryIdOpt);
+            cache->emplace(sourceNameUpper.asCanonicalString(), *mergedQueryIdOpt);
         }
     }
     const auto mergedQueryId = *mergedQueryIdOpt;
@@ -310,7 +331,7 @@ std::string StatisticManager::startGrpcServer()
     grpcServer = builder.BuildAndStart();
     if (not grpcServer)
     {
-        throw GRPCError("StatisticManager: Failed to start gRPC server");
+        throw QueryStartFailed("StatisticManager: Failed to start gRPC server");
     }
     service.release(); /// NOLINT(bugprone-unused-return-value)
     coordinatorAddress = "localhost:" + std::to_string(selectedPort);
@@ -361,27 +382,33 @@ std::optional<double> StatisticManager::getStatistics(
     {
         grpcSourcePort = startPort + attempt;
 
-        /// Build the full probe query: GrpcSource → probeQueryWithoutSource → GrpcSink
-        Schema grpcSourceSchema;
+        /// Build the full probe query: GrpcSource → probeQueryWithoutSource → GrpcSink.
+        /// Upstream's Schema is templated and declared schemas use unbound fields, so the statistic field
+        /// constants are materialised via StatisticField::unbound() rather than added one by one.
         const LogicalStatisticFields statisticFields;
-        grpcSourceSchema.addField(statisticFields.statisticIdField);
-        grpcSourceSchema.addField(statisticFields.statisticStartTsField);
-        grpcSourceSchema.addField(statisticFields.statisticEndTsField);
+        const auto statisticKeySchema = std::vector<UnqualifiedUnboundField>{
+                                            statisticFields.statisticIdField.unbound(),
+                                            statisticFields.statisticStartTsField.unbound(),
+                                            statisticFields.statisticEndTsField.unbound()}
+            | std::ranges::to<Schema<UnqualifiedUnboundField, Ordered>>();
 
         auto plan = LogicalPlanBuilder::createLogicalPlan(
-            "Grpc", grpcSourceSchema, {{"grpc_port", std::to_string(grpcSourcePort)}, {"receive_timeout_ms", "5000"}}, {});
+            Identifier::parse("Grpc"),
+            statisticKeySchema,
+            {{Identifier::parse("grpc_port"), std::to_string(grpcSourcePort)}, {Identifier::parse("receive_timeout_ms"), "5000"}},
+            {});
 
         for (const auto& rootOp : probeQueryWithoutSource.getRootOperators())
         {
             plan = LogicalPlanBuilder::addStatProbeOp(rootOp, plan);
         }
 
-        Schema grpcSinkSchema;
-        grpcSinkSchema.addField(statisticFields.statisticIdField);
-        grpcSinkSchema.addField(statisticFields.statisticStartTsField);
-        grpcSinkSchema.addField(statisticFields.statisticEndTsField);
-
-        plan = LogicalPlanBuilder::addInlineSink("Grpc", grpcSinkSchema, {{"grpc_host", sinkHost}, {"grpc_port", sinkPort}}, {}, plan);
+        plan = LogicalPlanBuilder::addAnonymousSink(
+            Identifier::parse("Grpc"),
+            statisticKeySchema,
+            {{Identifier::parse("grpc_host"), sinkHost}, {Identifier::parse("grpc_port"), sinkPort}},
+            {},
+            plan);
 
         auto queryIdResult = submitQuery(std::move(plan));
         if (queryIdResult.has_value())

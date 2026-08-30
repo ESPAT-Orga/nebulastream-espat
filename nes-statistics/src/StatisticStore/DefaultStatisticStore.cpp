@@ -32,11 +32,13 @@ bool DefaultStatisticStore::deleteStatistics(
     const auto statisticsLocked = statistics.wlock();
     auto& statisticsVec = (*statisticsLocked)[statisticId];
 
-    const auto range = std::ranges::remove_if(
-        statisticsVec,
-        [startTs, endTs](const StatisticTuple& statistic) { return startTs <= statistic.getStartTs() && statistic.getEndTs() <= endTs; });
-    const bool foundAnyStatistic = range.begin() != statisticsVec.end();
-    statisticsVec.erase(range.begin(), statisticsVec.end());
+    std::vector<StatisticTuple> kept;
+    kept.reserve(statisticsVec.size());
+    for (const auto& statistic : statisticsVec)
+        if (!(startTs <= statistic.getStartTs() && statistic.getEndTs() <= endTs))
+            kept.push_back(statistic);
+    const bool foundAnyStatistic = kept.size() != statisticsVec.size();
+    statisticsVec = std::move(kept);
     return foundAnyStatistic;
 }
 

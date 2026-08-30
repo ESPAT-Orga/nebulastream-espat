@@ -62,7 +62,7 @@ public:
     grpc::Status ReportStatistic(grpc::ServerContext*, const StatisticReport* report, google::protobuf::Empty*) override
     {
         coordinator.onStatisticReport(
-            StatisticTuple::StatisticId{report->statistic_id()},
+            StatisticTuple::StatisticId{static_cast<uint64_t>(report->statistic_id())},
             Windowing::TimeMeasure{report->start_ts()},
             Windowing::TimeMeasure{report->end_ts()},
             report->value());
@@ -213,11 +213,23 @@ std::expected<CollectStatisticResult, Exception> StatisticManager::collectWorklo
             auto ts = taggedSource.getTraitSet();
             [[maybe_unused]] const auto inserted = tryInsert(ts, DeferSourceStartTrait{.expectedSpliceCount = expectedSpliceCount});
             taggedSource = taggedSource.withTraitSet(ts);
-            auto replaced = replaceOperator(dataPlanWithDeferTrait, dataSources.front().getId(), taggedSource);
-            if (replaced.has_value())
+            const auto targetId = dataSources.front().getId();
+            std::function<LogicalOperator(const LogicalOperator&)> replaceInTree
+                = [&](const LogicalOperator& op) -> LogicalOperator
             {
-                dataPlanWithDeferTrait = std::move(*replaced);
-            }
+                if (op.getId() == targetId)
+                    return taggedSource;
+                auto children = op.getChildren();
+                std::vector<LogicalOperator> newChildren;
+                newChildren.reserve(children.size());
+                for (const auto& child : children)
+                    newChildren.push_back(replaceInTree(child));
+                return op.withChildrenUnsafe(std::move(newChildren));
+            };
+            std::vector<LogicalOperator> newRoots;
+            for (const auto& root : dataPlanWithDeferTrait.getRootOperators())
+                newRoots.push_back(replaceInTree(root));
+            dataPlanWithDeferTrait = dataPlanWithDeferTrait.withRootOperators(newRoots);
         }
     }
 
@@ -229,7 +241,7 @@ std::expected<CollectStatisticResult, Exception> StatisticManager::collectWorklo
     std::optional<QueryId> mergedQueryIdOpt;
     {
         auto cache = deployedDataQueriesBySource.wlock();
-        if (const auto it = cache->find(sourceNameUpper); it != cache->end())
+        if (const auto it = cache->find(sourceNameUpper.asCanonicalString()); it != cache->end())
         {
             mergedQueryIdOpt = it->second;
         }
@@ -241,7 +253,7 @@ std::expected<CollectStatisticResult, Exception> StatisticManager::collectWorklo
                 return std::unexpected(submittedData.error());
             }
             mergedQueryIdOpt = std::move(submittedData.value());
-            cache->emplace(sourceNameUpper, *mergedQueryIdOpt);
+            cache->emplace(sourceNameUpper.asCanonicalString(), *mergedQueryIdOpt);
         }
     }
     const auto mergedQueryId = *mergedQueryIdOpt;
@@ -309,7 +321,7 @@ std::string StatisticManager::startGrpcServer()
     grpcServer = builder.BuildAndStart();
     if (not grpcServer)
     {
-        throw GRPCError("StatisticManager: Failed to start gRPC server");
+        throw QueryStartFailed("StatisticManager: Failed to start gRPC server");
     }
     service.release(); /// NOLINT(bugprone-unused-return-value)
     coordinatorAddress = "localhost:" + std::to_string(selectedPort);

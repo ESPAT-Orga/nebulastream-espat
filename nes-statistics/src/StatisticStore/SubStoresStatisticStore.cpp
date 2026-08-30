@@ -73,12 +73,14 @@ bool SubStoresStatisticStore::deleteStatistics(
             continue;
         }
         auto& bucket = bucketIt->second;
-        const auto removed = std::ranges::remove_if(
-            bucket,
-            [startTs, endTs](const StatisticTuple& statistic) { return statistic.getStartTs() >= startTs and statistic.getEndTs() <= endTs; });
-        if (removed.begin() != bucket.end())
+        std::vector<StatisticTuple> kept;
+        kept.reserve(bucket.size());
+        for (const auto& statistic : bucket)
+            if (!(statistic.getStartTs() >= startTs and statistic.getEndTs() <= endTs))
+                kept.push_back(statistic);
+        if (kept.size() != bucket.size())
         {
-            bucket.erase(removed.begin(), removed.end());
+            bucket = std::move(kept);
             foundAnyStatistic = true;
         }
     }

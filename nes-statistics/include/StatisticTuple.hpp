@@ -69,9 +69,9 @@ public:
     }
 
     StatisticTuple(const StatisticTuple&) = default;
-    StatisticTuple& operator=(const StatisticTuple&) = default;
+    StatisticTuple& operator=(const StatisticTuple&) = delete;
     StatisticTuple(StatisticTuple&&) = default;
-    StatisticTuple& operator=(StatisticTuple&&) = default;
+    StatisticTuple& operator=(StatisticTuple&&) = delete;
 
     [[nodiscard]] StatisticType getStatisticType() const { return statisticType; }
 

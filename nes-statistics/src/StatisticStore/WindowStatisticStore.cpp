@@ -76,11 +76,14 @@ bool WindowStatisticStore::deleteStatistics(
     for (auto it = windowMap.lower_bound(startTs); it != hi;)
     {
         auto& window = it->second;
-        auto newEnd = std::ranges::remove_if(window, [&endTs](const StatisticTuple& curStatistic) { return curStatistic.getEndTs() <= endTs; });
-
-        if (newEnd.begin() != window.end())
+        std::vector<StatisticTuple> kept;
+        kept.reserve(window.size());
+        for (const auto& curStatistic : window)
+            if (!(curStatistic.getEndTs() <= endTs))
+                kept.push_back(curStatistic);
+        if (kept.size() != window.size())
         {
-            window.erase(newEnd.begin(), newEnd.end());
+            window = std::move(kept);
             foundAnyStatistic = true;
         }
         if (window.empty())

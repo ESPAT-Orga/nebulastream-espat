@@ -32,11 +32,6 @@ class DefaultStatisticQueryGenerator : public StatisticQueryGenerator
 public:
     DefaultStatisticQueryGenerator() = default;
 
-    explicit DefaultStatisticQueryGenerator(const bool enableHistogramDeltaCompression)
-        : enableHistogramDeltaCompression(enableHistogramDeltaCompression)
-    {
-    }
-
     [[nodiscard]] LogicalPlan generateQuery(
         const RequestStatisticBuildStatement& request,
         StatisticTuple::StatisticId statisticId,
@@ -62,8 +57,6 @@ public:
     [[nodiscard]] LogicalPlan generateWorkloadBranchPrometheus(
         const WorkloadDomain& domain, const RequestStatisticBuildStatement& request, const LogicalOperator& spliceLeaf) const override;
 
-private:
-    bool enableHistogramDeltaCompression = false;
 };
 
 }

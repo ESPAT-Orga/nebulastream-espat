@@ -1,0 +1,145 @@
+/*
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
+
+        https://www.apache.org/licenses/LICENSE-2.0
+
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
+*/
+#include <Statistic/StatisticProvider.hpp>
+
+#include <magic_enum/magic_enum.hpp>
+#include <Statistic/Scalar/ScalarStatisticIteratorImpl.hpp>
+#include <ErrorHandling.hpp>
+
+namespace NES
+{
+StatisticProvider::StatisticProviderIterator::StatisticProviderIterator(StatisticProviderIterator&& statisticProviderIterator) noexcept
+    : iteratorImpl(std::move(statisticProviderIterator.iteratorImpl))
+{
+}
+
+StatisticProvider::StatisticProviderIterator::StatisticProviderIterator(std::unique_ptr<StatisticProviderIteratorImpl> iteratorImpl)
+    : iteratorImpl(std::move(iteratorImpl))
+{
+}
+
+Record StatisticProvider::StatisticProviderIterator::operator*() const
+{
+    return iteratorImpl->operator*();
+}
+
+StatisticProvider::StatisticProviderIterator& StatisticProvider::StatisticProviderIterator::operator++()
+{
+    iteratorImpl->operator++();
+    return *this;
+}
+
+nautilus::val<bool> StatisticProvider::StatisticProviderIterator::operator==(const StatisticProviderIterator& other) const
+{
+    return iteratorImpl->operator==(*other.iteratorImpl);
+}
+
+nautilus::val<bool> StatisticProvider::StatisticProviderIterator::operator!=(const StatisticProviderIterator& other) const
+{
+    return not(*this == other);
+}
+
+void StatisticProvider::StatisticProviderIterator::advanceToBegin() const
+{
+    return iteratorImpl->advanceToBegin();
+}
+
+void StatisticProvider::StatisticProviderIterator::advanceToEnd() const
+{
+    return iteratorImpl->advanceToEnd();
+}
+
+StatisticProvider::StatisticProvider(
+    const StatisticTuple::StatisticType statisticType, std::unique_ptr<StatisticProviderArguments> statisticProviderArguments)
+    : statisticType(statisticType), statisticProviderArguments(std::move(statisticProviderArguments))
+{
+}
+
+StatisticProvider::StatisticProvider(StatisticProvider&& other) noexcept
+    : statisticType(other.statisticType), statisticProviderArguments(std::move(other.statisticProviderArguments))
+{
+}
+
+StatisticProvider::StatisticProvider(const StatisticProvider& other) noexcept
+    : statisticType(other.statisticType), statisticProviderArguments(other.statisticProviderArguments->clone())
+{
+}
+
+StatisticProvider& StatisticProvider::operator=(StatisticProvider&& other) noexcept
+{
+    statisticType = other.statisticType;
+    statisticProviderArguments = std::move(other.statisticProviderArguments);
+    return *this;
+}
+
+StatisticProvider& StatisticProvider::operator=(const StatisticProvider& other) noexcept
+{
+    statisticType = other.statisticType;
+    statisticProviderArguments = other.statisticProviderArguments->clone();
+    return *this;
+}
+
+std::unique_ptr<StatisticProviderIteratorImpl> StatisticProvider::makeIteratorImpl(const nautilus::val<int8_t*>& statisticMemArea) const
+{
+    switch (statisticType)
+    {
+        /// TODO: the synopsis statistics are not ported onto upstream yet. Their iterator impls
+        /// (ReservoirSampleIteratorImpl, EquiWidthHistogramIteratorImpl, CountMinSketchIteratorImpl) and the
+        /// matching aggregation functions still live only on statistic-renaming. The enum values stay so that
+        /// StatisticTuple ports unchanged; restore these three branches together with those iterators.
+        case StatisticTuple::StatisticType::Reservoir_Sample:
+        case StatisticTuple::StatisticType::Equi_Width_Histogram:
+        case StatisticTuple::StatisticType::Count_Min_Sketch:
+            throw NotImplemented(
+                "StatisticProvider: synopsis statistic type {} is not ported yet; only the scalar statistics "
+                "(Count/Sum/Avg) are available",
+                magic_enum::enum_name(statisticType));
+        /// The scalar statistics all persist a single value and differ only in its data type, so one iterator serves them all
+        case StatisticTuple::StatisticType::Count:
+        case StatisticTuple::StatisticType::Sum:
+        case StatisticTuple::StatisticType::Avg: {
+            const auto scalarArguments = dynamic_cast<ScalarStatisticProviderArguments*>(statisticProviderArguments.get());
+            INVARIANT(scalarArguments != nullptr, "ScalarStatisticProviderArguments is expected!");
+            return std::make_unique<ScalarStatisticIteratorImpl>(statisticMemArea, *scalarArguments);
+        }
+    }
+
+    std::unreachable();
+}
+
+StatisticProvider::StatisticProviderIterator StatisticProvider::begin(const nautilus::val<int8_t*>& statisticMemArea) const
+{
+    StatisticProviderIterator iterator{makeIteratorImpl(statisticMemArea)};
+    iterator.advanceToBegin();
+    return iterator;
+}
+
+StatisticProvider::StatisticProviderIterator StatisticProvider::end(const nautilus::val<int8_t*>& statisticMemArea) const
+{
+    StatisticProviderIterator iterator{makeIteratorImpl(statisticMemArea)};
+    iterator.advanceToEnd();
+    return iterator;
+}
+
+StatisticTuple::StatisticType StatisticProvider::getStatisticType() const
+{
+    return statisticType;
+}
+
+StatisticProviderIteratorImpl::StatisticProviderIteratorImpl(nautilus::val<int8_t*> statisticMemArea)
+    : statisticMemArea(std::move(statisticMemArea))
+{
+}
+
+}

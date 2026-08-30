@@ -67,6 +67,6 @@ struct BufferManagerStatisticListener
 
     /// This function is called from a WorkerThread!
     /// It should not block, and it has to be thread-safe!
-    virtual void onEvent(BufferManagerEvent event) = 0;
+    virtual void onEvent(BufferManagerEvent event) { (void)event; }
 };
 }

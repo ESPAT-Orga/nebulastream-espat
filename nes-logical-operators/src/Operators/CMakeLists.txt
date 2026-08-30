@@ -24,7 +24,6 @@ add_source_files(nes-logical-operators
 
 add_subdirectory(Sinks)
 add_subdirectory(Sources)
-add_subdirectory(Statistic)
 add_subdirectory(Windows)
 
 

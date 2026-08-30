@@ -42,10 +42,8 @@
 #include <Operators/Sources/AnonymousSourceLogicalOperator.hpp>
 #include <Operators/Sources/SourceNameLogicalOperator.hpp>
 #include <Operators/UnionLogicalOperator.hpp>
-#include <Operators/Statistic/StatisticStoreWriterLogicalOperator.hpp>
 #include <Operators/Windows/Aggregations/WindowAggregationLogicalFunction.hpp>
 #include <Operators/Windows/JoinLogicalOperator.hpp>
-#include <Operators/Windows/StatisticBuildLogicalOperator.hpp>
 #include <Operators/Windows/WindowedAggregationLogicalOperator.hpp>
 #include <Plans/LogicalPlan.hpp>
 #include <Schema/Schema.hpp>
@@ -160,43 +158,6 @@ LogicalPlan LogicalPlanBuilder::addJoin(
         leftLogicalPlan,
         rightLogicalPlan);
     return leftLogicalPlan;
-}
-
-LogicalPlan LogicalPlanBuilder::addStatisticBuild(
-    LogicalPlan queryPlan,
-    const Windowing::TimeBasedWindowType& windowType,
-    Windowing::TimeCharacteristic timeCharacteristic,
-    std::vector<std::shared_ptr<WindowAggregationLogicalFunction>> windowAggs,
-    std::vector<FieldAccessLogicalFunction> onKeys,
-    std::shared_ptr<LogicalStatisticFields> logicalStatisticFields)
-{
-    PRECONDITION(not queryPlan.getRootOperators().empty(), "invalid query plan, as the root operator is empty");
-    queryPlan = checkAndAddWatermarkAssigner(queryPlan, timeCharacteristic);
-    if (logicalStatisticFields)
-    {
-        if (not onKeys.empty())
-        {
-            throw NotImplemented("Statistics do not support group by");
-        }
-        return promoteOperatorToRoot(
-            queryPlan, StatisticBuildLogicalOperator::create(std::move(windowAggs), windowType, std::move(logicalStatisticFields)));
-    }
-    throw NotImplemented("Cannot add statisticBuild without logicalStatisticFields");
-}
-
-LogicalPlan LogicalPlanBuilder::addStatisticStoreWriter(
-    const LogicalPlan& queryPlan,
-    const std::shared_ptr<LogicalStatisticFields>& inputLogicalStatisticFields,
-    StatisticTuple::StatisticId statisticId,
-    StatisticTuple::StatisticType statisticType)
-{
-    return promoteOperatorToRoot(
-        queryPlan, StatisticStoreWriterLogicalOperator::create(inputLogicalStatisticFields, statisticId, statisticType));
-}
-
-LogicalPlan LogicalPlanBuilder::addStatProbeOp(const LogicalOperator& probe, const LogicalPlan& queryPlan)
-{
-    return promoteOperatorToRoot(queryPlan, probe);
 }
 
 LogicalPlan LogicalPlanBuilder::addInferModel(Identifier modelName, const LogicalPlan& childPlan)

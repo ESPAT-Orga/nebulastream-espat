@@ -22,6 +22,3 @@ add_source_files(nes-logical-operators
         JoinLogicalOperator.cpp
 )
 
-add_source_files(nes-logical-operators StatisticBuildLogicalOperator.cpp)
-add_registry_entry(LogicalOperator StatisticBuild)
-add_unreflection_entry(LogicalOperator StatisticBuild)

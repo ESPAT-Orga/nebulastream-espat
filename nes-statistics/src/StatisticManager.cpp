@@ -25,7 +25,6 @@
 #include <Schema/Schema.hpp>
 #include <Identifiers/Identifiers.hpp>
 #include <Operators/Sources/SourceNameLogicalOperator.hpp>
-#include <Operators/Statistic/LogicalStatisticFields.hpp>
 #include <Plans/LogicalPlan.hpp>
 #include <Plans/LogicalPlanBuilder.hpp>
 #include <Traits/DeferSourceStartTrait.hpp>
@@ -329,147 +328,12 @@ void StatisticManager::stopGrpcServer()
 }
 
 std::optional<double> StatisticManager::getStatistics(
-    const std::vector<StatisticRegistry::Key>& keys,
-    Windowing::TimeMeasure startTs,
-    Windowing::TimeMeasure endTs,
-    LogicalPlan& probeQueryWithoutSource)
+    const std::vector<StatisticRegistry::Key>& /*keys*/,
+    Windowing::TimeMeasure /*startTs*/,
+    Windowing::TimeMeasure /*endTs*/,
+    LogicalPlan& /*probeQueryWithoutSource*/)
 {
-    /// Look up statisticIds for all keys.
-    std::vector<StatisticTuple::StatisticId> statisticIds;
-    for (const auto& key : keys)
-    {
-        auto entry = registry.find(key);
-        if (not entry.has_value())
-        {
-            throw QueryNotFound("StatisticManager::getStatistics: key not found in registry");
-        }
-        statisticIds.push_back(entry->statisticId);
-    }
-
-    /// Parse coordinator address into host:port for the sink config.
-    const auto colonPos = coordinatorAddress.find(':');
-    const auto sinkHost = coordinatorAddress.substr(0, colonPos);
-    const auto sinkPort = coordinatorAddress.substr(colonPos + 1);
-
-    /// Try to submit the probe query with different gRPC source ports until one succeeds.
-    constexpr uint32_t startPort = 10000;
-    constexpr uint32_t maxRetries = 10;
-    uint32_t grpcSourcePort = 0;
-    auto probeQueryId = QueryId::invalid();
-
-    for (uint32_t attempt = 0; attempt < maxRetries; attempt++)
-    {
-        grpcSourcePort = startPort + attempt;
-
-        /// Build the full probe query: GrpcSource → probeQueryWithoutSource → GrpcSink
-        Schema grpcSourceSchema;
-        const LogicalStatisticFields statisticFields;
-        grpcSourceSchema.addField(statisticFields.statisticIdField);
-        grpcSourceSchema.addField(statisticFields.statisticStartTsField);
-        grpcSourceSchema.addField(statisticFields.statisticEndTsField);
-
-        auto plan = LogicalPlanBuilder::createLogicalPlan(
-            "Grpc", grpcSourceSchema, {{"grpc_port", std::to_string(grpcSourcePort)}, {"receive_timeout_ms", "5000"}}, {});
-
-        for (const auto& rootOp : probeQueryWithoutSource.getRootOperators())
-        {
-            plan = LogicalPlanBuilder::addStatProbeOp(rootOp, plan);
-        }
-
-        Schema grpcSinkSchema;
-        grpcSinkSchema.addField(statisticFields.statisticIdField);
-        grpcSinkSchema.addField(statisticFields.statisticStartTsField);
-        grpcSinkSchema.addField(statisticFields.statisticEndTsField);
-
-        plan = LogicalPlanBuilder::addInlineSink("Grpc", grpcSinkSchema, {{"grpc_host", sinkHost}, {"grpc_port", sinkPort}}, {}, plan);
-
-        auto queryIdResult = submitQuery(std::move(plan));
-        if (queryIdResult.has_value())
-        {
-            probeQueryId = queryIdResult.value();
-            NES_DEBUG(
-                "StatisticManager::getStatistics: probe query submitted as queryId={} with gRPC source port {}",
-                probeQueryId,
-                grpcSourcePort);
-            break;
-        }
-
-        NES_WARNING(
-            "StatisticManager::getStatistics: failed to submit probe query on port {}: {}",
-            grpcSourcePort,
-            queryIdResult.error().what());
-
-        if (attempt == maxRetries - 1)
-        {
-            throw QueryStartFailed("StatisticManager::getStatistics: failed to submit probe query after {} attempts", maxRetries);
-        }
-    }
-
-    /// Register pending probes so we can wait for results.
-    std::vector<std::future<double>> futures;
-    for (const auto& statId : statisticIds)
-    {
-        auto [future, promise] = []
-        {
-            std::promise<double> p;
-            auto f = p.get_future();
-            return std::pair{std::move(f), std::move(p)};
-        }();
-        pendingProbes.wlock()->emplace(statId, PendingProbe{.promise = std::move(promise)});
-        futures.push_back(std::move(future));
-    }
-
-    /// Send StatisticRequests to the gRPC source to trigger the probe.
-    /// The source runs on localhost at the port we configured above.
-    const auto sourceAddress = "localhost:" + std::to_string(grpcSourcePort);
-    auto channel = grpc::CreateChannel(sourceAddress, grpc::InsecureChannelCredentials());
-    auto sourceStub = StatisticSourceService::NewStub(channel);
-
-    for (const auto& statId : statisticIds)
-    {
-        StatisticRequest request;
-        request.set_statistic_id(statId.getRawValue());
-        request.set_start_ts(startTs.getTime());
-        request.set_end_ts(endTs.getTime());
-
-        grpc::ClientContext context;
-        google::protobuf::Empty response;
-        auto status = sourceStub->RequestStatistic(&context, request, &response);
-        if (not status.ok())
-        {
-            NES_WARNING(
-                "StatisticManager::getStatistics: RequestStatistic failed for statisticId={}: {}", statId, status.error_message());
-        }
-    }
-
-    /// Wait for results with a timeout.
-    constexpr auto timeout = std::chrono::seconds{30};
-    double result = 0.0;
-    bool allReceived = true;
-    for (auto& future : futures)
-    {
-        if (future.wait_for(timeout) == std::future_status::ready)
-        {
-            result += future.get();
-        }
-        else
-        {
-            NES_WARNING("StatisticManager::getStatistics: timeout waiting for probe result");
-            allReceived = false;
-        }
-    }
-
-    /// Clean up pending probes.
-    for (const auto& statId : statisticIds)
-    {
-        pendingProbes.wlock()->erase(statId);
-    }
-
-    if (not allReceived)
-    {
-        return {};
-    }
-    return result;
+    throw NotImplemented("StatisticManager::getStatistics: statistic probe operators not yet ported");
 }
 
 void StatisticManager::onStatisticReport(

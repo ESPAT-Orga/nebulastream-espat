@@ -36,37 +36,3 @@ add_registry_entry(AggregationLogicalFunction Median)
 add_registry_entry(AggregationLogicalFunction Min)
 add_registry_entry(AggregationLogicalFunction Sum)
 
-add_source_files(nes-logical-operators
-        Sample/ReservoirSampleLogicalFunction.cpp
-        Histogram/EquiWidthHistogramLogicalFunction.cpp
-        Histogram/EquiWidthHistogramDeltaGenLogicalFunction.cpp
-        Histogram/EquiWidthHistogramDeltaResolverLogicalFunction.cpp
-        Sketch/CountMinSketchLogicalFunction.cpp
-        Scalar/ScalarStatisticLogicalFunction.cpp
-        Sample/ReservoirProbeLogicalOperator.cpp
-        Histogram/EquiWidthHistogramProbeLogicalOperator.cpp
-        Sketch/CountMinSketchProbeLogicalOperator.cpp
-        Scalar/ScalarStatisticProbeLogicalOperator.cpp
-        StatisticLogicalFunction.cpp)
-
-add_unreflection_entry(AggregationLogicalFunction ReservoirSample HEADER Operators/Windows/Aggregations/Sample/ReservoirSampleLogicalFunction.hpp)
-add_unreflection_entry(AggregationLogicalFunction EquiWidthHistogram HEADER Operators/Windows/Aggregations/Histogram/EquiWidthHistogramLogicalFunction.hpp)
-add_unreflection_entry(AggregationLogicalFunction EquiWidthHistogramDeltaGen HEADER Operators/Windows/Aggregations/Histogram/EquiWidthHistogramDeltaGenLogicalFunction.hpp)
-add_unreflection_entry(AggregationLogicalFunction EquiWidthHistogramDeltaResolver HEADER Operators/Windows/Aggregations/Histogram/EquiWidthHistogramDeltaResolverLogicalFunction.hpp)
-add_unreflection_entry(AggregationLogicalFunction CountMinSketch HEADER Operators/Windows/Aggregations/Sketch/CountMinSketchLogicalFunction.hpp)
-add_unreflection_entry(AggregationLogicalFunction ScalarStatistic HEADER Operators/Windows/Aggregations/Scalar/ScalarStatisticLogicalFunction.hpp)
-add_unreflection_entry(LogicalOperator ReservoirProbe HEADER Operators/Windows/Aggregations/Sample/ReservoirProbeLogicalOperator.hpp)
-add_unreflection_entry(LogicalOperator EquiWidthHistogramProbe HEADER Operators/Windows/Aggregations/Histogram/EquiWidthHistogramProbeLogicalOperator.hpp)
-add_unreflection_entry(LogicalOperator CountMinSketchProbe HEADER Operators/Windows/Aggregations/Sketch/CountMinSketchProbeLogicalOperator.hpp)
-add_unreflection_entry(LogicalOperator ScalarStatisticProbe HEADER Operators/Windows/Aggregations/Scalar/ScalarStatisticProbeLogicalOperator.hpp)
-
-add_registry_entry(AggregationLogicalFunction ReservoirSample HEADER Operators/Windows/Aggregations/Sample/ReservoirSampleLogicalFunction.hpp)
-add_registry_entry(AggregationLogicalFunction EquiWidthHistogram HEADER Operators/Windows/Aggregations/Histogram/EquiWidthHistogramLogicalFunction.hpp)
-add_registry_entry(AggregationLogicalFunction EquiWidthHistogramDeltaGen HEADER Operators/Windows/Aggregations/Histogram/EquiWidthHistogramDeltaGenLogicalFunction.hpp)
-add_registry_entry(AggregationLogicalFunction EquiWidthHistogramDeltaResolver HEADER Operators/Windows/Aggregations/Histogram/EquiWidthHistogramDeltaResolverLogicalFunction.hpp)
-add_registry_entry(AggregationLogicalFunction CountMinSketch HEADER Operators/Windows/Aggregations/Sketch/CountMinSketchLogicalFunction.hpp)
-add_registry_entry(AggregationLogicalFunction ScalarStatistic HEADER Operators/Windows/Aggregations/Scalar/ScalarStatisticLogicalFunction.hpp)
-add_registry_entry(LogicalOperator ReservoirProbe HEADER Operators/Windows/Aggregations/Sample/ReservoirProbeLogicalOperator.hpp)
-add_registry_entry(LogicalOperator EquiWidthHistogramProbe HEADER Operators/Windows/Aggregations/Histogram/EquiWidthHistogramProbeLogicalOperator.hpp)
-add_registry_entry(LogicalOperator CountMinSketchProbe HEADER Operators/Windows/Aggregations/Sketch/CountMinSketchProbeLogicalOperator.hpp)
-add_registry_entry(LogicalOperator ScalarStatisticProbe HEADER Operators/Windows/Aggregations/Scalar/ScalarStatisticProbeLogicalOperator.hpp)

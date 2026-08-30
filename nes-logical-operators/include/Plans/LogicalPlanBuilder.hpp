@@ -28,11 +28,9 @@
 #include <Operators/LogicalOperator.hpp>
 #include <Operators/ProjectionLogicalOperator.hpp>
 #include <Operators/Windows/Aggregations/WindowAggregationLogicalFunction.hpp>
-#include <Operators/Statistic/LogicalStatisticFields.hpp>
 #include <Operators/Windows/JoinLogicalOperator.hpp>
 #include <Operators/Windows/WindowedAggregationLogicalOperator.hpp>
 #include <Plans/LogicalPlan.hpp>
-#include <StatisticTuple.hpp>
 #include <Schema/Schema.hpp>
 #include <Schema/SchemaFwd.hpp>
 #include <WindowTypes/Measures/TimeCharacteristic.hpp>
@@ -98,22 +96,6 @@ public:
         Windowing::TimeCharacteristic rightCharacteristic);
 
     static LogicalPlan addInferModel(Identifier modelName, const LogicalPlan& childPlan);
-
-    static LogicalPlan addStatisticBuild(
-        LogicalPlan queryPlan,
-        const Windowing::TimeBasedWindowType& windowType,
-        Windowing::TimeCharacteristic timeCharacteristic,
-        std::vector<std::shared_ptr<WindowAggregationLogicalFunction>> windowAggs,
-        std::vector<FieldAccessLogicalFunction> onKeys,
-        std::shared_ptr<LogicalStatisticFields> logicalStatisticFields);
-
-    static LogicalPlan addStatisticStoreWriter(
-        const LogicalPlan& queryPlan,
-        const std::shared_ptr<LogicalStatisticFields>& inputLogicalStatisticFields,
-        StatisticTuple::StatisticId statisticId,
-        StatisticTuple::StatisticType statisticType);
-
-    static LogicalPlan addStatProbeOp(const LogicalOperator& probe, const LogicalPlan& queryPlan);
 
     static LogicalPlan addSink(Identifier sinkName, const LogicalPlan& queryPlan);
     static LogicalPlan addAnonymousSink(

@@ -11,4 +11,6 @@
 # limitations under the License.
 
 
-add_plugin(StatisticStoreWriter LogicalOperator nes-logical-operators StatisticStoreWriterLogicalOperator.cpp)
+add_source_files(nes-logical-operators StatisticStoreWriterLogicalOperator.cpp)
+add_registry_entry(LogicalOperator StatisticStoreWriter)
+add_unreflection_entry(LogicalOperator StatisticStoreWriter)

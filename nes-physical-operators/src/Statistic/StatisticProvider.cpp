@@ -63,7 +63,7 @@ void StatisticProvider::StatisticProviderIterator::advanceToEnd() const
 }
 
 StatisticProvider::StatisticProvider(
-    const Statistic::StatisticType statisticType, std::unique_ptr<StatisticProviderArguments> statisticProviderArguments)
+    const StatisticTuple::StatisticType statisticType, std::unique_ptr<StatisticProviderArguments> statisticProviderArguments)
     : statisticType(statisticType), statisticProviderArguments(std::move(statisticProviderArguments))
 {
 }
@@ -96,25 +96,25 @@ std::unique_ptr<StatisticProviderIteratorImpl> StatisticProvider::makeIteratorIm
 {
     switch (statisticType)
     {
-        case Statistic::StatisticType::Reservoir_Sample: {
+        case StatisticTuple::StatisticType::Reservoir_Sample: {
             const auto reservoirSampleArguments = dynamic_cast<ReservoirSampleProviderArguments*>(statisticProviderArguments.get());
             INVARIANT(reservoirSampleArguments != nullptr, "ReservoirSampleProviderArguments is expected!");
             return std::make_unique<ReservoirSampleIteratorImpl>(statisticMemArea, *reservoirSampleArguments);
         }
-        case Statistic::StatisticType::Equi_Width_Histogram: {
+        case StatisticTuple::StatisticType::Equi_Width_Histogram: {
             const auto equiWidthHistogramArguments = dynamic_cast<EquiWidthHistogramProviderArguments*>(statisticProviderArguments.get());
             INVARIANT(equiWidthHistogramArguments != nullptr, "EquiWidthHistogramProviderArguments is expected!");
             return std::make_unique<EquiWidthHistogramIteratorImpl>(statisticMemArea, *equiWidthHistogramArguments);
         }
-        case Statistic::StatisticType::Count_Min_Sketch: {
+        case StatisticTuple::StatisticType::Count_Min_Sketch: {
             const auto countMinArguments = dynamic_cast<CountMinSketchProviderArguments*>(statisticProviderArguments.get());
             INVARIANT(countMinArguments != nullptr, "CountMinSketchProviderArguments is expected!");
             return std::make_unique<CountMinSketchIteratorImpl>(statisticMemArea, *countMinArguments);
         }
         /// The scalar statistics all persist a single value and differ only in its data type, so one iterator serves them all
-        case Statistic::StatisticType::Count:
-        case Statistic::StatisticType::Sum:
-        case Statistic::StatisticType::Avg: {
+        case StatisticTuple::StatisticType::Count:
+        case StatisticTuple::StatisticType::Sum:
+        case StatisticTuple::StatisticType::Avg: {
             const auto scalarArguments = dynamic_cast<ScalarStatisticProviderArguments*>(statisticProviderArguments.get());
             INVARIANT(scalarArguments != nullptr, "ScalarStatisticProviderArguments is expected!");
             return std::make_unique<ScalarStatisticIteratorImpl>(statisticMemArea, *scalarArguments);
@@ -138,7 +138,7 @@ StatisticProvider::StatisticProviderIterator StatisticProvider::end(const nautil
     return iterator;
 }
 
-Statistic::StatisticType StatisticProvider::getStatisticType() const
+StatisticTuple::StatisticType StatisticProvider::getStatisticType() const
 {
     return statisticType;
 }

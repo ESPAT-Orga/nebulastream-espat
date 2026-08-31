@@ -42,25 +42,15 @@ public:
         StatisticTuple::StatisticId statisticId,
         const std::string& coordinatorAddress) const override;
 
-    /// Builds the "build branch" sub-plan for a WorkloadDomain statistic: a chain rooted at the
-    /// gRPC sink with WatermarkAssign → StatisticBuild → StatisticStoreWriter → GrpcSink stacked
-    /// on top of `spliceLeaf`. The caller passes the data query's source operator (a
-    /// SourceNameLogicalOperator) as `spliceLeaf`; the returned plan can then be merged into the
-    /// data query via addRootOperators, so the LogicalSourceExpansionRule produces a single
-    /// Union(SourceDescriptors) shared by both the data query's filter chain and the build branch.
-    [[nodiscard]] LogicalPlan generateWorkloadBranch(
-        const WorkloadDomain& domain,
-        const RequestStatisticBuildStatement& request,
-        StatisticTuple::StatisticId statisticId,
-        const std::string& coordinatorAddress,
-        const LogicalOperator& spliceLeaf) const override;
-
-    /// Prometheus-baseline build branch: Source → Projection(field) → PrometheusSink. See the base
-    /// interface declaration for the contract. The sink is given an empty schema; type inference
-    /// fills it from the projection's single-field output (the field type isn't resolved on the
-    /// splice leaf until the optimizer runs).
-    [[nodiscard]] LogicalPlan generateWorkloadBranchPrometheus(
-        const WorkloadDomain& domain, const RequestStatisticBuildStatement& request, const LogicalOperator& spliceLeaf) const override;
+    /// TODO: statistic-renaming also overrides generateWorkloadBranch and
+    /// generateWorkloadBranchPrometheus, which splice a build branch onto a *running* data query's source
+    /// (stamping SpliceToRunningSourceTrait so the worker fans that source out to both pipelines). Those
+    /// overrides are not ported: they pull in the SpliceToRunningSource / PlacementHint / PinnedHost traits
+    /// and a PrometheusSink, none of which exist upstream, and none of it is needed to collect a statistic
+    /// on a source field. We deliberately leave them unoverridden so the base class's NotImplemented applies
+    /// -- StatisticQueryGenerator documents that as the supported behaviour for generators without
+    /// WorkloadDomain support. StatisticManager::collectWorkloadStatistic is unchanged and still calls
+    /// through; it simply surfaces that NotImplemented.
 
 private:
     bool enableHistogramDeltaCompression = false;

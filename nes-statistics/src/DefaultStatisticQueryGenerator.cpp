@@ -30,10 +30,7 @@
 #include <Schema/Schema.hpp>
 #include <Functions/FieldAccessLogicalFunction.hpp>
 #include <Functions/LogicalFunction.hpp>
-#include <Functions/ZstdCompressLogicalFunction.hpp>
-#include <Functions/ZstdDecompressLogicalFunction.hpp>
 #include <Identifiers/Identifiers.hpp>
-#include <Identifiers/SketchDimensions.hpp>
 #include <Operators/ProjectionLogicalOperator.hpp>
 #include <Operators/Sources/SourceNameLogicalOperator.hpp>
 #include <Operators/Statistic/LogicalStatisticFields.hpp>
@@ -151,19 +148,20 @@ bool wantsZstdCompression(const std::unordered_map<std::string, std::string>& op
     return it != options.end() and toLowerCase(it->second) == "zstd";
 }
 
-LogicalPlan appendZstdStage(LogicalPlan plan, const StatisticTuple::StatisticId statisticId, const bool compress)
+/// TODO: statistic-renaming wraps the synopsis blob in a ZstdCompress / ZstdDecompress logical-function pair
+/// around the build, so the payload crosses the network compressed. Those functions (~700 lines across
+/// nes-logical-operators and nes-physical-operators, plus their physical counterparts and a systest) are an
+/// option-gated feature orthogonal to the statistics themselves, and are deliberately not ported here.
+///
+/// We reject `compress_statistic=zstd` rather than ignoring it. Silently dropping the stage would hand back a
+/// plan whose payload is uncompressed while the caller believes it asked for compression -- and on the probe
+/// side that same blob is read back through the matching decompress stage, so the two halves would disagree
+/// about the payload's encoding. Failing at plan generation is the honest outcome until the pair is ported.
+[[noreturn]] LogicalPlan appendZstdStage(LogicalPlan, StatisticTuple::StatisticId, bool)
 {
-    const auto dataField = statisticDataFieldName(statisticId);
-    const FieldAccessLogicalFunction blob{dataField};
-    auto wrapped = compress ? LogicalFunction{ZstdCompressLogicalFunction{blob}} : LogicalFunction{ZstdDecompressLogicalFunction{blob}};
-    std::vector<ProjectionLogicalOperator::Projection> projections;
-    projections.emplace_back(FieldIdentifier{dataField}, std::move(wrapped));
-    plan = LogicalPlanBuilder::addProjection(std::move(projections), /*asterisk=*/true, plan);
-    if (not compress)
-    {
-        plan = stampPlacementHint(std::move(plan), PlacementAnchor::Sink);
-    }
-    return plan;
+    throw NotImplemented(
+        "compress_statistic=zstd is not supported on this branch: the ZstdCompress/ZstdDecompress logical "
+        "functions are not ported yet");
 }
 
 LogicalPlan appendHistogramDeltaBuildChain(

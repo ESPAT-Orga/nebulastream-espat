@@ -175,7 +175,7 @@ RequestStatisticBuildStatement averageOverValue()
         .windowSizeMs = WINDOW_SIZE_MS,
         .windowAdvanceMs = std::nullopt,
         .eventTimeFieldName = "ts",
-        .conditionTrigger = std::nullopt,
+        .conditionTrigger = NEVER_SEND std::nullopt,
         .options = {}};
 }
 

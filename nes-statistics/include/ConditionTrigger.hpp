@@ -37,4 +37,7 @@ struct ConditionTrigger
         callback;
 };
 
+static ConditionTrigger ALWAYS_SEND = {"true"};
+static ConditionTrigger NEVER_SEND = {"false"};
+
 }

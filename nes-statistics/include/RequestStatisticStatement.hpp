@@ -29,6 +29,7 @@ struct RequestStatisticBuildStatement
 {
     CollectionDomain domain;
     Metric metric;
+    // maye we can use Windowing::TimeCharacteristic instead of windowSizeMs and windowAdvanceMs
     uint64_t windowSizeMs;
     std::optional<uint64_t> windowAdvanceMs;
     /// If set, the window uses EventTime on this field. Otherwise IngestionTime is used.

@@ -141,6 +141,42 @@ def test_grid_sql_is_well_formed():
     assert "totalCpu" in sql[first_select:first_select + 200], "analytical queries must come first"
 
 
+def test_filter_arm_sink_matches_its_projection():
+    """The filter reference arm is a SELECT *, so its sink must declare the full input schema in the
+    source's own order. A mismatch does not raise — nes-repl stops consuming statements on a parse
+    error and reports nothing, which looks exactly like a hung worker."""
+    import re
+    k = 2
+    sql = grid_submission.build_sql(k, 0, "filter")
+
+    assert sql.count("SELECT * FROM") == k
+    assert "WINDOW" not in sql and "GROUP BY" not in sql, "the filter arm must carry no window"
+    # Same predicate as Q2: the only difference between the two arms is the aggregation itself.
+    assert sql.count("WHERE eventType == INT16(3)") == k
+
+    schema = re.search(r"CREATE LOGICAL SOURCE \w+\((.*?)\);", sql).group(1)
+    sink = re.search(r"CREATE SINK \w+\((.*?)\)\n", sql).group(1)
+    source_fields = [f.split()[0].upper() for f in schema.split(", ")]
+    sink_fields = [f.split()[0].split(".")[1] for f in sink.split(", ")]
+    assert sink_fields == source_fields, f"sink schema drifted from the source: {sink_fields}"
+
+    # The window arm is untouched by the shape switch.
+    assert "WINDOW SLIDING" in grid_submission.build_sql(k, 0, "window")
+
+
+def test_ingest_arm_matches_nothing():
+    """The upper reference measures receive + parse + compare and nothing else, which only holds if
+    the predicate can never be true. The generator emits eventType in {0,1,2,3}; if that domain ever
+    grows to cover this value the arm silently becomes a filter that materialises tuples, and the
+    numbers would still look plausible."""
+    sql = grid_submission.build_sql(2, 0, "ingest")
+    assert grid_submission.NEVER_MATCHING_EVENT_TYPE not in range(4), "generator domain is {0,1,2,3}"
+    assert sql.count(f"WHERE eventType == INT16({grid_submission.NEVER_MATCHING_EVENT_TYPE})") == 2
+    assert "WINDOW" not in sql and "GROUP BY" not in sql
+    # Q2's own predicate must NOT appear: that would be the mid-point arm, not the floor.
+    assert "INT16(3)" not in sql
+
+
 def test_grid_offered_load_counts_statistic_ingestion():
     """The defining difference from the shared experiment: independent statistic queries own their
     sources, so they DO add ingestion. If this ever stopped being true the grid would be measuring
@@ -159,5 +195,7 @@ if __name__ == "__main__":
     test_companion_covers_the_group_by_key()
     test_offered_load_is_independent_of_statistic_count()
     test_grid_sql_is_well_formed()
+    test_filter_arm_sink_matches_its_projection()
+    test_ingest_arm_matches_nothing()
     test_grid_offered_load_counts_statistic_ingestion()
     print("ok")

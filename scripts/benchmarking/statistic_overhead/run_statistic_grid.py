@@ -48,7 +48,11 @@ from scripts.benchmarking.common.worker_lifecycle import (
     terminate_process_if_exists,
 )
 from scripts.benchmarking.statistic_overhead import config
-from scripts.benchmarking.statistic_overhead.grid_submission import shutdown_grid, submit_grid
+from scripts.benchmarking.statistic_overhead.grid_submission import (
+    ANALYTICAL_SHAPES,
+    shutdown_grid,
+    submit_grid,
+)
 from scripts.benchmarking.statistic_overhead.run_statistic_overhead import (
     ensure_generator_image,
     parse_throughput_samples,
@@ -80,11 +84,15 @@ def write_per_query_csv(samples, roles, csv_path):
             writer.writerow([query_id, roles.get(query_id, "unknown"), start, start - t0, tps])
 
 
-def run_one(num_analytical, num_statistic, run_idx, output_dir, tuples_per_sec):
+def run_one(num_analytical, num_statistic, run_idx, output_dir, tuples_per_sec,
+            analytical_query="window"):
     """Execute one (k, j, run_idx) grid point and return its result row."""
     # The rate belongs in the name: without it, two rates sharing an --output-dir would overwrite
-    # each other's logs and per-query CSVs while the results CSV happily recorded both.
-    tag = f"r{tuples_per_sec // 1000}k_k{num_analytical:02d}_j{num_statistic:02d}"
+    # each other's logs and per-query CSVs while the results CSV happily recorded both. So does the
+    # query shape, for the same reason: the filter arm's (rate, k, j=0) points collide with the
+    # window arm's, and create_folder_and_remove_if_exists would delete the earlier arm's logs.
+    shape_tag = "" if analytical_query == "window" else f"_{analytical_query}"
+    tag = f"r{tuples_per_sec // 1000}k_k{num_analytical:02d}_j{num_statistic:02d}{shape_tag}"
     run_dir = os.path.join(output_dir, f"{tag}_run_{run_idx}")
     create_folder_and_remove_if_exists(run_dir)
     worker_log = os.path.join(run_dir, "worker.log")
@@ -94,6 +102,7 @@ def run_one(num_analytical, num_statistic, run_idx, output_dir, tuples_per_sec):
     row = {
         'num_analytical_queries': num_analytical,
         'num_statistic_queries': num_statistic,
+        'analytical_query': analytical_query,
         'run_idx': run_idx,
         'num_worker_threads': config.WORKER_THREADS,
         'window_size_sec': config.WINDOW_SIZE_SEC,
@@ -132,7 +141,7 @@ def run_one(num_analytical, num_statistic, run_idx, output_dir, tuples_per_sec):
             time.sleep(config.WAIT_AFTER_WORKER_START)
 
             repl_proc, repl_log, analytical_ids, statistic_ids = submit_grid(
-                num_analytical, num_statistic, run_dir)
+                num_analytical, num_statistic, run_dir, analytical_query=analytical_query)
             if len(analytical_ids) != num_analytical:
                 issues.append(f"only {len(analytical_ids)}/{num_analytical} analytical deployed")
             if len(statistic_ids) != num_statistic:
@@ -181,11 +190,13 @@ def run_one(num_analytical, num_statistic, run_idx, output_dir, tuples_per_sec):
     return row
 
 
-def _failure_row(num_analytical, num_statistic, run_idx, tuples_per_sec, message):
+def _failure_row(num_analytical, num_statistic, run_idx, tuples_per_sec, message,
+                 analytical_query="window"):
     row = {name: "" for name in config.GRID_FIELDNAMES}
     row.update({
         'num_analytical_queries': num_analytical,
         'num_statistic_queries': num_statistic,
+        'analytical_query': analytical_query,
         'run_idx': run_idx,
         'tuples_per_sec_per_query': tuples_per_sec,
         'offered_tps': config.grid_offered_tps(tuples_per_sec, num_analytical, num_statistic),
@@ -207,8 +218,17 @@ def main():
                         help="Offered load per query; one grid is run per rate. Keep at least one "
                              "rate below saturation: a saturated system measures capacity division, "
                              "not the cost of monitoring.")
+    parser.add_argument("--analytical-query", choices=ANALYTICAL_SHAPES, default="window",
+                        help="Shape of the k analytical queries: 'window' is ClusterMonitoring Q2, "
+                             "'ingest' drops every tuple at a predicate nothing matches, 'filter' "
+                             "keeps Q2's predicate and forwards 25%% of the stream. Run with "
+                             "--statistic-counts 0, window and ingest bracket the grid.")
     parser.add_argument("--num-runs", type=int, default=config.NUM_RUNS)
     parser.add_argument("--skip-build", action="store_true", help="Do not rebuild NebulaStream")
+    parser.add_argument("--append", action="store_true",
+                        help="Append to an existing results CSV instead of truncating it. Lets a "
+                             "second sweep (the all-analytical reference arm) share one file, which "
+                             "is what keeps the analysis a single-file download.")
     args = parser.parse_args()
 
     check_repository_root()
@@ -218,8 +238,9 @@ def main():
 
     os.makedirs(args.output_dir, exist_ok=True)
     csv_path = os.path.join(args.output_dir, config.GRID_RESULTS_CSV)
-    with open(csv_path, "w", newline="") as f:
-        csv.DictWriter(f, fieldnames=config.GRID_FIELDNAMES).writeheader()
+    if not (args.append and os.path.exists(csv_path)):
+        with open(csv_path, "w", newline="") as f:
+            csv.DictWriter(f, fieldnames=config.GRID_FIELDNAMES).writeheader()
 
     total = (len(args.tuples_per_sec) * len(args.analytical_counts)
              * len(args.statistic_counts) * args.num_runs)
@@ -234,16 +255,16 @@ def main():
                 for run_idx in range(args.num_runs):
                     completed += 1
                     printInfo(f"[{completed}/{total}] {tuples_per_sec} tup/s/query, "
-                              f"k={num_analytical} analytical + j={num_statistic} statistic, "
-                              f"run {run_idx}")
+                              f"k={num_analytical} analytical [{args.analytical_query}] + "
+                              f"j={num_statistic} statistic, run {run_idx}")
                     try:
                         row = run_one(num_analytical, num_statistic, run_idx,
-                                      args.output_dir, tuples_per_sec)
+                                      args.output_dir, tuples_per_sec, args.analytical_query)
                     except Exception as e:  # noqa: BLE001 - one bad point must not kill the grid
                         printError(f"Grid point failed: {e}")
                         stop_generator()
                         row = _failure_row(num_analytical, num_statistic, run_idx,
-                                           tuples_per_sec, str(e))
+                                           tuples_per_sec, str(e), args.analytical_query)
                     with open(csv_path, "a", newline="") as f:
                         csv.DictWriter(f, fieldnames=config.GRID_FIELDNAMES).writerow(row)
                     printInfo(f"    -> analytical={row.get('analytical_throughput_tps')} "

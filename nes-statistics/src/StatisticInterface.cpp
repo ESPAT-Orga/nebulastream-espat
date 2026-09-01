@@ -378,7 +378,7 @@ void StatisticInterface::onStatisticReport(
             {
                 if (trigger.callback)
                 {
-                    trigger.callback(statisticId, startTs, endTs);
+                    trigger.callback(statisticId, startTs, endTs, value);
                 }
             }
         });

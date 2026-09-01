@@ -186,6 +186,7 @@ TEST_F(StatisticTaskQueueTest, TaskQueueEventsReachTheStatisticInterfaceAsAStati
 
     /// Every closed window fires this, which is what "the events reached the statistic interface" means.
     std::atomic<int> reportsSeen{0};
+    std::atomic<double> lastAverage{0.0};
     RequestStatisticBuildStatement statement{
         .domain = DataDomain{.logicalSourceName = STATS_SOURCE, .fieldName = "tuples"},
         .metric = Metric::Average,
@@ -195,8 +196,12 @@ TEST_F(StatisticTaskQueueTest, TaskQueueEventsReachTheStatisticInterfaceAsAStati
         .eventTimeFieldName = std::nullopt,
         .conditionTrigger = ConditionTrigger{
             .condition = std::nullopt,
-            .callback = [&reportsSeen](StatisticTuple::StatisticId, Windowing::TimeMeasure, Windowing::TimeMeasure)
-            { reportsSeen.fetch_add(1); }},
+            .callback =
+                [&reportsSeen, &lastAverage](StatisticTuple::StatisticId, Windowing::TimeMeasure, Windowing::TimeMeasure, double value)
+            {
+                reportsSeen.fetch_add(1);
+                lastAverage.store(value);
+            }},
         .options = {}};
 
     const auto collected = statisticInterface.collectNewStatistic(statement);
@@ -209,7 +214,9 @@ TEST_F(StatisticTaskQueueTest, TaskQueueEventsReachTheStatisticInterfaceAsAStati
         std::this_thread::sleep_for(std::chrono::milliseconds{200});
     }
 
-    EXPECT_GT(reportsSeen.load(), 0) << "no statistic over the engine's task events reached the statisticInterface";
+    EXPECT_GT(reportsSeen.load(), 0) << "no statistic over the engine's task events reached the statistic interface";
+    /// Task events carry a tuple count, so the average over them is a real number rather than a placeholder.
+    EXPECT_GT(lastAverage.load(), 0.0) << "the reported average over the engine's task events was not a real value";
 
     const auto store = StatisticStoreRegistry::instance().getOrCreate(std::string{StatisticStoreRegistry::DEFAULT_STORE_NAME});
     const auto statistics

@@ -170,20 +170,19 @@ LogicalPlan generateForDataDomain(
             LogicalFunction{UnboundFieldAccessLogicalFunction{statisticDataFieldName(statisticId)}}}});
     plan = LogicalPlanBuilder::addProjection(std::move(projections), /*asterisk=*/false, plan);
 
-    /// A trigger carrying a *predicate* is the one case where the build query also has to read the store back.
+    /// A trigger makes the build query read the store back.
     ///
-    /// The predicate is evaluated over the statistic's value, and the value only exists in the store -- the build
-    /// chain itself carries it as an opaque VARSIZED payload. So a conditional trigger compiles a probe and a
-    /// selection into the same query, and only the windows that satisfy the predicate are reported.
+    /// Both things a trigger needs are the statistic's *value*, and the value only exists in the store -- the
+    /// build chain itself carries it as an opaque VARSIZED payload it can neither compare nor report. The
+    /// callback is handed the value, and a predicate is evaluated over it, so either way the query has to probe
+    /// what it just wrote.
     ///
-    /// Without a predicate the query stays write-only: every closed window is reported, carrying just the window
-    /// metadata, and a caller that wants values calls getStatistics. A trigger with a callback but no predicate
-    /// does not need the probe either, because the callback is handed the window and not the value.
+    /// Without a trigger nothing consumes a report at all, so the query stays write-only and a caller that wants
+    /// values calls getStatistics instead.
     ///
     /// The probe reads the window bounds from the projected columns above, and supplies STATISTICID and
     /// STATISTICVALUE itself, so its output is exactly what the sink reports.
-    const bool probeInBuild = request.conditionTrigger.has_value() and request.conditionTrigger->condition.has_value();
-    if (probeInBuild)
+    if (request.conditionTrigger.has_value())
     {
         const auto probe = ScalarStatisticProbeLogicalOperator::create(
             statisticId,
@@ -192,7 +191,12 @@ LogicalPlan generateForDataDomain(
             Identifier::parse(std::string{StatisticFieldNames::START_TS}),
             Identifier::parse(std::string{StatisticFieldNames::END_TS}));
         plan = plan.withRootOperators({LogicalOperator{probe}.withChildrenUnsafe(plan.getRootOperators())});
-        plan = LogicalPlanBuilder::addSelection(request.conditionTrigger->condition.value(), plan);
+
+        /// The predicate, when there is one, filters which of those windows are worth reporting.
+        if (request.conditionTrigger->condition.has_value())
+        {
+            plan = LogicalPlanBuilder::addSelection(request.conditionTrigger->condition.value(), plan);
+        }
     }
 
     const auto [host, port] = splitAddress(interfaceAddress);

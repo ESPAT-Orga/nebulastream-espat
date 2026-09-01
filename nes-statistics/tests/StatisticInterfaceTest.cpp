@@ -256,6 +256,11 @@ TEST_F(StatisticInterfaceTest, IdenticalRequestsAreDeduplicated)
     EXPECT_TRUE(second->alreadyExisted);
     EXPECT_EQ(first->statisticId, second->statisticId);
     EXPECT_EQ(first->queryId, second->queryId);
+
+    /// Let the query finish before the backend, and with it the worker, goes out of scope. Tearing a worker down
+    /// while a pipeline is still being compiled trips CompiledExecutablePipelineStage's invariant that start()
+    /// runs before execute(), which made this test abort roughly one run in three.
+    EXPECT_TRUE(backend.waitForAllStopped(std::chrono::seconds{60})) << "the build query never finished";
 }
 
 /// The read half through the statistic interface: after a statistic has been built, getStatistics deploys the probe,
@@ -323,13 +328,18 @@ TEST_F(StatisticInterfaceTest, AConditionalTriggerFiresOnlyForMatchingWindows)
     statisticInterface.startGrpcServer();
 
     std::atomic<int> fired{0};
+    std::atomic<double> lastValue{0.0};
     auto statement = averageOverValue();
     statement.conditionTrigger = ConditionTrigger{
         .condition = LogicalFunction{GreaterLogicalFunction{
             LogicalFunction{UnboundFieldAccessLogicalFunction{Identifier::parse(std::string{StatisticFieldNames::VALUE})}},
             LogicalFunction{ConstantValueLogicalFunction{
                 DataTypeProvider::provideDataType(DataType::Type::FLOAT64, DataType::NULLABLE::NOT_NULLABLE), "100.0"}}}},
-        .callback = [&fired](StatisticTuple::StatisticId, Windowing::TimeMeasure, Windowing::TimeMeasure) { fired.fetch_add(1); }};
+        .callback = [&fired, &lastValue](StatisticTuple::StatisticId, Windowing::TimeMeasure, Windowing::TimeMeasure, double value)
+        {
+            fired.fetch_add(1);
+            lastValue.store(value);
+        }};
 
     const auto collected = statisticInterface.collectNewStatistic(statement);
     ASSERT_TRUE(collected.has_value()) << collected.error().what();
@@ -339,6 +349,8 @@ TEST_F(StatisticInterfaceTest, AConditionalTriggerFiresOnlyForMatchingWindows)
     std::this_thread::sleep_for(std::chrono::seconds{1});
 
     EXPECT_EQ(fired.load(), 1) << "only the window averaging 200 should have passed the predicate";
+    /// And the callback is handed the value itself, not just the window it covers.
+    EXPECT_DOUBLE_EQ(lastValue.load(), 200.0);
 }
 
 /// What the generator emits is decided entirely by the trigger, so it is worth pinning directly rather than
@@ -355,14 +367,16 @@ TEST_F(StatisticInterfaceTest, PlanShapeDependsOnTheTrigger)
     EXPECT_EQ(sinkTypeOf(noTriggerPlan), "VOID");
     EXPECT_EQ(explain(noTriggerPlan, ExplainVerbosity::Debug).find("SCALARSTATISTICPROBE"), std::string::npos);
 
-    /// A callback with no predicate wants every closed window, so the report is needed -- but not the value, so
-    /// no store read is compiled in.
+    /// A callback with no predicate still needs the store read, because the callback is handed the value. What it
+    /// does not get is a Selection: every closed window is reported.
     auto callbackOnly = averageOverValue();
     callbackOnly.conditionTrigger = ConditionTrigger{
-        .condition = std::nullopt, .callback = [](StatisticTuple::StatisticId, Windowing::TimeMeasure, Windowing::TimeMeasure) { }};
+        .condition = std::nullopt, .callback = [](StatisticTuple::StatisticId, Windowing::TimeMeasure, Windowing::TimeMeasure, double) { }};
     const auto callbackPlan = generator.generateQuery(callbackOnly, StatisticTuple::StatisticId{1}, address);
+    const auto callbackExplain = explain(callbackPlan, ExplainVerbosity::Debug);
     EXPECT_EQ(sinkTypeOf(callbackPlan), "GRPC");
-    EXPECT_EQ(explain(callbackPlan, ExplainVerbosity::Debug).find("SCALARSTATISTICPROBE"), std::string::npos);
+    EXPECT_NE(callbackExplain.find("SCALARSTATISTICPROBE"), std::string::npos) << callbackExplain;
+    EXPECT_EQ(callbackExplain.find("SELECTION"), std::string::npos) << callbackExplain;
 
     /// A predicate is evaluated over the value, which only the store has, so this one reads its own writes back.
     auto withPredicate = averageOverValue();
@@ -371,7 +385,7 @@ TEST_F(StatisticInterfaceTest, PlanShapeDependsOnTheTrigger)
             LogicalFunction{UnboundFieldAccessLogicalFunction{Identifier::parse(std::string{StatisticFieldNames::VALUE})}},
             LogicalFunction{ConstantValueLogicalFunction{
                 DataTypeProvider::provideDataType(DataType::Type::FLOAT64, DataType::NULLABLE::NOT_NULLABLE), "100.0"}}}},
-        .callback = [](StatisticTuple::StatisticId, Windowing::TimeMeasure, Windowing::TimeMeasure) { }};
+        .callback = [](StatisticTuple::StatisticId, Windowing::TimeMeasure, Windowing::TimeMeasure, double) { }};
     const auto predicatePlan = generator.generateQuery(withPredicate, StatisticTuple::StatisticId{1}, address);
     const auto predicateExplain = explain(predicatePlan, ExplainVerbosity::Debug);
     EXPECT_EQ(sinkTypeOf(predicatePlan), "GRPC");

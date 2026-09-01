@@ -21,7 +21,10 @@
 #include <vector>
 #include <CollectionDomain.hpp>
 #include <DataTypes/DataTypeProvider.hpp>
+#include <Functions/ConstantValueLogicalFunction.hpp>
+#include <Functions/OctetLengthLogicalFunction.hpp>
 #include <Functions/UnboundFieldAccessLogicalFunction.hpp>
+#include <Operators/ProjectionLogicalOperator.hpp>
 #include <Identifiers/Identifier.hpp>
 #include <Metric.hpp>
 #include <Operators/Statistic/LogicalStatisticFields.hpp>
@@ -113,6 +116,42 @@ LogicalPlan generateForDataDomain(
         {WindowedAggregationLogicalOperator::ProjectedAggregation{statisticFunction, statisticDataFieldName(statisticId)}},
         {},
         timeCharacteristicFor(request));
+
+    /// Project to scalar columns before the sink. Three things are going on here.
+    ///
+    /// The VARSIZED payload must not reach the sink. The sink transports formatted CSV, and the payload is a raw
+    /// IEEE-754 double whose bytes can include commas and newlines, which corrupt the row framing. (This shows up
+    /// only for some values: 20.0 and 200.0 happen to be byte-safe, arbitrary averages are not.)
+    ///
+    /// The statisticId has to travel with the report so the coordinator can route it. The fused writer adds it to
+    /// the Nautilus record but not to any schema, so it would not survive a pipeline boundary; projecting it as a
+    /// constant puts it in the schema, where it does.
+    ///
+    /// And the payload has to stay *referenced*, which is what OCTET_LENGTH is doing here. The
+    /// StatisticStoreWriter is fused into the aggregation's lowering, so it is invisible to the optimizer: an
+    /// aggregation whose only output column nothing reads looks dead, and ProjectionPushdown duly emptied the
+    /// aggregation list and took the writer's side effect with it. Reading the payload's length keeps the column
+    /// live while staying scalar. It is also a useful assertion in its own right -- a scalar statistic is always
+    /// 8 bytes.
+    ///
+    /// All of this runs after the writer, which sits below in the aggregation, so the store still sees the full
+    /// record.
+    const auto uint64Type = DataTypeProvider::provideDataType(DataType::Type::UINT64, DataType::NULLABLE::NOT_NULLABLE);
+    std::vector<ProjectionLogicalOperator::UnboundProjection> projections;
+    projections.emplace_back(
+        Identifier::parse(std::string{StatisticFieldNames::STATISTIC_ID}),
+        LogicalFunction{ConstantValueLogicalFunction{uint64Type, std::to_string(statisticId.getRawValue())}});
+    projections.emplace_back(
+        Identifier::parse(std::string{StatisticFieldNames::START_TS}),
+        LogicalFunction{UnboundFieldAccessLogicalFunction{Identifier::parse("start")}});
+    projections.emplace_back(
+        Identifier::parse(std::string{StatisticFieldNames::END_TS}),
+        LogicalFunction{UnboundFieldAccessLogicalFunction{Identifier::parse("end")}});
+    projections.emplace_back(
+        Identifier::parse(std::string{StatisticFieldNames::PAYLOAD_BYTES}),
+        LogicalFunction{OctetLengthLogicalFunction{
+            LogicalFunction{UnboundFieldAccessLogicalFunction{statisticDataFieldName(statisticId)}}}});
+    plan = LogicalPlanBuilder::addProjection(std::move(projections), /*asterisk=*/false, plan);
 
     const auto [host, port] = splitAddress(coordinatorAddress);
     return LogicalPlanBuilder::addAnonymousSink(

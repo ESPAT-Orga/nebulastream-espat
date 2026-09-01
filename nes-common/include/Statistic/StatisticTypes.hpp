@@ -58,6 +58,9 @@ inline constexpr std::string_view DATA = "STATISTICDATA";
 inline constexpr std::string_view TYPE = "STATISTICTYPE";
 /// The read side only: the scalar value a probe reconstructs from a stored statistic.
 inline constexpr std::string_view VALUE = "STATISTICVALUE";
+/// Size of the persisted payload. Reported by a build query so its aggregation stays referenced -- see
+/// DefaultStatisticQueryGenerator for why that matters.
+inline constexpr std::string_view PAYLOAD_BYTES = "STATISTICPAYLOADBYTES";
 }
 
 /// Overload modulo operator for StatisticId as it is commonly used to index into hash maps.

@@ -35,3 +35,7 @@ target_link_libraries(statistic-transport-test nes-grpc)
 # The coordinator drives both directions of the transport, so it needs nes-grpc too.
 add_nes_statistics_query_test(statistic-coordinator-test StatisticCoordinatorTest.cpp)
 target_link_libraries(statistic-coordinator-test nes-grpc)
+
+# The end-to-end demonstration: engine task events aggregated into a statistic that reaches the coordinator.
+add_nes_statistics_query_test(statistic-task-queue-test StatisticTaskQueueTest.cpp)
+target_link_libraries(statistic-task-queue-test nes-grpc)

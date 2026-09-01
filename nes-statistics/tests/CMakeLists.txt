@@ -18,6 +18,16 @@ endfunction()
 
 add_nes_statistics_test(statistic-store-test StatisticStoreTest.cpp)
 
-# Needs the worker to actually run a query: this is the only test that executes the traced code.
-add_nes_statistics_test(statistic-round-trip-test StatisticRoundTripTest.cpp)
-target_link_libraries(statistic-round-trip-test nes-single-node-worker-lib nes-query-optimizer nes-distributed)
+# These two compile and run real queries, so they need the worker, the optimizer and the plugins.
+function(add_nes_statistics_query_test)
+    add_nes_statistics_test(${ARGN})
+    set(TARGET_NAME ${ARGV0})
+    target_include_directories(${TARGET_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries(${TARGET_NAME} nes-single-node-worker-lib nes-query-optimizer nes-distributed)
+endfunction()
+
+add_nes_statistics_query_test(statistic-round-trip-test StatisticRoundTripTest.cpp)
+
+# Additionally needs nes-grpc for the generated StatisticService stubs the test server uses.
+add_nes_statistics_query_test(statistic-transport-test StatisticTransportTest.cpp)
+target_link_libraries(statistic-transport-test nes-grpc)

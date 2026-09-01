@@ -1,0 +1,102 @@
+/*
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
+
+        https://www.apache.org/licenses/LICENSE-2.0
+
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
+*/
+
+#pragma once
+
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <ostream>
+#include <utility>
+#include <Statistic/StatisticTypes.hpp>
+#include <Util/Logger/Formatter.hpp>
+#include <WindowTypes/Measures/TimeMeasure.hpp>
+
+namespace NES
+{
+
+/// A statistic represents particular information of a component, stream or etc. over a period of time.
+/// As we build and probe these statistics via a query compiler, this class stores the statistic data as a
+/// shared byte array.
+class Statistic
+{
+public:
+    /// Aliases back to the nes-common definitions so that 'Statistic::StatisticId' and 'Statistic::StatisticType'
+    /// keep working, while nes-logical-operators can include <Statistic/StatisticTypes.hpp> on its own.
+    using StatisticId = NES::StatisticId;
+    using StatisticType = NES::StatisticType;
+
+    Statistic(
+        const StatisticId statisticId,
+        const StatisticType statisticType,
+        const Windowing::TimeMeasure& startTs,
+        const Windowing::TimeMeasure& endTs,
+        const uint64_t numberOfSeenTuples,
+        std::shared_ptr<std::byte[]> statisticData,
+        const uint64_t statisticDataSize)
+        : statisticId(statisticId)
+        , statisticType(statisticType)
+        , startTs(startTs)
+        , endTs(endTs)
+        , numberOfSeenTuples(numberOfSeenTuples)
+        , statisticData(std::move(statisticData))
+        , statisticDataSize(statisticDataSize)
+    {
+    }
+
+    /// Copy/move constructible but NOT assignable: 'Windowing::TimeMeasure' holds a const member upstream, so
+    /// both assignment operators are implicitly deleted. Declaring them '= default' would only add a
+    /// -Wdefaulted-function-deleted warning without granting assignability, so they are left implicit.
+    /// Consequence for callers: rebuild-and-move a container of Statistic rather than permuting one in place.
+    Statistic(const Statistic&) = default;
+    Statistic(Statistic&&) = default;
+    ~Statistic() = default;
+
+    [[nodiscard]] StatisticType getStatisticType() const { return statisticType; }
+
+    [[nodiscard]] Windowing::TimeMeasure getStartTs() const { return startTs; }
+
+    [[nodiscard]] Windowing::TimeMeasure getEndTs() const { return endTs; }
+
+    [[nodiscard]] const int8_t* getStatisticData() const { return reinterpret_cast<const int8_t*>(statisticData.get()); }
+
+    [[nodiscard]] uint64_t getStatisticDataSize() const { return statisticDataSize; }
+
+    [[nodiscard]] uint64_t getNumberOfSeenTuples() const { return numberOfSeenTuples; }
+
+    [[nodiscard]] StatisticId getStatisticId() const { return statisticId; }
+
+    bool operator==(const Statistic& other) const
+    {
+        return statisticId == other.statisticId and statisticType == other.statisticType and startTs == other.startTs
+            and endTs == other.endTs and numberOfSeenTuples == other.numberOfSeenTuples and statisticDataSize == other.statisticDataSize
+            and std::equal(statisticData.get(), statisticData.get() + statisticDataSize, other.statisticData.get());
+    }
+
+    friend std::ostream& operator<<(std::ostream& os, const Statistic& statistic);
+
+private:
+    StatisticId statisticId;
+    StatisticType statisticType;
+    Windowing::TimeMeasure startTs;
+    Windowing::TimeMeasure endTs;
+    uint64_t numberOfSeenTuples;
+    std::shared_ptr<std::byte[]> statisticData;
+    uint64_t statisticDataSize;
+};
+
+}
+
+FMT_OSTREAM(NES::Statistic);

@@ -19,8 +19,13 @@ add_source_files(nes-logical-operators
         MedianAggregationLogicalFunction.cpp
         MinAggregationLogicalFunction.cpp
         SumAggregationLogicalFunction.cpp
+        ScalarStatisticAggregationLogicalFunction.cpp
 )
 
+
+# No add_registry_entry for ScalarStatistic: name-based construction serves the SQL parser, which this port
+# does not have, and the registry arguments carry neither the statisticId nor the op.
+add_unreflection_entry(AggregationLogicalFunction ScalarStatistic)
 
 add_unreflection_entry(AggregationLogicalFunction Avg)
 add_unreflection_entry(AggregationLogicalFunction Count)

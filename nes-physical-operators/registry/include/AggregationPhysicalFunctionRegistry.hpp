@@ -23,6 +23,7 @@
 #include <Functions/PhysicalFunction.hpp>
 #include <Interface/PagedVector/PagedVectorRef.hpp>
 #include <Interface/Record.hpp>
+#include <Statistic/StatisticTypes.hpp>
 #include <Util/RuntimeRegistry.hpp>
 
 namespace NES
@@ -38,6 +39,11 @@ struct AggregationPhysicalFunctionRegistryArguments
     Record::RecordFieldIdentifier resultFieldIdentifier;
     std::optional<std::shared_ptr<PagedVectorTupleLayout>> tupleLayout;
     bool includeNullValues;
+
+    /// Set only for the ScalarStatistic aggregation, which shares one registry name across Count/Sum/Avg and so
+    /// cannot be told apart by name alone. Every other aggregation dispatches purely on its name and leaves this
+    /// empty. Declared last with a default so existing aggregate-initialisation call sites are unaffected.
+    std::optional<StatisticType> scalarOp{};
 };
 
 using AggregationPhysicalFunctionFn

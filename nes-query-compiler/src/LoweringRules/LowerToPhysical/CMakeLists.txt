@@ -14,6 +14,7 @@ add_source_files(nes-query-compiler
         LowerToPhysicalNLJoin.cpp
         LowerToPhysicalHashJoin.cpp
         LowerToPhysicalSelection.cpp
+        LowerToPhysicalScalarStatisticProbe.cpp
         LowerToPhysicalProjection.cpp
         LowerToPhysicalWindowedAggregation.cpp
         LowerToPhysicalUnion.cpp
@@ -27,6 +28,7 @@ add_source_files(nes-query-compiler
 add_registry_entry(LoweringRule NLJoin)
 add_registry_entry(LoweringRule HashJoin)
 add_registry_entry(LoweringRule Selection)
+add_registry_entry(LoweringRule ScalarStatisticProbe)
 add_registry_entry(LoweringRule Projection)
 add_registry_entry(LoweringRule WindowedAggregation)
 add_registry_entry(LoweringRule Union)

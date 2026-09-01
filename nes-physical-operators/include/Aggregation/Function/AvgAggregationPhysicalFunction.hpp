@@ -59,7 +59,14 @@ public:
 
     static AggregationPhysicalFunctionRegistryReturnType create(AggregationPhysicalFunctionRegistryArguments arguments);
 
-private:
+protected:
+    /// The [sum][count] state layout is shared with the scalar-statistic functions, which need the two halves
+    /// separately: Sum emits the running sum verbatim rather than the quotient, and both Sum and Avg report the
+    /// count as STATISTICNUMBEROFSEENTUPLES. Exposed here rather than duplicated so the offset arithmetic --
+    /// including the leading null byte when the input is nullable -- has one definition.
+    [[nodiscard]] VarVal readSum(const nautilus::val<AggregationState*>& aggregationState) const;
+    [[nodiscard]] VarVal readCount(const nautilus::val<AggregationState*>& aggregationState) const;
+
     DataType countType{DataType::Type::UINT64, DataType::NULLABLE::NOT_NULLABLE};
 };
 

@@ -28,6 +28,12 @@
 #include <Aggregation/AggregationBuildPhysicalOperator.hpp>
 #include <Aggregation/AggregationOperatorHandler.hpp>
 #include <Aggregation/AggregationProbePhysicalOperator.hpp>
+#include <Aggregation/Function/ScalarStatisticAggregationPhysicalFunction.hpp>
+#include <Identifiers/Identifier.hpp>
+#include <Operators/Windows/Aggregations/ScalarStatisticAggregationLogicalFunction.hpp>
+#include <Statistic/StatisticStore/StatisticStoreOperatorHandler.hpp>
+#include <Statistic/StatisticStore/StatisticStoreWriter.hpp>
+#include <Statistic/StatisticTypes.hpp>
 #include <Aggregation/AggregationSlice.hpp>
 #include <Aggregation/Function/AggregationPhysicalFunction.hpp>
 #include <DataTypes/DataTypeProvider.hpp>
@@ -112,6 +118,14 @@ getAggregationPhysicalFunctions(const WindowedAggregationLogicalOperator& logica
             resultFieldIdentifier,
             tupleLayout,
             descriptor.function.shallIncludeNullValues());
+
+        /// ScalarStatistic shares one registry name across Count/Sum/Avg, so the op has to travel separately;
+        /// every other aggregation is fully identified by its name and leaves this empty.
+        if (const auto scalarStatistic = descriptor.function.tryGetAs<ScalarStatisticAggregationLogicalFunction>())
+        {
+            aggregationArguments.scalarOp = (*scalarStatistic)->getOp();
+        }
+
         if (const auto aggregationFactory = AggregationPhysicalFunctionRegistry::instance().find(std::string{name}))
         {
             aggregationPhysicalFunctions.push_back((*aggregationFactory)(std::move(aggregationArguments)));
@@ -241,6 +255,43 @@ LoweringRuleResultSubgraph LowerToPhysicalWindowedAggregation::apply(LogicalOper
 
     /// Creates a physical leaf for each logical leaf. Required, as this operator can have any number of sources.
     std::vector leaves(logicalOperator.getChildren().size(), buildWrapper);
+
+    /// A scalar-statistic aggregation persists every window it closes. The writer is appended here as the probe's
+    /// physical child rather than lowered from a logical operator of its own: AggregationProbePhysicalOperator
+    /// hands its record straight to executeChild without materialising it, so the payload, the window bounds and
+    /// the tuple count are still in registers and never need to appear in a logical output schema. That is what
+    /// lets the build chain stay an ordinary windowed aggregation.
+    for (const auto& descriptor : aggregation->getWindowAggregation())
+    {
+        const auto scalarStatistic = descriptor.function.tryGetAs<ScalarStatisticAggregationLogicalFunction>();
+        if (not scalarStatistic.has_value())
+        {
+            continue;
+        }
+        auto storeHandlerId = getNextOperatorHandlerId();
+        auto storeHandler = std::make_shared<StatisticStoreOperatorHandler>();
+        const StatisticStoreWriter writer{
+            storeHandlerId,
+            (*scalarStatistic)->getStatisticId(),
+            (*scalarStatistic)->getOp(),
+            descriptor.name,
+            windowMetaData.startField.getFullyQualifiedName(),
+            windowMetaData.endField.getFullyQualifiedName(),
+            Identifier::parse(std::string{StatisticFieldNames::NUMBER_OF_SEEN_TUPLES}),
+            Identifier::parse(std::string{StatisticFieldNames::STATISTIC_ID})};
+        auto writerWrapper = std::make_shared<PhysicalOperatorWrapper>(
+            writer,
+            physicalInputSchema,
+            physicalOutputSchema,
+            memoryLayoutType,
+            memoryLayoutType,
+            storeHandlerId,
+            storeHandler,
+            PhysicalOperatorWrapper::PipelineLocation::INTERMEDIATE,
+            std::vector{probeWrapper});
+        return {.root = writerWrapper, .leaves = {leaves}};
+    }
+
     return {.root = probeWrapper, .leaves = {leaves}};
 }
 }

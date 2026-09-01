@@ -150,6 +150,24 @@ void AvgAggregationPhysicalFunction::combine(
     }
 }
 
+VarVal AvgAggregationPhysicalFunction::readSum(const nautilus::val<AggregationState*>& aggregationState) const
+{
+    /// A nullable input reserves the first byte of the state for the null flag, so the sum starts one byte later.
+    const auto memAreaSum = inputType.nullable
+        ? static_cast<nautilus::val<int8_t*>>(aggregationState + nautilus::val<uint64_t>{1})
+        : static_cast<nautilus::val<int8_t*>>(aggregationState);
+    return VarVal::readVarValFromMemory(memAreaSum, resultType, nautilus::val<bool>(false));
+}
+
+VarVal AvgAggregationPhysicalFunction::readCount(const nautilus::val<AggregationState*>& aggregationState) const
+{
+    const auto memAreaSum = inputType.nullable
+        ? static_cast<nautilus::val<int8_t*>>(aggregationState + nautilus::val<uint64_t>{1})
+        : static_cast<nautilus::val<int8_t*>>(aggregationState);
+    const auto memAreaCount = memAreaSum + nautilus::val<uint64_t>(resultType.getSizeInBytesWithoutNull());
+    return VarVal::readNonNullableVarValFromMemory(memAreaCount, countType);
+}
+
 Record AvgAggregationPhysicalFunction::lower(
     const nautilus::val<AggregationState*> aggregationState, nautilus::val<TupleBuffer*>, PipelineMemoryProvider&)
 {

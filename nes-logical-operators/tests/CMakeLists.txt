@@ -25,3 +25,5 @@ if (ENABLE_IREE_TESTS)
 endif ()
 
 add_nes_logical_operators_test(nes-join-logical-operator-test "JoinLogicalOperatorTest.cpp")
+
+add_nes_logical_operators_test(scalar-statistic-aggregation-function-test "ScalarStatisticAggregationLogicalFunctionTest.cpp")

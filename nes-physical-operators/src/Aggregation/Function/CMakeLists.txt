@@ -20,8 +20,10 @@ add_source_files(nes-physical-operators
         MinAggregationPhysicalFunction.cpp
         MedianAggregationPhysicalFunction.cpp
         SumAggregationPhysicalFunction.cpp
+        ScalarStatisticAggregationPhysicalFunction.cpp
 )
 
+add_registry_entry(AggregationPhysicalFunction ScalarStatistic)
 add_registry_entry(AggregationPhysicalFunction Avg)
 add_registry_entry(AggregationPhysicalFunction Count)
 add_registry_entry(AggregationPhysicalFunction Max)

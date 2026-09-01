@@ -14,35 +14,36 @@
 
 #include <DefaultStatisticQueryGenerator.hpp>
 
+#include <optional>
 #include <string>
 #include <type_traits>
 #include <utility>
 #include <variant>
 #include <vector>
-#include <CollectionDomain.hpp>
 #include <DataTypes/DataTypeProvider.hpp>
 #include <Functions/ConstantValueLogicalFunction.hpp>
 #include <Functions/OctetLengthLogicalFunction.hpp>
 #include <Functions/UnboundFieldAccessLogicalFunction.hpp>
-#include <Operators/ProjectionLogicalOperator.hpp>
-#include <Operators/Statistic/ScalarStatisticProbeLogicalOperator.hpp>
 #include <Identifiers/Identifier.hpp>
-#include <Metric.hpp>
+#include <Operators/ProjectionLogicalOperator.hpp>
+#include <Operators/SelectionLogicalOperator.hpp>
 #include <Operators/Statistic/LogicalStatisticFields.hpp>
+#include <Operators/Statistic/ScalarStatisticProbeLogicalOperator.hpp>
 #include <Operators/Windows/Aggregations/ScalarStatisticAggregationLogicalFunction.hpp>
 #include <Operators/Windows/WindowedAggregationLogicalOperator.hpp>
 #include <Plans/LogicalPlan.hpp>
 #include <Plans/LogicalPlanBuilder.hpp>
-#include <RequestStatisticStatement.hpp>
-#include <StatisticTuple.hpp>
+#include <SQLQueryParser/AntlrSQLQueryParser.hpp>
 #include <Statistic/StatisticTypes.hpp>
 #include <WindowTypes/Measures/TimeCharacteristic.hpp>
-#include <WindowTypes/Measures/TimeMeasure.hpp>
-#include <WindowTypes/Types/SlidingWindow.hpp>
 #include <WindowTypes/Types/TimeBasedWindowType.hpp>
-#include <WindowTypes/Types/TumblingWindow.hpp>
+#include <fmt/format.h>
 #include <magic_enum/magic_enum.hpp>
+#include <CollectionDomain.hpp>
 #include <ErrorHandling.hpp>
+#include <Metric.hpp>
+#include <RequestStatisticStatement.hpp>
+#include <StatisticTuple.hpp>
 
 namespace NES
 {
@@ -59,8 +60,7 @@ StatisticType toStatisticType(const Metric metric)
         return StatisticType::Avg;
     }
     throw NotImplemented(
-        "Metric {} needs a synopsis statistic, which this port does not provide; only Average is supported",
-        magic_enum::enum_name(metric));
+        "Metric {} needs a synopsis statistic, which this port does not provide; only Average is supported", magic_enum::enum_name(metric));
 }
 
 /// The type a probe reconstructs the persisted scalar as. Only Avg is reachable today, but keeping the mapping
@@ -79,27 +79,36 @@ DataType probeValueTypeFor(const StatisticType op)
     throw NotImplemented("No probe value type is defined for statistic type {}", magic_enum::enum_name(op));
 }
 
-Windowing::TimeBasedWindowType windowTypeFor(const RequestStatisticBuildStatement& request)
+/// Turns the trigger's SQL condition into a LogicalFunction.
+///
+/// There is no public entry point that parses a bare expression, so the condition is wrapped in the smallest
+/// complete query that can carry it and the Selection's predicate is lifted back out. The source and sink names
+/// are never resolved -- parsing only needs the syntactic shape, and this plan is discarded once the predicate
+/// has been taken from it. The INTO clause is not optional: without it the parser rejects the query outright.
+///
+/// Callers reach this only for conditions that are neither NEVER_SEND nor ALWAYS_SEND; those two are matched
+/// before parsing, because they describe the plan rather than a row.
+LogicalFunction parseCondition(const std::string& condition)
 {
-    if (request.windowAdvanceMs.has_value())
+    const auto sql = fmt::format("SELECT * FROM _nes_stat_dummy_ WHERE {} INTO _nes_stat_dummy_sink_", condition);
+    std::optional<LogicalPlan> parsed;
+    try
     {
-        return Windowing::TimeBasedWindowType{
-            Windowing::SlidingWindow{Windowing::TimeMeasure{request.windowSizeMs}, Windowing::TimeMeasure{*request.windowAdvanceMs}}};
+        parsed = AntlrSQLQueryParser::createLogicalQueryPlanFromSQLString(sql);
     }
-    return Windowing::TimeBasedWindowType{Windowing::TumblingWindow{Windowing::TimeMeasure{request.windowSizeMs}}};
-}
+    catch (const std::exception& e)
+    {
+        throw InvalidQuerySyntax("Could not parse statistic trigger condition '{}': {}", condition, e.what());
+    }
 
-Windowing::TimeCharacteristic timeCharacteristicFor(const RequestStatisticBuildStatement& request)
-{
-    if (request.eventTimeFieldName.has_value())
+    /// A condition that parses but yields no Selection is one the parser folded away or read as something other
+    /// than a predicate. Reporting it as invalid beats deploying a query that silently reports everything.
+    const auto selections = getOperatorByType<SelectionLogicalOperator>(*parsed);
+    if (selections.empty())
     {
-        return Windowing::TimeCharacteristic{
-            Windowing::UnboundTimeCharacteristic{Windowing::TimeCharacteristicWrapper::createEventTime(
-                UnboundFieldAccessLogicalFunction{Identifier::parse(*request.eventTimeFieldName)},
-                Windowing::TimeUnit::Milliseconds())}};
+        throw InvalidQuerySyntax("Statistic trigger condition '{}' is not a predicate", condition);
     }
-    return Windowing::TimeCharacteristic{
-        Windowing::UnboundTimeCharacteristic{Windowing::TimeCharacteristicWrapper::createIngestionTime()}};
+    return selections.front()->getPredicate();
 }
 
 /// Splits "host:port" as the statistic interface reports it. The sink wants the two halves separately.
@@ -129,10 +138,10 @@ LogicalPlan generateForDataDomain(
     /// The result field is named from the id alone, which is how the fused StatisticStoreWriter finds the payload.
     plan = LogicalPlanBuilder::addWindowAggregation(
         plan,
-        windowTypeFor(request),
+        request.windowType,
         {WindowedAggregationLogicalOperator::ProjectedAggregation{statisticFunction, statisticDataFieldName(statisticId)}},
         {},
-        timeCharacteristicFor(request));
+        request.timeCharacteristic);
 
     /// Project to scalar columns before the sink. Three things are going on here.
     ///
@@ -166,51 +175,44 @@ LogicalPlan generateForDataDomain(
         LogicalFunction{UnboundFieldAccessLogicalFunction{Identifier::parse("end")}});
     projections.emplace_back(
         Identifier::parse(std::string{StatisticFieldNames::PAYLOAD_BYTES}),
-        LogicalFunction{OctetLengthLogicalFunction{
-            LogicalFunction{UnboundFieldAccessLogicalFunction{statisticDataFieldName(statisticId)}}}});
+        LogicalFunction{
+            OctetLengthLogicalFunction{LogicalFunction{UnboundFieldAccessLogicalFunction{statisticDataFieldName(statisticId)}}}});
     plan = LogicalPlanBuilder::addProjection(std::move(projections), /*asterisk=*/false, plan);
 
-    /// A trigger makes the build query read the store back.
+    /// The trigger's condition decides the whole shape of what follows, in three cases.
     ///
-    /// Both things a trigger needs are the statistic's *value*, and the value only exists in the store -- the
-    /// build chain itself carries it as an opaque VARSIZED payload it can neither compare nor report. The
-    /// callback is handed the value, and a predicate is evaluated over it, so either way the query has to probe
-    /// what it just wrote.
+    /// NEVER_SEND is the write-only query: no probe, no network. Nothing consumes a report unless a callback was
+    /// registered for it -- onStatisticReport routes reports to the registry's triggers and drops them when there
+    /// are none -- so reporting here would pay a gRPC round-trip per closed window for a message that is
+    /// immediately discarded. It terminates in a VoidSink instead. The statistic is still persisted: the writer is
+    /// fused into the aggregation, far below the sink, so getStatistics reads it back exactly as before.
     ///
-    /// Without a trigger nothing consumes a report at all, so the query stays write-only and a caller that wants
-    /// values calls getStatistics instead.
+    /// Anything else reports, and reporting means probing. Both of the things a trigger needs -- the value handed
+    /// to the callback, and the value a predicate is evaluated over -- exist only in the store; the build chain
+    /// carries the statistic as an opaque VARSIZED payload it can neither compare nor report. So the query reads
+    /// back what it just wrote. The probe takes the window bounds from the projected columns above and supplies
+    /// STATISTICID and STATISTICVALUE itself, so its output is exactly what the sink reports.
     ///
-    /// The probe reads the window bounds from the projected columns above, and supplies STATISTICID and
-    /// STATISTICVALUE itself, so its output is exactly what the sink reports.
-    if (request.conditionTrigger.has_value())
+    /// ALWAYS_SEND stops there: every closed window is worth reporting, so there is nothing to filter.
+    /// Every other condition adds a Selection over the probed columns, and only matching windows are reported.
+    const auto& trigger = request.conditionTrigger;
+    const auto [host, port] = splitAddress(interfaceAddress);
+    if (trigger.sendsNever())
     {
-        const auto probe = ScalarStatisticProbeLogicalOperator::create(
-            statisticId,
-            toStatisticType(request.metric),
-            probeValueTypeFor(toStatisticType(request.metric)),
-            Identifier::parse(std::string{StatisticFieldNames::START_TS}),
-            Identifier::parse(std::string{StatisticFieldNames::END_TS}));
-        plan = plan.withRootOperators({LogicalOperator{probe}.withChildrenUnsafe(plan.getRootOperators())});
-
-        /// The predicate, when there is one, filters which of those windows are worth reporting.
-        if (request.conditionTrigger->condition.has_value())
-        {
-            plan = LogicalPlanBuilder::addSelection(request.conditionTrigger->condition.value(), plan);
-        }
+        return LogicalPlanBuilder::addAnonymousSink(Identifier::parse("Void"), std::nullopt, {{Identifier::parse("host"), host}}, {}, plan);
     }
 
-    const auto [host, port] = splitAddress(interfaceAddress);
+    const auto probe = ScalarStatisticProbeLogicalOperator::create(
+        statisticId,
+        toStatisticType(request.metric),
+        probeValueTypeFor(toStatisticType(request.metric)),
+        Identifier::parse(std::string{StatisticFieldNames::START_TS}),
+        Identifier::parse(std::string{StatisticFieldNames::END_TS}));
+    plan = plan.withRootOperators({LogicalOperator{probe}.withChildrenUnsafe(plan.getRootOperators())});
 
-    /// Nothing listens to a report unless a trigger was registered for it, and the report exists purely to drive
-    /// those callbacks: onStatisticReport routes it to the registry's triggers and drops it if there are none.
-    /// So a request without a trigger terminates in a VoidSink and never touches the network, rather than paying
-    /// a synchronous gRPC round-trip per closed window for a report that is immediately discarded. The statistic
-    /// is still persisted -- the writer is fused into the aggregation, well below the sink -- so getStatistics
-    /// reads it back exactly as before.
-    if (not request.conditionTrigger.has_value())
+    if (not trigger.sendsAlways())
     {
-        return LogicalPlanBuilder::addAnonymousSink(
-            Identifier::parse("Void"), std::nullopt, {{Identifier::parse("host"), host}}, {}, plan);
+        plan = LogicalPlanBuilder::addSelection(parseCondition(trigger.condition), plan);
     }
 
     return LogicalPlanBuilder::addAnonymousSink(
@@ -227,9 +229,7 @@ LogicalPlan generateForDataDomain(
 }
 
 LogicalPlan DefaultStatisticQueryGenerator::generateQuery(
-    const RequestStatisticBuildStatement& request,
-    const StatisticTuple::StatisticId statisticId,
-    const std::string& interfaceAddress) const
+    const RequestStatisticBuildStatement& request, const StatisticTuple::StatisticId statisticId, const std::string& interfaceAddress) const
 {
     return std::visit(
         [&]<typename DomainAlternative>(const DomainAlternative& domain) -> LogicalPlan

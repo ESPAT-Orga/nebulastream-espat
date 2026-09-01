@@ -35,34 +35,36 @@
 #include <string>
 #include <thread>
 #include <vector>
-#include <CollectionDomain.hpp>
-#include <ConditionTrigger.hpp>
 #include <DataTypes/DataTypeProvider.hpp>
 #include <DataTypes/UnboundField.hpp>
-#include <DefaultStatisticQueryGenerator.hpp>
-#include <DistributedLogicalPlan.hpp>
 #include <Identifiers/Identifier.hpp>
-#include <Metric.hpp>
-#include <ModelCatalog.hpp>
 #include <Plans/LogicalPlan.hpp>
 #include <Plans/LogicalPlanBuilder.hpp>
-#include <QueryOptimizer.hpp>
-#include <QueryOptimizerConfiguration.hpp>
-#include <RequestStatisticStatement.hpp>
 #include <Schema/Schema.hpp>
 #include <Sinks/SinkCatalog.hpp>
 #include <Sources/SourceCatalog.hpp>
-#include <StatisticInterface.hpp>
 #include <StatisticStore/StatisticStoreRegistry.hpp>
 #include <Util/Logger/Logger.hpp>
 #include <WindowTypes/Measures/TimeMeasure.hpp>
-#include <WorkerCatalog.hpp>
-#include <WorkerConfig.hpp>
+#include <WindowTypes/Types/TimeBasedWindowType.hpp>
+#include <WindowTypes/Types/TumblingWindow.hpp>
 #include <gtest/gtest.h>
 #include <BaseUnitTest.hpp>
+#include <CollectionDomain.hpp>
+#include <ConditionTrigger.hpp>
+#include <DefaultStatisticQueryGenerator.hpp>
+#include <DistributedLogicalPlan.hpp>
+#include <Metric.hpp>
+#include <ModelCatalog.hpp>
+#include <QueryOptimizer.hpp>
+#include <QueryOptimizerConfiguration.hpp>
+#include <RequestStatisticStatement.hpp>
 #include <SingleNodeWorker.hpp>
 #include <SingleNodeWorkerConfiguration.hpp>
+#include <StatisticInterface.hpp>
 #include <StatisticTestSupport.hpp>
+#include <WorkerCatalog.hpp>
+#include <WorkerConfig.hpp>
 
 namespace NES
 {
@@ -190,18 +192,16 @@ TEST_F(StatisticTaskQueueTest, TaskQueueEventsReachTheStatisticInterfaceAsAStati
     RequestStatisticBuildStatement statement{
         .domain = DataDomain{.logicalSourceName = STATS_SOURCE, .fieldName = "tuples"},
         .metric = Metric::Average,
-        .windowSizeMs = TASK_WINDOW_MS,
-        .windowAdvanceMs = std::nullopt,
-        /// Ingestion time: ts_us is microseconds, and the engine's own clock is what matters here anyway.
-        .eventTimeFieldName = std::nullopt,
-        .conditionTrigger = ConditionTrigger{
-            .condition = std::nullopt,
-            .callback =
-                [&reportsSeen, &lastAverage](StatisticTuple::StatisticId, Windowing::TimeMeasure, Windowing::TimeMeasure, double value)
+        .windowType = Windowing::TimeBasedWindowType{Windowing::TumblingWindow{Windowing::TimeMeasure{TASK_WINDOW_MS}}},
+        /// Ingestion time, which is the default: ts_us is microseconds, and the engine's own clock is what
+        /// matters here anyway.
+        .conditionTrigger = withCallback(
+            ALWAYS_SEND,
+            [&reportsSeen, &lastAverage](StatisticTuple::StatisticId, Windowing::TimeMeasure, Windowing::TimeMeasure, double value)
             {
                 reportsSeen.fetch_add(1);
                 lastAverage.store(value);
-            }},
+            }),
         .options = {}};
 
     const auto collected = statisticInterface.collectNewStatistic(statement);
@@ -219,8 +219,7 @@ TEST_F(StatisticTaskQueueTest, TaskQueueEventsReachTheStatisticInterfaceAsAStati
     EXPECT_GT(lastAverage.load(), 0.0) << "the reported average over the engine's task events was not a real value";
 
     const auto store = StatisticStoreRegistry::instance().getOrCreate(std::string{StatisticStoreRegistry::DEFAULT_STORE_NAME});
-    const auto statistics
-        = store->getStatistics(collected->statisticId, Windowing::TimeMeasure{0}, Windowing::TimeMeasure{~uint64_t{0}});
+    const auto statistics = store->getStatistics(collected->statisticId, Windowing::TimeMeasure{0}, Windowing::TimeMeasure{~uint64_t{0}});
     EXPECT_FALSE(statistics.empty()) << "no statistic was persisted for the task-queue stream";
     for (const auto& statistic : statistics)
     {

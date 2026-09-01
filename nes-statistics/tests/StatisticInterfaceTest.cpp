@@ -29,38 +29,42 @@
 #include <thread>
 #include <utility>
 #include <vector>
-#include <CollectionDomain.hpp>
-#include <ConditionTrigger.hpp>
+#include <DataTypes/DataTypeProvider.hpp>
 #include <Functions/ComparisonFunctions/GreaterLogicalFunction.hpp>
 #include <Functions/ConstantValueLogicalFunction.hpp>
 #include <Functions/UnboundFieldAccessLogicalFunction.hpp>
-#include <DataTypes/DataTypeProvider.hpp>
+#include <Identifiers/Identifier.hpp>
+#include <Operators/Sinks/AnonymousSinkLogicalOperator.hpp>
+#include <Plans/LogicalPlan.hpp>
+#include <Schema/Schema.hpp>
+#include <Sinks/SinkCatalog.hpp>
+#include <Sources/SourceCatalog.hpp>
+#include <StatisticStore/StatisticStoreRegistry.hpp>
+#include <Util/Logger/Logger.hpp>
+#include <WindowTypes/Measures/TimeCharacteristic.hpp>
+#include <WindowTypes/Measures/TimeMeasure.hpp>
+#include <WindowTypes/Types/TimeBasedWindowType.hpp>
+#include <WindowTypes/Types/TumblingWindow.hpp>
+#include <fmt/format.h>
+#include <gtest/gtest.h>
+#include <BaseUnitTest.hpp>
+#include <CollectionDomain.hpp>
+#include <ConditionTrigger.hpp>
 #include <DefaultStatisticQueryGenerator.hpp>
 #include <DistributedLogicalPlan.hpp>
-#include <Identifiers/Identifier.hpp>
 #include <Metric.hpp>
 #include <ModelCatalog.hpp>
-#include <Plans/LogicalPlan.hpp>
 #include <QueryOptimizer.hpp>
 #include <QueryOptimizerConfiguration.hpp>
 #include <QueryStatus.hpp>
 #include <RequestStatisticStatement.hpp>
-#include <Schema/Schema.hpp>
-#include <Sinks/SinkCatalog.hpp>
-#include <Operators/Sinks/AnonymousSinkLogicalOperator.hpp>
-#include <Sources/SourceCatalog.hpp>
-#include <StatisticInterface.hpp>
-#include <StatisticRegistry.hpp>
-#include <StatisticStore/StatisticStoreRegistry.hpp>
-#include <Util/Logger/Logger.hpp>
-#include <WindowTypes/Measures/TimeMeasure.hpp>
-#include <WorkerCatalog.hpp>
-#include <WorkerConfig.hpp>
-#include <gtest/gtest.h>
-#include <BaseUnitTest.hpp>
 #include <SingleNodeWorker.hpp>
 #include <SingleNodeWorkerConfiguration.hpp>
+#include <StatisticInterface.hpp>
+#include <StatisticRegistry.hpp>
 #include <StatisticTestSupport.hpp>
+#include <WorkerCatalog.hpp>
+#include <WorkerConfig.hpp>
 
 namespace NES
 {
@@ -98,8 +102,8 @@ public:
             (void)physical;
         }
 
-        optimizer = std::make_unique<QueryOptimizer>(
-            QueryOptimizerConfiguration{}, sourceCatalog, sinkCatalog, workerCatalog, modelCatalog);
+        optimizer
+            = std::make_unique<QueryOptimizer>(QueryOptimizerConfiguration{}, sourceCatalog, sinkCatalog, workerCatalog, modelCatalog);
         worker = std::make_unique<SingleNodeWorker>(SingleNodeWorkerConfiguration{});
     }
 
@@ -172,10 +176,11 @@ RequestStatisticBuildStatement averageOverValue()
     return RequestStatisticBuildStatement{
         .domain = DataDomain{.logicalSourceName = SOURCE_NAME, .fieldName = "value"},
         .metric = Metric::Average,
-        .windowSizeMs = WINDOW_SIZE_MS,
-        .windowAdvanceMs = std::nullopt,
-        .eventTimeFieldName = "ts",
-        .conditionTrigger = NEVER_SEND std::nullopt,
+        .windowType = Windowing::TimeBasedWindowType{Windowing::TumblingWindow{Windowing::TimeMeasure{WINDOW_SIZE_MS}}},
+        .timeCharacteristic
+        = Windowing::TimeCharacteristic{Windowing::UnboundTimeCharacteristic{Windowing::TimeCharacteristicWrapper::createEventTime(
+            UnboundFieldAccessLogicalFunction{Identifier::parse("ts")}, Windowing::TimeUnit::Milliseconds())}},
+        .conditionTrigger = NEVER_SEND,
         .options = {}};
 }
 
@@ -190,7 +195,7 @@ std::string sinkTypeOf(const LogicalPlan& plan)
 StatisticRegistry::Key keyFor(const RequestStatisticBuildStatement& statement)
 {
     return StatisticRegistry::Key{
-        .metric = statement.metric, .collectionDomain = statement.domain, .windowSize = Windowing::TimeMeasure{statement.windowSizeMs}};
+        .metric = statement.metric, .collectionDomain = statement.domain, .windowSize = statement.windowType.getSize()};
 }
 
 }
@@ -214,9 +219,9 @@ public:
 };
 
 /// The build half through the statistic interface: a request turns into a deployed query whose statistics land in the
-/// store. With no trigger the query reports nothing -- see PlanShapeDependsOnTheTrigger -- so the store is the
+/// store. Under NEVER_SEND the query reports nothing -- see PlanShapeDependsOnTheTrigger -- so the store is the
 /// only observable effect, which is exactly what getStatistics later reads.
-TEST_F(StatisticInterfaceTest, CollectNewStatisticWithoutATriggerStillPersists)
+TEST_F(StatisticInterfaceTest, CollectNewStatisticUnderNeverSendStillPersists)
 {
     const auto inputPath = writeInput("statisticInterface-collect-input.csv");
     TestSubmissionBackend backend{inputPath};
@@ -233,8 +238,8 @@ TEST_F(StatisticInterfaceTest, CollectNewStatisticWithoutATriggerStillPersists)
     ASSERT_TRUE(backend.waitForAllStopped(std::chrono::seconds{60})) << "the build query never finished";
 
     const auto store = StatisticStoreRegistry::instance().getOrCreate(std::string{StatisticStoreRegistry::DEFAULT_STORE_NAME});
-    const auto statistics = store->getStatistics(
-        result->statisticId, Windowing::TimeMeasure{0}, Windowing::TimeMeasure{WINDOW_SIZE_MS * 10});
+    const auto statistics
+        = store->getStatistics(result->statisticId, Windowing::TimeMeasure{0}, Windowing::TimeMeasure{WINDOW_SIZE_MS * 10});
     EXPECT_EQ(statistics.size(), 2U) << "expected one statistic per closed window";
 }
 
@@ -281,8 +286,8 @@ TEST_F(StatisticInterfaceTest, GetStatisticsProbesTheCollectedStatistic)
     /// The probe reads what the build wrote, so the build has to be done first.
     ASSERT_TRUE(backend.waitForAllStopped(std::chrono::seconds{60})) << "the build query never finished";
 
-    const auto probed = statisticInterface.getStatistics(
-        {keyFor(statement)}, Windowing::TimeMeasure{0}, Windowing::TimeMeasure{WINDOW_SIZE_MS * 10});
+    const auto probed
+        = statisticInterface.getStatistics({keyFor(statement)}, Windowing::TimeMeasure{0}, Windowing::TimeMeasure{WINDOW_SIZE_MS * 10});
 
     ASSERT_TRUE(probed.has_value()) << "no report came back before the timeout";
     EXPECT_DOUBLE_EQ(probed.value(), 220.0) << "expected the sum of both windows' averages";
@@ -331,10 +336,7 @@ TEST_F(StatisticInterfaceTest, AConditionalTriggerFiresOnlyForMatchingWindows)
     std::atomic<double> lastValue{0.0};
     auto statement = averageOverValue();
     statement.conditionTrigger = ConditionTrigger{
-        .condition = LogicalFunction{GreaterLogicalFunction{
-            LogicalFunction{UnboundFieldAccessLogicalFunction{Identifier::parse(std::string{StatisticFieldNames::VALUE})}},
-            LogicalFunction{ConstantValueLogicalFunction{
-                DataTypeProvider::provideDataType(DataType::Type::FLOAT64, DataType::NULLABLE::NOT_NULLABLE), "100.0"}}}},
+        .condition = fmt::format("{} > 100.0", StatisticFieldNames::VALUE),
         .callback = [&fired, &lastValue](StatisticTuple::StatisticId, Windowing::TimeMeasure, Windowing::TimeMeasure, double value)
         {
             fired.fetch_add(1);
@@ -361,17 +363,17 @@ TEST_F(StatisticInterfaceTest, PlanShapeDependsOnTheTrigger)
     const DefaultStatisticQueryGenerator generator;
     const std::string address = "localhost:1234";
 
-    /// No trigger: nothing would consume a report, so the query terminates in a VoidSink and never touches the
+    /// NEVER_SEND: nothing would consume a report, so the query terminates in a VoidSink and never touches the
     /// network. The statistic is still written -- the writer is fused into the aggregation, below the sink.
-    const auto noTriggerPlan = generator.generateQuery(averageOverValue(), StatisticTuple::StatisticId{1}, address);
-    EXPECT_EQ(sinkTypeOf(noTriggerPlan), "VOID");
-    EXPECT_EQ(explain(noTriggerPlan, ExplainVerbosity::Debug).find("SCALARSTATISTICPROBE"), std::string::npos);
+    const auto neverSendPlan = generator.generateQuery(averageOverValue(), StatisticTuple::StatisticId{1}, address);
+    EXPECT_EQ(sinkTypeOf(neverSendPlan), "VOID");
+    EXPECT_EQ(explain(neverSendPlan, ExplainVerbosity::Debug).find("SCALARSTATISTICPROBE"), std::string::npos);
 
-    /// A callback with no predicate still needs the store read, because the callback is handed the value. What it
-    /// does not get is a Selection: every closed window is reported.
+    /// ALWAYS_SEND still needs the store read, because the callback is handed the value. What it does not get is
+    /// a Selection: every closed window is reported.
     auto callbackOnly = averageOverValue();
-    callbackOnly.conditionTrigger = ConditionTrigger{
-        .condition = std::nullopt, .callback = [](StatisticTuple::StatisticId, Windowing::TimeMeasure, Windowing::TimeMeasure, double) { }};
+    callbackOnly.conditionTrigger
+        = withCallback(ALWAYS_SEND, [](StatisticTuple::StatisticId, Windowing::TimeMeasure, Windowing::TimeMeasure, double) { });
     const auto callbackPlan = generator.generateQuery(callbackOnly, StatisticTuple::StatisticId{1}, address);
     const auto callbackExplain = explain(callbackPlan, ExplainVerbosity::Debug);
     EXPECT_EQ(sinkTypeOf(callbackPlan), "GRPC");
@@ -381,10 +383,7 @@ TEST_F(StatisticInterfaceTest, PlanShapeDependsOnTheTrigger)
     /// A predicate is evaluated over the value, which only the store has, so this one reads its own writes back.
     auto withPredicate = averageOverValue();
     withPredicate.conditionTrigger = ConditionTrigger{
-        .condition = LogicalFunction{GreaterLogicalFunction{
-            LogicalFunction{UnboundFieldAccessLogicalFunction{Identifier::parse(std::string{StatisticFieldNames::VALUE})}},
-            LogicalFunction{ConstantValueLogicalFunction{
-                DataTypeProvider::provideDataType(DataType::Type::FLOAT64, DataType::NULLABLE::NOT_NULLABLE), "100.0"}}}},
+        .condition = fmt::format("{} > 100.0", StatisticFieldNames::VALUE),
         .callback = [](StatisticTuple::StatisticId, Windowing::TimeMeasure, Windowing::TimeMeasure, double) { }};
     const auto predicatePlan = generator.generateQuery(withPredicate, StatisticTuple::StatisticId{1}, address);
     const auto predicateExplain = explain(predicatePlan, ExplainVerbosity::Debug);

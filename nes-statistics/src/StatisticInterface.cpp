@@ -14,14 +14,14 @@
 
 #include <StatisticInterface.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
-#include <algorithm>
-#include <mutex>
-#include <thread>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 #include <DataTypes/DataTypeProvider.hpp>
@@ -34,6 +34,7 @@
 #include <Schema/Schema.hpp>
 #include <Statistic/StatisticTypes.hpp>
 #include <Util/Logger/Logger.hpp>
+#include <WindowTypes/Types/TimeBasedWindowType.hpp>
 #include <google/protobuf/empty.pb.h>
 #include <grpcpp/create_channel.h>
 #include <grpcpp/security/credentials.h>
@@ -112,14 +113,14 @@ StatisticInterface::~StatisticInterface()
 std::expected<CollectStatisticResult, Exception> StatisticInterface::collectNewStatistic(const RequestStatisticBuildStatement& statement)
 {
     const StatisticRegistry::Key key{
-        .metric = statement.metric, .collectionDomain = statement.domain, .windowSize = Windowing::TimeMeasure{statement.windowSizeMs}};
+        .metric = statement.metric, .collectionDomain = statement.domain, .windowSize = statement.windowType.getSize()};
 
     if (const auto existing = registry.find(key))
     {
-        if (statement.conditionTrigger.has_value())
-        {
-            registry.addTrigger(key, statement.conditionTrigger.value());
-        }
+        /// The deployed query's shape was fixed by the request that created it, and there is no redeployment
+        /// here: a trigger added to an entry whose query terminates in a VoidSink can never fire, because that
+        /// query reports nothing. Registering it anyway keeps the record of what was asked for.
+        registry.addTrigger(key, statement.conditionTrigger);
         return CollectStatisticResult{.queryId = existing->queryId, .statisticId = existing->statisticId, .alreadyExisted = true};
     }
 
@@ -138,12 +139,7 @@ std::expected<CollectStatisticResult, Exception> StatisticInterface::collectNewS
             .transform(
                 [this, &key, statisticId, &statement](auto queryId)
                 {
-                    std::vector<ConditionTrigger> triggers;
-                    if (statement.conditionTrigger.has_value())
-                    {
-                        triggers.emplace_back(*statement.conditionTrigger);
-                    }
-                    registry.registerStatistic(key, queryId, statisticId, std::move(triggers));
+                    registry.registerStatistic(key, queryId, statisticId, {statement.conditionTrigger});
                     return CollectStatisticResult{.queryId = queryId, .statisticId = statisticId, .alreadyExisted = false};
                 });
     }
@@ -260,8 +256,7 @@ std::optional<double> StatisticInterface::getStatistics(
         }
         else
         {
-            NES_WARNING(
-                "StatisticInterface::getStatistics: probe query on port {} failed: {}", sourcePort, submitted.error().what());
+            NES_WARNING("StatisticInterface::getStatistics: probe query on port {} failed: {}", sourcePort, submitted.error().what());
         }
     }
     if (not deployed)
@@ -315,11 +310,7 @@ std::optional<double> StatisticInterface::getStatistics(
         allReported = probeCv.wait_for(
             lock,
             PROBE_TIMEOUT,
-            [&]
-            {
-                return std::ranges::all_of(
-                    statisticIds, [&](const auto& id) { return pendingProbes[id].reports > 0; });
-            });
+            [&] { return std::ranges::all_of(statisticIds, [&](const auto& id) { return pendingProbes[id].reports > 0; }); });
     }
     if (allReported)
     {

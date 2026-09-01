@@ -14,10 +14,10 @@
 
 #pragma once
 
-#include <cstdint>
-#include <optional>
 #include <string>
 #include <unordered_map>
+#include <WindowTypes/Measures/TimeCharacteristic.hpp>
+#include <WindowTypes/Types/TimeBasedWindowType.hpp>
 #include <CollectionDomain.hpp>
 #include <ConditionTrigger.hpp>
 #include <Metric.hpp>
@@ -29,13 +29,25 @@ struct RequestStatisticBuildStatement
 {
     CollectionDomain domain;
     Metric metric;
-    // maye we can use Windowing::TimeCharacteristic instead of windowSizeMs and windowAdvanceMs
-    uint64_t windowSizeMs;
-    std::optional<uint64_t> windowAdvanceMs;
-    /// If set, the window uses EventTime on this field. Otherwise IngestionTime is used.
-    std::optional<std::string> eventTimeFieldName;
-    /// Optional filter predicate applied to the statistic result. Used by the trigger system.
-    std::optional<ConditionTrigger> conditionTrigger;
+
+    /// The window the statistic is aggregated over. TimeBasedWindowType already models the tumbling/sliding
+    /// choice and carries size and slide as TimeMeasures, so it replaces the loose windowSizeMs/windowAdvanceMs
+    /// pair: a sliding window is a SlidingWindow rather than a size plus an engaged optional, and the unit is
+    /// part of the type instead of a suffix in the field name. It is also exactly what addWindowAggregation
+    /// takes, so the generator now forwards it instead of reconstructing it.
+    Windowing::TimeBasedWindowType windowType;
+
+    /// How the window gets its timestamps. Defaults to ingestion time; construct an event-time characteristic
+    /// over a field to use that instead. This subsumes the old optional eventTimeFieldName, and gains the time
+    /// unit -- the old form silently assumed milliseconds.
+    Windowing::TimeCharacteristic timeCharacteristic{
+        Windowing::UnboundTimeCharacteristic{Windowing::TimeCharacteristicWrapper::createIngestionTime()}};
+
+    /// What to report and to whom. Always present: "do not report" is NEVER_SEND, which is a condition like any
+    /// other rather than a disengaged optional, and it is what decides the shape of the deployed plan. See
+    /// ConditionTrigger.
+    ConditionTrigger conditionTrigger{NEVER_SEND};
+
     std::unordered_map<std::string, std::string> options;
 };
 

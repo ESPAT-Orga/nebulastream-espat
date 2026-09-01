@@ -56,7 +56,7 @@ struct ConfigParametersGrpcSink
         = DescriptorConfig::createConfigParameterContainerMap(SinkDescriptor::parameterMap, HOST, PORT);
 };
 
-/// Reports each incoming tuple to a StatisticCoordinatorService as a StatisticReport.
+/// Reports each incoming tuple to a StatisticInterfaceService as a StatisticReport.
 ///
 /// Reads the CSV rows the formatter produces and locates its four columns by resolving their names against the
 /// descriptor's ordered schema once, in the constructor. That is the same schema FileSink uses to write its
@@ -98,7 +98,7 @@ private:
     std::optional<size_t> valueColumn;
     size_t columnCount{0};
 
-    std::unique_ptr<StatisticCoordinatorService::Stub> stub;
+    std::unique_ptr<StatisticInterfaceService::Stub> stub;
 };
 
 }

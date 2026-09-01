@@ -19,13 +19,13 @@
 #include <optional>
 #include <utility>
 #include <vector>
-#include <Statistic.hpp>
+#include <StatisticTuple.hpp>
 #include <WindowTypes/Measures/TimeMeasure.hpp>
 
 namespace NES
 {
 
-bool DefaultStatisticStore::insertStatistic(const Statistic::StatisticId& statisticId, Statistic statistic)
+bool DefaultStatisticStore::insertStatistic(const StatisticTuple::StatisticId& statisticId, StatisticTuple statistic)
 {
     const auto statisticsLocked = statistics.wlock();
     (*statisticsLocked)[statisticId].emplace_back(std::move(statistic));
@@ -33,21 +33,21 @@ bool DefaultStatisticStore::insertStatistic(const Statistic::StatisticId& statis
 }
 
 bool DefaultStatisticStore::deleteStatistics(
-    const Statistic::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs)
+    const StatisticTuple::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs)
 {
     const auto statisticsLocked = statistics.wlock();
     auto& statisticsVec = (*statisticsLocked)[statisticId];
 
-    /// Statistic is not assignable here -- Windowing::TimeMeasure holds a const member -- so its iterators are
+    /// StatisticTuple is not assignable here -- Windowing::TimeMeasure holds a const member -- so its iterators are
     /// not 'permutable' and the usual ranges::remove_if + erase idiom does not compile. Rebuild the vector with
     /// the survivors instead and move-assign it: vector move-assignment steals the buffer and asks nothing of
     /// the elements.
-    std::vector<Statistic> keptStatistics;
+    std::vector<StatisticTuple> keptStatistics;
     keptStatistics.reserve(statisticsVec.size());
     std::ranges::copy_if(
         statisticsVec,
         std::back_inserter(keptStatistics),
-        [startTs, endTs](const Statistic& statistic)
+        [startTs, endTs](const StatisticTuple& statistic)
         { return not(startTs <= statistic.getStartTs() && statistic.getEndTs() <= endTs); });
 
     const bool foundAnyStatistic = keptStatistics.size() != statisticsVec.size();
@@ -55,8 +55,8 @@ bool DefaultStatisticStore::deleteStatistics(
     return foundAnyStatistic;
 }
 
-std::vector<Statistic> DefaultStatisticStore::getStatistics(
-    const Statistic::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs)
+std::vector<StatisticTuple> DefaultStatisticStore::getStatistics(
+    const StatisticTuple::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs)
 {
     const auto statisticsLocked = statistics.rlock();
     const auto idIt = statisticsLocked->find(statisticId);
@@ -65,17 +65,17 @@ std::vector<Statistic> DefaultStatisticStore::getStatistics(
         return {};
     }
 
-    std::vector<Statistic> returnStatisticsVector;
+    std::vector<StatisticTuple> returnStatisticsVector;
     const auto& statisticsVec = idIt->second;
     std::ranges::copy_if(
         statisticsVec,
         std::back_inserter(returnStatisticsVector),
-        [startTs, endTs](const Statistic& statistic) { return startTs <= statistic.getStartTs() && statistic.getEndTs() <= endTs; });
+        [startTs, endTs](const StatisticTuple& statistic) { return startTs <= statistic.getStartTs() && statistic.getEndTs() <= endTs; });
     return returnStatisticsVector;
 }
 
-std::optional<Statistic> DefaultStatisticStore::getSingleStatistic(
-    const Statistic::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs)
+std::optional<StatisticTuple> DefaultStatisticStore::getSingleStatistic(
+    const StatisticTuple::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs)
 {
     const auto statisticsLocked = statistics.rlock();
     const auto idIt = statisticsLocked->find(statisticId);
@@ -87,8 +87,8 @@ std::optional<Statistic> DefaultStatisticStore::getSingleStatistic(
 
     const auto it = std::ranges::find_if(
         statisticsVec,
-        [startTs, endTs](const Statistic& statistic) { return startTs == statistic.getStartTs() && statistic.getEndTs() == endTs; });
-    return it != statisticsVec.end() ? std::make_optional(*it) : std::optional<Statistic>{};
+        [startTs, endTs](const StatisticTuple& statistic) { return startTs == statistic.getStartTs() && statistic.getEndTs() == endTs; });
+    return it != statisticsVec.end() ? std::make_optional(*it) : std::optional<StatisticTuple>{};
 }
 
 std::vector<DefaultStatisticStore::IdStatisticPair> DefaultStatisticStore::getAllStatistics()

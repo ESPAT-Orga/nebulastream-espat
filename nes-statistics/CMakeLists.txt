@@ -15,9 +15,9 @@ get_source(nes-statistics NES_STATISTICS_SOURCE_FILES)
 
 add_library(nes-statistics STATIC ${NES_STATISTICS_SOURCE_FILES})
 
-# nes-logical-operators: Statistic carries Windowing::TimeMeasure, and later phases build logical plans here.
+# nes-logical-operators: StatisticTuple carries Windowing::TimeMeasure, and later phases build logical plans here.
 # nes-schema: Schema lives behind its own target upstream and is not reachable through nes-common.
-# nes-grpc: the coordinator hosts StatisticCoordinatorService and calls StatisticSourceService.
+# nes-grpc: the statistic interface hosts StatisticInterfaceService and calls StatisticSourceService.
 target_link_libraries(nes-statistics PUBLIC nes-common nes-schema nes-configurations nes-memory nes-logical-operators nes-grpc)
 
 target_include_directories(nes-statistics PUBLIC

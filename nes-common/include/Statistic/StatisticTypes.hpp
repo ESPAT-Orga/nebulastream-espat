@@ -19,17 +19,17 @@
 #include <string_view>
 #include <Identifiers/NESStrongType.hpp>
 
-/// The identity and kind of a statistic, split out of the 'Statistic' value class in nes-statistics so that
+/// The identity and kind of a statistic, split out of the 'StatisticTuple' value class in nes-statistics so that
 /// nes-logical-operators can name a statistic without depending on nes-statistics.
 ///
-/// The full 'Statistic' carries 'Windowing::TimeMeasure', which lives in nes-logical-operators; moving all of
+/// The full 'StatisticTuple' carries 'Windowing::TimeMeasure', which lives in nes-logical-operators; moving all of
 /// it down here would point that dependency the wrong way. Operators and aggregation functions only ever need
-/// the id and the type, so only those live here. 'Statistic' aliases both back, which keeps every
-/// 'Statistic::StatisticId' / 'Statistic::StatisticType' spelling working unchanged.
+/// the id and the type, so only those live here. 'StatisticTuple' aliases both back, which keeps every
+/// 'StatisticTuple::StatisticId' / 'StatisticTuple::StatisticType' spelling working unchanged.
 namespace NES
 {
 
-/// Uniquely identifies a statistic. Assigned by the StatisticCoordinator via an atomic counter.
+/// Uniquely identifies a statistic. Assigned by the StatisticInterface via an atomic counter.
 using StatisticId = NESStrongType<uint64_t, struct StatisticId_, 0, 1>;
 
 /// Defines what statistic type is held in the underlying statistic memory area.

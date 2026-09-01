@@ -17,7 +17,7 @@
 #include <optional>
 #include <utility>
 #include <vector>
-#include <Statistic.hpp>
+#include <StatisticTuple.hpp>
 #include <WindowTypes/Measures/TimeMeasure.hpp>
 
 namespace NES
@@ -26,7 +26,7 @@ namespace NES
 class AbstractStatisticStore
 {
 public:
-    using IdStatisticPair = std::pair<Statistic::StatisticId, Statistic>;
+    using IdStatisticPair = std::pair<StatisticTuple::StatisticId, StatisticTuple>;
 
     AbstractStatisticStore() = default;
     virtual ~AbstractStatisticStore() = default;
@@ -39,21 +39,21 @@ public:
     /// Inserts a statistic with the statisticId into a StatisticStore. Does not deduplicate: if multiple statistics are inserted with the
     /// same statisticId, startTs, and endTs, they all coexist in the store and there is no guarantee which of them is returned by
     /// getSingleStatistic, nor in what order they appear in getStatistics / getAllStatistics.
-    virtual bool insertStatistic(const Statistic::StatisticId& statisticId, Statistic statistic) = 0;
+    virtual bool insertStatistic(const StatisticTuple::StatisticId& statisticId, StatisticTuple statistic) = 0;
 
     /// Deletes all statistics belonging to the statisticId in the period of [startTs, endTs]. Returns true, if any statistic was deleted
     virtual bool
-    deleteStatistics(const Statistic::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs)
+    deleteStatistics(const StatisticTuple::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs)
         = 0;
 
     /// Gets all statistics belonging to the statisticId in the period of [startTs, endTs]
-    virtual std::vector<Statistic>
-    getStatistics(const Statistic::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs)
+    virtual std::vector<StatisticTuple>
+    getStatistics(const StatisticTuple::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs)
         = 0;
 
     /// Gets a single statistic belonging to the statisticId that has exactly the startTs and endTs
-    virtual std::optional<Statistic> getSingleStatistic(
-        const Statistic::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs)
+    virtual std::optional<StatisticTuple> getSingleStatistic(
+        const StatisticTuple::StatisticId& statisticId, const Windowing::TimeMeasure& startTs, const Windowing::TimeMeasure& endTs)
         = 0;
 
     /// Returns all statistics which are currently saved in this store

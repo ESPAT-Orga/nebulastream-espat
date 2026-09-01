@@ -34,7 +34,7 @@
 #include <Plans/LogicalPlan.hpp>
 #include <Plans/LogicalPlanBuilder.hpp>
 #include <RequestStatisticStatement.hpp>
-#include <Statistic.hpp>
+#include <StatisticTuple.hpp>
 #include <Statistic/StatisticTypes.hpp>
 #include <WindowTypes/Measures/TimeCharacteristic.hpp>
 #include <WindowTypes/Measures/TimeMeasure.hpp>
@@ -102,13 +102,13 @@ Windowing::TimeCharacteristic timeCharacteristicFor(const RequestStatisticBuildS
         Windowing::UnboundTimeCharacteristic{Windowing::TimeCharacteristicWrapper::createIngestionTime()}};
 }
 
-/// Splits "host:port" as the coordinator reports it. The sink wants the two halves separately.
+/// Splits "host:port" as the statistic interface reports it. The sink wants the two halves separately.
 std::pair<std::string, std::string> splitAddress(const std::string& address)
 {
     const auto colon = address.rfind(':');
     if (colon == std::string::npos)
     {
-        throw InvalidConfigParameter("Coordinator address '{}' is not in host:port form", address);
+        throw InvalidConfigParameter("Statistic interface address '{}' is not in host:port form", address);
     }
     return {address.substr(0, colon), address.substr(colon + 1)};
 }
@@ -116,8 +116,8 @@ std::pair<std::string, std::string> splitAddress(const std::string& address)
 LogicalPlan generateForDataDomain(
     const DataDomain& domain,
     const RequestStatisticBuildStatement& request,
-    const Statistic::StatisticId statisticId,
-    const std::string& coordinatorAddress)
+    const StatisticTuple::StatisticId statisticId,
+    const std::string& interfaceAddress)
 {
     auto plan = LogicalPlanBuilder::createLogicalPlan(Identifier::parse(domain.logicalSourceName));
 
@@ -140,7 +140,7 @@ LogicalPlan generateForDataDomain(
     /// IEEE-754 double whose bytes can include commas and newlines, which corrupt the row framing. (This shows up
     /// only for some values: 20.0 and 200.0 happen to be byte-safe, arbitrary averages are not.)
     ///
-    /// The statisticId has to travel with the report so the coordinator can route it. The fused writer adds it to
+    /// The statisticId has to travel with the report so the statistic interface can route it. The fused writer adds it to
     /// the Nautilus record but not to any schema, so it would not survive a pipeline boundary; projecting it as a
     /// constant puts it in the schema, where it does.
     ///
@@ -195,7 +195,7 @@ LogicalPlan generateForDataDomain(
         plan = LogicalPlanBuilder::addSelection(request.conditionTrigger->condition.value(), plan);
     }
 
-    const auto [host, port] = splitAddress(coordinatorAddress);
+    const auto [host, port] = splitAddress(interfaceAddress);
 
     /// Nothing listens to a report unless a trigger was registered for it, and the report exists purely to drive
     /// those callbacks: onStatisticReport routes it to the registry's triggers and drops it if there are none.
@@ -224,8 +224,8 @@ LogicalPlan generateForDataDomain(
 
 LogicalPlan DefaultStatisticQueryGenerator::generateQuery(
     const RequestStatisticBuildStatement& request,
-    const Statistic::StatisticId statisticId,
-    const std::string& coordinatorAddress) const
+    const StatisticTuple::StatisticId statisticId,
+    const std::string& interfaceAddress) const
 {
     return std::visit(
         [&]<typename DomainAlternative>(const DomainAlternative& domain) -> LogicalPlan
@@ -233,7 +233,7 @@ LogicalPlan DefaultStatisticQueryGenerator::generateQuery(
             using DomainType = std::decay_t<DomainAlternative>;
             if constexpr (std::is_same_v<DomainType, DataDomain>)
             {
-                return generateForDataDomain(domain, request, statisticId, coordinatorAddress);
+                return generateForDataDomain(domain, request, statisticId, interfaceAddress);
             }
             else if constexpr (std::is_same_v<DomainType, WorkloadDomain>)
             {

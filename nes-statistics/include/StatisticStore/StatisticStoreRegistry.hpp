@@ -49,7 +49,7 @@ public:
     StatisticStoreRegistry& operator=(StatisticStoreRegistry&&) = delete;
 
     /// Returns the store registered under 'name', creating an empty DefaultStatisticStore if it does not exist
-    /// yet. The writer's handler, the reader's handler and the coordinator all call this, so none of them has
+    /// yet. The writer's handler, the reader's handler and the statistic interface all call this, so none of them has
     /// to be constructed first.
     std::shared_ptr<AbstractStatisticStore> getOrCreate(const std::string& name);
 

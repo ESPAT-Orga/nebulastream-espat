@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Demonstrates the ported StatisticCoordinator observing the query engine's own task queue.
+# Demonstrates the ported StatisticInterface observing the query engine's own task queue.
 #
 #   TaskStatisticListener -> InProcessFeed -> InProcessSource -> WindowedAggregation(ScalarStatistic Avg)
-#                         -> StatisticStoreWriter -> GrpcSink -> StatisticCoordinator
+#                         -> StatisticStoreWriter -> GrpcSink -> StatisticInterface
 #
 # This is the in-process counterpart of run-engine-stats-demo.sh: where that one drives the REPL with SQL, this
-# drives the coordinator through its C++ API, which is the only interface this port provides.
+# drives the statistic interface through its C++ API, which is the only interface this port provides.
 #
 # The demonstration is the statistic-task-queue-test binary, so that it stays runnable in CI rather than being a
 # script that only a human can judge.
@@ -56,5 +56,5 @@ fi
 
 echo "==> Running the demonstration"
 echo "    A Generator query supplies load; the engine's own task events are aggregated"
-echo "    into a statistic whose every closed window is reported to the coordinator."
+echo "    into a statistic whose every closed window is reported to the statisticInterface."
 "${BINARY}" --gtest_color=yes

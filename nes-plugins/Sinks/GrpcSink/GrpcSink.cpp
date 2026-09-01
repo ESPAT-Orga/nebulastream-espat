@@ -136,7 +136,7 @@ void GrpcSink::start(PipelineExecutionContext&)
     const auto address = grpcHost + ":" + std::to_string(grpcPort);
     NES_DEBUG("GrpcSink::start: connecting to {}", address);
     auto channel = grpc::CreateChannel(address, grpc::InsecureChannelCredentials());
-    stub = StatisticCoordinatorService::NewStub(channel);
+    stub = StatisticInterfaceService::NewStub(channel);
     if (not stub)
     {
         throw CannotOpenSink("GrpcSink: failed to create a gRPC stub for {}", address);

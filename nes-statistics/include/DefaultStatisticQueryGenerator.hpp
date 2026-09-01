@@ -16,7 +16,7 @@
 
 #include <string>
 #include <Plans/LogicalPlan.hpp>
-#include <Statistic.hpp>
+#include <StatisticTuple.hpp>
 #include <StatisticQueryGenerator.hpp>
 
 namespace NES
@@ -42,8 +42,8 @@ class DefaultStatisticQueryGenerator final : public StatisticQueryGenerator
 public:
     [[nodiscard]] LogicalPlan generateQuery(
         const RequestStatisticBuildStatement& request,
-        Statistic::StatisticId statisticId,
-        const std::string& coordinatorAddress) const override;
+        StatisticTuple::StatisticId statisticId,
+        const std::string& interfaceAddress) const override;
 };
 
 }

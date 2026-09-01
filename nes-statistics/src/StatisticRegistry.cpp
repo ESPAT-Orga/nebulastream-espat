@@ -18,7 +18,7 @@
 #include <vector>
 #include <Identifiers/Identifiers.hpp>
 #include <ConditionTrigger.hpp>
-#include <Statistic.hpp>
+#include <StatisticTuple.hpp>
 
 namespace NES
 {
@@ -34,7 +34,7 @@ std::optional<StatisticRegistry::Entry> StatisticRegistry::find(const Key& key) 
 }
 
 void StatisticRegistry::registerStatistic(
-    const Key& key, const QueryId queryId, const Statistic::StatisticId statisticId, std::vector<ConditionTrigger> triggers)
+    const Key& key, const QueryId queryId, const StatisticTuple::StatisticId statisticId, std::vector<ConditionTrigger> triggers)
 {
     registry.wlock()->insert_or_assign(key, Entry{.queryId = queryId, .statisticId = statisticId, .triggers = std::move(triggers)});
 }

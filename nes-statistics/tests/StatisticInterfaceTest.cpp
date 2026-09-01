@@ -12,7 +12,7 @@
     limitations under the License.
 */
 
-/// The coordinator driving the whole thing: collectNewStatistic deploys a build query that reports back over
+/// The statistic interface driving the whole thing: collectNewStatistic deploys a build query that reports back over
 /// gRPC, and getStatistics deploys a probe query, impulses it, and collects the answers.
 ///
 /// Unlike the other suites this uses a named logical source, because that is what a real request names, so it
@@ -49,7 +49,7 @@
 #include <Sinks/SinkCatalog.hpp>
 #include <Operators/Sinks/AnonymousSinkLogicalOperator.hpp>
 #include <Sources/SourceCatalog.hpp>
-#include <StatisticCoordinator.hpp>
+#include <StatisticInterface.hpp>
 #include <StatisticRegistry.hpp>
 #include <StatisticStore/StatisticStoreRegistry.hpp>
 #include <Util/Logger/Logger.hpp>
@@ -71,7 +71,7 @@ using namespace StatisticTestSupport;
 
 constexpr auto SOURCE_NAME = "teststream";
 
-/// Owns the worker, the catalogs and the optimizer, and exposes the SubmitQueryFn the coordinator needs.
+/// Owns the worker, the catalogs and the optimizer, and exposes the SubmitQueryFn the statistic interface needs.
 ///
 /// Query ids are recorded so a test can wait for the build query to finish before probing: the probe reads what
 /// the build wrote, so the two must not overlap.
@@ -103,7 +103,7 @@ public:
         worker = std::make_unique<SingleNodeWorker>(SingleNodeWorkerConfiguration{});
     }
 
-    [[nodiscard]] StatisticCoordinator::SubmitQueryFn submitFn()
+    [[nodiscard]] StatisticInterface::SubmitQueryFn submitFn()
     {
         return [this](LogicalPlan plan) -> std::expected<QueryId, Exception>
         {
@@ -195,10 +195,10 @@ StatisticRegistry::Key keyFor(const RequestStatisticBuildStatement& statement)
 
 }
 
-class StatisticCoordinatorTest : public Testing::BaseUnitTest
+class StatisticInterfaceTest : public Testing::BaseUnitTest
 {
 public:
-    static void SetUpTestCase() { Logger::setupLogging("StatisticCoordinatorTest.log", LogLevel::LOG_DEBUG); }
+    static void SetUpTestCase() { Logger::setupLogging("StatisticInterfaceTest.log", LogLevel::LOG_DEBUG); }
 
     void SetUp() override
     {
@@ -213,20 +213,20 @@ public:
     }
 };
 
-/// The build half through the coordinator: a request turns into a deployed query whose statistics land in the
+/// The build half through the statistic interface: a request turns into a deployed query whose statistics land in the
 /// store. With no trigger the query reports nothing -- see PlanShapeDependsOnTheTrigger -- so the store is the
 /// only observable effect, which is exactly what getStatistics later reads.
-TEST_F(StatisticCoordinatorTest, CollectNewStatisticWithoutATriggerStillPersists)
+TEST_F(StatisticInterfaceTest, CollectNewStatisticWithoutATriggerStillPersists)
 {
-    const auto inputPath = writeInput("coordinator-collect-input.csv");
+    const auto inputPath = writeInput("statisticInterface-collect-input.csv");
     TestSubmissionBackend backend{inputPath};
 
-    StatisticCoordinator coordinator{std::make_unique<DefaultStatisticQueryGenerator>(), backend.submitFn()};
-    const auto address = coordinator.startGrpcServer();
+    StatisticInterface statisticInterface{std::make_unique<DefaultStatisticQueryGenerator>(), backend.submitFn()};
+    const auto address = statisticInterface.startGrpcServer();
     ASSERT_FALSE(address.empty());
 
     const auto statement = averageOverValue();
-    const auto result = coordinator.collectNewStatistic(statement);
+    const auto result = statisticInterface.collectNewStatistic(statement);
     ASSERT_TRUE(result.has_value()) << result.error().what();
     EXPECT_FALSE(result->alreadyExisted);
 
@@ -239,18 +239,18 @@ TEST_F(StatisticCoordinatorTest, CollectNewStatisticWithoutATriggerStillPersists
 }
 
 /// A second identical request must not deploy a second query.
-TEST_F(StatisticCoordinatorTest, IdenticalRequestsAreDeduplicated)
+TEST_F(StatisticInterfaceTest, IdenticalRequestsAreDeduplicated)
 {
-    const auto inputPath = writeInput("coordinator-dedup-input.csv");
+    const auto inputPath = writeInput("statisticInterface-dedup-input.csv");
     TestSubmissionBackend backend{inputPath};
 
-    StatisticCoordinator coordinator{std::make_unique<DefaultStatisticQueryGenerator>(), backend.submitFn()};
-    coordinator.startGrpcServer();
+    StatisticInterface statisticInterface{std::make_unique<DefaultStatisticQueryGenerator>(), backend.submitFn()};
+    statisticInterface.startGrpcServer();
 
     const auto statement = averageOverValue();
-    const auto first = coordinator.collectNewStatistic(statement);
+    const auto first = statisticInterface.collectNewStatistic(statement);
     ASSERT_TRUE(first.has_value()) << first.error().what();
-    const auto second = coordinator.collectNewStatistic(statement);
+    const auto second = statisticInterface.collectNewStatistic(statement);
     ASSERT_TRUE(second.has_value()) << second.error().what();
 
     EXPECT_TRUE(second->alreadyExisted);
@@ -258,25 +258,25 @@ TEST_F(StatisticCoordinatorTest, IdenticalRequestsAreDeduplicated)
     EXPECT_EQ(first->queryId, second->queryId);
 }
 
-/// The read half through the coordinator: after a statistic has been built, getStatistics deploys the probe,
+/// The read half through the statistic interface: after a statistic has been built, getStatistics deploys the probe,
 /// impulses it, and returns what the probe read back out of the store. The two windows average 20 and 200, so a
 /// correct sum is 220.
-TEST_F(StatisticCoordinatorTest, GetStatisticsProbesTheCollectedStatistic)
+TEST_F(StatisticInterfaceTest, GetStatisticsProbesTheCollectedStatistic)
 {
-    const auto inputPath = writeInput("coordinator-probe-input.csv");
+    const auto inputPath = writeInput("statisticInterface-probe-input.csv");
     TestSubmissionBackend backend{inputPath};
 
-    StatisticCoordinator coordinator{std::make_unique<DefaultStatisticQueryGenerator>(), backend.submitFn()};
-    coordinator.startGrpcServer();
+    StatisticInterface statisticInterface{std::make_unique<DefaultStatisticQueryGenerator>(), backend.submitFn()};
+    statisticInterface.startGrpcServer();
 
     const auto statement = averageOverValue();
-    const auto collected = coordinator.collectNewStatistic(statement);
+    const auto collected = statisticInterface.collectNewStatistic(statement);
     ASSERT_TRUE(collected.has_value()) << collected.error().what();
 
     /// The probe reads what the build wrote, so the build has to be done first.
     ASSERT_TRUE(backend.waitForAllStopped(std::chrono::seconds{60})) << "the build query never finished";
 
-    const auto probed = coordinator.getStatistics(
+    const auto probed = statisticInterface.getStatistics(
         {keyFor(statement)}, Windowing::TimeMeasure{0}, Windowing::TimeMeasure{WINDOW_SIZE_MS * 10});
 
     ASSERT_TRUE(probed.has_value()) << "no report came back before the timeout";
@@ -284,29 +284,29 @@ TEST_F(StatisticCoordinatorTest, GetStatisticsProbesTheCollectedStatistic)
 }
 
 /// The domains and metrics outside this port's slice keep their interface and fail cleanly.
-TEST_F(StatisticCoordinatorTest, UnsupportedRequestsFailWithNotImplemented)
+TEST_F(StatisticInterfaceTest, UnsupportedRequestsFailWithNotImplemented)
 {
-    const auto inputPath = writeInput("coordinator-unsupported-input.csv");
+    const auto inputPath = writeInput("statisticInterface-unsupported-input.csv");
     TestSubmissionBackend backend{inputPath};
 
-    StatisticCoordinator coordinator{std::make_unique<DefaultStatisticQueryGenerator>(), backend.submitFn()};
-    coordinator.startGrpcServer();
+    StatisticInterface statisticInterface{std::make_unique<DefaultStatisticQueryGenerator>(), backend.submitFn()};
+    statisticInterface.startGrpcServer();
 
     auto infrastructure = averageOverValue();
     infrastructure.domain = InfrastructureDomain{Host{"worker1"}};
-    const auto infrastructureResult = coordinator.collectNewStatistic(infrastructure);
+    const auto infrastructureResult = statisticInterface.collectNewStatistic(infrastructure);
     ASSERT_FALSE(infrastructureResult.has_value());
     EXPECT_EQ(infrastructureResult.error().code(), ErrorCode::NotImplemented);
 
     auto workload = averageOverValue();
     workload.domain = WorkloadDomain{.queryId = QueryId::invalid(), .operatorId = OperatorId{1}, .fieldName = "value"};
-    const auto workloadResult = coordinator.collectNewStatistic(workload);
+    const auto workloadResult = statisticInterface.collectNewStatistic(workload);
     ASSERT_FALSE(workloadResult.has_value());
     EXPECT_EQ(workloadResult.error().code(), ErrorCode::NotImplemented);
 
     auto unsupportedMetric = averageOverValue();
     unsupportedMetric.metric = Metric::Cardinality;
-    const auto metricResult = coordinator.collectNewStatistic(unsupportedMetric);
+    const auto metricResult = statisticInterface.collectNewStatistic(unsupportedMetric);
     ASSERT_FALSE(metricResult.has_value());
     EXPECT_EQ(metricResult.error().code(), ErrorCode::NotImplemented);
 }
@@ -314,13 +314,13 @@ TEST_F(StatisticCoordinatorTest, UnsupportedRequestsFailWithNotImplemented)
 /// A trigger carrying a predicate compiles a store read into the build query itself, so that only the windows
 /// satisfying it are reported. The two windows average 20 and 200, so "> 100" must fire exactly once -- if the
 /// probe or the selection were missing this would fire twice, or not at all.
-TEST_F(StatisticCoordinatorTest, AConditionalTriggerFiresOnlyForMatchingWindows)
+TEST_F(StatisticInterfaceTest, AConditionalTriggerFiresOnlyForMatchingWindows)
 {
-    const auto inputPath = writeInput("coordinator-conditional-input.csv");
+    const auto inputPath = writeInput("statisticInterface-conditional-input.csv");
     TestSubmissionBackend backend{inputPath};
 
-    StatisticCoordinator coordinator{std::make_unique<DefaultStatisticQueryGenerator>(), backend.submitFn()};
-    coordinator.startGrpcServer();
+    StatisticInterface statisticInterface{std::make_unique<DefaultStatisticQueryGenerator>(), backend.submitFn()};
+    statisticInterface.startGrpcServer();
 
     std::atomic<int> fired{0};
     auto statement = averageOverValue();
@@ -329,9 +329,9 @@ TEST_F(StatisticCoordinatorTest, AConditionalTriggerFiresOnlyForMatchingWindows)
             LogicalFunction{UnboundFieldAccessLogicalFunction{Identifier::parse(std::string{StatisticFieldNames::VALUE})}},
             LogicalFunction{ConstantValueLogicalFunction{
                 DataTypeProvider::provideDataType(DataType::Type::FLOAT64, DataType::NULLABLE::NOT_NULLABLE), "100.0"}}}},
-        .callback = [&fired](Statistic::StatisticId, Windowing::TimeMeasure, Windowing::TimeMeasure) { fired.fetch_add(1); }};
+        .callback = [&fired](StatisticTuple::StatisticId, Windowing::TimeMeasure, Windowing::TimeMeasure) { fired.fetch_add(1); }};
 
-    const auto collected = coordinator.collectNewStatistic(statement);
+    const auto collected = statisticInterface.collectNewStatistic(statement);
     ASSERT_TRUE(collected.has_value()) << collected.error().what();
     ASSERT_TRUE(backend.waitForAllStopped(std::chrono::seconds{60})) << "the build query never finished";
 
@@ -344,14 +344,14 @@ TEST_F(StatisticCoordinatorTest, AConditionalTriggerFiresOnlyForMatchingWindows)
 /// What the generator emits is decided entirely by the trigger, so it is worth pinning directly rather than
 /// inferring it from runtime effects -- especially "no report is sent", which is otherwise an absence of
 /// evidence.
-TEST_F(StatisticCoordinatorTest, PlanShapeDependsOnTheTrigger)
+TEST_F(StatisticInterfaceTest, PlanShapeDependsOnTheTrigger)
 {
     const DefaultStatisticQueryGenerator generator;
     const std::string address = "localhost:1234";
 
     /// No trigger: nothing would consume a report, so the query terminates in a VoidSink and never touches the
     /// network. The statistic is still written -- the writer is fused into the aggregation, below the sink.
-    const auto noTriggerPlan = generator.generateQuery(averageOverValue(), Statistic::StatisticId{1}, address);
+    const auto noTriggerPlan = generator.generateQuery(averageOverValue(), StatisticTuple::StatisticId{1}, address);
     EXPECT_EQ(sinkTypeOf(noTriggerPlan), "VOID");
     EXPECT_EQ(explain(noTriggerPlan, ExplainVerbosity::Debug).find("SCALARSTATISTICPROBE"), std::string::npos);
 
@@ -359,8 +359,8 @@ TEST_F(StatisticCoordinatorTest, PlanShapeDependsOnTheTrigger)
     /// no store read is compiled in.
     auto callbackOnly = averageOverValue();
     callbackOnly.conditionTrigger = ConditionTrigger{
-        .condition = std::nullopt, .callback = [](Statistic::StatisticId, Windowing::TimeMeasure, Windowing::TimeMeasure) { }};
-    const auto callbackPlan = generator.generateQuery(callbackOnly, Statistic::StatisticId{1}, address);
+        .condition = std::nullopt, .callback = [](StatisticTuple::StatisticId, Windowing::TimeMeasure, Windowing::TimeMeasure) { }};
+    const auto callbackPlan = generator.generateQuery(callbackOnly, StatisticTuple::StatisticId{1}, address);
     EXPECT_EQ(sinkTypeOf(callbackPlan), "GRPC");
     EXPECT_EQ(explain(callbackPlan, ExplainVerbosity::Debug).find("SCALARSTATISTICPROBE"), std::string::npos);
 
@@ -371,8 +371,8 @@ TEST_F(StatisticCoordinatorTest, PlanShapeDependsOnTheTrigger)
             LogicalFunction{UnboundFieldAccessLogicalFunction{Identifier::parse(std::string{StatisticFieldNames::VALUE})}},
             LogicalFunction{ConstantValueLogicalFunction{
                 DataTypeProvider::provideDataType(DataType::Type::FLOAT64, DataType::NULLABLE::NOT_NULLABLE), "100.0"}}}},
-        .callback = [](Statistic::StatisticId, Windowing::TimeMeasure, Windowing::TimeMeasure) { }};
-    const auto predicatePlan = generator.generateQuery(withPredicate, Statistic::StatisticId{1}, address);
+        .callback = [](StatisticTuple::StatisticId, Windowing::TimeMeasure, Windowing::TimeMeasure) { }};
+    const auto predicatePlan = generator.generateQuery(withPredicate, StatisticTuple::StatisticId{1}, address);
     const auto predicateExplain = explain(predicatePlan, ExplainVerbosity::Debug);
     EXPECT_EQ(sinkTypeOf(predicatePlan), "GRPC");
     EXPECT_NE(predicateExplain.find("SCALARSTATISTICPROBE"), std::string::npos) << predicateExplain;

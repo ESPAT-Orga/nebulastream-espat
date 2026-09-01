@@ -30,15 +30,15 @@ namespace NES
 /// A statistic represents particular information of a component, stream or etc. over a period of time.
 /// As we build and probe these statistics via a query compiler, this class stores the statistic data as a
 /// shared byte array.
-class Statistic
+class StatisticTuple
 {
 public:
-    /// Aliases back to the nes-common definitions so that 'Statistic::StatisticId' and 'Statistic::StatisticType'
+    /// Aliases back to the nes-common definitions so that 'StatisticTuple::StatisticId' and 'StatisticTuple::StatisticType'
     /// keep working, while nes-logical-operators can include <Statistic/StatisticTypes.hpp> on its own.
     using StatisticId = NES::StatisticId;
     using StatisticType = NES::StatisticType;
 
-    Statistic(
+    StatisticTuple(
         const StatisticId statisticId,
         const StatisticType statisticType,
         const Windowing::TimeMeasure& startTs,
@@ -59,10 +59,10 @@ public:
     /// Copy/move constructible but NOT assignable: 'Windowing::TimeMeasure' holds a const member upstream, so
     /// both assignment operators are implicitly deleted. Declaring them '= default' would only add a
     /// -Wdefaulted-function-deleted warning without granting assignability, so they are left implicit.
-    /// Consequence for callers: rebuild-and-move a container of Statistic rather than permuting one in place.
-    Statistic(const Statistic&) = default;
-    Statistic(Statistic&&) = default;
-    ~Statistic() = default;
+    /// Consequence for callers: rebuild-and-move a container of StatisticTuple rather than permuting one in place.
+    StatisticTuple(const StatisticTuple&) = default;
+    StatisticTuple(StatisticTuple&&) = default;
+    ~StatisticTuple() = default;
 
     [[nodiscard]] StatisticType getStatisticType() const { return statisticType; }
 
@@ -78,14 +78,14 @@ public:
 
     [[nodiscard]] StatisticId getStatisticId() const { return statisticId; }
 
-    bool operator==(const Statistic& other) const
+    bool operator==(const StatisticTuple& other) const
     {
         return statisticId == other.statisticId and statisticType == other.statisticType and startTs == other.startTs
             and endTs == other.endTs and numberOfSeenTuples == other.numberOfSeenTuples and statisticDataSize == other.statisticDataSize
             and std::equal(statisticData.get(), statisticData.get() + statisticDataSize, other.statisticData.get());
     }
 
-    friend std::ostream& operator<<(std::ostream& os, const Statistic& statistic);
+    friend std::ostream& operator<<(std::ostream& os, const StatisticTuple& statistic);
 
 private:
     StatisticId statisticId;
@@ -99,4 +99,4 @@ private:
 
 }
 
-FMT_OSTREAM(NES::Statistic);
+FMT_OSTREAM(NES::StatisticTuple);

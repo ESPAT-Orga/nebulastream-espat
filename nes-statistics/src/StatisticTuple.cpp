@@ -12,7 +12,7 @@
     limitations under the License.
 */
 
-#include <Statistic.hpp>
+#include <StatisticTuple.hpp>
 
 #include <ostream>
 #include <magic_enum/magic_enum.hpp>
@@ -20,9 +20,9 @@
 namespace NES
 {
 
-std::ostream& operator<<(std::ostream& os, const Statistic& statistic)
+std::ostream& operator<<(std::ostream& os, const StatisticTuple& statistic)
 {
-    os << "Statistic{id=" << statistic.getStatisticId() << ", type=" << magic_enum::enum_name(statistic.getStatisticType())
+    os << "StatisticTuple{id=" << statistic.getStatisticId() << ", type=" << magic_enum::enum_name(statistic.getStatisticType())
        << ", start=" << statistic.getStartTs().getTime() << ", end=" << statistic.getEndTs().getTime()
        << ", seenTuples=" << statistic.getNumberOfSeenTuples() << "}";
     return os;

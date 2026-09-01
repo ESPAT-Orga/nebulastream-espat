@@ -13,10 +13,10 @@
 */
 
 /// The point of the whole port: the query engine's own task events, aggregated into a statistic, reaching the
-/// StatisticCoordinator.
+/// StatisticInterface.
 ///
 ///   TaskStatisticListener -> InProcessFeed -> InProcessSource -> WindowedAggregation(ScalarStatistic Avg)
-///                         -> StatisticStoreWriter -> GrpcSink -> StatisticCoordinator
+///                         -> StatisticStoreWriter -> GrpcSink -> StatisticInterface
 ///
 /// A second query over a Generator source supplies the load, because the statistic query itself is excluded from
 /// the feed -- the listener recognises a query that reads an InProcess source and drops its events, so a query
@@ -52,7 +52,7 @@
 #include <Schema/Schema.hpp>
 #include <Sinks/SinkCatalog.hpp>
 #include <Sources/SourceCatalog.hpp>
-#include <StatisticCoordinator.hpp>
+#include <StatisticInterface.hpp>
 #include <StatisticStore/StatisticStoreRegistry.hpp>
 #include <Util/Logger/Logger.hpp>
 #include <WindowTypes/Measures/TimeMeasure.hpp>
@@ -118,7 +118,7 @@ public:
     }
 };
 
-TEST_F(StatisticTaskQueueTest, TaskQueueEventsReachTheCoordinatorAsAStatistic)
+TEST_F(StatisticTaskQueueTest, TaskQueueEventsReachTheStatisticInterfaceAsAStatistic)
 {
     const auto loadOutput = std::filesystem::temp_directory_path() / "task-queue-load.csv";
     std::filesystem::remove(loadOutput);
@@ -175,8 +175,8 @@ TEST_F(StatisticTaskQueueTest, TaskQueueEventsReachTheCoordinatorAsAStatistic)
         return worker.startQuery(distributed.begin()->second.front());
     };
 
-    StatisticCoordinator coordinator{std::make_unique<DefaultStatisticQueryGenerator>(), submitFn};
-    ASSERT_FALSE(coordinator.startGrpcServer().empty());
+    StatisticInterface statisticInterface{std::make_unique<DefaultStatisticQueryGenerator>(), submitFn};
+    ASSERT_FALSE(statisticInterface.startGrpcServer().empty());
 
     /// The load query. Started first so the statistic query has events to see from the outset.
     auto loadPlan = LogicalPlanBuilder::createLogicalPlan(Identifier::parse(LOAD_SOURCE));
@@ -184,7 +184,7 @@ TEST_F(StatisticTaskQueueTest, TaskQueueEventsReachTheCoordinatorAsAStatistic)
     const auto loadQuery = submitFn(loadPlan);
     ASSERT_TRUE(loadQuery.has_value()) << loadQuery.error().what();
 
-    /// Every closed window fires this, which is what "the events reached the coordinator" means.
+    /// Every closed window fires this, which is what "the events reached the statistic interface" means.
     std::atomic<int> reportsSeen{0};
     RequestStatisticBuildStatement statement{
         .domain = DataDomain{.logicalSourceName = STATS_SOURCE, .fieldName = "tuples"},
@@ -195,11 +195,11 @@ TEST_F(StatisticTaskQueueTest, TaskQueueEventsReachTheCoordinatorAsAStatistic)
         .eventTimeFieldName = std::nullopt,
         .conditionTrigger = ConditionTrigger{
             .condition = std::nullopt,
-            .callback = [&reportsSeen](Statistic::StatisticId, Windowing::TimeMeasure, Windowing::TimeMeasure)
+            .callback = [&reportsSeen](StatisticTuple::StatisticId, Windowing::TimeMeasure, Windowing::TimeMeasure)
             { reportsSeen.fetch_add(1); }},
         .options = {}};
 
-    const auto collected = coordinator.collectNewStatistic(statement);
+    const auto collected = statisticInterface.collectNewStatistic(statement);
     ASSERT_TRUE(collected.has_value()) << collected.error().what();
 
     /// Wait for the engine to produce events, a window to close, and the report to make it back over gRPC.
@@ -209,7 +209,7 @@ TEST_F(StatisticTaskQueueTest, TaskQueueEventsReachTheCoordinatorAsAStatistic)
         std::this_thread::sleep_for(std::chrono::milliseconds{200});
     }
 
-    EXPECT_GT(reportsSeen.load(), 0) << "no statistic over the engine's task events reached the coordinator";
+    EXPECT_GT(reportsSeen.load(), 0) << "no statistic over the engine's task events reached the statisticInterface";
 
     const auto store = StatisticStoreRegistry::instance().getOrCreate(std::string{StatisticStoreRegistry::DEFAULT_STORE_NAME});
     const auto statistics

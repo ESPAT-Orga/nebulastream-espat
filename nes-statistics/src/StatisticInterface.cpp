@@ -12,7 +12,7 @@
     limitations under the License.
 */
 
-#include <StatisticCoordinator.hpp>
+#include <StatisticInterface.hpp>
 
 #include <chrono>
 #include <cstdint>
@@ -50,23 +50,23 @@ namespace NES
 namespace
 {
 
-/// Bound to a kernel-chosen port; getCoordinatorAddress reports what was selected.
+/// Bound to a kernel-chosen port; getInterfaceAddress reports what was selected.
 constexpr auto LISTEN_ADDRESS = "0.0.0.0:0";
 
 /// Ports the probe queries try in turn. A probe deploys its own GrpcSource, so it needs a free one.
 constexpr uint32_t PROBE_SOURCE_PORT_BASE = 10000;
 constexpr uint32_t PROBE_SOURCE_PORT_ATTEMPTS = 10;
 
-/// Routes incoming reports to the coordinator.
-class StatisticCoordinatorServiceImpl final : public StatisticCoordinatorService::Service
+/// Routes incoming reports to the statistic interface.
+class StatisticInterfaceServiceImpl final : public StatisticInterfaceService::Service
 {
 public:
-    explicit StatisticCoordinatorServiceImpl(StatisticCoordinator& coordinator) : coordinator(coordinator) { }
+    explicit StatisticInterfaceServiceImpl(StatisticInterface& statisticInterface) : statisticInterface(statisticInterface) { }
 
     grpc::Status ReportStatistic(grpc::ServerContext*, const StatisticReport* report, google::protobuf::Empty*) override
     {
-        coordinator.onStatisticReport(
-            Statistic::StatisticId{report->statistic_id()},
+        statisticInterface.onStatisticReport(
+            StatisticTuple::StatisticId{report->statistic_id()},
             Windowing::TimeMeasure{report->start_ts()},
             Windowing::TimeMeasure{report->end_ts()},
             report->value());
@@ -74,7 +74,7 @@ public:
     }
 
 private:
-    StatisticCoordinator& coordinator;
+    StatisticInterface& statisticInterface;
 };
 
 /// The three columns a GrpcSource emits, which is what a probe consumes.
@@ -92,24 +92,24 @@ std::pair<std::string, std::string> splitAddress(const std::string& address)
     const auto colon = address.rfind(':');
     if (colon == std::string::npos)
     {
-        throw InvalidConfigParameter("Coordinator address '{}' is not in host:port form", address);
+        throw InvalidConfigParameter("Statistic interface address '{}' is not in host:port form", address);
     }
     return {address.substr(0, colon), address.substr(colon + 1)};
 }
 
 }
 
-StatisticCoordinator::StatisticCoordinator(std::unique_ptr<StatisticQueryGenerator> queryGenerator, SubmitQueryFn submitQuery)
+StatisticInterface::StatisticInterface(std::unique_ptr<StatisticQueryGenerator> queryGenerator, SubmitQueryFn submitQuery)
     : queryGenerator(std::move(queryGenerator)), submitQuery(std::move(submitQuery))
 {
 }
 
-StatisticCoordinator::~StatisticCoordinator()
+StatisticInterface::~StatisticInterface()
 {
     stopGrpcServer();
 }
 
-std::expected<CollectStatisticResult, Exception> StatisticCoordinator::collectNewStatistic(const RequestStatisticBuildStatement& statement)
+std::expected<CollectStatisticResult, Exception> StatisticInterface::collectNewStatistic(const RequestStatisticBuildStatement& statement)
 {
     const StatisticRegistry::Key key{
         .metric = statement.metric, .collectionDomain = statement.domain, .windowSize = Windowing::TimeMeasure{statement.windowSizeMs}};
@@ -123,8 +123,8 @@ std::expected<CollectStatisticResult, Exception> StatisticCoordinator::collectNe
         return CollectStatisticResult{.queryId = existing->queryId, .statisticId = existing->statisticId, .alreadyExisted = true};
     }
 
-    const auto statisticId = Statistic::StatisticId{nextStatisticId.fetch_add(1)};
-    if (coordinatorAddress.empty())
+    const auto statisticId = StatisticTuple::StatisticId{nextStatisticId.fetch_add(1)};
+    if (interfaceAddress.empty())
     {
         return std::unexpected(
             InvalidConfigParameter("startGrpcServer() has to run before a statistic can be collected: the sink needs an address"));
@@ -134,7 +134,7 @@ std::expected<CollectStatisticResult, Exception> StatisticCoordinator::collectNe
     /// channel the rest of the API uses rather than letting it escape.
     try
     {
-        return submitQuery(queryGenerator->generateQuery(statement, statisticId, coordinatorAddress))
+        return submitQuery(queryGenerator->generateQuery(statement, statisticId, interfaceAddress))
             .transform(
                 [this, &key, statisticId, &statement](auto queryId)
                 {
@@ -153,19 +153,19 @@ std::expected<CollectStatisticResult, Exception> StatisticCoordinator::collectNe
     }
 }
 
-bool StatisticCoordinator::addConditionTrigger(const StatisticRegistry::Key& key, ConditionTrigger trigger)
+bool StatisticInterface::addConditionTrigger(const StatisticRegistry::Key& key, ConditionTrigger trigger)
 {
     return registry.addTrigger(key, std::move(trigger));
 }
 
-bool StatisticCoordinator::deregisterStatistic(const StatisticRegistry::Key& key)
+bool StatisticInterface::deregisterStatistic(const StatisticRegistry::Key& key)
 {
     return registry.deregisterStatistic(key);
 }
 
-std::string StatisticCoordinator::startGrpcServer()
+std::string StatisticInterface::startGrpcServer()
 {
-    auto service = std::make_shared<StatisticCoordinatorServiceImpl>(*this);
+    auto service = std::make_shared<StatisticInterfaceServiceImpl>(*this);
     grpc::ServerBuilder builder;
     int selectedPort = 0;
     builder.AddListeningPort(LISTEN_ADDRESS, grpc::InsecureServerCredentials(), &selectedPort);
@@ -173,47 +173,47 @@ std::string StatisticCoordinator::startGrpcServer()
     grpcServer = builder.BuildAndStart();
     if (not grpcServer)
     {
-        throw QueryStartFailed("StatisticCoordinator: failed to start its gRPC server");
+        throw QueryStartFailed("StatisticInterface: failed to start its gRPC server");
     }
     /// Kept alive alongside the server, which holds a bare pointer to it.
     grpcService = std::move(service);
-    coordinatorAddress = "localhost:" + std::to_string(selectedPort);
-    NES_INFO("StatisticCoordinator gRPC server listening on {}", coordinatorAddress);
-    return coordinatorAddress;
+    interfaceAddress = "localhost:" + std::to_string(selectedPort);
+    NES_INFO("StatisticInterface gRPC server listening on {}", interfaceAddress);
+    return interfaceAddress;
 }
 
-void StatisticCoordinator::stopGrpcServer()
+void StatisticInterface::stopGrpcServer()
 {
     if (grpcServer)
     {
         grpcServer->Shutdown();
         grpcServer.reset();
-        NES_DEBUG("StatisticCoordinator gRPC server stopped.");
+        NES_DEBUG("StatisticInterface gRPC server stopped.");
     }
     grpcService.reset();
 }
 
-std::optional<double> StatisticCoordinator::getStatistics(
+std::optional<double> StatisticInterface::getStatistics(
     const std::vector<StatisticRegistry::Key>& keys, const Windowing::TimeMeasure startTs, const Windowing::TimeMeasure endTs)
 {
-    if (coordinatorAddress.empty())
+    if (interfaceAddress.empty())
     {
         throw InvalidConfigParameter("startGrpcServer() has to run before statistics can be probed");
     }
 
-    std::vector<Statistic::StatisticId> statisticIds;
+    std::vector<StatisticTuple::StatisticId> statisticIds;
     statisticIds.reserve(keys.size());
     for (const auto& key : keys)
     {
         const auto entry = registry.find(key);
         if (not entry.has_value())
         {
-            throw QueryNotFound("StatisticCoordinator::getStatistics: key not found in the registry");
+            throw QueryNotFound("StatisticInterface::getStatistics: key not found in the registry");
         }
         statisticIds.push_back(entry->statisticId);
     }
 
-    const auto [sinkHost, sinkPort] = splitAddress(coordinatorAddress);
+    const auto [sinkHost, sinkPort] = splitAddress(interfaceAddress);
 
     /// Deploy the probe query. Its source needs a free port, and nothing reports which ones are taken, so this
     /// walks a small range until one binds.
@@ -256,17 +256,17 @@ std::optional<double> StatisticCoordinator::getStatistics(
         if (auto submitted = submitQuery(std::move(plan)); submitted.has_value())
         {
             deployed = true;
-            NES_DEBUG("StatisticCoordinator::getStatistics: probe query deployed with source port {}", sourcePort);
+            NES_DEBUG("StatisticInterface::getStatistics: probe query deployed with source port {}", sourcePort);
         }
         else
         {
             NES_WARNING(
-                "StatisticCoordinator::getStatistics: probe query on port {} failed: {}", sourcePort, submitted.error().what());
+                "StatisticInterface::getStatistics: probe query on port {} failed: {}", sourcePort, submitted.error().what());
         }
     }
     if (not deployed)
     {
-        throw QueryStartFailed("StatisticCoordinator::getStatistics: no probe query could be deployed");
+        throw QueryStartFailed("StatisticInterface::getStatistics: no probe query could be deployed");
     }
 
     /// Register the pending entries before the impulses go out, so a fast report cannot arrive unclaimed.
@@ -303,7 +303,7 @@ std::optional<double> StatisticCoordinator::getStatistics(
         }
         if (not delivered)
         {
-            NES_WARNING("StatisticCoordinator::getStatistics: the probe source never accepted a request for {}", statisticId);
+            NES_WARNING("StatisticInterface::getStatistics: the probe source never accepted a request for {}", statisticId);
         }
     }
 
@@ -337,7 +337,7 @@ std::optional<double> StatisticCoordinator::getStatistics(
                 result += it->second.sum;
                 if (it->second.reports == 0)
                 {
-                    NES_WARNING("StatisticCoordinator::getStatistics: no report arrived for {}", statisticId);
+                    NES_WARNING("StatisticInterface::getStatistics: no report arrived for {}", statisticId);
                 }
                 pendingProbes.erase(it);
             }
@@ -347,8 +347,8 @@ std::optional<double> StatisticCoordinator::getStatistics(
     return allReported ? std::optional{result} : std::nullopt;
 }
 
-void StatisticCoordinator::onStatisticReport(
-    const Statistic::StatisticId statisticId,
+void StatisticInterface::onStatisticReport(
+    const StatisticTuple::StatisticId statisticId,
     const Windowing::TimeMeasure startTs,
     const Windowing::TimeMeasure endTs,
     const double value)

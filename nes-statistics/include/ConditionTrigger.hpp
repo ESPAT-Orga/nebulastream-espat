@@ -17,7 +17,7 @@
 #include <functional>
 #include <optional>
 #include <Functions/LogicalFunction.hpp>
-#include <Statistic.hpp>
+#include <StatisticTuple.hpp>
 #include <WindowTypes/Measures/TimeMeasure.hpp>
 
 namespace NES
@@ -29,7 +29,7 @@ namespace NES
 struct ConditionTrigger
 {
     std::optional<LogicalFunction> condition;
-    std::function<void(Statistic::StatisticId, Windowing::TimeMeasure startTs, Windowing::TimeMeasure endTs)> callback;
+    std::function<void(StatisticTuple::StatisticId, Windowing::TimeMeasure startTs, Windowing::TimeMeasure endTs)> callback;
 };
 
 }

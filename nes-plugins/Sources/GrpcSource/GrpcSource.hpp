@@ -45,7 +45,7 @@ struct PendingStatisticRequest
     uint64_t endTs;
 };
 
-/// Turns coordinator-issued probe requests into a stream.
+/// Turns statistic interface-issued probe requests into a stream.
 ///
 /// Hosts a gRPC server implementing StatisticSourceService; each RequestStatistic call enqueues one request,
 /// which is emitted as a CSV row "statisticId,startTs,endTs". Downstream, a ScalarStatisticProbe turns that row
@@ -55,7 +55,7 @@ struct PendingStatisticRequest
 /// and the configured InputFormatter parses them (cf. InProcessSource). A query reading this source therefore
 /// declares a three-column UINT64 schema and a CSV input formatter.
 ///
-/// Like InProcessSource it never signals end-of-stream while running: an empty queue only means the coordinator
+/// Like InProcessSource it never signals end-of-stream while running: an empty queue only means the statistic interface
 /// has not asked for anything yet.
 class GrpcSource final : public Source
 {

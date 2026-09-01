@@ -23,7 +23,7 @@
 #include <Interface/NESStrongTypeRef.hpp>
 #include <Interface/Record.hpp>
 #include <Runtime/Execution/OperatorHandler.hpp>
-#include <Statistic.hpp>
+#include <StatisticTuple.hpp>
 #include <Statistic/StatisticStore/StatisticStoreOperatorHandler.hpp>
 #include <Statistic/StatisticTypes.hpp>
 #include <StatisticStore/AbstractStatisticStore.hpp>
@@ -44,13 +44,13 @@ namespace
 
 /// Holds the statistics matching a single execute() call. Safe as thread-local because a worker thread runs an
 /// operator pipeline without re-entering execute().
-thread_local std::vector<Statistic> tProbeStatistics;
+thread_local std::vector<StatisticTuple> tProbeStatistics;
 
 /// A probe declares what it expects to read, but the store is keyed by statisticId alone, so a probe can reach a
 /// statistic some other build wrote. Reading it anyway would reinterpret the stored bytes -- a FLOAT64 average read
 /// as a UINT64 count -- or read past a shorter payload. Fail loudly instead.
 void validateAgainstProbe(
-    const std::vector<Statistic>& statistics,
+    const std::vector<StatisticTuple>& statistics,
     const StatisticId statisticId,
     const StatisticType expectedType,
     const uint64_t expectedPayloadSizeInBytes)
@@ -60,7 +60,7 @@ void validateAgainstProbe(
         if (statistic.getStatisticType() != expectedType)
         {
             throw CannotProbeStatistic(
-                "Statistic {} was built as {} but is probed as {}",
+                "StatisticTuple {} was built as {} but is probed as {}",
                 statisticId.getRawValue(),
                 magic_enum::enum_name(statistic.getStatisticType()),
                 magic_enum::enum_name(expectedType));
@@ -68,7 +68,7 @@ void validateAgainstProbe(
         if (statistic.getStatisticDataSize() != expectedPayloadSizeInBytes)
         {
             throw CannotProbeStatistic(
-                "Statistic {} persisted a {}-byte payload but is probed as a {}-byte type",
+                "StatisticTuple {} persisted a {}-byte payload but is probed as a {}-byte type",
                 statisticId.getRawValue(),
                 statistic.getStatisticDataSize(),
                 expectedPayloadSizeInBytes);

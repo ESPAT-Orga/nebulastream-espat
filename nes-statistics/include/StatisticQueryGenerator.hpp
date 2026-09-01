@@ -19,14 +19,14 @@
 #include <Plans/LogicalPlan.hpp>
 #include <CollectionDomain.hpp>
 #include <ErrorHandling.hpp>
-#include <Statistic.hpp>
+#include <StatisticTuple.hpp>
 
 namespace NES
 {
 
 /// Forward-declared to keep this interface header decoupled from the concrete statement definition.
 /// Including RequestStatisticBuildStatement.hpp would pull in:
-///   RequestStatisticBuildStatement.hpp --> CollectionDomain.hpp --> Metric.hpp --> Statistic.hpp
+///   RequestStatisticBuildStatement.hpp --> CollectionDomain.hpp --> Metric.hpp --> StatisticTuple.hpp
 /// This header only needs the type for a const reference parameter.
 struct RequestStatisticBuildStatement;
 
@@ -38,9 +38,9 @@ public:
     virtual ~StatisticQueryGenerator() = default;
 
     /// Generates a LogicalPlan that builds a statistic and writes it to the StatisticStore.
-    /// The statisticId is provided by the StatisticCoordinator and uniquely identifies this statistic.
+    /// The statisticId is provided by the StatisticInterface and uniquely identifies this statistic.
     [[nodiscard]] virtual LogicalPlan generateQuery(
-        const RequestStatisticBuildStatement& request, Statistic::StatisticId statisticId, const std::string& coordinatorAddress) const
+        const RequestStatisticBuildStatement& request, StatisticTuple::StatisticId statisticId, const std::string& interfaceAddress) const
         = 0;
 
     /// Builds the "build branch" sub-plan for a WorkloadDomain statistic: a chain rooted at the
@@ -51,14 +51,14 @@ public:
     [[nodiscard]] virtual LogicalPlan generateWorkloadBranch(
         const WorkloadDomain& domain,
         const RequestStatisticBuildStatement& request,
-        Statistic::StatisticId statisticId,
-        const std::string& coordinatorAddress,
+        StatisticTuple::StatisticId statisticId,
+        const std::string& interfaceAddress,
         const LogicalOperator& spliceLeaf) const
     {
         (void)domain;
         (void)request;
         (void)statisticId;
-        (void)coordinatorAddress;
+        (void)interfaceAddress;
         (void)spliceLeaf;
         throw NotImplemented("This StatisticQueryGenerator does not support WorkloadDomain build-branch generation");
     }

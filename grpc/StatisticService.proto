@@ -16,11 +16,11 @@ syntax = "proto3";
 import "google/protobuf/empty.proto";
 
 /// Runs in the REPL. gRPC sinks call this to report statistic results.
-service StatisticCoordinatorService {
+service StatisticInterfaceService {
   rpc ReportStatistic (StatisticReport) returns (google.protobuf.Empty) {}
 }
 
-/// Runs on the worker (inside gRPC source). Coordinator calls this to trigger probes.
+/// Runs on the worker (inside gRPC source). Statistic interface calls this to trigger probes.
 service StatisticSourceService {
   rpc RequestStatistic (StatisticRequest) returns (google.protobuf.Empty) {}
 }

@@ -23,7 +23,7 @@
 #include <Interface/NESStrongTypeRef.hpp>
 #include <Interface/Record.hpp>
 #include <Runtime/Execution/OperatorHandler.hpp>
-#include <Statistic.hpp>
+#include <StatisticTuple.hpp>
 #include <Statistic/StatisticStore/StatisticStoreOperatorHandler.hpp>
 #include <Statistic/StatisticTypes.hpp>
 #include <Time/Timestamp.hpp>
@@ -35,7 +35,7 @@
 namespace NES
 {
 
-/// Copies the payload out of the pipeline arena and into a Statistic owned by the store. The copy is required:
+/// Copies the payload out of the pipeline arena and into a StatisticTuple owned by the store. The copy is required:
 /// the arena memory is recycled once the pipeline moves on, whereas the store outlives the query that wrote it.
 void insertStatisticIntoStoreProxy(
     OperatorHandler* ptrOpHandler,
@@ -57,7 +57,7 @@ void insertStatisticIntoStoreProxy(
     auto statisticData = std::make_shared<std::byte[]>(statisticDataSize);
     std::memcpy(statisticData.get(), data, statisticDataSize);
 
-    const Statistic statistic{
+    const StatisticTuple statistic{
         statisticId,
         type,
         Windowing::TimeMeasure(startTs.getRawValue()),

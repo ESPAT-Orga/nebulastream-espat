@@ -14,11 +14,11 @@
 
 /// Covers the gRPC transport in both directions, against real servers rather than mocks.
 ///
-///   GrpcSink   -- reports probe results to a StatisticCoordinatorService
+///   GrpcSink   -- reports probe results to a StatisticInterfaceService
 ///   GrpcSource -- turns RequestStatistic calls into rows that drive a probe
 ///
-/// The coordinator itself does not exist yet (that is the next phase), so the sink test stands a minimal
-/// StatisticCoordinatorService up in-process and records what arrives.
+/// The statistic interface itself does not exist yet (that is the next phase), so the sink test stands a minimal
+/// StatisticInterfaceService up in-process and records what arrives.
 
 #include <chrono>
 #include <cstdint>
@@ -49,8 +49,8 @@ namespace
 
 using namespace StatisticTestSupport;
 
-/// Stands in for the coordinator until it is ported: records every report it receives.
-class RecordingCoordinatorService final : public StatisticCoordinatorService::Service
+/// Stands in for the statistic interface until it is ported: records every report it receives.
+class RecordingStatisticInterfaceService final : public StatisticInterfaceService::Service
 {
 public:
     grpc::Status ReportStatistic(grpc::ServerContext*, const StatisticReport* report, google::protobuf::Empty*) override
@@ -72,10 +72,10 @@ private:
 };
 
 /// Owns a service and the server hosting it, on a kernel-chosen port.
-class TestCoordinatorServer
+class TestStatisticInterfaceServer
 {
 public:
-    TestCoordinatorServer()
+    TestStatisticInterfaceServer()
     {
         grpc::ServerBuilder builder;
         int selected = 0;
@@ -85,7 +85,7 @@ public:
         port = static_cast<uint32_t>(selected);
     }
 
-    ~TestCoordinatorServer()
+    ~TestStatisticInterfaceServer()
     {
         if (server)
         {
@@ -93,17 +93,17 @@ public:
         }
     }
 
-    TestCoordinatorServer(const TestCoordinatorServer&) = delete;
-    TestCoordinatorServer& operator=(const TestCoordinatorServer&) = delete;
-    TestCoordinatorServer(TestCoordinatorServer&&) = delete;
-    TestCoordinatorServer& operator=(TestCoordinatorServer&&) = delete;
+    TestStatisticInterfaceServer(const TestStatisticInterfaceServer&) = delete;
+    TestStatisticInterfaceServer& operator=(const TestStatisticInterfaceServer&) = delete;
+    TestStatisticInterfaceServer(TestStatisticInterfaceServer&&) = delete;
+    TestStatisticInterfaceServer& operator=(TestStatisticInterfaceServer&&) = delete;
 
     [[nodiscard]] uint32_t getPort() const { return port; }
     [[nodiscard]] bool isRunning() const { return server != nullptr; }
     [[nodiscard]] std::vector<StatisticReport> reports() const { return service.snapshot(); }
 
 private:
-    RecordingCoordinatorService service;
+    RecordingStatisticInterfaceService service;
     std::unique_ptr<grpc::Server> server;
     uint32_t port{0};
 };
@@ -128,20 +128,20 @@ public:
     }
 };
 
-/// The whole write-to-coordinator path: build, probe, and ship each result over gRPC. This is also what
+/// The whole write-to-statistic interface path: build, probe, and ship each result over gRPC. This is also what
 /// establishes that reports carry a value at all -- the branch this is ported from never populated the field.
-TEST_F(StatisticTransportTest, GrpcSinkReportsProbeResultsToTheCoordinator)
+TEST_F(StatisticTransportTest, GrpcSinkReportsProbeResultsToTheStatisticInterface)
 {
-    TestCoordinatorServer coordinator;
-    ASSERT_TRUE(coordinator.isRunning()) << "could not start a test coordinator server";
-    ASSERT_NE(coordinator.getPort(), 0U);
+    TestStatisticInterfaceServer statisticInterface;
+    ASSERT_TRUE(statisticInterface.isRunning()) << "could not start a test statisticInterface server";
+    ASSERT_NE(statisticInterface.getPort(), 0U);
 
     const auto inputPath = writeInput("statistic-transport-input.csv");
-    const auto plan = addGrpcSink(addScalarProbe(buildStatisticPlan(inputPath)), coordinator.getPort());
+    const auto plan = addGrpcSink(addScalarProbe(buildStatisticPlan(inputPath)), statisticInterface.getPort());
     runToCompletion(plan);
 
     /// The sink reports synchronously from execute(), so everything is in by the time the query stops.
-    const auto reports = coordinator.reports();
+    const auto reports = statisticInterface.reports();
     ASSERT_EQ(reports.size(), 2U) << "expected one report per closed window";
 
     std::vector<double> values;

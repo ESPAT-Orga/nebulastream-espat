@@ -30,6 +30,10 @@
 #include <utility>
 #include <vector>
 #include <CollectionDomain.hpp>
+#include <ConditionTrigger.hpp>
+#include <Functions/ComparisonFunctions/GreaterLogicalFunction.hpp>
+#include <Functions/ConstantValueLogicalFunction.hpp>
+#include <Functions/UnboundFieldAccessLogicalFunction.hpp>
 #include <DataTypes/DataTypeProvider.hpp>
 #include <DefaultStatisticQueryGenerator.hpp>
 #include <DistributedLogicalPlan.hpp>
@@ -295,6 +299,36 @@ TEST_F(StatisticCoordinatorTest, UnsupportedRequestsFailWithNotImplemented)
     const auto metricResult = coordinator.collectNewStatistic(unsupportedMetric);
     ASSERT_FALSE(metricResult.has_value());
     EXPECT_EQ(metricResult.error().code(), ErrorCode::NotImplemented);
+}
+
+/// A trigger carrying a predicate compiles a store read into the build query itself, so that only the windows
+/// satisfying it are reported. The two windows average 20 and 200, so "> 100" must fire exactly once -- if the
+/// probe or the selection were missing this would fire twice, or not at all.
+TEST_F(StatisticCoordinatorTest, AConditionalTriggerFiresOnlyForMatchingWindows)
+{
+    const auto inputPath = writeInput("coordinator-conditional-input.csv");
+    TestSubmissionBackend backend{inputPath};
+
+    StatisticCoordinator coordinator{std::make_unique<DefaultStatisticQueryGenerator>(), backend.submitFn()};
+    coordinator.startGrpcServer();
+
+    std::atomic<int> fired{0};
+    auto statement = averageOverValue();
+    statement.conditionTrigger = ConditionTrigger{
+        .condition = LogicalFunction{GreaterLogicalFunction{
+            LogicalFunction{UnboundFieldAccessLogicalFunction{Identifier::parse(std::string{StatisticFieldNames::VALUE})}},
+            LogicalFunction{ConstantValueLogicalFunction{
+                DataTypeProvider::provideDataType(DataType::Type::FLOAT64, DataType::NULLABLE::NOT_NULLABLE), "100.0"}}}},
+        .callback = [&fired](Statistic::StatisticId, Windowing::TimeMeasure, Windowing::TimeMeasure) { fired.fetch_add(1); }};
+
+    const auto collected = coordinator.collectNewStatistic(statement);
+    ASSERT_TRUE(collected.has_value()) << collected.error().what();
+    ASSERT_TRUE(backend.waitForAllStopped(std::chrono::seconds{60})) << "the build query never finished";
+
+    /// The reports are sent from the sink as the query drains, so give the last one a moment to land.
+    std::this_thread::sleep_for(std::chrono::seconds{1});
+
+    EXPECT_EQ(fired.load(), 1) << "only the window averaging 200 should have passed the predicate";
 }
 
 }

@@ -25,6 +25,7 @@
 #include <Functions/OctetLengthLogicalFunction.hpp>
 #include <Functions/UnboundFieldAccessLogicalFunction.hpp>
 #include <Operators/ProjectionLogicalOperator.hpp>
+#include <Operators/Statistic/ScalarStatisticProbeLogicalOperator.hpp>
 #include <Identifiers/Identifier.hpp>
 #include <Metric.hpp>
 #include <Operators/Statistic/LogicalStatisticFields.hpp>
@@ -60,6 +61,22 @@ StatisticType toStatisticType(const Metric metric)
     throw NotImplemented(
         "Metric {} needs a synopsis statistic, which this port does not provide; only Average is supported",
         magic_enum::enum_name(metric));
+}
+
+/// The type a probe reconstructs the persisted scalar as. Only Avg is reachable today, but keeping the mapping
+/// explicit means adding Count/Sum is a one-line change rather than a hunt.
+DataType probeValueTypeFor(const StatisticType op)
+{
+    switch (op)
+    {
+        case StatisticType::Avg:
+            return DataTypeProvider::provideDataType(DataType::Type::FLOAT64, DataType::NULLABLE::NOT_NULLABLE);
+        case StatisticType::Count:
+            return DataTypeProvider::provideDataType(DataType::Type::UINT64, DataType::NULLABLE::NOT_NULLABLE);
+        case StatisticType::Sum:
+            break;
+    }
+    throw NotImplemented("No probe value type is defined for statistic type {}", magic_enum::enum_name(op));
 }
 
 Windowing::TimeBasedWindowType windowTypeFor(const RequestStatisticBuildStatement& request)
@@ -152,6 +169,31 @@ LogicalPlan generateForDataDomain(
         LogicalFunction{OctetLengthLogicalFunction{
             LogicalFunction{UnboundFieldAccessLogicalFunction{statisticDataFieldName(statisticId)}}}});
     plan = LogicalPlanBuilder::addProjection(std::move(projections), /*asterisk=*/false, plan);
+
+    /// A trigger carrying a *predicate* is the one case where the build query also has to read the store back.
+    ///
+    /// The predicate is evaluated over the statistic's value, and the value only exists in the store -- the build
+    /// chain itself carries it as an opaque VARSIZED payload. So a conditional trigger compiles a probe and a
+    /// selection into the same query, and only the windows that satisfy the predicate are reported.
+    ///
+    /// Without a predicate the query stays write-only: every closed window is reported, carrying just the window
+    /// metadata, and a caller that wants values calls getStatistics. A trigger with a callback but no predicate
+    /// does not need the probe either, because the callback is handed the window and not the value.
+    ///
+    /// The probe reads the window bounds from the projected columns above, and supplies STATISTICID and
+    /// STATISTICVALUE itself, so its output is exactly what the sink reports.
+    const bool probeInBuild = request.conditionTrigger.has_value() and request.conditionTrigger->condition.has_value();
+    if (probeInBuild)
+    {
+        const auto probe = ScalarStatisticProbeLogicalOperator::create(
+            statisticId,
+            toStatisticType(request.metric),
+            probeValueTypeFor(toStatisticType(request.metric)),
+            Identifier::parse(std::string{StatisticFieldNames::START_TS}),
+            Identifier::parse(std::string{StatisticFieldNames::END_TS}));
+        plan = plan.withRootOperators({LogicalOperator{probe}.withChildrenUnsafe(plan.getRootOperators())});
+        plan = LogicalPlanBuilder::addSelection(request.conditionTrigger->condition.value(), plan);
+    }
 
     const auto [host, port] = splitAddress(coordinatorAddress);
     return LogicalPlanBuilder::addAnonymousSink(

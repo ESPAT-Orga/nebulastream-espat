@@ -17,7 +17,8 @@ add_library(nes-statistics STATIC ${NES_STATISTICS_SOURCE_FILES})
 
 # nes-logical-operators: Statistic carries Windowing::TimeMeasure, and later phases build logical plans here.
 # nes-schema: Schema lives behind its own target upstream and is not reachable through nes-common.
-target_link_libraries(nes-statistics PUBLIC nes-common nes-schema nes-configurations nes-memory nes-logical-operators)
+# nes-grpc: the coordinator hosts StatisticCoordinatorService and calls StatisticSourceService.
+target_link_libraries(nes-statistics PUBLIC nes-common nes-schema nes-configurations nes-memory nes-logical-operators nes-grpc)
 
 target_include_directories(nes-statistics PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>

@@ -31,3 +31,7 @@ add_nes_statistics_query_test(statistic-round-trip-test StatisticRoundTripTest.c
 # Additionally needs nes-grpc for the generated StatisticService stubs the test server uses.
 add_nes_statistics_query_test(statistic-transport-test StatisticTransportTest.cpp)
 target_link_libraries(statistic-transport-test nes-grpc)
+
+# The coordinator drives both directions of the transport, so it needs nes-grpc too.
+add_nes_statistics_query_test(statistic-coordinator-test StatisticCoordinatorTest.cpp)
+target_link_libraries(statistic-coordinator-test nes-grpc)

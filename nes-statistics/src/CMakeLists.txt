@@ -12,6 +12,9 @@
 
 add_source_files(nes-statistics
         Statistic.cpp
+        StatisticRegistry.cpp
+        DefaultStatisticQueryGenerator.cpp
+        StatisticCoordinator.cpp
 )
 
 add_subdirectory(StatisticStore)

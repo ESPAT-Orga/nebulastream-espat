@@ -41,7 +41,7 @@
 #   REPS=<n>                    throughput repetitions, median'd by the notebook (default 3)
 #   ONLY=bytes|throughput       run just one of the two
 #   BYTES_DURATION=<s>          hold for experiment 1 (default 60)
-#   THROUGHPUT_DURATION=<s>     hold for experiment 2 (default 120)
+#   THROUGHPUT_DURATION=<s>     hold for experiment 2 (default 60)
 #   SKIP_BUILD=1                reuse the existing in-image build
 #   NES_SKIP_DEV_IMAGE_BUILD=1  reuse the existing dev image instead of rebuilding it
 #
@@ -97,7 +97,11 @@ export TOPOLOGIES="${TOPOLOGIES:-1/1}"
 export SOURCES_PER_LEAF="${SOURCES_PER_LEAF:-1}"
 export HISTOGRAM_MEMORY_BUDGET="${HISTOGRAM_MEMORY_BUDGET:-16384}"
 export HISTOGRAM_DELTA_KEYFRAME_INTERVAL="${HISTOGRAM_DELTA_KEYFRAME_INTERVAL:-10}"
-export VARIANTS="${VARIANTS:-split,split_zstd,delta,delta_zstd}"
+### prometheus first: it is the SOTA baseline (raw stream to a Prometheus sink on the root, no
+### synopsis built on the leaf), so it reads as the reference at the left of both charts. NOTE the
+### runner does NOT validate variant names -- a typo silently renders as a `local`-like query and
+### produces a plausible but wrong bar, so spell these carefully.
+export VARIANTS="${VARIANTS:-prometheus,split,split_zstd,delta,delta_zstd}"
 export MODES=traffic
 
 echo "=================================================================="
@@ -127,8 +131,14 @@ fi
 
 ### --- 2. Throughput -------------------------------------------------------------------------
 ### Memory sources, unthrottled. DATASET_COPIES=8 replays the trace 8x with each copy shifted by a
-### whole number of windows: the raw trace drains in ~3.5 s, short enough that warm-up would be a
-### large share of the measured span. NUMBER_OF_BUFFERS covers the ~2.4 GB of pre-parsed tuples.
+### whole number of windows: one copy drains far too fast for warm-up not to dominate the measured
+### span. NUMBER_OF_BUFFERS covers the ~2.4 GB of pre-parsed tuples.
+###
+### The 60 s hold is chosen so the source still has data when the window closes: ~149 M rows at the
+### few-M/s these variants reach is over a minute of input, so the pipeline stays saturated for the
+### whole hold rather than draining partway and idling. Overrunning is harmless -- parse_throughput
+### measures the ACTIVE span (first to last non-zero sample), so a trailing idle tail is trimmed
+### anyway; it just wastes wall-clock.
 ### THROUGHPUT_LISTENER_INTERVAL_MS drops to 50 because the active span is short: at the default
 ### 200 ms, one sample of span error is several percent -- more than the gaps between variants.
 ###
@@ -144,7 +154,7 @@ if [[ "$ONLY" == "both" || "$ONLY" == "throughput" ]]; then
             DATASET_COPIES="${DATASET_COPIES:-8}" \
             NUMBER_OF_BUFFERS="${NUMBER_OF_BUFFERS:-600000}" \
             THROUGHPUT_LISTENER_INTERVAL_MS="${THROUGHPUT_LISTENER_INTERVAL_MS:-50}" \
-            RUN_DURATION_SECONDS="${THROUGHPUT_DURATION:-120}" \
+            RUN_DURATION_SECONDS="${THROUGHPUT_DURATION:-60}" \
                 bash "$RUNNER" ); then
             echo "WARNING: throughput repetition $rep/$REPS failed; continuing with the rest." >&2
         fi

@@ -159,7 +159,11 @@ def grid_analytical_offered_tps(tuples_per_sec_per_query, num_analytical):
 GRID_RESULTS_CSV = "results_statistic_grid.csv"
 
 GRID_FIELDNAMES = [
-    'num_analytical_queries', 'num_statistic_queries', 'run_idx',
+    'num_analytical_queries', 'num_statistic_queries',
+    # Which query shape the k analytical queries had: 'window' (ClusterMonitoring Q2, the grid's
+    # workload) or 'filter' (that query without the sliding window and GROUP BY). Only the j=0 rows
+    # ever carry 'filter' — the two shapes at j=0 are the reference band the grid is read against.
+    'analytical_query', 'run_idx',
     'num_worker_threads', 'window_size_sec', 'window_advance_sec',
     'statistic_window_sec', 'job_domain', 'events_per_sec', 'memory_budget',
     'tuples_per_sec_per_query', 'offered_tps', 'analytical_offered_tps',

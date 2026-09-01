@@ -45,6 +45,36 @@ from scripts.benchmarking.utils import printError, printInfo
 ANALYTICAL_SINK = "agg_void_sink"
 STATISTIC_SINK_PREFIX = "stat_void_sink"
 
+### The shapes the analytical query can take. All three share a source, a schema and a parser, so at
+### j=0 they differ only in what the engine does per tuple:
+###   window  ClusterMonitoring Q2 — sliding 60 s aggregation over 10k groups. The grid's workload,
+###           and the LOWER reference: the most expensive of the three.
+###   ingest  the predicate matches nothing, so no tuple is ever materialised: TCP receive, CSV
+###           parse, compare, drop. The floor of per-query cost and therefore the UPPER reference.
+###   filter  Q2's own predicate with no window, forwarding 25% of the stream as 12 full fields.
+###           Measured before "ingest" existed and kept as a realistic mid-point.
+### "filter" is NOT the cheapest shape, which is why "ingest" exists: a Void sink discards, but the
+### pipeline still has to materialise every passing tuple into an output buffer first, and at 150
+### queries that is ~7.5 Mtup/s of copying and ~60k buffer round-trips/s through the global pool.
+### Measured at 150 queries, 200k tup/s each: window 19.9, filter 24.8, 10xQ2+150 histogram 28.2
+### Mtup/s achieved — a histogram build is cheaper per tuple than a passthrough projection.
+ANALYTICAL_SHAPES = ("window", "filter", "ingest")
+
+### An eventType the generator never produces: write_tuple emits 3, else (h >> 16) % 3, so the domain
+### is exactly {0,1,2,3} (rust-benchmark-generator/src/main.rs). If that ever changes, the "ingest"
+### arm quietly turns back into a filter that passes tuples, and it would still look plausible.
+NEVER_MATCHING_EVENT_TYPE = 99
+
+### The generator's ClusterMonitoring schema, declared ONCE. The source DDL emits it and a
+### SELECT * query's sink has to repeat it exactly; a silent mismatch is the worst failure mode here,
+### because nes-repl reports nothing on a parse error — it just stops consuming statements, which
+### looks exactly like a hung worker.
+CLUSTER_FIELDS = (
+    ("creationTS", "UINT64"), ("jobId", "UINT64"), ("taskId", "UINT64"), ("machineId", "INT64"),
+    ("eventType", "INT16"), ("userId", "INT16"), ("category", "INT16"), ("priority", "INT16"),
+    ("cpu", "FLOAT64"), ("ram", "FLOAT64"), ("disk", "FLOAT64"), ("constraints", "INT16"),
+)
+
 
 def analytical_source(i):
     return f"cluster_a{i}"
@@ -60,11 +90,9 @@ def _tcp_source_ddl(source):
     The generator serves unlimited clients, each getting an identical independently-paced stream, so
     one connection per query gives real per-query ingestion without needing a file per query.
     """
+    schema = ", ".join(f"{name} {typ} NOT NULL" for name, typ in CLUSTER_FIELDS)
     return f"""\
-CREATE LOGICAL SOURCE {source}(creationTS UINT64 NOT NULL, jobId UINT64 NOT NULL, taskId UINT64 NOT NULL, \
-machineId INT64 NOT NULL, eventType INT16 NOT NULL, userId INT16 NOT NULL, category INT16 NOT NULL, \
-priority INT16 NOT NULL, cpu FLOAT64 NOT NULL, ram FLOAT64 NOT NULL, disk FLOAT64 NOT NULL, \
-constraints INT16 NOT NULL);
+CREATE LOGICAL SOURCE {source}({schema});
 CREATE PHYSICAL SOURCE FOR {source}
 TYPE TCP
 SET(
@@ -78,14 +106,21 @@ SET(
 """
 
 
-def _analytical_sink_ddl(source):
-    """Q2's output sink. START/END must be backtick-quoted — they are reserved tokens in
-    AntlrSQL.g4, and nes-repl reports NOTHING on a parse error, it simply stops consuming
-    statements, which looks exactly like a hung worker."""
+def _analytical_sink_ddl(source, shape="window"):
+    """The analytical query's output sink, shaped like whatever that query emits.
+
+    START/END must be backtick-quoted — they are reserved tokens in AntlrSQL.g4, and nes-repl reports
+    NOTHING on a parse error, it simply stops consuming statements, which looks exactly like a hung
+    worker. The filter arm is a SELECT *, so its sink is the full input schema.
+    """
     q = source.upper()
+    if shape in ("filter", "ingest"):
+        cols = ", ".join(f"{q}.{name.upper()} {typ} NOT NULL" for name, typ in CLUSTER_FIELDS)
+    else:
+        cols = (f"{q}.`START` UINT64 NOT NULL, {q}.`END` UINT64 NOT NULL, "
+                f"{q}.TOTALCPU FLOAT64 NOT NULL, {q}.JOBID UINT64 NOT NULL")
     return f"""\
-CREATE SINK {ANALYTICAL_SINK}_{source}({q}.`START` UINT64 NOT NULL, {q}.`END` UINT64 NOT NULL, \
-{q}.TOTALCPU FLOAT64 NOT NULL, {q}.JOBID UINT64 NOT NULL)
+CREATE SINK {ANALYTICAL_SINK}_{source}({cols})
 TYPE Void
 SET('{WORKER_GRPC}' AS `SINK`.HOST);
 """
@@ -103,9 +138,26 @@ SET('{WORKER_GRPC}' AS `SINK`.HOST);
 """
 
 
-def analytical_sql(i):
-    """ClusterMonitoring Q2, same shape as nes-systests/benchmark/ClusterMonitoring.test."""
+def analytical_sql(i, shape="window"):
+    """ClusterMonitoring Q2, same shape as nes-systests/benchmark/ClusterMonitoring.test — or one of
+    the two reference arms, which are Q2 with the window and GROUP BY removed.
+
+    "filter" keeps Q2's predicate, so 25% of tuples survive it (EVENT_TYPE_MATCH_MODULUS in
+    rust-benchmark-generator/src/main.rs) and get materialised. "ingest" swaps the predicate for one
+    nothing matches, so the query costs exactly what it costs to receive and parse the stream.
+
+    Both still report full throughput: ThroughputListener counts the tuples the first pipeline
+    PROCESSED, not the ones it emitted (ThroughputListener.cpp:84-97) — which is also why a Q2 query
+    emitting 10k windows/s reports 200k tup/s.
+    """
     source = analytical_source(i)
+    if shape in ("filter", "ingest"):
+        matched = 3 if shape == "filter" else NEVER_MATCHING_EVENT_TYPE
+        return (
+            f"SELECT * FROM {source} "
+            f"WHERE eventType == INT16({matched}) "
+            f"INTO {ANALYTICAL_SINK}_{source};\n"
+        )
     return (
         "SELECT start, end, SUM(cpu) AS totalCpu, jobId "
         f"FROM {source} "
@@ -134,7 +186,7 @@ def statistic_sql(i):
     )
 
 
-def build_sql(num_analytical, num_statistic):
+def build_sql(num_analytical, num_statistic, analytical_query="window"):
     """Full statement stream for one grid point: DDL for every source and sink, then the queries.
 
     Analytical queries are emitted FIRST so their ids come back first — the runner splits the id
@@ -143,25 +195,26 @@ def build_sql(num_analytical, num_statistic):
     parts = [f'CREATE WORKER "{WORKER_GRPC}" SET (\'{WORKER_DATA}\' AS DATA);\n']
     for i in range(num_analytical):
         parts.append(_tcp_source_ddl(analytical_source(i)))
-        parts.append(_analytical_sink_ddl(analytical_source(i)))
+        parts.append(_analytical_sink_ddl(analytical_source(i), analytical_query))
     for i in range(num_statistic):
         parts.append(_tcp_source_ddl(statistic_source(i)))
         parts.append(_statistic_sink_ddl(statistic_source(i)))
     for i in range(num_analytical):
-        parts.append(analytical_sql(i))
+        parts.append(analytical_sql(i, analytical_query))
     for i in range(num_statistic):
         parts.append(statistic_sql(i))
     return "".join(parts)
 
 
-def submit_grid(num_analytical, num_statistic, run_dir, deploy_timeout=180):
+def submit_grid(num_analytical, num_statistic, run_dir, deploy_timeout=180,
+                analytical_query="window"):
     """Start one nes-repl and submit every query. Returns (proc, log_file, analytical, statistic).
 
     `analytical` / `statistic` are the deployed query ids, split by submission order. Unlike the
     shared experiment, statistic queries here DO report throughput — each owns a source, so the
     throughput listener sees its first pipeline.
     """
-    sql = build_sql(num_analytical, num_statistic)
+    sql = build_sql(num_analytical, num_statistic, analytical_query)
     expected = num_analytical + num_statistic
 
     log_path = os.path.join(run_dir, "repl.log")
@@ -194,7 +247,7 @@ def submit_grid(num_analytical, num_statistic, run_dir, deploy_timeout=180):
     if len(ids) != expected:
         printError(f"only {len(ids)}/{expected} queries deployed; see {log_path}")
     printInfo(f"    {len(ids)}/{expected} queries deployed "
-              f"({num_analytical} analytical + {num_statistic} statistic)")
+              f"({num_analytical} analytical [{analytical_query}] + {num_statistic} statistic)")
     return proc, log_file, ids[:num_analytical], ids[num_analytical:expected]
 
 

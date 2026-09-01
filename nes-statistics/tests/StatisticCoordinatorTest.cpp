@@ -47,6 +47,7 @@
 #include <RequestStatisticStatement.hpp>
 #include <Schema/Schema.hpp>
 #include <Sinks/SinkCatalog.hpp>
+#include <Operators/Sinks/AnonymousSinkLogicalOperator.hpp>
 #include <Sources/SourceCatalog.hpp>
 #include <StatisticCoordinator.hpp>
 #include <StatisticRegistry.hpp>
@@ -178,6 +179,14 @@ RequestStatisticBuildStatement averageOverValue()
         .options = {}};
 }
 
+/// The sink's type is not in the explain output before optimization -- an unoptimized plan just says
+/// ANONYMOUS_SINK -- so read it off the operator instead.
+std::string sinkTypeOf(const LogicalPlan& plan)
+{
+    const auto sink = plan.getRootOperators().front().tryGetAs<AnonymousSinkLogicalOperator>();
+    return sink.has_value() ? (*sink)->getSinkType().asCanonicalString() : std::string{"<not an anonymous sink>"};
+}
+
 StatisticRegistry::Key keyFor(const RequestStatisticBuildStatement& statement)
 {
     return StatisticRegistry::Key{
@@ -204,9 +213,10 @@ public:
     }
 };
 
-/// The build half through the coordinator: a request turns into a deployed query whose results reach
-/// onStatisticReport over gRPC, and whose statistics land in the store.
-TEST_F(StatisticCoordinatorTest, CollectNewStatisticDeploysAQueryThatReportsBack)
+/// The build half through the coordinator: a request turns into a deployed query whose statistics land in the
+/// store. With no trigger the query reports nothing -- see PlanShapeDependsOnTheTrigger -- so the store is the
+/// only observable effect, which is exactly what getStatistics later reads.
+TEST_F(StatisticCoordinatorTest, CollectNewStatisticWithoutATriggerStillPersists)
 {
     const auto inputPath = writeInput("coordinator-collect-input.csv");
     TestSubmissionBackend backend{inputPath};
@@ -329,6 +339,44 @@ TEST_F(StatisticCoordinatorTest, AConditionalTriggerFiresOnlyForMatchingWindows)
     std::this_thread::sleep_for(std::chrono::seconds{1});
 
     EXPECT_EQ(fired.load(), 1) << "only the window averaging 200 should have passed the predicate";
+}
+
+/// What the generator emits is decided entirely by the trigger, so it is worth pinning directly rather than
+/// inferring it from runtime effects -- especially "no report is sent", which is otherwise an absence of
+/// evidence.
+TEST_F(StatisticCoordinatorTest, PlanShapeDependsOnTheTrigger)
+{
+    const DefaultStatisticQueryGenerator generator;
+    const std::string address = "localhost:1234";
+
+    /// No trigger: nothing would consume a report, so the query terminates in a VoidSink and never touches the
+    /// network. The statistic is still written -- the writer is fused into the aggregation, below the sink.
+    const auto noTriggerPlan = generator.generateQuery(averageOverValue(), Statistic::StatisticId{1}, address);
+    EXPECT_EQ(sinkTypeOf(noTriggerPlan), "VOID");
+    EXPECT_EQ(explain(noTriggerPlan, ExplainVerbosity::Debug).find("SCALARSTATISTICPROBE"), std::string::npos);
+
+    /// A callback with no predicate wants every closed window, so the report is needed -- but not the value, so
+    /// no store read is compiled in.
+    auto callbackOnly = averageOverValue();
+    callbackOnly.conditionTrigger = ConditionTrigger{
+        .condition = std::nullopt, .callback = [](Statistic::StatisticId, Windowing::TimeMeasure, Windowing::TimeMeasure) { }};
+    const auto callbackPlan = generator.generateQuery(callbackOnly, Statistic::StatisticId{1}, address);
+    EXPECT_EQ(sinkTypeOf(callbackPlan), "GRPC");
+    EXPECT_EQ(explain(callbackPlan, ExplainVerbosity::Debug).find("SCALARSTATISTICPROBE"), std::string::npos);
+
+    /// A predicate is evaluated over the value, which only the store has, so this one reads its own writes back.
+    auto withPredicate = averageOverValue();
+    withPredicate.conditionTrigger = ConditionTrigger{
+        .condition = LogicalFunction{GreaterLogicalFunction{
+            LogicalFunction{UnboundFieldAccessLogicalFunction{Identifier::parse(std::string{StatisticFieldNames::VALUE})}},
+            LogicalFunction{ConstantValueLogicalFunction{
+                DataTypeProvider::provideDataType(DataType::Type::FLOAT64, DataType::NULLABLE::NOT_NULLABLE), "100.0"}}}},
+        .callback = [](Statistic::StatisticId, Windowing::TimeMeasure, Windowing::TimeMeasure) { }};
+    const auto predicatePlan = generator.generateQuery(withPredicate, Statistic::StatisticId{1}, address);
+    const auto predicateExplain = explain(predicatePlan, ExplainVerbosity::Debug);
+    EXPECT_EQ(sinkTypeOf(predicatePlan), "GRPC");
+    EXPECT_NE(predicateExplain.find("SCALARSTATISTICPROBE"), std::string::npos) << predicateExplain;
+    EXPECT_NE(predicateExplain.find("SELECTION"), std::string::npos) << predicateExplain;
 }
 
 }

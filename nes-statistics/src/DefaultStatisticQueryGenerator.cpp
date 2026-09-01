@@ -196,6 +196,19 @@ LogicalPlan generateForDataDomain(
     }
 
     const auto [host, port] = splitAddress(coordinatorAddress);
+
+    /// Nothing listens to a report unless a trigger was registered for it, and the report exists purely to drive
+    /// those callbacks: onStatisticReport routes it to the registry's triggers and drops it if there are none.
+    /// So a request without a trigger terminates in a VoidSink and never touches the network, rather than paying
+    /// a synchronous gRPC round-trip per closed window for a report that is immediately discarded. The statistic
+    /// is still persisted -- the writer is fused into the aggregation, well below the sink -- so getStatistics
+    /// reads it back exactly as before.
+    if (not request.conditionTrigger.has_value())
+    {
+        return LogicalPlanBuilder::addAnonymousSink(
+            Identifier::parse("Void"), std::nullopt, {{Identifier::parse("host"), host}}, {}, plan);
+    }
+
     return LogicalPlanBuilder::addAnonymousSink(
         Identifier::parse("Grpc"),
         std::nullopt,
